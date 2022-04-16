@@ -1,6 +1,5 @@
 use std::env;
 use tidymedia::Config;
-// use tidymedia::crc32;
 
 fn main() {
     let config = Config::new(env::args()).expect("err");

@@ -66,6 +66,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "hex-literal"
+version = "0.3.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7ebdb29d2ea9ed0083cd8cece49bbd968021bd99b0849edb4a9a7ee0fdf6a4e0"
+
+[[package]]
 name = "libc"
 version = "0.2.123"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -96,6 +102,8 @@ name = "tidymedia"
 version = "0.1.0"
 dependencies = [
  "crc32fast",
+ "generic-array",
+ "hex-literal",
  "log",
  "sha2",
 ]

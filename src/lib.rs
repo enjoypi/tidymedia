@@ -22,8 +22,9 @@ pub fn run(config: Config) {
         // let attr = fs::metadata(file).expect("what");
         // let dir = fs::read_dir(argument).expect_err("what");
         if let Ok(mut m) = Media::new(argument.as_str()) {
-            let crc32 = m.crc32().unwrap();
-            println!("{}\t{}", m.path(), crc32);
+            let _ = m.crc32();
+            let _ = m.sha256();
+            println!("{:?}", m);
         }
 
 
