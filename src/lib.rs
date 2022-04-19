@@ -1,5 +1,6 @@
 pub mod media;
 pub mod crc32;
+mod media_index;
 
 use std::env;
 use crate::media::Media;

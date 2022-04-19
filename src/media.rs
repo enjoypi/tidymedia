@@ -2,7 +2,9 @@ use std::{fs};
 use std::io::{Error, ErrorKind, Read, Result};
 use sha2::Digest;
 
-const CHECKSUM_SIZE: usize = 32;
+pub type Checksum = [u8; CHECKSUM_SIZE];
+
+pub const CHECKSUM_SIZE: usize = 32;
 const READ_BUFFER_SIZE: usize = 4096;
 
 #[derive(Debug)]
@@ -12,7 +14,7 @@ pub struct Media {
 
     crc32: u32,
     checksum: bool,
-    sha256: [u8; CHECKSUM_SIZE],
+    sha256: Checksum,
 }
 
 impl Media {
@@ -54,7 +56,7 @@ impl Media {
         Ok(self.crc32)
     }
 
-    pub fn sha256(&mut self) -> Result<[u8; CHECKSUM_SIZE]> {
+    pub fn sha256(&mut self) -> Result<Checksum> {
         if self.checksum {
             return Ok(self.sha256);
         }
@@ -71,7 +73,7 @@ impl Media {
             }
         }
 
-        let mut result: [u8; CHECKSUM_SIZE] = [0; CHECKSUM_SIZE];
+        let mut result: Checksum = [0; CHECKSUM_SIZE];
         hasher.finalize_into(&mut generic_array::GenericArray::from_mut_slice(&mut result));
         self.checksum = true;
         self.sha256 = result;
