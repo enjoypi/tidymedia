@@ -1,6 +1,6 @@
-use std::{fs};
-use std::io::{Error, ErrorKind, Read, Result};
 use sha2::Digest;
+use std::fs;
+use std::io::{Error, ErrorKind, Read};
 
 pub type Checksum = [u8; CHECKSUM_SIZE];
 
@@ -18,7 +18,7 @@ pub struct Media {
 }
 
 impl Media {
-    pub fn new(path: &str) -> Result<Media> {
+    pub fn new(path: &str) -> std::io::Result<Media> {
         let attr = fs::metadata(path)?;
         if !attr.is_file() {
             // let isADir = ErrorKind::IsADirectory;
@@ -39,13 +39,28 @@ impl Media {
         Err(Error::from(ErrorKind::InvalidInput))
     }
 
-    pub fn crc32(&mut self) -> Result<u32> {
+    pub fn crc32(&self) -> Option<u32> {
+        if self.crc32 > 0 {
+            return Some(self.crc32);
+        }
+        None
+    }
+
+    pub fn full_crc32(&mut self) -> std::io::Result<u32> {
+        let mut file = fs::File::open(self.path())?;
+        let mut contents: Vec<u8> = vec![0; self.size as usize];
+        let _ = file.read_to_end(&mut contents)?;
+        self.crc32 = crc32fast::hash(contents.as_slice());
+        Ok(self.crc32)
+    }
+
+    pub fn get_crc32(&mut self) -> std::io::Result<u32> {
         if self.crc32 > 0 {
             return Ok(self.crc32);
         }
         let mut file = fs::File::open(self.path())?;
         if self.size < READ_BUFFER_SIZE as u64 {
-            let mut contents: Vec<u8> = vec!(0; self.size as usize);
+            let mut contents: Vec<u8> = vec![0; self.size as usize];
             let _ = file.read_to_end(&mut contents)?;
             self.crc32 = crc32fast::hash(contents.as_slice());
         } else {
@@ -56,7 +71,14 @@ impl Media {
         Ok(self.crc32)
     }
 
-    pub fn sha256(&mut self) -> Result<Checksum> {
+    pub fn sha256(&self) -> Option<Checksum> {
+        if self.checksum {
+            return Some(self.sha256);
+        }
+        None
+    }
+
+    pub fn get_sha256(&mut self) -> std::io::Result<Checksum> {
         if self.checksum {
             return Ok(self.sha256);
         }
@@ -74,7 +96,9 @@ impl Media {
         }
 
         let mut result: Checksum = [0; CHECKSUM_SIZE];
-        hasher.finalize_into(&mut generic_array::GenericArray::from_mut_slice(&mut result));
+        hasher.finalize_into(&mut generic_array::GenericArray::from_mut_slice(
+            &mut result,
+        ));
         self.checksum = true;
         self.sha256 = result;
         Ok(result)

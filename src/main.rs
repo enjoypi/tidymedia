@@ -55,7 +55,9 @@ fn main() {
                 .help("Set the directory used to store data"),
         );
 
-    cmd.print_long_help();
+    //     if cmd.is_set(String::from("help")) {
+    _ = cmd.print_long_help();
+    //     }
     // let matches =  cmd.get_matches();
     let config = Config::new(env::args()).expect("err");
     tidymedia::run(config);
