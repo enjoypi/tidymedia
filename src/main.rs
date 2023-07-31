@@ -14,7 +14,7 @@ fn main() {
                 .short('C')
                 .long("config")
                 .value_name("FILE")
-                .help("Set the configuration file")
+                .help("Set the configuration file"),
         )
         .arg(
             Arg::new("config-check")

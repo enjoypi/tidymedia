@@ -1,5 +1,3 @@
-
-
 #[cfg(test)]
 mod tests {
 
@@ -35,4 +33,3 @@ mod tests {
         assert_eq!(2804366926580453156, checksum);
     }
 }
-
