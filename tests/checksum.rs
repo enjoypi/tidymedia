@@ -24,12 +24,12 @@ mod tests {
     }
 
     #[test]
-    fn test_wyhash() {
-        let contents = "abcdefghijkasdfasdfasdfsdf";
+    fn wyhash() {
+        let contents = "# tidymedia\nTidy Media\n";
 
         use wyhash::wyhash;
 
         let checksum = wyhash(contents.as_bytes(), 0);
-        assert_eq!(2804366926580453156, checksum);
+        assert_eq!(14067286713656012073, checksum);
     }
 }

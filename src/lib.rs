@@ -1,3 +1,5 @@
+extern crate core;
+
 pub mod file_checksum;
 mod media_index;
 
@@ -20,7 +22,7 @@ pub fn run(config: Config) {
         // let file = argument.as_str();
         // let attr = fs::metadata(file).expect("what");
         // let dir = fs::read_dir(argument).expect_err("what");
-        if let Ok(mut m) = FileChecksum::new(argument.as_str()) {
+        if let Ok(m) = FileChecksum::new(argument.as_str()) {
             // let _ = m.get_crc32();
             // let _ = m.get_sha256();
             println!("{:?}", m);
