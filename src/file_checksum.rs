@@ -5,14 +5,12 @@ use std::{fs, io};
 
 const READ_BUFFER_SIZE: usize = 4096;
 
-pub type Checksum = GenericArray<u8, typenum::U64>;
-
 #[derive(Debug)]
 pub struct FileChecksum {
-    fast: u64,
-    path: String,
-    secure: Checksum,
-    size: u64,
+    pub fast: u64,
+    pub path: String,
+    pub secure: GenericArray<u8, typenum::U64>,
+    pub size: u64,
 }
 
 impl FileChecksum {
@@ -42,10 +40,6 @@ impl FileChecksum {
         })
     }
 
-    pub fn fast(&self) -> u64 {
-        self.fast
-    }
-
     pub fn calc_fast(path: &str) -> io::Result<u64> {
         let mut file = fs::File::open(path)?;
 
@@ -55,11 +49,7 @@ impl FileChecksum {
         Ok(wyhash::wyhash(&(buffer[..bytes_read]), 0))
     }
 
-    pub fn secure(&self) -> Checksum {
-        self.secure
-    }
-
-    pub fn calc_secure(&mut self) -> io::Result<Checksum> {
+    pub fn calc_secure(&mut self) -> io::Result<GenericArray<u8, typenum::U64>> {
         let mut file = fs::File::open(self.path.as_str())?;
         let mut hasher = Sha512::new();
         let mut buffer: [u8; READ_BUFFER_SIZE] = [0; READ_BUFFER_SIZE];
@@ -74,10 +64,6 @@ impl FileChecksum {
 
         self.secure = hasher.finalize();
         Ok(self.secure)
-    }
-
-    pub fn path(&self) -> &String {
-        &self.path
     }
 
     pub fn compare(&mut self, other: &mut Self) -> bool {
@@ -110,17 +96,22 @@ mod tests {
 
     #[test]
     fn new() {
+        const CHECKSUM: &str = "5e43eaa3fc0f18ecdc6e7674dd25d54c31c054489da91dde99c152837258b4637b83aea65dd2f29077df0330b9a3d57a923822399e412d3002ac17e841b2a7be";
         let mut f = FileChecksum::new("README.md").unwrap();
-        assert_eq!(14067286713656012073, f.fast());
-        assert_eq!(GenericArray::default(), f.secure());
+        assert_eq!(14067286713656012073, f.fast);
+        assert_eq!(GenericArray::default(), f.secure);
         let secure = f.calc_secure().unwrap();
         let hex_array: String = secure.iter().map(|byte| format!("{:02x}", byte)).collect();
-        assert_eq!("5e43eaa3fc0f18ecdc6e7674dd25d54c31c054489da91dde99c152837258b4637b83aea65dd2f29077df0330b9a3d57a923822399e412d3002ac17e841b2a7be"
-                   , hex_array);
+        assert_eq!(CHECKSUM, hex_array);
 
         let mut f2 = FileChecksum::new("README.md").unwrap();
         assert!(f.compare(&mut f2));
-        assert_eq!("5e43eaa3fc0f18ecdc6e7674dd25d54c31c054489da91dde99c152837258b4637b83aea65dd2f29077df0330b9a3d57a923822399e412d3002ac17e841b2a7be"
-                   , f2.secure().iter().map(|byte| format!("{:02x}", byte)).collect::<String>());
+        assert_eq!(
+            CHECKSUM,
+            f2.secure
+                .iter()
+                .map(|byte| format!("{:02x}", byte))
+                .collect::<String>()
+        );
     }
 }
