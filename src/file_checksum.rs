@@ -45,7 +45,6 @@ impl FileChecksum {
 
         let mut buffer = [0; READ_BUFFER_SIZE];
         let bytes_read = file.read(&mut buffer)?;
-        println!("bytes_read: {}", std::str::from_utf8(&buffer).unwrap());
         Ok(wyhash::wyhash(&(buffer[..bytes_read]), 0))
     }
 
@@ -75,13 +74,12 @@ impl FileChecksum {
             return true;
         }
 
-        use byteorder::{ByteOrder, NativeEndian};
-        if NativeEndian::read_u64(&self.secure[..8]) == 0 {
-            self.calc_secure();
+        if self.secure == GenericArray::default() && self.calc_secure().is_err() {
+            return false;
         }
 
-        if NativeEndian::read_u64(&other.secure[..8]) == 0 {
-            other.calc_secure();
+        if other.secure == GenericArray::default() && other.calc_secure().is_err() {
+            return false;
         }
 
         self.secure == other.secure
@@ -95,16 +93,20 @@ mod tests {
     use generic_array::GenericArray;
 
     #[test]
-    fn new() {
+    fn checksum() {
+        const FAST: u64 = 14067286713656012073;
         const CHECKSUM: &str = "5e43eaa3fc0f18ecdc6e7674dd25d54c31c054489da91dde99c152837258b4637b83aea65dd2f29077df0330b9a3d57a923822399e412d3002ac17e841b2a7be";
+
         let mut f = FileChecksum::new("README.md").unwrap();
-        assert_eq!(14067286713656012073, f.fast);
+        assert_eq!(FAST, f.fast);
         assert_eq!(GenericArray::default(), f.secure);
         let secure = f.calc_secure().unwrap();
         let hex_array: String = secure.iter().map(|byte| format!("{:02x}", byte)).collect();
         assert_eq!(CHECKSUM, hex_array);
 
         let mut f2 = FileChecksum::new("README.md").unwrap();
+        assert_eq!(FAST, f2.fast);
+        assert_eq!(GenericArray::default(), f2.secure);
         assert!(f.compare(&mut f2));
         assert_eq!(
             CHECKSUM,

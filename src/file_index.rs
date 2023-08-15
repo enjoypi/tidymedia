@@ -1,4 +1,4 @@
-use crate::FileChecksum;
+use crate::file_checksum::FileChecksum;
 use std::collections::{HashMap, HashSet};
 
 pub struct FileIndex {
@@ -25,7 +25,7 @@ impl FileIndex {
         let file_existed = self.files.get(checksum.path.as_str()).is_some();
 
         if file_existed {
-            return Ok(&self.files[&checksum.path]);
+            Ok(&self.files[&checksum.path])
         } else {
             self.fast_checksums
                 .entry(checksum.fast)
@@ -45,6 +45,8 @@ mod tests {
     fn new() {
         let mut index = FileIndex::new();
         let checksum = index.insert("README.md").unwrap();
-        eprintln!("checksum: {:?}", checksum.path);
+        assert_eq!(checksum.path, "/Users/user/prj/tidy/tidymedia/README.md");
+        const FAST: u64 = 14067286713656012073;
+        assert_eq!(checksum.fast, FAST);
     }
 }
