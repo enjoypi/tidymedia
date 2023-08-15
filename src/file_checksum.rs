@@ -5,11 +5,14 @@ use std::{fs, io};
 
 const READ_BUFFER_SIZE: usize = 4096;
 
+pub type SecureChecksum = GenericArray<u8, typenum::U64>;
+
 #[derive(Debug)]
 pub struct FileChecksum {
     pub fast: u64,
+    xxhash: u64,
     pub path: String,
-    pub secure: GenericArray<u8, typenum::U64>,
+    pub secure: SecureChecksum,
     pub size: u64,
 }
 
@@ -30,25 +33,28 @@ impl FileChecksum {
             None => return Err(Error::from(ErrorKind::Unsupported)),
         };
 
-        let fast = Self::calc_fast(&p)?;
+        let (wyhash, xxhash) = Self::calc_fast(&p)?;
 
         Ok(Self {
-            fast,
+            fast: wyhash,
+            xxhash: xxhash,
             secure: GenericArray::default(),
             path: p,
             size: meta.len(),
         })
     }
 
-    pub fn calc_fast(path: &str) -> io::Result<u64> {
+    pub fn calc_fast(path: &str) -> io::Result<(u64, u64)> {
         let mut file = fs::File::open(path)?;
 
         let mut buffer = [0; READ_BUFFER_SIZE];
         let bytes_read = file.read(&mut buffer)?;
-        Ok(wyhash::wyhash(&(buffer[..bytes_read]), 0))
+        let wyhash = wyhash::wyhash(&(buffer[..bytes_read]), 0);
+        let xxhash = xxhash_rust::xxh3::xxh3_64(&(buffer[..bytes_read]));
+        Ok((wyhash, xxhash))
     }
 
-    pub fn calc_secure(&mut self) -> io::Result<GenericArray<u8, typenum::U64>> {
+    pub fn calc_secure(&mut self) -> io::Result<SecureChecksum> {
         let mut file = fs::File::open(self.path.as_str())?;
         let mut hasher = Sha512::new();
         let mut buffer: [u8; READ_BUFFER_SIZE] = [0; READ_BUFFER_SIZE];
@@ -65,13 +71,13 @@ impl FileChecksum {
         Ok(self.secure)
     }
 
-    pub fn compare(&mut self, other: &mut Self) -> bool {
+    pub fn eq(&mut self, other: &mut Self) -> bool {
         if self.size != other.size {
             return false;
         }
 
-        if self.fast != other.fast {
-            return true;
+        if self.fast != other.fast || self.xxhash != other.xxhash {
+            return false;
         }
 
         if self.secure == GenericArray::default() && self.calc_secure().is_err() {
@@ -85,6 +91,12 @@ impl FileChecksum {
         self.secure == other.secure
     }
 }
+
+// impl PartialEq for FileChecksum {
+//     fn eq(&self, other: &Self) -> bool {
+//         self.compare(&mut other.clone())
+//     }
+// }
 
 // 以下为这个模块的单元测试:
 #[cfg(test)]

@@ -20,10 +20,21 @@ pub fn run() {
 
     let cli = Cli::parse();
     for argument in cli.dirs {
-        if let Ok(file) = index.insert(argument.as_str()) {
-            println!("{} is inserted", file.path);
-        } else {
-            println!("{} is not inserted", argument);
-        }
+        let path = std::path::Path::new(argument.as_str());
+        index.visit_dir(path);
+    }
+
+    // let index = index;
+    println!(
+        "Files: {}, FastChecksums: {}",
+        index.files.len(),
+        index.fast_checksums.len()
+    );
+
+    let same = index.search_same();
+    println!("Same: {}", same.len());
+
+    for (_, paths) in same {
+        println!("{:?}", paths);
     }
 }

@@ -1,10 +1,12 @@
+use crate::file_checksum;
 use crate::file_checksum::FileChecksum;
 use std::collections::{HashMap, HashSet};
+use std::path::Path;
 
 pub struct FileIndex {
     // fast checksum -> file path, maybe same fast checksum
-    fast_checksums: HashMap<u64, HashSet<String>>,
-    files: HashMap<String, FileChecksum>, // file path -> file checksum
+    pub fast_checksums: HashMap<u64, HashSet<String>>,
+    pub files: HashMap<String, FileChecksum>, // file path -> file checksum
 }
 
 impl FileIndex {
@@ -17,6 +19,32 @@ impl FileIndex {
 
     pub fn get(&self, path: &str) -> Option<&FileChecksum> {
         self.files.get(path)
+    }
+
+    pub fn search_same(&mut self) -> HashMap<file_checksum::SecureChecksum, HashSet<String>> {
+        let mut same = HashMap::new();
+
+        for (_, paths) in self.fast_checksums.iter() {
+            if paths.len() <= 1 {
+                continue;
+            }
+
+            for path in paths.iter() {
+                let checksum = self.files.get_mut(path).unwrap();
+                if let Ok(secure) = checksum.calc_secure() {
+                    same.entry(secure)
+                        .or_insert(HashSet::new())
+                        .insert(path.clone());
+                }
+            }
+        }
+
+        for (secure, paths) in same.clone().iter() {
+            if paths.len() <= 1 {
+                let _ = same.remove(secure);
+            }
+        }
+        same
     }
 
     pub fn insert(&mut self, path: &str) -> std::io::Result<&FileChecksum> {
@@ -33,6 +61,43 @@ impl FileIndex {
                 .insert(checksum.path.clone());
 
             Ok(self.files.entry(checksum.path.clone()).or_insert(checksum))
+        }
+    }
+
+    pub fn visit_dir(&mut self, path: &Path) {
+        let dir = match std::fs::read_dir(path) {
+            Ok(d) => d,
+            Err(e) => {
+                eprintln!("Error: {}", e);
+                return;
+            }
+        };
+
+        for r in dir {
+            let entry = match r {
+                Ok(e) => e,
+                Err(e) => {
+                    eprintln!("Error: {}", e);
+                    continue;
+                }
+            };
+
+            let path = entry.path();
+            if path.is_dir() {
+                self.visit_dir(path.as_path());
+            } else {
+                let path = match path.to_str() {
+                    Some(p) => p,
+                    None => {
+                        eprintln!("Error: path is not a valid UTF-8 sequence");
+                        continue;
+                    }
+                };
+                match self.insert(path) {
+                    Ok(checksum) => (), //println!("{} {}", path, checksum.fast),
+                    Err(e) => eprintln!("Error: {} {}", path, e),
+                }
+            }
         }
     }
 }
