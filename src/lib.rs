@@ -30,9 +30,10 @@ pub fn run() {
 
     // let index = index;
     println!(
-        "Files: {}, FastChecksums: {}",
+        "Files: {}, FastChecksums: {}, BytesRead: {}",
         index.files.len(),
-        index.fast_checksums.len()
+        index.fast_checksums.len(),
+        index.bytes_read(),
     );
 
     let same = if cli.fast {
@@ -46,4 +47,6 @@ pub fn run() {
     for paths in same {
         println!("{:?}", paths);
     }
+
+    println!("BytesRead: {}", index.bytes_read());
 }

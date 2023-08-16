@@ -11,10 +11,13 @@ pub type SecureChecksum = GenericArray<u8, typenum::U64>;
 #[derive(Debug)]
 pub struct FileChecksum {
     pub short: u64,
-    pub long: u128,
+    pub full: u64,
     pub path: String,
     pub secure: SecureChecksum,
     pub size: u64,
+
+    pub bytes_read: u64,
+    true_full: bool,
 }
 
 impl FileChecksum {
@@ -28,49 +31,36 @@ impl FileChecksum {
             return Err(Error::from(ErrorKind::UnexpectedEof));
         }
 
-        let p = fs::canonicalize(path)?;
-        let p = match p.to_str() {
+        let path = fs::canonicalize(path)?;
+        let path = match path.to_str() {
             Some(s) => String::from(s),
             None => return Err(Error::from(ErrorKind::Unsupported)),
         };
 
-        let (short, long) = Self::calc_fast(&p)?;
+        let (bytes_read, short, full) = fast_checksum(&path)?;
 
         Ok(Self {
-            short: short,
-            long: long,
+            short,
+            full,
             secure: GenericArray::default(),
-            path: p,
+            path,
             size: meta.len(),
+            bytes_read: bytes_read as u64,
+            true_full: meta.len() <= READ_BUFFER_SIZE as u64,
         })
     }
 
-    pub fn calc_fast(path: &str) -> io::Result<(u64, u128)> {
-        let mut file = fs::File::open(path)?;
-
-        let mut buffer = [0; READ_BUFFER_SIZE];
-        let bytes_read = file.read(&mut buffer)?;
-        let short = wyhash::wyhash(&(buffer[..bytes_read]), 0);
-        let long = xxhash_rust::xxh3::xxh3_128(&(buffer[..bytes_read]));
-        Ok((short, long))
-    }
-
-    pub fn calc_full(&self) -> io::Result<u64> {
-        let mut file = fs::File::open(self.path.as_str())?;
-        // let mut hasher = Sha512::new();
-        let mut long_hasher = xxhash_rust::xxh3::Xxh3::new();
-        let mut buffer: [u8; READ_BUFFER_SIZE] = [0; READ_BUFFER_SIZE];
-        loop {
-            let bytes_read = file.read(&mut buffer)?;
-            if bytes_read > 0 {
-                // hasher.update(&buffer[..bytes_read]);
-                long_hasher.update(&buffer[..bytes_read]);
-            } else {
-                break;
-            }
+    pub fn calc_full(&mut self) -> io::Result<u64> {
+        if self.true_full {
+            return Ok(self.full);
         }
 
-        Ok(long_hasher.finish())
+        let (bytes_read, full) = full_checksum(self.path.as_str())?;
+        self.bytes_read += bytes_read as u64;
+        self.full = full;
+        self.true_full = true;
+
+        Ok(full)
     }
 
     pub fn calc_secure(&mut self) -> io::Result<SecureChecksum> {
@@ -109,8 +99,39 @@ impl FileChecksum {
 
 impl PartialEq for FileChecksum {
     fn eq(&self, other: &Self) -> bool {
-        self.size == other.size && self.short == other.short && self.long == other.long
+        self.size == other.size && self.short == other.short && self.full == other.full
     }
+}
+
+fn fast_checksum(path: &str) -> io::Result<(usize, u64, u64)> {
+    let mut file = fs::File::open(path)?;
+
+    let mut buffer = [0; READ_BUFFER_SIZE];
+    let bytes_read = file.read(&mut buffer)?;
+
+    let short = wyhash::wyhash(&(buffer[..bytes_read]), 0);
+    let full = xxhash_rust::xxh3::xxh3_64(&(buffer[..bytes_read]));
+
+    Ok((bytes_read, short, full))
+}
+
+fn full_checksum(path: &str) -> io::Result<(usize, u64)> {
+    let mut file = fs::File::open(path)?;
+    let mut long_hasher = xxhash_rust::xxh3::Xxh3::new();
+    let mut buffer: [u8; READ_BUFFER_SIZE] = [0; READ_BUFFER_SIZE];
+
+    let mut total_read = 0;
+    loop {
+        let bytes_read = file.read(&mut buffer)?;
+        if bytes_read > 0 {
+            total_read += bytes_read;
+            long_hasher.update(&buffer[..bytes_read]);
+        } else {
+            break;
+        }
+    }
+
+    Ok((total_read, long_hasher.finish()))
 }
 
 // 以下为这个模块的单元测试:
@@ -118,9 +139,10 @@ impl PartialEq for FileChecksum {
 mod tests {
     use crate::file_checksum::FileChecksum;
     use generic_array::GenericArray;
-    use std::io::Read;
+    use std::io::{Read, Seek};
     use std::{env, fs};
     use xxhash_rust::xxh3;
+
     type Result = std::result::Result<(), Box<dyn std::error::Error>>;
 
     #[test]
@@ -151,21 +173,69 @@ mod tests {
         Ok(())
     }
 
+    const XXHASH_V: u64 = 0xdce253cfb92205e2;
+
     #[test]
     fn calc_full() -> Result {
         let home = env::var("HOME")?;
 
         let filename = home + "/Movies/桥水基金中国区总裁王沿：全天候的投资原则.mp4";
         let mut file = fs::File::open(filename.as_str())?;
+
+        let (short, full) = {
+            let mut buffer = [0; super::READ_BUFFER_SIZE];
+            let bytes_read = file.read(&mut buffer)?;
+
+            (
+                wyhash::wyhash(&(buffer[..bytes_read]), 0),
+                xxhash_rust::xxh3::xxh3_64(&(buffer[..bytes_read])),
+            )
+        };
+
         let mut buffer = Vec::new();
+
+        file.seek(std::io::SeekFrom::Start(0))?;
         let size = dbg!(file.read_to_end(&mut buffer)?);
         assert!(size > 0);
 
-        const XXHASH_V: u64 = 0xdce253cfb92205e2;
         assert_eq!(XXHASH_V, xxh3::xxh3_64(buffer.as_slice()));
 
-        let f = FileChecksum::new(filename.as_str())?;
+        let mut f = FileChecksum::new(filename.as_str())?;
+        assert_eq!(short, f.short);
+        assert_eq!(full, f.full);
         assert_eq!(XXHASH_V, f.calc_full()?);
+
+        Ok(())
+    }
+
+    #[test]
+    fn bytes_read() -> Result {
+        let home = env::var("HOME")?;
+        let filename = home + "/Movies/桥水基金中国区总裁王沿：全天候的投资原则.mp4";
+        let meta = fs::metadata(filename.as_str())?;
+
+        {
+            let (bytes_read, _fast, _full) = super::fast_checksum(filename.as_str())?;
+            assert_eq!(bytes_read, super::READ_BUFFER_SIZE);
+
+            let (bytes_read, full) = super::full_checksum(filename.as_str())?;
+            assert_eq!(bytes_read as u64, meta.len());
+            assert_eq!(XXHASH_V, full);
+        }
+
+        let mut checksum = FileChecksum::new(filename.as_str())?;
+        assert_eq!(super::READ_BUFFER_SIZE as u64, checksum.bytes_read);
+        assert_eq!(XXHASH_V, checksum.calc_full()?);
+        assert_eq!(
+            checksum.bytes_read,
+            super::READ_BUFFER_SIZE as u64 + meta.len()
+        );
+        // no read file when twice
+        assert_eq!(XXHASH_V, checksum.calc_full()?);
+        assert_eq!(
+            checksum.bytes_read,
+            super::READ_BUFFER_SIZE as u64 + meta.len()
+        );
 
         Ok(())
     }

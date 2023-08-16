@@ -20,6 +20,15 @@ impl FileIndex {
     //     self.files.get(path)
     // }
 
+    pub fn bytes_read(&self) -> u64 {
+        let mut bytes_read = 0;
+        for (_, checksum) in self.files.iter() {
+            bytes_read += checksum.bytes_read;
+        }
+
+        bytes_read
+    }
+
     pub fn search_same(&mut self) -> Vec<HashSet<String>> {
         let mut same = HashMap::new();
 
@@ -48,7 +57,7 @@ impl FileIndex {
         ret
     }
 
-    pub fn fast_search_same(&self) -> Vec<HashSet<String>> {
+    pub fn fast_search_same(&mut self) -> Vec<HashSet<String>> {
         let mut same = HashMap::new();
 
         for (_, paths) in self.fast_checksums.iter() {
@@ -57,7 +66,7 @@ impl FileIndex {
             }
 
             for path in paths.iter() {
-                let checksum = self.files.get(path).unwrap();
+                let checksum = self.files.get_mut(path).unwrap();
                 if let Ok(long) = checksum.calc_full() {
                     same.entry(long)
                         .or_insert(HashSet::new())
