@@ -10,6 +10,5 @@ clap = { version = "4", features = ["derive"] }
 generic-array = "0"
 sha2 = "0.10.7"
 wyhash = "0.5"
-twox-hash = "1"
 xxhash-rust = { version = "0.8", features = ["xxh3"] }
 

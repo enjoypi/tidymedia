@@ -12,6 +12,10 @@ pub struct Cli {
     #[arg(short, long, action = clap::ArgAction::Count)]
     debug: u8,
 
+    /// fast or secure checksum
+    #[arg(short, long, default_value = "true")]
+    fast: bool,
+
     dirs: Vec<String>,
 }
 
@@ -31,10 +35,15 @@ pub fn run() {
         index.fast_checksums.len()
     );
 
-    let same = index.search_same();
+    let same = if cli.fast {
+        index.fast_search_same()
+    } else {
+        index.search_same()
+    };
+
     println!("Same: {}", same.len());
 
-    for (_, paths) in same {
+    for paths in same {
         println!("{:?}", paths);
     }
 }

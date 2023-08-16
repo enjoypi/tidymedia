@@ -1,4 +1,3 @@
-use crate::file_checksum;
 use crate::file_checksum::FileChecksum;
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
@@ -17,11 +16,11 @@ impl FileIndex {
         }
     }
 
-    pub fn get(&self, path: &str) -> Option<&FileChecksum> {
-        self.files.get(path)
-    }
+    // pub fn get(&self, path: &str) -> Option<&FileChecksum> {
+    //     self.files.get(path)
+    // }
 
-    pub fn search_same(&mut self) -> HashMap<file_checksum::SecureChecksum, HashSet<String>> {
+    pub fn search_same(&mut self) -> Vec<HashSet<String>> {
         let mut same = HashMap::new();
 
         for (_, paths) in self.fast_checksums.iter() {
@@ -39,12 +38,42 @@ impl FileIndex {
             }
         }
 
-        for (secure, paths) in same.clone().iter() {
-            if paths.len() <= 1 {
-                let _ = same.remove(secure);
+        let mut ret = Vec::new();
+        for (_, paths) in same.iter() {
+            if paths.len() > 1 {
+                ret.push(paths.clone());
             }
         }
-        same
+
+        ret
+    }
+
+    pub fn fast_search_same(&self) -> Vec<HashSet<String>> {
+        let mut same = HashMap::new();
+
+        for (_, paths) in self.fast_checksums.iter() {
+            if paths.len() <= 1 {
+                continue;
+            }
+
+            for path in paths.iter() {
+                let checksum = self.files.get(path).unwrap();
+                if let Ok(long) = checksum.calc_full() {
+                    same.entry(long)
+                        .or_insert(HashSet::new())
+                        .insert(path.clone());
+                }
+            }
+        }
+
+        let mut ret = Vec::new();
+        for (_, paths) in same.iter() {
+            if paths.len() > 1 {
+                ret.push(paths.clone());
+            }
+        }
+
+        ret
     }
 
     pub fn insert(&mut self, path: &str) -> std::io::Result<&FileChecksum> {
@@ -56,7 +85,7 @@ impl FileIndex {
             Ok(&self.files[&checksum.path])
         } else {
             self.fast_checksums
-                .entry(checksum.fast)
+                .entry(checksum.short)
                 .or_insert(HashSet::new())
                 .insert(checksum.path.clone());
 
@@ -94,7 +123,7 @@ impl FileIndex {
                     }
                 };
                 match self.insert(path) {
-                    Ok(checksum) => (), //println!("{} {}", path, checksum.fast),
+                    Ok(_checksum) => (), //println!("{} {}", path, checksum.fast),
                     Err(e) => eprintln!("Error: {} {}", path, e),
                 }
             }
@@ -112,6 +141,6 @@ mod tests {
         let checksum = index.insert("README.md").unwrap();
         assert_eq!(checksum.path, "/Users/user/prj/tidy/tidymedia/README.md");
         const FAST: u64 = 14067286713656012073;
-        assert_eq!(checksum.fast, FAST);
+        assert_eq!(checksum.short, FAST);
     }
 }
