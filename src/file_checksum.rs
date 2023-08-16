@@ -64,19 +64,14 @@ impl FileChecksum {
     }
 
     pub fn calc_secure(&mut self) -> io::Result<SecureChecksum> {
-        let mut file = fs::File::open(self.path.as_str())?;
-        let mut hasher = Sha512::new();
-        let mut buffer: [u8; READ_BUFFER_SIZE] = [0; READ_BUFFER_SIZE];
-        loop {
-            let bytes_read = file.read(&mut buffer)?;
-            if bytes_read > 0 {
-                hasher.update(&buffer[..bytes_read]);
-            } else {
-                break;
-            }
+        if self.secure != GenericArray::default() {
+            return Ok(self.secure);
         }
 
-        self.secure = hasher.finalize();
+        let (bytes_read, secure) = secure_checksum(self.path.as_str())?;
+        self.bytes_read += bytes_read as u64;
+        self.secure = secure;
+
         Ok(self.secure)
     }
 
@@ -134,6 +129,25 @@ fn full_checksum(path: &str) -> io::Result<(usize, u64)> {
     Ok((total_read, long_hasher.finish()))
 }
 
+fn secure_checksum(path: &str) -> io::Result<(usize, SecureChecksum)> {
+    let mut file = fs::File::open(path)?;
+    let mut hasher = Sha512::new();
+    let mut buffer: [u8; READ_BUFFER_SIZE] = [0; READ_BUFFER_SIZE];
+
+    let mut total_read = 0;
+    loop {
+        let bytes_read = file.read(&mut buffer)?;
+        if bytes_read > 0 {
+            total_read += bytes_read;
+            hasher.update(&buffer[..bytes_read]);
+        } else {
+            break;
+        }
+    }
+
+    Ok((total_read, hasher.finalize()))
+}
+
 // 以下为这个模块的单元测试:
 #[cfg(test)]
 mod tests {
@@ -145,30 +159,42 @@ mod tests {
 
     type Result = std::result::Result<(), Box<dyn std::error::Error>>;
 
+    fn decode_hex_string(
+        input_str: &str,
+    ) -> std::result::Result<super::SecureChecksum, Box<dyn std::error::Error>> {
+        // Step 1: 将16进制字符串转换成 Vec<u8>
+        let vec: Vec<u8> = hex::decode(&input_str)?;
+
+        if vec.len() != 64 {
+            // 为了适应U64类型，我们需要确保数组里面有64项
+            Err("Hex string length doesn't match U64")?;
+        }
+
+        // Step 2: 创建 GenericArray
+        let generic_array = GenericArray::from_exact_iter(vec).unwrap();
+
+        Ok(generic_array)
+    }
+
     #[test]
     fn checksum() -> Result {
         const FAST: u64 = 14067286713656012073;
-        const CHECKSUM: &str = "5e43eaa3fc0f18ecdc6e7674dd25d54c31c054489da91dde99c152837258b4637b83aea65dd2f29077df0330b9a3d57a923822399e412d3002ac17e841b2a7be";
+        const FULL: u64 = 0x59d5aae4ebeccc24;
+        let sha512 = decode_hex_string("5e43eaa3fc0f18ecdc6e7674dd25d54c31c054489da91dde99c152837258b4637b83aea65dd2f29077df0330b9a3d57a923822399e412d3002ac17e841b2a7be")?;
 
         let mut f = FileChecksum::new("README.md")?;
         assert_eq!(FAST, f.short);
+        assert_eq!(FULL, f.full);
         assert_eq!(GenericArray::default(), f.secure);
-        let secure = f.calc_secure()?;
-        let hex_array: String = secure.iter().map(|byte| format!("{:02x}", byte)).collect();
-        assert_eq!(CHECKSUM, hex_array);
+        assert_eq!(sha512, f.calc_secure()?);
+        assert_eq!(sha512, f.secure);
 
-        let mut f2 = FileChecksum::new("README.md")?;
+        let f2 = FileChecksum::new("README.md")?;
         assert_eq!(FAST, f2.short);
+        assert_eq!(FULL, f.full);
         assert_eq!(GenericArray::default(), f2.secure);
+
         assert_eq!(f, f2);
-        f2.calc_secure()?;
-        assert_eq!(
-            CHECKSUM,
-            f2.secure
-                .iter()
-                .map(|byte| format!("{:02x}", byte))
-                .collect::<String>()
-        );
 
         Ok(())
     }
@@ -235,6 +261,20 @@ mod tests {
         assert_eq!(
             checksum.bytes_read,
             super::READ_BUFFER_SIZE as u64 + meta.len()
+        );
+
+        let sha512 = decode_hex_string("60a11fd3b23811788b38f6055943b17d0ad02c74bd06a5ee850698f1bf7f032048ab8677ee03a5d20c5c4c7af807174b4406274dffb3611740180774d2ad67d0")?;
+        assert_eq!(sha512, checksum.calc_secure()?);
+        assert_eq!(
+            checksum.bytes_read,
+            super::READ_BUFFER_SIZE as u64 + meta.len() * 2
+        );
+
+        // no read file when twice
+        assert_eq!(sha512, checksum.calc_secure()?);
+        assert_eq!(
+            checksum.bytes_read,
+            super::READ_BUFFER_SIZE as u64 + meta.len() * 2
         );
 
         Ok(())

@@ -13,7 +13,7 @@ pub struct Cli {
     debug: u8,
 
     /// fast or secure checksum
-    #[arg(short, long, default_value = "true")]
+    #[arg(short, long, action = clap::ArgAction::SetTrue)]
     fast: bool,
 
     dirs: Vec<String>,
@@ -35,6 +35,8 @@ pub fn run() {
         index.fast_checksums.len(),
         index.bytes_read(),
     );
+
+    println!("Fast: {}", cli.fast);
 
     let same = if cli.fast {
         index.fast_search_same()
