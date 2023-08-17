@@ -1,54 +1,29 @@
-mod file_checksum;
-mod file_index;
-
 extern crate core;
 
-use clap::Parser;
+use generic_array::{typenum, GenericArray};
 
-#[derive(Parser)]
-#[command(author, version, about, long_about = None)]
-pub struct Cli {
-    /// Turn debugging information on
-    #[arg(short, long, action = clap::ArgAction::Count)]
-    debug: u8,
+pub mod file_checksum;
+pub mod file_index;
 
-    /// fast or secure checksum
-    #[arg(short, long, action = clap::ArgAction::SetTrue)]
-    fast: bool,
+pub type SecureChecksum = GenericArray<u8, typenum::U64>;
 
-    dirs: Vec<String>,
-}
+pub type TestResult = std::result::Result<(), Box<dyn std::error::Error>>;
 
-pub fn run() {
-    let mut index = file_index::FileIndex::new();
+pub const READ_BUFFER_SIZE: usize = 4096;
 
-    let cli = Cli::parse();
-    for argument in cli.dirs {
-        let path = std::path::Path::new(argument.as_str());
-        index.visit_dir(path);
+pub fn decode_hex_string(
+    input_str: &str,
+) -> std::result::Result<SecureChecksum, Box<dyn std::error::Error>> {
+    // Step 1: 将16进制字符串转换成 Vec<u8>
+    let vec: Vec<u8> = hex::decode(&input_str)?;
+
+    if vec.len() != 64 {
+        // 为了适应U64类型，我们需要确保数组里面有64项
+        Err("Hex string length doesn't match U64")?;
     }
 
-    // let index = index;
-    println!(
-        "Files: {}, FastChecksums: {}, BytesRead: {}",
-        index.files.len(),
-        index.fast_checksums.len(),
-        index.bytes_read(),
-    );
+    // Step 2: 创建 GenericArray
+    let generic_array = GenericArray::from_exact_iter(vec).unwrap();
 
-    println!("Fast: {}", cli.fast);
-
-    let same = if cli.fast {
-        index.fast_search_same()
-    } else {
-        index.search_same()
-    };
-
-    println!("Same: {}", same.len());
-
-    for paths in same {
-        println!("{:?}", paths);
-    }
-
-    println!("BytesRead: {}", index.bytes_read());
+    Ok(generic_array)
 }
