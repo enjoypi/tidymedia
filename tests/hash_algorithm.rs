@@ -2,7 +2,7 @@
 mod tests {
 
     #[test]
-    fn wyhash() {
+    fn hash() {
         let contents = "# tidymedia\nTidy Media\n";
 
         let checksum = wyhash::wyhash(contents.as_bytes(), 0);
