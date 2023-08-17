@@ -22,16 +22,16 @@ pub struct FileChecksum {
 
 impl FileChecksum {
     pub fn new(path: &str) -> io::Result<Self> {
-        let meta = fs::metadata(path)?;
+        let path = fs::canonicalize(path)?;
+        let meta = path.metadata()?;
         if !meta.is_file() {
             return Err(Error::from(ErrorKind::Unsupported));
         }
 
-        if meta.len() <= 0 {
+        if meta.len() == 0 {
             return Err(std::io::Error::new(std::io::ErrorKind::Other, "empty file"));
         }
 
-        let path = fs::canonicalize(path)?;
         let path = match path.to_str() {
             Some(s) => String::from(s),
             None => return Err(Error::from(ErrorKind::Unsupported)),

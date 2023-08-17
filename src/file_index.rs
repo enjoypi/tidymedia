@@ -145,13 +145,14 @@ impl FileIndex {
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
     use crate::file_index::FileIndex;
 
     #[test]
     fn new() {
         let mut index = FileIndex::new();
         let checksum = index.insert("README.md").unwrap();
-        assert_eq!(checksum.path, "/Users/user/prj/tidy/tidymedia/README.md");
+        assert_eq!(checksum.path, fs::canonicalize("README.md").unwrap().as_path().to_str().unwrap());
         const FAST: u64 = 14067286713656012073;
         assert_eq!(checksum.short, FAST);
     }
