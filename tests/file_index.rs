@@ -1,33 +1,30 @@
+mod common;
+
 #[cfg(test)]
 mod tests {
     use std::fs;
 
     use tidymedia::file_index::FileIndex;
 
-    const DATA0_SHA256: &str= "c77d955d24f36057a2fc6eba10d9a386ef6b8a6568e73bb8f6a168b4e2adc65fa2ffdc6f6e479f42199b740b8e83af74caffa6f580d4b7351be20efa65b0fcd2";
-    const FILENAME: &str = "tests/data0";
+    use crate::common;
 
     #[test]
-    fn insert() -> tidymedia::TestResult {
+    fn insert() -> common::Result {
         let mut index = FileIndex::new();
-        let checksum = index.insert(FILENAME)?;
+        let checksum = index.insert(common::DATA0)?;
         assert_eq!(
             checksum.path,
-            fs::canonicalize(FILENAME)
+            fs::canonicalize(common::DATA0)
                 .unwrap()
                 .as_path()
                 .to_str()
                 .unwrap()
         );
-        const FAST: u64 = 14067286713656012073;
-        assert_eq!(checksum.short, FAST);
-        assert_eq!(checksum.full, 0x59d5aae4ebeccc24);
+        assert_eq!(checksum.short, common::DATA0_WYHASH);
+        assert_eq!(checksum.full, common::DATA0_XXHASH);
 
-        let checksum = index.files.get_mut(FILENAME).unwrap();
-        assert_eq!(
-            checksum.calc_secure()?,
-            tidymedia::decode_hex_string(DATA0_SHA256)?
-        );
+        let mut new_checksum = checksum.clone();
+        assert_eq!(new_checksum.calc_secure()?, common::data0_sha512());
 
         Ok(())
     }

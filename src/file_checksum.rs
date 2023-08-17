@@ -7,7 +7,7 @@ use sha2::{Digest, Sha512};
 
 use super::SecureChecksum;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct FileChecksum {
     pub short: u64,
     pub full: u64,
@@ -182,7 +182,7 @@ mod tests {
             super::super::READ_BUFFER_SIZE as u64 + meta.len()
         );
 
-        let sha512 = super::super::decode_hex_string("60a11fd3b23811788b38f6055943b17d0ad02c74bd06a5ee850698f1bf7f032048ab8677ee03a5d20c5c4c7af807174b4406274dffb3611740180774d2ad67d0")?;
+        let sha512 = super::super::decode_hex_string("60a11fd3b23811788b38f6055943b17d0ad02c74bd06a5ee850698f1bf7f032048ab8677ee03a5d20c5c4c7af807174b4406274dffb3611740180774d2ad67d0");
         assert_eq!(sha512, checksum.calc_secure()?);
         assert_eq!(
             checksum.bytes_read,
