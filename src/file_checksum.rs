@@ -28,7 +28,7 @@ impl FileChecksum {
         }
 
         if meta.len() <= 0 {
-            return Err(Error::from(ErrorKind::UnexpectedEof));
+            return Err(std::io::Error::new(std::io::ErrorKind::Other, "empty file"));
         }
 
         let path = fs::canonicalize(path)?;

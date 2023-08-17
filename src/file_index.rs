@@ -133,6 +133,9 @@ impl FileIndex {
                 };
                 match self.insert(path) {
                     Ok(_checksum) => (), //println!("{} {}", path, checksum.fast),
+                    Err(ref e) if e.kind() == std::io::ErrorKind::Other => {
+                        println!("{} {}", path, e)
+                    }
                     Err(e) => eprintln!("Error: {} {}", path, e),
                 }
             }
