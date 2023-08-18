@@ -1,52 +1,83 @@
 mod common;
 #[cfg(test)]
 mod tests {
-    use std::fs;
+    use generic_array::GenericArray;
     use std::io::{Read, Seek};
+    use std::{fs, io};
 
     use sha2::Digest;
     use xxhash_rust::xxh3;
 
     use tidymedia::file_checksum::FileChecksum;
+    use tidymedia::SecureChecksum;
 
     use crate::common;
 
-    #[test]
-    fn checksum() -> common::Result {
-        let mut file = fs::File::open(common::DATA0)?;
+    struct ChecksumTest {
+        short_wyhash: u64,
+        short_xxhash: u64,
+        short_read: usize,
+        full: u64,
+        file_size: usize,
 
-        let (short, first_full) = {
+        secure: SecureChecksum,
+    }
+
+    impl ChecksumTest {
+        fn new(path: &str) -> io::Result<ChecksumTest> {
+            let mut file = fs::File::open(path)?;
+
             let mut buffer = [0; tidymedia::READ_BUFFER_SIZE];
-            let bytes_read = file.read(&mut buffer)?;
-            assert!(bytes_read <= tidymedia::READ_BUFFER_SIZE);
+            let short_read = file.read(&mut buffer)?;
+            if short_read == 0 {
+                return Err(io::Error::new(
+                    io::ErrorKind::UnexpectedEof,
+                    "File is empty",
+                ));
+            }
 
-            (
-                wyhash::wyhash(&(buffer[..bytes_read]), 0),
-                xxh3::xxh3_64(&(buffer[..bytes_read])),
-            )
-        };
+            let short_wyhash = wyhash::wyhash(&(buffer[..short_read]), 0);
+            let short_xxhash = xxh3::xxh3_64(&(buffer[..short_read]));
 
-        assert_eq!(common::DATA0_WYHASH, short);
-        assert_eq!(common::DATA0_XXHASH, first_full);
+            let mut buffer = Vec::new();
+            file.seek(std::io::SeekFrom::Start(0))?;
+            let file_size = file.read_to_end(&mut buffer)?;
+            let full = xxh3::xxh3_64(buffer.as_slice());
 
-        let mut buffer = Vec::new();
+            let mut hasher = sha2::Sha512::new();
+            hasher.update(buffer.as_slice());
+            let secure = hasher.finalize();
 
-        file.seek(std::io::SeekFrom::Start(0))?;
-        let size = file.read_to_end(&mut buffer)?;
-        assert!(size > 0);
+            Ok(ChecksumTest {
+                short_wyhash,
+                short_xxhash,
+                short_read,
+                full,
+                file_size,
+                secure,
+            })
+        }
+    }
 
-        let second_full = xxh3::xxh3_64(buffer.as_slice());
-        assert_eq!(first_full, second_full);
+    #[test]
+    fn small_file() -> common::Result {
+        let ct = ChecksumTest::new(common::DATA_SMALL)?;
+        assert_eq!(ct.short_wyhash, common::DATA_SMALL_WYHASH);
+        assert_eq!(ct.short_xxhash, common::DATA_SMALL_XXHASH);
+        assert!(ct.file_size <= tidymedia::READ_BUFFER_SIZE);
+        assert_eq!(ct.short_read, ct.file_size);
+        assert_eq!(ct.short_xxhash, ct.full);
+        assert_eq!(ct.secure, common::data_small_sha512());
 
-        let mut hasher = sha2::Sha512::new();
-        hasher.update(buffer.as_slice());
-        let secure = hasher.finalize();
-        assert_eq!(secure, common::data0_sha512());
-
-        let mut f = FileChecksum::new(common::DATA0)?;
-        assert_eq!(short, f.short);
-        assert_eq!(first_full, f.full);
-        assert_eq!(second_full, f.calc_full()?);
+        let mut f = FileChecksum::new(common::DATA_SMALL)?;
+        assert_eq!(f.short, ct.short_wyhash);
+        assert_eq!(f.full, ct.short_xxhash);
+        assert_eq!(f.size, ct.file_size as u64);
+        assert_eq!(f.calc_full()?, ct.full);
+        assert_eq!(f.full, ct.full);
+        assert_eq!(f.secure, GenericArray::default());
+        assert_eq!(f.calc_secure()?, common::data_small_sha512());
+        assert_eq!(f.secure, common::data_small_sha512());
 
         Ok(())
     }
