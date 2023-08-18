@@ -1,4 +1,5 @@
 use clap::Parser;
+
 use tidymedia::file_index;
 
 #[derive(Parser)]
