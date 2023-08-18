@@ -152,7 +152,7 @@ fn secure_checksum(path: &str) -> io::Result<(usize, SecureChecksum)> {
 #[cfg(test)]
 mod tests {
     use std::io::{Read, Seek};
-    use std::{env, fs, io};
+    use std::{fs, io};
 
     use generic_array::GenericArray;
     use sha2::Digest;
@@ -256,45 +256,40 @@ mod tests {
     }
 
     #[test]
-    fn bytes_read() -> std::result::Result<(), Box<dyn std::error::Error>> {
-        const XXHASH_V: u64 = 0xdce253cfb92205e2;
-
-        let home = env::var("HOME")?;
-        let filename = home + "/Movies/桥水基金中国区总裁王沿：全天候的投资原则.mp4";
-        let meta = fs::metadata(filename.as_str())?;
+    fn bytes_read() -> tests::Result {
+        let meta = fs::metadata(tests::DATA_LARGE)?;
 
         {
-            let (bytes_read, _fast, _full) = super::fast_checksum(filename.as_str())?;
+            let (bytes_read, _fast, _full) = super::fast_checksum(tests::DATA_LARGE)?;
             assert_eq!(bytes_read, super::READ_BUFFER_SIZE);
 
-            let (bytes_read, full) = super::full_checksum(filename.as_str())?;
+            let (bytes_read, full) = super::full_checksum(tests::DATA_LARGE)?;
             assert_eq!(bytes_read as u64, meta.len());
-            assert_eq!(XXHASH_V, full);
+            assert_eq!(full, tests::DATA_LARGE_XXHASH);
         }
 
-        let mut checksum = super::FileChecksum::new(filename.as_str())?;
-        assert_eq!(super::READ_BUFFER_SIZE as u64, checksum.bytes_read);
-        assert_eq!(XXHASH_V, checksum.calc_full()?);
+        let mut checksum = super::FileChecksum::new(tests::DATA_LARGE)?;
+        assert_eq!(checksum.bytes_read, super::READ_BUFFER_SIZE as u64);
+        assert_eq!(checksum.calc_full()?, tests::DATA_LARGE_XXHASH);
         assert_eq!(
             checksum.bytes_read,
             super::READ_BUFFER_SIZE as u64 + meta.len()
         );
         // no read file when twice
-        assert_eq!(XXHASH_V, checksum.calc_full()?);
+        assert_eq!(checksum.calc_full()?, tests::DATA_LARGE_XXHASH);
         assert_eq!(
             checksum.bytes_read,
             super::READ_BUFFER_SIZE as u64 + meta.len()
         );
 
-        let sha512 = tests::str_to_secure("60a11fd3b23811788b38f6055943b17d0ad02c74bd06a5ee850698f1bf7f032048ab8677ee03a5d20c5c4c7af807174b4406274dffb3611740180774d2ad67d0");
-        assert_eq!(sha512, checksum.calc_secure()?);
+        assert_eq!(checksum.calc_secure()?, tests::data_large_sha512());
         assert_eq!(
             checksum.bytes_read,
             super::READ_BUFFER_SIZE as u64 + meta.len() * 2
         );
 
         // no read file when twice
-        assert_eq!(sha512, checksum.calc_secure()?);
+        assert_eq!(checksum.calc_secure()?, tests::data_large_sha512());
         assert_eq!(
             checksum.bytes_read,
             super::READ_BUFFER_SIZE as u64 + meta.len() * 2
