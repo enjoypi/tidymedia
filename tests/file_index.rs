@@ -13,8 +13,9 @@ mod tests {
             checksum.path,
             fs::canonicalize(tests::DATA_SMALL)
                 .unwrap()
-                .as_path()
                 .to_str()
+                .unwrap()
+                .strip_prefix("\\\\?\\")
                 .unwrap()
         );
         assert_eq!(checksum.short, tests::DATA_SMALL_WYHASH);

@@ -24,6 +24,7 @@ pub struct FileChecksum {
 impl FileChecksum {
     pub fn new(path: &str) -> io::Result<Self> {
         let path = fs::canonicalize(path)?;
+
         let meta = path.metadata()?;
         if !meta.is_file() {
             return Err(Error::from(ErrorKind::Unsupported));
@@ -34,17 +35,18 @@ impl FileChecksum {
         }
 
         let path = match path.to_str() {
-            Some(s) => String::from(s),
+            Some(s) => s,
             None => return Err(Error::from(ErrorKind::Unsupported)),
         };
 
-        let (bytes_read, short, full) = fast_checksum(&path)?;
+        let (bytes_read, short, full) = fast_checksum(path)?;
+        let path = path.strip_prefix("\\\\?\\").unwrap_or(path);
 
         Ok(Self {
             short,
             full,
             secure: GenericArray::default(),
-            path,
+            path: path.to_string(),
             size: meta.len(),
             bytes_read: bytes_read as u64,
             true_full: meta.len() <= READ_BUFFER_SIZE as u64,

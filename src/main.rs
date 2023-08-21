@@ -1,15 +1,15 @@
 use clap::Parser;
+use tracing::{debug, info};
+use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt};
 
 use tidymedia::file_index;
 
-#[derive(Parser)]
+#[derive(Debug, Parser)]
 #[command(author, version, about, long_about = None)]
 pub struct Cli {
-    /// Turn debugging information on
-    #[arg(short, long, action = clap::ArgAction::Count)]
-    debug: u8,
+    #[arg(short, long, default_value = "info")]
+    log: String,
 
-    /// fast or secure checksum
     #[arg(short, long, action = clap::ArgAction::SetTrue)]
     fast: bool,
 
@@ -17,23 +17,35 @@ pub struct Cli {
 }
 
 fn main() {
+    let cli = Cli::parse();
+
+    // let subscriber = fmt::Subscriber::builder()
+    //     .with_env_filter(EnvFilter::try_new(cli.log).unwarp_or("info"))
+    //     .with_writer(std::io::stderr)
+    //     .finish();
+    //
+    // tracing::subscriber::set_global_default(subscriber)
+    //     .expect("setting default subscriber failed");
+
+    tracing_subscriber::registry()
+        .with(fmt::layer().with_writer(std::io::stderr))
+        .init();
+
     let mut index = file_index::FileIndex::new();
 
-    let cli = Cli::parse();
+    debug!("cli: {:?}", cli);
+
     for path in cli.dirs {
         let path = std::path::Path::new(path.as_str());
         index.visit_dir(path);
     }
 
-    // let index = index;
-    println!(
+    info!(
         "Files: {}, FastChecksums: {}, BytesRead: {}",
         index.files.len(),
         index.fast_checksums.len(),
         index.bytes_read(),
     );
-
-    println!("Fast: {}", cli.fast);
 
     let same = if cli.fast {
         index.fast_search_same()
@@ -41,16 +53,16 @@ fn main() {
         index.search_same()
     };
 
-    println!("Same: {}", same.len());
+    info!("Same: {}", same.len());
 
     for paths in same {
         let mut paths: Vec<_> = paths.into_iter().collect();
         paths.sort();
         for path in paths.iter() {
-            println!("#DEL {:?}", path);
+            println!(":DEL \"{}\"\r", path);
         }
-        println!("")
+        println!()
     }
 
-    println!("BytesRead: {}", index.bytes_read());
+    info!("BytesRead: {}", index.bytes_read());
 }
