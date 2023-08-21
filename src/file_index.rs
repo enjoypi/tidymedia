@@ -103,42 +103,29 @@ impl FileIndex {
     }
 
     pub fn visit_dir(&mut self, path: &Path) {
-        let dir = match std::fs::read_dir(path) {
-            Ok(d) => d,
-            Err(e) => {
-                eprintln!("Error: {}", e);
-                return;
-            }
-        };
-
-        for r in dir {
-            let entry = match r {
-                Ok(e) => e,
-                Err(e) => {
-                    eprintln!("Error: {}", e);
-                    continue;
-                }
-            };
-
-            let path = entry.path();
-            if path.is_dir() {
-                self.visit_dir(path.as_path());
-            } else {
-                let path = match path.to_str() {
-                    Some(p) => p,
-                    None => {
-                        eprintln!("Error: path is not a valid UTF-8 sequence");
+        use ignore::Walk;
+        for result in Walk::new(path) {
+            // Each item yielded by the iterator is either a directory entry or an
+            // error, so either print the path or the error.
+            match result {
+                Ok(entry) => {
+                    let path = entry.path();
+                    if path.is_dir() {
                         continue;
                     }
-                };
-                match self.insert(path) {
-                    Ok(_checksum) => (), //println!("{} {}", path, checksum.fast),
-                    Err(ref e) if e.kind() == std::io::ErrorKind::Other => {
-                        println!("{} {}", path, e)
+                    match path.to_str() {
+                        Some(s) => _ = self.insert(s),
+                        None => continue,
                     }
-                    Err(e) => eprintln!("Error: {} {}", path, e),
                 }
+                Err(err) => println!("ERROR: {}", err),
             }
         }
+    }
+}
+
+impl Default for FileIndex {
+    fn default() -> Self {
+        FileIndex::new()
     }
 }

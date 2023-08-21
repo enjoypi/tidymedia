@@ -20,8 +20,8 @@ fn main() {
     let mut index = file_index::FileIndex::new();
 
     let cli = Cli::parse();
-    for argument in cli.dirs {
-        let path = std::path::Path::new(argument.as_str());
+    for path in cli.dirs {
+        let path = std::path::Path::new(path.as_str());
         index.visit_dir(path);
     }
 
@@ -44,7 +44,12 @@ fn main() {
     println!("Same: {}", same.len());
 
     for paths in same {
-        println!("{:?}", paths);
+        let mut paths: Vec<_> = paths.into_iter().collect();
+        paths.sort();
+        for path in paths.iter() {
+            println!("#DEL {:?}", path);
+        }
+        println!("")
     }
 
     println!("BytesRead: {}", index.bytes_read());
