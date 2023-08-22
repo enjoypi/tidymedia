@@ -8,7 +8,8 @@ use sha2::{Digest, Sha512};
 
 use super::SecureChecksum;
 
-pub const READ_BUFFER_SIZE: usize = 4096;
+pub const FAST_READ_SIZE: usize = 4096;
+const READ_BUFFER_SIZE: usize = 1024 * 1024;
 
 #[derive(Debug, Clone)]
 pub struct FileChecksum {
@@ -54,7 +55,7 @@ impl FileChecksum {
             path: p.to_string(),
             size: meta.len(),
             bytes_read: bytes_read as u64,
-            true_full: meta.len() <= READ_BUFFER_SIZE as u64,
+            true_full: meta.len() <= FAST_READ_SIZE as u64,
         })
     }
 
@@ -92,22 +93,6 @@ impl FileChecksum {
 
         Ok(self.secure)
     }
-
-    // pub fn equal(&mut self, other: &mut Self) -> bool {
-    //     if self != other {
-    //         return false;
-    //     }
-    //
-    //     if self.secure == GenericArray::default() && self.calc_secure().is_err() {
-    //         return false;
-    //     }
-    //
-    //     if other.secure == GenericArray::default() && other.calc_secure().is_err() {
-    //         return false;
-    //     }
-    //
-    //     self.secure == other.secure
-    // }
 }
 
 impl PartialEq for FileChecksum {
@@ -119,7 +104,7 @@ impl PartialEq for FileChecksum {
 fn fast_checksum(path: &str) -> io::Result<(usize, u64, u64)> {
     let mut file = fs::File::open(path)?;
 
-    let mut buffer = [0; READ_BUFFER_SIZE];
+    let mut buffer = [0; FAST_READ_SIZE];
     let bytes_read = file.read(&mut buffer)?;
 
     let short = wyhash::wyhash(&(buffer[..bytes_read]), 0);
@@ -131,7 +116,7 @@ fn fast_checksum(path: &str) -> io::Result<(usize, u64, u64)> {
 fn full_checksum(path: &str) -> io::Result<(usize, u64)> {
     let mut file = fs::File::open(path)?;
     let mut long_hasher = xxhash_rust::xxh3::Xxh3::new();
-    let mut buffer: [u8; READ_BUFFER_SIZE] = [0; READ_BUFFER_SIZE];
+    let mut buffer = vec![0u8; READ_BUFFER_SIZE];
 
     let mut total_read = 0;
     loop {
@@ -150,7 +135,7 @@ fn full_checksum(path: &str) -> io::Result<(usize, u64)> {
 fn secure_checksum(path: &str) -> io::Result<(usize, SecureChecksum)> {
     let mut file = fs::File::open(path)?;
     let mut hasher = Sha512::new();
-    let mut buffer: [u8; READ_BUFFER_SIZE] = [0; READ_BUFFER_SIZE];
+    let mut buffer = vec![0u8; READ_BUFFER_SIZE];
 
     let mut total_read = 0;
     loop {
@@ -194,7 +179,7 @@ mod tests {
         fn new(path: &str) -> io::Result<ChecksumTest> {
             let mut file = fs::File::open(path)?;
 
-            let mut buffer = [0; super::READ_BUFFER_SIZE];
+            let mut buffer = [0; super::FAST_READ_SIZE];
             let short_read = file.read(&mut buffer)?;
             if short_read == 0 {
                 return Err(io::Error::new(
@@ -231,7 +216,7 @@ mod tests {
         let ct = ChecksumTest::new(tests::DATA_SMALL)?;
         assert_eq!(ct.short_wyhash, tests::DATA_SMALL_WYHASH);
         assert_eq!(ct.short_xxhash, tests::DATA_SMALL_XXHASH);
-        assert!(ct.file_size <= super::READ_BUFFER_SIZE);
+        assert!(ct.file_size <= super::FAST_READ_SIZE);
         assert_eq!(ct.short_read, ct.file_size);
         assert_eq!(ct.short_xxhash, ct.full);
         assert_eq!(ct.secure, tests::data_small_sha512());
@@ -254,7 +239,7 @@ mod tests {
         let ct = ChecksumTest::new(tests::DATA_LARGE)?;
         assert_eq!(ct.short_wyhash, tests::DATA_LARGE_WYHASH);
         assert_ne!(ct.short_xxhash, tests::DATA_LARGE_XXHASH);
-        assert_eq!(ct.short_read, super::READ_BUFFER_SIZE);
+        assert_eq!(ct.short_read, super::FAST_READ_SIZE);
         assert!(ct.short_read < ct.file_size);
         assert_eq!(ct.full, tests::DATA_LARGE_XXHASH);
         assert_eq!(ct.secure, tests::data_large_sha512());
@@ -278,7 +263,7 @@ mod tests {
 
         {
             let (bytes_read, _fast, _full) = super::fast_checksum(tests::DATA_LARGE)?;
-            assert_eq!(bytes_read, super::READ_BUFFER_SIZE);
+            assert_eq!(bytes_read, super::FAST_READ_SIZE);
 
             let (bytes_read, full) = super::full_checksum(tests::DATA_LARGE)?;
             assert_eq!(bytes_read as u64, meta.len());
@@ -286,30 +271,30 @@ mod tests {
         }
 
         let mut checksum = super::FileChecksum::new(tests::DATA_LARGE)?;
-        assert_eq!(checksum.bytes_read, super::READ_BUFFER_SIZE as u64);
+        assert_eq!(checksum.bytes_read, super::FAST_READ_SIZE as u64);
         assert_eq!(checksum.calc_full()?, tests::DATA_LARGE_XXHASH);
         assert_eq!(
             checksum.bytes_read,
-            super::READ_BUFFER_SIZE as u64 + meta.len()
+            super::FAST_READ_SIZE as u64 + meta.len()
         );
         // no read file when twice
         assert_eq!(checksum.calc_full()?, tests::DATA_LARGE_XXHASH);
         assert_eq!(
             checksum.bytes_read,
-            super::READ_BUFFER_SIZE as u64 + meta.len()
+            super::FAST_READ_SIZE as u64 + meta.len()
         );
 
         assert_eq!(checksum.calc_secure()?, tests::data_large_sha512());
         assert_eq!(
             checksum.bytes_read,
-            super::READ_BUFFER_SIZE as u64 + meta.len() * 2
+            super::FAST_READ_SIZE as u64 + meta.len() * 2
         );
 
         // no read file when twice
         assert_eq!(checksum.calc_secure()?, tests::data_large_sha512());
         assert_eq!(
             checksum.bytes_read,
-            super::READ_BUFFER_SIZE as u64 + meta.len() * 2
+            super::FAST_READ_SIZE as u64 + meta.len() * 2
         );
 
         Ok(())

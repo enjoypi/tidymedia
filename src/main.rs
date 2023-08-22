@@ -43,16 +43,23 @@ async fn main() {
     );
 
     let same = if cli.fast {
-        index.fast_search_same()
+        index.fast_search_same().await
     } else {
         index.search_same()
     };
 
     info!("Same: {}", same.len());
 
+    let mut sorted: Vec<_> = vec![];
     for paths in same {
         let mut paths: Vec<_> = paths.into_iter().collect();
         paths.sort();
+
+        sorted.push(paths);
+    }
+
+    sorted.sort();
+    for paths in sorted.iter() {
         for path in paths.iter() {
             println!(":DEL \"{}\"\r", path);
         }

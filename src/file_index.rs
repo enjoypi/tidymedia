@@ -2,7 +2,8 @@ use crate::file_checksum::FileChecksum;
 use futures::stream::StreamExt;
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
-use tracing::error;
+use tracing::{debug, error};
+const MAX_CONCURRENT_TASKS: usize = 16;
 
 pub struct FileIndex {
     // fast checksum -> file path, maybe same fast checksum
@@ -59,28 +60,41 @@ impl FileIndex {
         ret
     }
 
-    pub fn fast_search_same(&mut self) -> Vec<HashSet<String>> {
-        let mut same = HashMap::new();
-
-        for (_, paths) in self.fast_checksums.iter() {
-            if paths.len() <= 1 {
-                continue;
-            }
-
-            for path in paths.iter() {
-                let checksum = self.files.get_mut(path).unwrap();
-                if let Ok(long) = checksum.calc_full() {
-                    same.entry(long)
+    pub async fn fast_search_same(&self) -> Vec<HashSet<String>> {
+        let filenames: Vec<_> =
+            futures::stream::iter(self.fast_checksums.values().map(|paths| async move {
+                if paths.len() <= 1 {
+                    return None;
+                }
+                let mut results = HashMap::new();
+                for path in paths.iter() {
+                    let mut checksum = self.files.get(path).unwrap().clone();
+                    if let Err(e) = checksum.calc_full() {
+                        debug!("{}: {}", path, e);
+                        continue;
+                    }
+                    results
+                        .entry(checksum.full)
                         .or_insert(HashSet::new())
                         .insert(path.clone());
                 }
-            }
-        }
+                Some(results)
+            }))
+            .buffer_unordered(MAX_CONCURRENT_TASKS)
+            .collect::<Vec<_>>()
+            .await;
 
         let mut ret = Vec::new();
-        for (_, paths) in same.iter() {
-            if paths.len() > 1 {
-                ret.push(paths.clone());
+        for r in filenames.iter() {
+            match r {
+                Some(same) => {
+                    for (_, paths) in same.iter() {
+                        if paths.len() > 1 {
+                            ret.push(paths.clone());
+                        }
+                    }
+                }
+                None => {}
             }
         }
 
@@ -109,7 +123,6 @@ impl FileIndex {
 
     pub async fn visit_dir(&mut self, path: &Path) {
         use ignore::Walk;
-        const MAX_CONCURRENT_TASKS: usize = 16;
         let checksums: Vec<_> = futures::stream::iter(
             Walk::new(path)
                 .map(|entry| async move { FileChecksum::new_async(entry.unwrap().path()).await }),
