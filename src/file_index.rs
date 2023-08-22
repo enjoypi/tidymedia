@@ -1,6 +1,8 @@
 use crate::file_checksum::FileChecksum;
+use futures::stream::StreamExt;
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
+use tracing::error;
 
 pub struct FileIndex {
     // fast checksum -> file path, maybe same fast checksum
@@ -85,9 +87,7 @@ impl FileIndex {
         ret
     }
 
-    pub fn insert(&mut self, path: &str) -> std::io::Result<&FileChecksum> {
-        let checksum = FileChecksum::new(path)?;
-
+    pub fn add(&mut self, checksum: FileChecksum) -> std::io::Result<&FileChecksum> {
         let file_existed = self.files.get(checksum.path.as_str()).is_some();
 
         if file_existed {
@@ -95,30 +95,36 @@ impl FileIndex {
         } else {
             self.fast_checksums
                 .entry(checksum.short)
-                .or_insert(HashSet::new())
+                .or_default()
                 .insert(checksum.path.clone());
 
             Ok(self.files.entry(checksum.path.clone()).or_insert(checksum))
         }
     }
 
-    pub fn visit_dir(&mut self, path: &Path) {
+    pub fn insert(&mut self, path: &str) -> std::io::Result<&FileChecksum> {
+        let checksum = FileChecksum::new(path)?;
+        self.add(checksum)
+    }
+
+    pub async fn visit_dir(&mut self, path: &Path) {
         use ignore::Walk;
-        for result in Walk::new(path) {
-            // Each item yielded by the iterator is either a directory entry or an
-            // error, so either print the path or the error.
+        const MAX_CONCURRENT_TASKS: usize = 16;
+        let checksums: Vec<_> = futures::stream::iter(
+            Walk::new(path)
+                .map(|entry| async move { FileChecksum::new_async(entry.unwrap().path()).await }),
+        )
+        .buffer_unordered(MAX_CONCURRENT_TASKS)
+        .collect::<Vec<_>>()
+        .await;
+
+        for result in checksums {
             match result {
-                Ok(entry) => {
-                    let path = entry.path();
-                    if path.is_dir() {
-                        continue;
-                    }
-                    match path.to_str() {
-                        Some(s) => _ = self.insert(s),
-                        None => continue,
-                    }
+                Ok(checksum) => _ = self.add(checksum),
+                Err(ref e) if e.kind() == std::io::ErrorKind::IsADirectory => continue,
+                Err(e) => {
+                    error!("{}", e)
                 }
-                Err(err) => println!("ERROR: {}", err),
             }
         }
     }

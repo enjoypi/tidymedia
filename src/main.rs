@@ -1,3 +1,5 @@
+#![feature(io_error_more)]
+
 use clap::Parser;
 use tracing::{debug, info};
 use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt};
@@ -16,16 +18,9 @@ pub struct Cli {
     dirs: Vec<String>,
 }
 
-fn main() {
+#[tokio::main]
+async fn main() {
     let cli = Cli::parse();
-
-    // let subscriber = fmt::Subscriber::builder()
-    //     .with_env_filter(EnvFilter::try_new(cli.log).unwarp_or("info"))
-    //     .with_writer(std::io::stderr)
-    //     .finish();
-    //
-    // tracing::subscriber::set_global_default(subscriber)
-    //     .expect("setting default subscriber failed");
 
     tracing_subscriber::registry()
         .with(fmt::layer().with_writer(std::io::stderr))
@@ -37,7 +32,7 @@ fn main() {
 
     for path in cli.dirs {
         let path = std::path::Path::new(path.as_str());
-        index.visit_dir(path);
+        index.visit_dir(path).await;
     }
 
     info!(

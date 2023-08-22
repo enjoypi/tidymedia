@@ -1,5 +1,6 @@
 use std::hash::Hasher;
 use std::io::{Error, ErrorKind, Read};
+use std::path::Path;
 use std::{fs, io};
 
 use generic_array::GenericArray;
@@ -22,35 +23,49 @@ pub struct FileChecksum {
 }
 
 impl FileChecksum {
-    pub fn new(path: &str) -> io::Result<Self> {
-        let path = fs::canonicalize(path)?;
-
+    fn new_path(path: &Path) -> io::Result<Self> {
         let meta = path.metadata()?;
         if !meta.is_file() {
-            return Err(Error::from(ErrorKind::Unsupported));
+            return Err(Error::new(ErrorKind::IsADirectory, format!("{:?}", path)));
         }
 
         if meta.len() == 0 {
             return Err(std::io::Error::new(std::io::ErrorKind::Other, "empty file"));
         }
 
-        let path = match path.to_str() {
+        let p = path.canonicalize()?;
+        let p = match p.to_str() {
             Some(s) => s,
-            None => return Err(Error::from(ErrorKind::Unsupported)),
+            None => {
+                return Err(Error::new(
+                    ErrorKind::InvalidFilename,
+                    format!("{:?}", path),
+                ))
+            }
         };
+        let p = p.strip_prefix("\\\\?\\").unwrap_or(p);
 
-        let (bytes_read, short, full) = fast_checksum(path)?;
-        let path = path.strip_prefix("\\\\?\\").unwrap_or(path);
+        let (bytes_read, short, full) = fast_checksum(p)?;
 
         Ok(Self {
             short,
             full,
             secure: GenericArray::default(),
-            path: path.to_string(),
+            path: p.to_string(),
             size: meta.len(),
             bytes_read: bytes_read as u64,
             true_full: meta.len() <= READ_BUFFER_SIZE as u64,
         })
+    }
+
+    pub fn new(path: &str) -> io::Result<Self> {
+        let path = fs::canonicalize(path)?;
+
+        Self::new_path(path.as_path())
+    }
+
+    pub async fn new_async(path: &Path) -> io::Result<Self> {
+        Self::new_path(path)
     }
 
     pub fn calc_full(&mut self) -> io::Result<u64> {
