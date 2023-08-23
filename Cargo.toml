@@ -11,6 +11,7 @@ futures = "0.3"
 generic-array = "0"
 hex = "0.4"
 ignore = "0.4"
+rayon = "1"
 sha2 = "0.10"
 tokio = {version = "1", features = ["full"]}
 tracing = "0.1"

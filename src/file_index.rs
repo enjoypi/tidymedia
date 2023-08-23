@@ -1,8 +1,10 @@
 use crate::file_checksum::FileChecksum;
 use futures::stream::StreamExt;
+use rayon::prelude::*;
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use tracing::{debug, error};
+
 const MAX_CONCURRENT_TASKS: usize = 16;
 
 pub struct FileIndex {
@@ -33,38 +35,35 @@ impl FileIndex {
     }
 
     pub fn search_same(&mut self) -> Vec<HashSet<String>> {
-        let mut same = HashMap::new();
-
-        for (_, paths) in self.fast_checksums.iter() {
-            if paths.len() <= 1 {
-                continue;
-            }
-
-            for path in paths.iter() {
-                let checksum = self.files.get_mut(path).unwrap();
-                if let Ok(secure) = checksum.calc_secure() {
-                    same.entry(secure)
-                        .or_insert(HashSet::new())
-                        .insert(path.clone());
+        let results: Vec<_> = self
+            .fast_checksums
+            .par_iter()
+            .map(|(_, paths)| {
+                if paths.len() <= 1 {
+                    return HashMap::default();
                 }
-            }
-        }
 
-        let mut ret = Vec::new();
-        for (_, paths) in same.iter() {
-            if paths.len() > 1 {
-                ret.push(paths.clone());
-            }
-        }
+                let mut same = HashMap::new();
+                for path in paths.iter() {
+                    let mut checksum = self.files.get(path).unwrap().clone();
+                    if let Ok(secure) = checksum.calc_secure() {
+                        same.entry(secure)
+                            .or_insert(HashSet::new())
+                            .insert(path.clone());
+                    }
+                }
+                same
+            })
+            .collect::<Vec<_>>();
 
-        ret
+        Self::filter_one(&results)
     }
 
     pub async fn fast_search_same(&self) -> Vec<HashSet<String>> {
         let filenames: Vec<_> =
             futures::stream::iter(self.fast_checksums.values().map(|paths| async move {
                 if paths.len() <= 1 {
-                    return None;
+                    return HashMap::default();
                 }
                 let mut results = HashMap::new();
                 for path in paths.iter() {
@@ -78,26 +77,24 @@ impl FileIndex {
                         .or_insert(HashSet::new())
                         .insert(path.clone());
                 }
-                Some(results)
+                results
             }))
             .buffer_unordered(MAX_CONCURRENT_TASKS)
             .collect::<Vec<_>>()
             .await;
 
+        Self::filter_one(&filenames)
+    }
+
+    fn filter_one<T>(map: &[HashMap<T, HashSet<String>>]) -> Vec<HashSet<String>> {
         let mut ret = Vec::new();
-        for r in filenames.iter() {
-            match r {
-                Some(same) => {
-                    for (_, paths) in same.iter() {
-                        if paths.len() > 1 {
-                            ret.push(paths.clone());
-                        }
-                    }
+        for same in map.iter() {
+            for (_, paths) in same.iter() {
+                if paths.len() > 1 {
+                    ret.push(paths.clone());
                 }
-                None => {}
             }
         }
-
         ret
     }
 
