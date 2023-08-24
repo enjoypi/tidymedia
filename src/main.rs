@@ -18,8 +18,7 @@ pub struct Cli {
     dirs: Vec<String>,
 }
 
-#[tokio::main]
-async fn main() {
+fn main() {
     let cli = Cli::parse();
 
     tracing_subscriber::registry()
@@ -32,7 +31,7 @@ async fn main() {
 
     for path in cli.dirs {
         let path = std::path::Path::new(path.as_str());
-        index.visit_dir(path).await;
+        index.visit_dir(path);
     }
 
     info!(
@@ -43,7 +42,7 @@ async fn main() {
     );
 
     let same = if cli.fast {
-        index.fast_search_same().await
+        index.fast_search_same()
     } else {
         index.search_same()
     };

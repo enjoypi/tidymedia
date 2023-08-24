@@ -24,7 +24,7 @@ pub struct FileChecksum {
 }
 
 impl FileChecksum {
-    fn new_path(path: &Path) -> io::Result<Self> {
+    pub fn new_path(path: &Path) -> io::Result<Self> {
         let meta = path.metadata()?;
         if !meta.is_file() {
             return Err(Error::new(ErrorKind::IsADirectory, format!("{:?}", path)));

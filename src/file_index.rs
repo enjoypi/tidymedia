@@ -1,11 +1,8 @@
 use crate::file_checksum::FileChecksum;
-use futures::stream::StreamExt;
 use rayon::prelude::*;
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
-use tracing::{debug, error};
-
-const MAX_CONCURRENT_TASKS: usize = 16;
+use tracing::error;
 
 pub struct FileIndex {
     // fast checksum -> file path, maybe same fast checksum
@@ -59,31 +56,29 @@ impl FileIndex {
         Self::filter_one(&results)
     }
 
-    pub async fn fast_search_same(&self) -> Vec<HashSet<String>> {
-        let filenames: Vec<_> =
-            futures::stream::iter(self.fast_checksums.values().map(|paths| async move {
+    pub fn fast_search_same(&self) -> Vec<HashSet<String>> {
+        let results: Vec<_> = self
+            .fast_checksums
+            .par_iter()
+            .map(|(_, paths)| {
                 if paths.len() <= 1 {
                     return HashMap::default();
                 }
-                let mut results = HashMap::new();
+
+                let mut same = HashMap::new();
                 for path in paths.iter() {
                     let mut checksum = self.files.get(path).unwrap().clone();
-                    if let Err(e) = checksum.calc_full() {
-                        debug!("{}: {}", path, e);
-                        continue;
+                    if let Ok(full) = checksum.calc_full() {
+                        same.entry(full)
+                            .or_insert(HashSet::new())
+                            .insert(path.clone());
                     }
-                    results
-                        .entry(checksum.full)
-                        .or_insert(HashSet::new())
-                        .insert(path.clone());
                 }
-                results
-            }))
-            .buffer_unordered(MAX_CONCURRENT_TASKS)
-            .collect::<Vec<_>>()
-            .await;
+                same
+            })
+            .collect::<Vec<_>>();
 
-        Self::filter_one(&filenames)
+        Self::filter_one(&results)
     }
 
     fn filter_one<T>(map: &[HashMap<T, HashSet<String>>]) -> Vec<HashSet<String>> {
@@ -118,20 +113,28 @@ impl FileIndex {
         self.add(checksum)
     }
 
-    pub async fn visit_dir(&mut self, path: &Path) {
+    pub fn visit_dir(&mut self, path: &Path) {
         use ignore::Walk;
-        let checksums: Vec<_> = futures::stream::iter(
-            Walk::new(path)
-                .map(|entry| async move { FileChecksum::new_async(entry.unwrap().path()).await }),
-        )
-        .buffer_unordered(MAX_CONCURRENT_TASKS)
-        .collect::<Vec<_>>()
-        .await;
+
+        let paths: Vec<_> = Walk::new(path)
+            .filter_map(|entry| entry.ok())
+            .map(|entry| entry.path().to_owned())
+            .collect();
+
+        let checksums = paths
+            .par_iter()
+            .map(|path| FileChecksum::new_path(path))
+            .collect::<Vec<_>>();
 
         for result in checksums {
             match result {
                 Ok(checksum) => _ = self.add(checksum),
-                Err(ref e) if e.kind() == std::io::ErrorKind::IsADirectory => continue,
+                Err(ref e)
+                    if e.kind() == std::io::ErrorKind::IsADirectory
+                        || e.kind() == std::io::ErrorKind::Other =>
+                {
+                    continue
+                }
                 Err(e) => {
                     error!("{}", e)
                 }
