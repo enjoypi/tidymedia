@@ -46,7 +46,7 @@ fn main() {
         index.search_same()
     };
     info!("Same: {}", same.len());
-    
+
     for paths in same.iter() {
         for path in paths.iter() {
             println!(":DEL \"{}\"\r", path);

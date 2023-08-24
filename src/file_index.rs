@@ -73,9 +73,9 @@ impl FileIndex {
     fn filter_and_sort<T>(map: &[HashMap<T, HashSet<String>>]) -> Vec<Vec<String>> {
         let mut r: Vec<_> = map
             .iter()
-            .filter_map(|same| {
+            .flat_map(|same| {
                 same.iter()
-                    .find(|(_, paths)| paths.len() > 1)
+                    .filter(|(_, paths)| paths.len() > 1)
                     .map(|(_, paths)| {
                         let mut v: Vec<_> = paths.clone().into_iter().collect();
                         v.sort();

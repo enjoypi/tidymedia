@@ -15,7 +15,7 @@ pub fn str_to_secure(input_str: &str) -> SecureChecksum {
     }
 }
 
-pub const DATA_DIR : &str = "tests/data";
+pub const DATA_DIR: &str = "tests/data";
 pub const DATA_SMALL: &str = "tests/data/data_small";
 pub const DATA_SMALL_WYHASH: u64 = 13333046383594682858;
 pub const DATA_SMALL_XXHASH: u64 = 0x1a5efdfdbd01a44c;
