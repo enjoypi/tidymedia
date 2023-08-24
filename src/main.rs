@@ -30,8 +30,7 @@ fn main() {
     debug!("cli: {:?}", cli);
 
     for path in cli.dirs {
-        let path = std::path::Path::new(path.as_str());
-        index.visit_dir(path);
+        index.visit_dir(path.as_str());
     }
 
     info!(
@@ -47,18 +46,7 @@ fn main() {
         index.search_same()
     };
 
-    info!("Same: {}", same.len());
-
-    let mut sorted: Vec<_> = vec![];
-    for paths in same {
-        let mut paths: Vec<_> = paths.into_iter().collect();
-        paths.sort();
-
-        sorted.push(paths);
-    }
-
-    sorted.sort();
-    for paths in sorted.iter() {
+    for paths in same.iter() {
         for path in paths.iter() {
             println!(":DEL \"{}\"\r", path);
         }

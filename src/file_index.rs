@@ -1,7 +1,8 @@
 use crate::file_checksum::FileChecksum;
 use rayon::prelude::*;
 use std::collections::{HashMap, HashSet};
-use std::path::Path;
+use std::hash::Hash;
+use std::io;
 use tracing::error;
 
 pub struct FileIndex {
@@ -31,66 +32,59 @@ impl FileIndex {
         bytes_read
     }
 
-    pub fn search_same(&mut self) -> Vec<HashSet<String>> {
-        let results: Vec<_> = self
+    pub fn calc_same<F, T>(&self, calc: F) -> Vec<HashMap<T, HashSet<String>>>
+    where
+        F: Fn(&mut FileChecksum) -> io::Result<T> + Send + Sync,
+        T: Eq + Hash + Send,
+    {
+        let multiple: HashMap<_, _> = self
             .fast_checksums
+            .iter()
+            .filter(|(_, paths)| paths.len() > 1)
+            .collect();
+
+        multiple
             .par_iter()
             .map(|(_, paths)| {
-                if paths.len() <= 1 {
-                    return HashMap::default();
-                }
-
                 let mut same = HashMap::new();
                 for path in paths.iter() {
                     let mut checksum = self.files.get(path).unwrap().clone();
-                    if let Ok(secure) = checksum.calc_secure() {
-                        same.entry(secure)
-                            .or_insert(HashSet::new())
+                    if let Ok(key) = calc(&mut checksum) {
+                        same.entry(key)
+                            .or_insert_with(HashSet::new)
                             .insert(path.clone());
                     }
                 }
                 same
             })
-            .collect::<Vec<_>>();
-
-        Self::filter_one(&results)
+            .collect::<Vec<_>>()
     }
 
-    pub fn fast_search_same(&self) -> Vec<HashSet<String>> {
-        let results: Vec<_> = self
-            .fast_checksums
-            .par_iter()
-            .map(|(_, paths)| {
-                if paths.len() <= 1 {
-                    return HashMap::default();
-                }
+    pub fn search_same(&mut self) -> Vec<Vec<String>> {
+        let results: Vec<_> = self.calc_same(|checksum| checksum.calc_secure());
+        Self::filter_and_sort(&results)
+    }
 
-                let mut same = HashMap::new();
-                for path in paths.iter() {
-                    let mut checksum = self.files.get(path).unwrap().clone();
-                    if let Ok(full) = checksum.calc_full() {
-                        same.entry(full)
-                            .or_insert(HashSet::new())
-                            .insert(path.clone());
-                    }
-                }
-                same
+    pub fn fast_search_same(&self) -> Vec<Vec<String>> {
+        let results: Vec<_> = self.calc_same(|checksum| checksum.calc_full());
+        Self::filter_and_sort(&results)
+    }
+
+    fn filter_and_sort<T>(map: &[HashMap<T, HashSet<String>>]) -> Vec<Vec<String>> {
+        let mut r: Vec<_> = map
+            .iter()
+            .filter_map(|same| {
+                same.iter()
+                    .find(|(_, paths)| paths.len() > 1)
+                    .map(|(_, paths)| {
+                        let mut v: Vec<_> = paths.clone().into_iter().collect();
+                        v.sort();
+                        v
+                    })
             })
-            .collect::<Vec<_>>();
-
-        Self::filter_one(&results)
-    }
-
-    fn filter_one<T>(map: &[HashMap<T, HashSet<String>>]) -> Vec<HashSet<String>> {
-        let mut ret = Vec::new();
-        for same in map.iter() {
-            for (_, paths) in same.iter() {
-                if paths.len() > 1 {
-                    ret.push(paths.clone());
-                }
-            }
-        }
-        ret
+            .collect();
+        r.sort();
+        r
     }
 
     pub fn add(&mut self, checksum: FileChecksum) -> std::io::Result<&FileChecksum> {
@@ -113,7 +107,7 @@ impl FileIndex {
         self.add(checksum)
     }
 
-    pub fn visit_dir(&mut self, path: &Path) {
+    pub fn visit_dir(&mut self, path: &str) {
         use ignore::Walk;
 
         let paths: Vec<_> = Walk::new(path)
