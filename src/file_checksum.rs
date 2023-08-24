@@ -1,15 +1,14 @@
-use std::hash::Hasher;
 use std::io::{Error, ErrorKind, Read};
 use std::path::Path;
 use std::{fs, io};
 
 use generic_array::GenericArray;
 use sha2::{Digest, Sha512};
+use memmap2::Mmap;
 
 use super::SecureChecksum;
 
 pub const FAST_READ_SIZE: usize = 4096;
-const READ_BUFFER_SIZE: usize = 1024 * 1024;
 
 #[derive(Debug, Clone)]
 pub struct FileChecksum {
@@ -114,41 +113,16 @@ fn fast_checksum(path: &str) -> io::Result<(usize, u64, u64)> {
 }
 
 fn full_checksum(path: &str) -> io::Result<(usize, u64)> {
-    let mut file = fs::File::open(path)?;
-    let mut long_hasher = xxhash_rust::xxh3::Xxh3::new();
-    let mut buffer = vec![0u8; READ_BUFFER_SIZE];
+    let file = fs::File::open(path)?;
+    let mmap = unsafe { Mmap::map(&file)?  };
 
-    let mut total_read = 0;
-    loop {
-        let bytes_read = file.read(&mut buffer)?;
-        if bytes_read > 0 {
-            total_read += bytes_read;
-            long_hasher.update(&buffer[..bytes_read]);
-        } else {
-            break;
-        }
-    }
-
-    Ok((total_read, long_hasher.finish()))
+    Ok((mmap.len() , xxhash_rust::xxh3::xxh3_64(&mmap)))
 }
 
 fn secure_checksum(path: &str) -> io::Result<(usize, SecureChecksum)> {
-    let mut file = fs::File::open(path)?;
-    let mut hasher = Sha512::new();
-    let mut buffer = vec![0u8; READ_BUFFER_SIZE];
-
-    let mut total_read = 0;
-    loop {
-        let bytes_read = file.read(&mut buffer)?;
-        if bytes_read > 0 {
-            total_read += bytes_read;
-            hasher.update(&buffer[..bytes_read]);
-        } else {
-            break;
-        }
-    }
-
-    Ok((total_read, hasher.finalize()))
+    let file = fs::File::open(path)?;
+    let mmap = unsafe { Mmap::map(&file)?  };
+    Ok((mmap.len() , Sha512::digest(&mmap)))
 }
 
 #[cfg(test)]
