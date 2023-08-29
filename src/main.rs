@@ -1,5 +1,3 @@
-#![feature(io_error_more)]
-
 use clap::Parser;
 use tracing::{debug, info};
 use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt};
