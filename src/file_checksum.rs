@@ -3,8 +3,8 @@ use std::path::Path;
 use std::{fs, io};
 
 use generic_array::GenericArray;
-use sha2::{Digest, Sha512};
 use memmap2::Mmap;
+use sha2::{Digest, Sha512};
 
 use super::SecureChecksum;
 
@@ -26,11 +26,17 @@ impl FileChecksum {
     pub fn new_path(path: &Path) -> io::Result<Self> {
         let meta = path.metadata()?;
         if !meta.is_file() {
-            return Err(Error::new(ErrorKind::IsADirectory, format!("{:?}", path)));
+            return Err(Error::new(
+                ErrorKind::Other,
+                format!("{} is a directory", path.display()),
+            ));
         }
 
         if meta.len() == 0 {
-            return Err(std::io::Error::new(std::io::ErrorKind::Other, "empty file"));
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                format!("{} is empty", path.display()),
+            ));
         }
 
         let p = path.canonicalize()?;
@@ -38,8 +44,8 @@ impl FileChecksum {
             Some(s) => s,
             None => {
                 return Err(Error::new(
-                    ErrorKind::InvalidFilename,
-                    format!("{:?}", path),
+                    ErrorKind::Other,
+                    format!("invalid filename {}", path.display()),
                 ))
             }
         };
@@ -114,15 +120,15 @@ fn fast_checksum(path: &str) -> io::Result<(usize, u64, u64)> {
 
 fn full_checksum(path: &str) -> io::Result<(usize, u64)> {
     let file = fs::File::open(path)?;
-    let mmap = unsafe { Mmap::map(&file)?  };
+    let mmap = unsafe { Mmap::map(&file)? };
 
-    Ok((mmap.len() , xxhash_rust::xxh3::xxh3_64(&mmap)))
+    Ok((mmap.len(), xxhash_rust::xxh3::xxh3_64(&mmap)))
 }
 
 fn secure_checksum(path: &str) -> io::Result<(usize, SecureChecksum)> {
     let file = fs::File::open(path)?;
-    let mmap = unsafe { Mmap::map(&file)?  };
-    Ok((mmap.len() , Sha512::digest(&mmap)))
+    let mmap = unsafe { Mmap::map(&file)? };
+    Ok((mmap.len(), Sha512::digest(&mmap)))
 }
 
 #[cfg(test)]
