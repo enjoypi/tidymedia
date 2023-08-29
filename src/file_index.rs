@@ -123,12 +123,7 @@ impl FileIndex {
         for result in checksums {
             match result {
                 Ok(checksum) => _ = self.add(checksum),
-                Err(ref e)
-                    if e.kind() == std::io::ErrorKind::IsADirectory
-                        || e.kind() == std::io::ErrorKind::Other =>
-                {
-                    continue
-                }
+                Err(ref e) if e.kind() == std::io::ErrorKind::Other => continue,
                 Err(e) => {
                     error!("{}", e)
                 }

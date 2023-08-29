@@ -1,4 +1,3 @@
-#![feature(io_error_more)]
 pub mod file_checksum;
 pub mod file_index;
 pub mod tests;
