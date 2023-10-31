@@ -39,6 +39,22 @@ impl FileChecksum {
             ));
         }
 
+        let p = Self::get_full_path(path)?;
+
+        let (bytes_read, short, full) = fast_checksum(p.as_str())?;
+
+        Ok(Self {
+            short,
+            full,
+            secure: GenericArray::default(),
+            path: p,
+            size: meta.len(),
+            bytes_read: bytes_read as u64,
+            true_full: meta.len() <= FAST_READ_SIZE as u64,
+        })
+    }
+
+    pub fn get_full_path(path: &Path) -> io::Result<String> {
         let p = path.canonicalize()?;
         let p = match p.to_str() {
             Some(s) => s,
@@ -50,18 +66,7 @@ impl FileChecksum {
             }
         };
         let p = p.strip_prefix("\\\\?\\").unwrap_or(p);
-
-        let (bytes_read, short, full) = fast_checksum(p)?;
-
-        Ok(Self {
-            short,
-            full,
-            secure: GenericArray::default(),
-            path: p.to_string(),
-            size: meta.len(),
-            bytes_read: bytes_read as u64,
-            true_full: meta.len() <= FAST_READ_SIZE as u64,
-        })
+        Ok(p.to_string())
     }
 
     pub fn new(path: &str) -> io::Result<Self> {

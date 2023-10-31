@@ -1,6 +1,6 @@
 use crate::file_checksum::FileChecksum;
 use rayon::prelude::*;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::hash::Hash;
 use std::io;
 use tracing::error;
@@ -32,7 +32,7 @@ impl FileIndex {
         bytes_read
     }
 
-    pub fn calc_same<F, T>(&self, calc: F) -> Vec<HashMap<T, HashSet<String>>>
+    pub fn calc_same<F, T>(&self, calc: F) -> Vec<HashMap<(u64, T), HashSet<String>>>
     where
         F: Fn(&mut FileChecksum) -> io::Result<T> + Send + Sync,
         T: Eq + Hash + Send,
@@ -50,7 +50,7 @@ impl FileIndex {
                 for path in paths.iter() {
                     let mut checksum = self.files.get(path).unwrap().clone();
                     if let Ok(key) = calc(&mut checksum) {
-                        same.entry(key)
+                        same.entry((checksum.size, key))
                             .or_insert_with(HashSet::new)
                             .insert(path.clone());
                     }
@@ -60,31 +60,32 @@ impl FileIndex {
             .collect::<Vec<_>>()
     }
 
-    pub fn search_same(&mut self) -> Vec<Vec<String>> {
+    pub fn search_same(&mut self) -> BTreeMap<u64, Vec<String>> {
         let results: Vec<_> = self.calc_same(|checksum| checksum.calc_secure());
         Self::filter_and_sort(&results)
     }
 
-    pub fn fast_search_same(&self) -> Vec<Vec<String>> {
+    pub fn fast_search_same(&self) -> BTreeMap<u64, Vec<String>> {
         let results: Vec<_> = self.calc_same(|checksum| checksum.calc_full());
         Self::filter_and_sort(&results)
     }
 
-    fn filter_and_sort<T>(map: &[HashMap<T, HashSet<String>>]) -> Vec<Vec<String>> {
-        let mut r: Vec<_> = map
-            .iter()
-            .flat_map(|same| {
-                same.iter()
-                    .filter(|(_, paths)| paths.len() > 1)
-                    .map(|(_, paths)| {
-                        let mut v: Vec<_> = paths.clone().into_iter().collect();
-                        v.sort();
-                        v
-                    })
-            })
-            .collect();
-        r.sort();
-        r
+    fn filter_and_sort<T>(
+        map: &[HashMap<(u64, T), HashSet<String>>],
+    ) -> BTreeMap<u64, Vec<String>> {
+        let mut result = BTreeMap::new();
+
+        for same in map.iter() {
+            for ((key, _), paths) in same {
+                if paths.len() > 1 {
+                    let mut v: Vec<_> = paths.clone().into_iter().collect();
+                    v.sort();
+                    result.insert(*key, v);
+                }
+            }
+        }
+
+        result
     }
 
     pub fn add(&mut self, checksum: FileChecksum) -> std::io::Result<&FileChecksum> {

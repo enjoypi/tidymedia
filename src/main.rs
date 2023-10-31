@@ -1,8 +1,8 @@
 use clap::Parser;
-use tracing::{debug, info};
+use tracing::{debug, error, info};
 use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt};
 
-use tidymedia::file_index;
+use tidymedia::{file_checksum, file_index};
 
 #[derive(Debug, Parser)]
 #[command(author, version, about, long_about = None)]
@@ -10,10 +10,13 @@ pub struct Cli {
     #[arg(short, long, default_value = "info")]
     log: String,
 
-    #[arg(short, long, action = clap::ArgAction::SetTrue)]
+    #[arg(short, long, default_value="true", action = clap::ArgAction::SetTrue)]
     fast: bool,
 
     dirs: Vec<String>,
+
+    #[arg(short, long)]
+    output: Option<String>,
 }
 
 fn main() {
@@ -26,6 +29,17 @@ fn main() {
     let mut index = file_index::FileIndex::new();
 
     debug!("cli: {:?}", cli);
+
+    if let Some(output) = cli.output.clone() {
+        // check if output is directory
+        // if not, create directory
+        // the code is
+        let output = std::path::Path::new(&output);
+        if !output.is_dir() {
+            error!("output is not a directory");
+            return;
+        }
+    }
 
     for path in cli.dirs {
         index.visit_dir(path.as_str());
@@ -45,11 +59,32 @@ fn main() {
     };
     info!("Same: {}", same.len());
 
-    for paths in same.iter() {
-        for path in paths.iter() {
-            println!(":DEL \"{}\"\r", path);
+    match cli.output {
+        Some(output) => {
+            let output =
+                file_checksum::FileChecksum::get_full_path(std::path::Path::new(&output)).unwrap();
+            let output = output.as_str();
+            for (size, paths) in same.iter().rev() {
+                println!(":SIZE {}\r", size);
+                for path in paths.iter() {
+                    if path.starts_with(output) {
+                        println!(":DEL \"{}\"\r", path);
+                    } else {
+                        println!("DEL \"{}\"\r", path);
+                    }
+                }
+                println!()
+            }
         }
-        println!()
+        _ => {
+            for (size, paths) in same.iter().rev() {
+                println!(":SIZE {}\r", size);
+                for path in paths.iter() {
+                    println!(":DEL \"{}\"\r", path);
+                }
+                println!()
+            }
+        }
     }
 
     info!("BytesRead: {}", index.bytes_read());
