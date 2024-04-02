@@ -2,7 +2,9 @@ use clap::Parser;
 use tracing::{debug, error, info};
 use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt};
 
-use tidymedia::{file_checksum, file_index};
+use crate::interface_adapters::use_cases::entities::*;
+
+mod interface_adapters;
 
 #[derive(Debug, Parser)]
 #[command(author, version, about, long_about = None)]
@@ -26,7 +28,7 @@ fn main() {
         .with(fmt::layer().with_writer(std::io::stderr))
         .init();
 
-    let mut index = file_index::FileIndex::new();
+    let mut index = FileIndex::new();
 
     debug!("cli: {:?}", cli);
 
@@ -61,8 +63,7 @@ fn main() {
 
     match cli.output {
         Some(output) => {
-            let output =
-                file_checksum::FileChecksum::get_full_path(std::path::Path::new(&output)).unwrap();
+            let output = FileChecksum::get_full_path(std::path::Path::new(&output)).unwrap();
             let output = output.as_str();
             for (size, paths) in same.iter().rev() {
                 println!(":SIZE {}\r", size);

@@ -1,11 +1,11 @@
 #[cfg(test)]
 mod tests {
-    use tidymedia::{file_checksum, tests};
+    use tidymedia::interface_adapters::use_cases::entities::*;
 
     #[test]
     fn same_small() -> tests::Result {
-        let mut checksum1 = file_checksum::FileChecksum::new(tests::DATA_SMALL)?;
-        let checksum2 = file_checksum::FileChecksum::new(tests::DATA_SMALL_COPY)?;
+        let mut checksum1 = FileChecksum::new(tests::DATA_SMALL)?;
+        let checksum2 = FileChecksum::new(tests::DATA_SMALL_COPY)?;
 
         assert_eq!(checksum1, checksum2);
         checksum1.calc_full()?;
@@ -16,8 +16,8 @@ mod tests {
 
     #[test]
     fn same_large() -> tests::Result {
-        let mut checksum1 = file_checksum::FileChecksum::new(tests::DATA_LARGE)?;
-        let mut checksum2 = file_checksum::FileChecksum::new(tests::DATA_LARGE_COPY)?;
+        let mut checksum1 = FileChecksum::new(tests::DATA_LARGE)?;
+        let mut checksum2 = FileChecksum::new(tests::DATA_LARGE_COPY)?;
 
         assert_eq!(checksum1, checksum2);
         checksum1.calc_full()?;

@@ -146,8 +146,7 @@ mod tests {
     use wyhash;
     use xxhash_rust::xxh3;
 
-    use crate::tests;
-
+    use super::super::*;
     use super::FileChecksum;
 
     struct ChecksumTest {

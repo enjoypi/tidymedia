@@ -1,9 +1,11 @@
-use crate::file_checksum::FileChecksum;
-use rayon::prelude::*;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::hash::Hash;
 use std::io;
+
+use rayon::prelude::*;
 use tracing::error;
+
+use super::file_checksum::FileChecksum;
 
 pub struct FileIndex {
     // fast checksum -> file path, maybe same fast checksum
