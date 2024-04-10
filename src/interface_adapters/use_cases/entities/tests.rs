@@ -17,6 +17,7 @@ pub fn str_to_secure(input_str: &str) -> SecureChecksum {
 
 pub const DATA_DIR: &str = "tests/data";
 pub const DATA_SMALL: &str = "tests/data/data_small";
+pub const DATA_SMALL_LEN: u64 = 3057;
 pub const DATA_SMALL_WYHASH: u64 = 13333046383594682858;
 pub const DATA_SMALL_XXHASH: u64 = 0x1a5efdfdbd01a44c;
 pub fn data_small_sha512() -> SecureChecksum {
@@ -25,6 +26,7 @@ pub fn data_small_sha512() -> SecureChecksum {
 pub const DATA_SMALL_COPY: &str = "tests/data/data_small_copy";
 
 pub const DATA_LARGE: &str = "tests/data/data_large";
+pub const DATA_LARGE_LEN: u64 = 7133;
 pub const DATA_LARGE_WYHASH: u64 = 2034553491748707037;
 pub const DATA_LARGE_XXHASH: u64 = 0x9dba53c59ea968e9;
 pub fn data_large_sha512() -> SecureChecksum {

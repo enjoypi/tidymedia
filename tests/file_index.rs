@@ -1,7 +1,9 @@
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
     use std::fs;
 
+    use tidymedia::interface_adapters::use_cases::entities::tests;
     use tidymedia::interface_adapters::use_cases::entities::*;
 
     #[test]
@@ -30,27 +32,27 @@ mod tests {
         let mut index = FileIndex::new();
         index.visit_dir(tests::DATA_DIR);
 
-        let same = index.search_same();
+        let same: BTreeMap<u64, _> = index.search_same();
         assert_eq!(same.len(), 2);
-        assert_eq!(same[&0].len(), 2);
+        assert_eq!(same[&tests::DATA_LARGE_LEN].len(), 2);
 
         assert_eq!(
-            same[&0][0],
+            same[&tests::DATA_LARGE_LEN][0],
             fs::canonicalize(tests::DATA_LARGE)?.to_str().unwrap() // .strip_prefix("\\\\?\\")
                                                                    // .unwrap()
         );
         assert_eq!(
-            same[&0][1],
+            same[&tests::DATA_LARGE_LEN][1],
             fs::canonicalize(tests::DATA_LARGE_COPY)?.to_str().unwrap() // .strip_prefix("\\\\?\\")
                                                                         // .unwrap()
         );
         assert_eq!(
-            same[&1][0],
+            same[&tests::DATA_SMALL_LEN][0],
             fs::canonicalize(tests::DATA_SMALL)?.to_str().unwrap() // .strip_prefix("\\\\?\\")
                                                                    // .unwrap()
         );
         assert_eq!(
-            same[&1][1],
+            same[&tests::DATA_SMALL_LEN][1],
             fs::canonicalize(tests::DATA_SMALL_COPY)?.to_str().unwrap() // .strip_prefix("\\\\?\\")
                                                                         // .unwrap()
         );
