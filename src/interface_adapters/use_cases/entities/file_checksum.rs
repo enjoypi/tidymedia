@@ -146,8 +146,8 @@ mod tests {
     use wyhash;
     use xxhash_rust::xxh3;
 
-    use super::super::*;
     use super::FileChecksum;
+    use crate::common;
 
     struct ChecksumTest {
         short_wyhash: u64,
@@ -196,86 +196,86 @@ mod tests {
     }
 
     #[test]
-    fn small_file() -> tests::Result {
-        let ct = ChecksumTest::new(tests::DATA_SMALL)?;
-        assert_eq!(ct.short_wyhash, tests::DATA_SMALL_WYHASH);
-        assert_eq!(ct.short_xxhash, tests::DATA_SMALL_XXHASH);
+    fn small_file() -> common::Result {
+        let ct = ChecksumTest::new(common::DATA_SMALL)?;
+        assert_eq!(ct.short_wyhash, common::DATA_SMALL_WYHASH);
+        assert_eq!(ct.short_xxhash, common::DATA_SMALL_XXHASH);
         assert!(ct.file_size <= super::FAST_READ_SIZE);
         assert_eq!(ct.short_read, ct.file_size);
         assert_eq!(ct.short_xxhash, ct.full);
-        assert_eq!(ct.secure, tests::data_small_sha512());
+        assert_eq!(ct.secure, common::data_small_sha512());
 
-        let mut f = FileChecksum::new(tests::DATA_SMALL)?;
+        let mut f = FileChecksum::new(common::DATA_SMALL)?;
         assert_eq!(f.short, ct.short_wyhash);
         assert_eq!(f.full, ct.short_xxhash);
         assert_eq!(f.size, ct.file_size as u64);
         assert_eq!(f.calc_full()?, ct.full);
         assert_eq!(f.full, ct.full);
         assert_eq!(f.secure, GenericArray::default());
-        assert_eq!(f.calc_secure()?, tests::data_small_sha512());
-        assert_eq!(f.secure, tests::data_small_sha512());
+        assert_eq!(f.calc_secure()?, common::data_small_sha512());
+        assert_eq!(f.secure, common::data_small_sha512());
 
         Ok(())
     }
 
     #[test]
-    fn large_file() -> tests::Result {
-        let ct = ChecksumTest::new(tests::DATA_LARGE)?;
-        assert_eq!(ct.short_wyhash, tests::DATA_LARGE_WYHASH);
-        assert_ne!(ct.short_xxhash, tests::DATA_LARGE_XXHASH);
+    fn large_file() -> common::Result {
+        let ct = ChecksumTest::new(common::DATA_LARGE)?;
+        assert_eq!(ct.short_wyhash, common::DATA_LARGE_WYHASH);
+        assert_ne!(ct.short_xxhash, common::DATA_LARGE_XXHASH);
         assert_eq!(ct.short_read, super::FAST_READ_SIZE);
         assert!(ct.short_read < ct.file_size);
-        assert_eq!(ct.full, tests::DATA_LARGE_XXHASH);
-        assert_eq!(ct.secure, tests::data_large_sha512());
+        assert_eq!(ct.full, common::DATA_LARGE_XXHASH);
+        assert_eq!(ct.secure, common::data_large_sha512());
 
-        let mut f = FileChecksum::new(tests::DATA_LARGE)?;
+        let mut f = FileChecksum::new(common::DATA_LARGE)?;
         assert_eq!(f.short, ct.short_wyhash);
         assert_eq!(f.full, ct.short_xxhash);
         assert_eq!(f.size, ct.file_size as u64);
         assert_eq!(f.calc_full()?, ct.full);
         assert_eq!(f.full, ct.full);
         assert_eq!(f.secure, GenericArray::default());
-        assert_eq!(f.calc_secure()?, tests::data_large_sha512());
-        assert_eq!(f.secure, tests::data_large_sha512());
+        assert_eq!(f.calc_secure()?, common::data_large_sha512());
+        assert_eq!(f.secure, common::data_large_sha512());
 
         Ok(())
     }
 
     #[test]
-    fn bytes_read() -> tests::Result {
-        let meta = fs::metadata(tests::DATA_LARGE)?;
+    fn bytes_read() -> common::Result {
+        let meta = fs::metadata(common::DATA_LARGE)?;
 
         {
-            let (bytes_read, _fast, _full) = super::fast_checksum(tests::DATA_LARGE)?;
+            let (bytes_read, _fast, _full) = super::fast_checksum(common::DATA_LARGE)?;
             assert_eq!(bytes_read, super::FAST_READ_SIZE);
 
-            let (bytes_read, full) = super::full_checksum(tests::DATA_LARGE)?;
+            let (bytes_read, full) = super::full_checksum(common::DATA_LARGE)?;
             assert_eq!(bytes_read as u64, meta.len());
-            assert_eq!(full, tests::DATA_LARGE_XXHASH);
+            assert_eq!(full, common::DATA_LARGE_XXHASH);
         }
 
-        let mut checksum = super::FileChecksum::new(tests::DATA_LARGE)?;
+        let mut checksum = super::FileChecksum::new(common::DATA_LARGE)?;
         assert_eq!(checksum.bytes_read, super::FAST_READ_SIZE as u64);
-        assert_eq!(checksum.calc_full()?, tests::DATA_LARGE_XXHASH);
+        assert_eq!(checksum.calc_full()?, common::DATA_LARGE_XXHASH);
         assert_eq!(
             checksum.bytes_read,
             super::FAST_READ_SIZE as u64 + meta.len()
         );
         // no read file when twice
-        assert_eq!(checksum.calc_full()?, tests::DATA_LARGE_XXHASH);
+        assert_eq!(checksum.calc_full()?, common::DATA_LARGE_XXHASH);
         assert_eq!(
             checksum.bytes_read,
             super::FAST_READ_SIZE as u64 + meta.len()
         );
 
-        assert_eq!(checksum.calc_secure()?, tests::data_large_sha512());
+        assert_eq!(checksum.calc_secure()?, common::data_large_sha512());
         assert_eq!(
             checksum.bytes_read,
             super::FAST_READ_SIZE as u64 + meta.len() * 2
         );
 
         // no read file when twice
-        assert_eq!(checksum.calc_secure()?, tests::data_large_sha512());
+        assert_eq!(checksum.calc_secure()?, common::data_large_sha512());
         assert_eq!(
             checksum.bytes_read,
             super::FAST_READ_SIZE as u64 + meta.len() * 2
