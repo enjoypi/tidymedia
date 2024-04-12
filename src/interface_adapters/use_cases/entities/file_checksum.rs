@@ -69,14 +69,11 @@ impl FileChecksum {
         Ok(p.to_string())
     }
 
+    #[cfg(test)]
     pub fn new(path: &str) -> io::Result<Self> {
         let path = fs::canonicalize(path)?;
 
         Self::new_path(path.as_path())
-    }
-
-    pub async fn new_async(path: &Path) -> io::Result<Self> {
-        Self::new_path(path)
     }
 
     pub fn calc_full(&mut self) -> io::Result<u64> {
@@ -280,6 +277,34 @@ mod tests {
             checksum.bytes_read,
             super::FAST_READ_SIZE as u64 + meta.len() * 2
         );
+
+        Ok(())
+    }
+
+    #[test]
+    fn same_small() -> common::Result {
+        let mut checksum1 = FileChecksum::new(common::DATA_SMALL)?;
+        let checksum2 = FileChecksum::new(common::DATA_SMALL_COPY)?;
+
+        assert_eq!(checksum1, checksum2);
+        checksum1.calc_full()?;
+
+        assert_eq!(checksum1, checksum2);
+        Ok(())
+    }
+
+    #[test]
+    fn same_large() -> common::Result {
+        let mut checksum1 = FileChecksum::new(common::DATA_LARGE)?;
+        let mut checksum2 = FileChecksum::new(common::DATA_LARGE_COPY)?;
+
+        assert_eq!(checksum1, checksum2);
+        checksum1.calc_full()?;
+
+        assert_ne!(checksum1, checksum2);
+
+        checksum2.calc_full()?;
+        assert_eq!(checksum1, checksum2);
 
         Ok(())
     }

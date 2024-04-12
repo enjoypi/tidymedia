@@ -1,5 +1,4 @@
 pub mod file_checksum;
-pub mod file_detail;
 pub mod file_index;
 
 use generic_array::{typenum, GenericArray};
