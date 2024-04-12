@@ -1,6 +1,6 @@
+use std::{fs, io};
 use std::io::{Error, ErrorKind, Read};
 use std::path::Path;
-use std::{fs, io};
 
 use generic_array::GenericArray;
 use memmap2::Mmap;
@@ -8,7 +8,7 @@ use sha2::{Digest, Sha512};
 
 use super::SecureChecksum;
 
-pub const FAST_READ_SIZE: usize = 4096;
+const FAST_READ_SIZE: usize = 4096;
 
 #[derive(Debug, Clone)]
 pub struct FileChecksum {
@@ -62,7 +62,7 @@ impl FileChecksum {
                 return Err(Error::new(
                     ErrorKind::Other,
                     format!("invalid filename {}", path.display()),
-                ))
+                ));
             }
         };
         let p = p.strip_prefix("\\\\?\\").unwrap_or(p);
@@ -135,8 +135,8 @@ fn secure_checksum(path: &str) -> io::Result<(usize, SecureChecksum)> {
 
 #[cfg(test)]
 mod tests {
-    use std::io::{Read, Seek};
     use std::{fs, io};
+    use std::io::{Read, Seek};
 
     use generic_array::GenericArray;
     use sha2::Digest;
@@ -144,7 +144,7 @@ mod tests {
     use xxhash_rust::xxh3;
 
     use super::FileChecksum;
-    use crate::common;
+    use super::super::test_common as common;
 
     struct ChecksumTest {
         short_wyhash: u64,
@@ -305,6 +305,22 @@ mod tests {
 
         checksum2.calc_full()?;
         assert_eq!(checksum1, checksum2);
+
+        Ok(())
+    }
+
+    #[test]
+    fn strip_prefix() -> common::Result {
+        let path = fs::canonicalize(common::DATA_SMALL)?;
+        let _path = path.to_str().unwrap();
+        // assert_eq!(
+        //     path,
+        //     "\\\\?\\D:\\user\\prj\\tidymedia\\tests\\data\\data_small"
+        // );
+        // assert_eq!(
+        //     "D:\\user\\prj\\tidymedia\\tests\\data\\data_small",
+        //     path.strip_prefix("\\\\?\\").unwrap()
+        // );
 
         Ok(())
     }

@@ -1,6 +1,8 @@
-pub mod entities;
-use entities::{file_checksum, file_index};
 use tracing::{error, info};
+
+use entities::{file_checksum, file_index};
+
+mod entities;
 
 pub fn find_duplicates(fast: bool, dirs: Vec<String>, output: Option<String>) {
     let mut index = file_index::FileIndex::new();

@@ -1,11 +1,10 @@
 use clap::Parser;
-use tidymedia::interface_adapters;
 use tracing::debug;
 use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt};
 
 #[derive(Debug, Parser)]
 #[command(author, version, about, long_about = None)]
-pub struct Cli {
+struct Cli {
     #[arg(short, long, default_value = "info")]
     log: String,
 
@@ -25,5 +24,5 @@ fn main() {
         .with(fmt::layer().with_writer(std::io::stderr))
         .init();
     debug!("cli: {:?}", cli);
-    interface_adapters::tidy(cli.fast, cli.dirs, cli.output)
+    tidymedia::tidy(cli.fast, cli.dirs, cli.output)
 }

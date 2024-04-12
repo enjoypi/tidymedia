@@ -144,10 +144,11 @@ impl Default for FileIndex {
 
 #[cfg(test)]
 mod tests {
-    use super::FileIndex;
-    use crate::common;
     use std::collections::BTreeMap;
     use std::fs;
+
+    use super::FileIndex;
+    use super::super::test_common as common;
 
     #[test]
     fn insert() -> common::Result {
