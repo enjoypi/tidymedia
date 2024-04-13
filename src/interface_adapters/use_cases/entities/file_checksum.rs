@@ -1,6 +1,6 @@
-use std::{fs, io};
 use std::io::{Error, ErrorKind, Read};
 use std::path::Path;
+use std::{fs, io};
 
 use generic_array::GenericArray;
 use memmap2::Mmap;
@@ -135,16 +135,16 @@ fn secure_checksum(path: &str) -> io::Result<(usize, SecureChecksum)> {
 
 #[cfg(test)]
 mod tests {
-    use std::{fs, io};
     use std::io::{Read, Seek};
+    use std::{fs, io};
 
     use generic_array::GenericArray;
     use sha2::Digest;
     use wyhash;
     use xxhash_rust::xxh3;
 
-    use super::FileChecksum;
     use super::super::test_common as common;
+    use super::FileChecksum;
 
     struct ChecksumTest {
         short_wyhash: u64,

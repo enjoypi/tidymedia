@@ -147,8 +147,8 @@ mod tests {
     use std::collections::BTreeMap;
     use std::fs;
 
-    use super::FileIndex;
     use super::super::test_common as common;
+    use super::FileIndex;
 
     #[test]
     fn insert() -> common::Result {

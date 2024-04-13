@@ -42,12 +42,12 @@ pub fn find_duplicates(fast: bool, dirs: Vec<String>, output: Option<String>) {
                 file_checksum::FileChecksum::get_full_path(std::path::Path::new(&output)).unwrap();
             let output = output.as_str();
             for (size, paths) in same.iter().rev() {
-                println!(":SIZE {}\r", size);
+                println!("{}SIZE {}\r", comment(), size);
                 for path in paths.iter() {
                     if path.starts_with(output) {
-                        println!(":DEL \"{}\"\r", path);
+                        println!("{}{} \"{}\"\r", comment(), rm(), path);
                     } else {
-                        println!("DEL \"{}\"\r", path);
+                        println!("{} \"{}\"\r", rm(), path);
                     }
                 }
                 println!()
@@ -55,9 +55,9 @@ pub fn find_duplicates(fast: bool, dirs: Vec<String>, output: Option<String>) {
         }
         _ => {
             for (size, paths) in same.iter().rev() {
-                println!(":SIZE {}\r", size);
+                println!("{}SIZE {}\r", comment(), size);
                 for path in paths.iter() {
-                    println!(":DEL \"{}\"\r", path);
+                    println!("{}{} \"{}\"\r", comment(), rm(), path);
                 }
                 println!()
             }
@@ -65,4 +65,22 @@ pub fn find_duplicates(fast: bool, dirs: Vec<String>, output: Option<String>) {
     }
 
     info!("BytesRead: {}", index.bytes_read());
+}
+
+#[cfg(target_os = "windows")]
+fn comment() -> &'static str {
+    ":"
+}
+#[cfg(not(target_os = "windows"))]
+fn comment() -> &'static str {
+    "#"
+}
+
+#[cfg(target_os = "windows")]
+fn rm() -> &'static str {
+    "del"
+}
+#[cfg(not(target_os = "windows"))]
+fn rm() -> &'static str {
+    "rm"
 }

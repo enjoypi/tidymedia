@@ -1,4 +1,4 @@
-use generic_array::{GenericArray, typenum};
+use generic_array::{typenum, GenericArray};
 
 pub type SecureChecksum = GenericArray<u8, typenum::U64>;
 
