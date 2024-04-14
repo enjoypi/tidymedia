@@ -19,5 +19,5 @@ fn main() {
         .with(fmt::layer().with_writer(std::io::stderr))
         .init();
     debug!("cli: {:?}", cli);
-    tidymedia::tidy(cli.command)
+    tidymedia::tidy(cli.command).unwrap();
 }
