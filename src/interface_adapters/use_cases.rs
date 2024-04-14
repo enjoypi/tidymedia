@@ -4,7 +4,7 @@ use entities::{file_checksum, file_index};
 
 mod entities;
 
-pub fn find_duplicates(fast: bool, dirs: Vec<String>, output: Option<String>) {
+pub fn find_duplicates(fast: bool, sources: Vec<String>, output: Option<String>) {
     let mut index = file_index::FileIndex::new();
 
     if let Some(output) = output.clone() {
@@ -18,7 +18,7 @@ pub fn find_duplicates(fast: bool, dirs: Vec<String>, output: Option<String>) {
         }
     }
 
-    for path in dirs {
+    for path in sources {
         index.visit_dir(path.as_str());
     }
 
