@@ -14,16 +14,16 @@ pub struct FileIndex {
 }
 
 impl FileIndex {
-    pub fn new() -> FileIndex {
-        FileIndex {
+    pub fn new() -> Self {
+        Self {
             files: HashMap::new(),
             fast_checksums: HashMap::new(),
         }
     }
 
-    // pub fn get_(&self, path: &str) -> Option<&FileChecksum> {
-    //     self.files.get(path)
-    // }
+    pub fn get(&self, checksum: u64) -> Option<&HashSet<String>> {
+        self.fast_checksums.get(&checksum)
+    }
 
     pub fn bytes_read(&self) -> u64 {
         let mut bytes_read = 0;
@@ -133,12 +133,6 @@ impl FileIndex {
                 }
             }
         }
-    }
-}
-
-impl Default for FileIndex {
-    fn default() -> Self {
-        FileIndex::new()
     }
 }
 
