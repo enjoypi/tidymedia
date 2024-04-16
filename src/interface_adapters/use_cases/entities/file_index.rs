@@ -5,7 +5,7 @@ use std::io;
 use rayon::prelude::*;
 use tracing::error;
 
-use super::file_checksum::FileChecksum;
+use super::file_meta::FileChecksum;
 
 pub struct FileIndex {
     // fast checksum -> file path, maybe same fast checksum

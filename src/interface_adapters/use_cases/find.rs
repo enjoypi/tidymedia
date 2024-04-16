@@ -2,7 +2,7 @@ use std::io;
 
 use tracing::{error, info};
 
-use super::entities::{file_checksum, file_index};
+use super::entities::{file_index, file_meta};
 
 pub fn find_duplicates(fast: bool, sources: Vec<String>, output: Option<String>) -> io::Result<()> {
     let mut index = file_index::FileIndex::new();
@@ -39,7 +39,7 @@ pub fn find_duplicates(fast: bool, sources: Vec<String>, output: Option<String>)
     match output {
         Some(output) => {
             let output =
-                file_checksum::FileChecksum::get_full_path(std::path::Path::new(&output)).unwrap();
+                file_meta::FileChecksum::get_full_path(std::path::Path::new(&output)).unwrap();
             let output = output.as_str();
             for (size, paths) in same.iter().rev() {
                 println!("{}SIZE {}\r", comment(), size);

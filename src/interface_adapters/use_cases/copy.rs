@@ -2,8 +2,8 @@ use std::{fs, io};
 
 use tracing::info;
 
-use super::entities::file_checksum;
 use super::entities::file_index;
+use super::entities::file_meta;
 
 pub fn copy(sources: Vec<String>, output: String) -> io::Result<()> {
     fs::create_dir_all(output.as_str())?;
@@ -46,7 +46,7 @@ pub fn copy(sources: Vec<String>, output: String) -> io::Result<()> {
             // TODO: get modified time as path
             let to = output.join(name.file_name().unwrap());
             fs::copy(name.to_str().unwrap(), to.as_path())?;
-            _ = out.add(file_checksum::FileChecksum::new_path(to.as_path())?);
+            _ = out.add(file_meta::FileChecksum::new_path(to.as_path())?);
         }
     }
 
