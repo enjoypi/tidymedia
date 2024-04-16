@@ -5,15 +5,15 @@ use std::io;
 use rayon::prelude::*;
 use tracing::error;
 
-use super::file_meta::FileChecksum;
+use super::file_meta::Meta;
 
-pub struct FileIndex {
+pub struct Index {
     // fast checksum -> file path, maybe same fast checksum
     pub fast_checksums: HashMap<u64, HashSet<String>>,
-    pub files: HashMap<String, FileChecksum>, // file path -> file checksum
+    pub files: HashMap<String, Meta>, // file path -> file checksum
 }
 
-impl FileIndex {
+impl Index {
     pub fn new() -> Self {
         Self {
             files: HashMap::new(),
@@ -36,7 +36,7 @@ impl FileIndex {
 
     pub fn calc_same<F, T>(&self, calc: F) -> Vec<HashMap<(u64, T), HashSet<String>>>
     where
-        F: Fn(&mut FileChecksum) -> io::Result<T> + Send + Sync,
+        F: Fn(&mut Meta) -> io::Result<T> + Send + Sync,
         T: Eq + Hash + Send,
     {
         let multiple: HashMap<_, _> = self
@@ -90,7 +90,7 @@ impl FileIndex {
         result
     }
 
-    pub fn add(&mut self, checksum: FileChecksum) -> std::io::Result<&FileChecksum> {
+    pub fn add(&mut self, checksum: Meta) -> std::io::Result<&Meta> {
         let file_existed = self.files.get(checksum.path.as_str()).is_some();
 
         if file_existed {
@@ -106,8 +106,8 @@ impl FileIndex {
     }
 
     #[cfg(test)]
-    pub fn insert(&mut self, path: &str) -> std::io::Result<&FileChecksum> {
-        let checksum = FileChecksum::new(path)?;
+    pub fn insert(&mut self, path: &str) -> std::io::Result<&Meta> {
+        let checksum = Meta::new(path)?;
         self.add(checksum)
     }
 
@@ -121,7 +121,7 @@ impl FileIndex {
 
         let checksums = paths
             .par_iter()
-            .map(|path| FileChecksum::new_path(path))
+            .map(|path| Meta::new_path(path))
             .collect::<Vec<_>>();
 
         for result in checksums {
@@ -142,11 +142,11 @@ mod tests {
     use std::fs;
 
     use super::super::test_common as common;
-    use super::FileIndex;
+    use super::Index;
 
     #[test]
     fn insert() -> common::Result {
-        let mut index = FileIndex::new();
+        let mut index = Index::new();
         let checksum = index.insert(common::DATA_SMALL)?;
         assert_eq!(
             checksum.path,
@@ -167,7 +167,7 @@ mod tests {
 
     #[test]
     fn search_same() -> common::Result {
-        let mut index = FileIndex::new();
+        let mut index = Index::new();
         index.visit_dir(common::DATA_DIR);
 
         let same: BTreeMap<u64, _> = index.search_same();

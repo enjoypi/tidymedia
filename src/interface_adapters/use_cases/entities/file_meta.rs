@@ -1,5 +1,7 @@
+use std::fs::Metadata;
 use std::io::{Error, ErrorKind, Read};
 use std::path::Path;
+use std::time::SystemTime;
 use std::{fs, io};
 
 use generic_array::GenericArray;
@@ -11,7 +13,7 @@ use super::SecureChecksum;
 const FAST_READ_SIZE: usize = 4096;
 
 #[derive(Debug, Clone)]
-pub struct FileChecksum {
+pub struct Meta {
     pub short: u64,
     pub full: u64,
     pub path: String,
@@ -20,9 +22,10 @@ pub struct FileChecksum {
 
     pub bytes_read: u64,
     true_full: bool,
+    meta: Metadata,
 }
 
-impl FileChecksum {
+impl Meta {
     pub fn new_path(path: &Path) -> io::Result<Self> {
         let meta = path.metadata()?;
         if !meta.is_file() {
@@ -51,6 +54,7 @@ impl FileChecksum {
             size: meta.len(),
             bytes_read: bytes_read as u64,
             true_full: meta.len() <= FAST_READ_SIZE as u64,
+            meta,
         })
     }
 
@@ -100,9 +104,13 @@ impl FileChecksum {
 
         Ok(self.secure)
     }
+
+    pub fn modified_time(&self) -> io::Result<SystemTime> {
+        self.meta.modified()
+    }
 }
 
-impl PartialEq for FileChecksum {
+impl PartialEq for Meta {
     fn eq(&self, other: &Self) -> bool {
         self.size == other.size && self.short == other.short && self.full == other.full
     }
@@ -144,7 +152,7 @@ mod tests {
     use xxhash_rust::xxh3;
 
     use super::super::test_common as common;
-    use super::FileChecksum;
+    use super::Meta;
 
     struct ChecksumTest {
         short_wyhash: u64,
@@ -202,7 +210,7 @@ mod tests {
         assert_eq!(ct.short_xxhash, ct.full);
         assert_eq!(ct.secure, common::data_small_sha512());
 
-        let mut f = FileChecksum::new(common::DATA_SMALL)?;
+        let mut f = Meta::new(common::DATA_SMALL)?;
         assert_eq!(f.short, ct.short_wyhash);
         assert_eq!(f.full, ct.short_xxhash);
         assert_eq!(f.size, ct.file_size as u64);
@@ -225,7 +233,7 @@ mod tests {
         assert_eq!(ct.full, common::DATA_LARGE_XXHASH);
         assert_eq!(ct.secure, common::data_large_sha512());
 
-        let mut f = FileChecksum::new(common::DATA_LARGE)?;
+        let mut f = Meta::new(common::DATA_LARGE)?;
         assert_eq!(f.short, ct.short_wyhash);
         assert_eq!(f.full, ct.short_xxhash);
         assert_eq!(f.size, ct.file_size as u64);
@@ -251,7 +259,7 @@ mod tests {
             assert_eq!(full, common::DATA_LARGE_XXHASH);
         }
 
-        let mut checksum = super::FileChecksum::new(common::DATA_LARGE)?;
+        let mut checksum = super::Meta::new(common::DATA_LARGE)?;
         assert_eq!(checksum.bytes_read, super::FAST_READ_SIZE as u64);
         assert_eq!(checksum.calc_full()?, common::DATA_LARGE_XXHASH);
         assert_eq!(
@@ -283,8 +291,8 @@ mod tests {
 
     #[test]
     fn same_small() -> common::Result {
-        let mut checksum1 = FileChecksum::new(common::DATA_SMALL)?;
-        let checksum2 = FileChecksum::new(common::DATA_SMALL_COPY)?;
+        let mut checksum1 = Meta::new(common::DATA_SMALL)?;
+        let checksum2 = Meta::new(common::DATA_SMALL_COPY)?;
 
         assert_eq!(checksum1, checksum2);
         checksum1.calc_full()?;
@@ -295,8 +303,8 @@ mod tests {
 
     #[test]
     fn same_large() -> common::Result {
-        let mut checksum1 = FileChecksum::new(common::DATA_LARGE)?;
-        let mut checksum2 = FileChecksum::new(common::DATA_LARGE_COPY)?;
+        let mut checksum1 = Meta::new(common::DATA_LARGE)?;
+        let mut checksum2 = Meta::new(common::DATA_LARGE_COPY)?;
 
         assert_eq!(checksum1, checksum2);
         checksum1.calc_full()?;

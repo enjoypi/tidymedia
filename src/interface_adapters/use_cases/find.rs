@@ -5,7 +5,7 @@ use tracing::{error, info};
 use super::entities::{file_index, file_meta};
 
 pub fn find_duplicates(fast: bool, sources: Vec<String>, output: Option<String>) -> io::Result<()> {
-    let mut index = file_index::FileIndex::new();
+    let mut index = file_index::Index::new();
 
     if let Some(output) = output.clone() {
         // check if output is directory
@@ -38,8 +38,7 @@ pub fn find_duplicates(fast: bool, sources: Vec<String>, output: Option<String>)
 
     match output {
         Some(output) => {
-            let output =
-                file_meta::FileChecksum::get_full_path(std::path::Path::new(&output)).unwrap();
+            let output = file_meta::Meta::get_full_path(std::path::Path::new(&output)).unwrap();
             let output = output.as_str();
             for (size, paths) in same.iter().rev() {
                 println!("{}SIZE {}\r", comment(), size);
@@ -72,6 +71,7 @@ pub fn find_duplicates(fast: bool, sources: Vec<String>, output: Option<String>)
 fn comment() -> &'static str {
     ":"
 }
+
 #[cfg(not(target_os = "windows"))]
 fn comment() -> &'static str {
     "#"
@@ -81,6 +81,7 @@ fn comment() -> &'static str {
 fn rm() -> &'static str {
     "del"
 }
+
 #[cfg(not(target_os = "windows"))]
 fn rm() -> &'static str {
     "rm"

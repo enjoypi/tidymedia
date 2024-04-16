@@ -9,10 +9,10 @@ pub fn copy(sources: Vec<String>, output: String) -> io::Result<()> {
     fs::create_dir_all(output.as_str())?;
     let output = fs::canonicalize(output.as_str())?;
 
-    let mut out = file_index::FileIndex::new();
+    let mut out = file_index::Index::new();
     out.visit_dir(output.to_str().unwrap());
 
-    let mut source = file_index::FileIndex::new();
+    let mut source = file_index::Index::new();
     for path in sources {
         source.visit_dir(path.as_str());
     }
@@ -42,11 +42,11 @@ pub fn copy(sources: Vec<String>, output: String) -> io::Result<()> {
 
         if !exists {
             let name = std::path::PathBuf::from(name);
-            // let modified_time = fs::metadata(name.as_path())?.modified()?;
+            let _modified_time = checksum.modified_time()?;
             // TODO: get modified time as path
             let to = output.join(name.file_name().unwrap());
             fs::copy(name.to_str().unwrap(), to.as_path())?;
-            _ = out.add(file_meta::FileChecksum::new_path(to.as_path())?);
+            _ = out.add(file_meta::Meta::new_path(to.as_path())?);
         }
     }
 
