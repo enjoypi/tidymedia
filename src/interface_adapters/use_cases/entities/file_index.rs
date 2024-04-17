@@ -9,8 +9,8 @@ use super::file_meta::Meta;
 
 pub struct Index {
     // fast checksum -> file path, maybe same fast checksum
-    pub fast_checksums: HashMap<u64, HashSet<String>>,
-    pub files: HashMap<String, Meta>, // file path -> file checksum
+    fast_checksums: HashMap<u64, HashSet<String>>,
+    files: HashMap<String, Meta>, // file path -> file checksum
 }
 
 impl Index {
@@ -21,8 +21,12 @@ impl Index {
         }
     }
 
-    pub fn get(&self, checksum: u64) -> Option<&HashSet<String>> {
-        self.fast_checksums.get(&checksum)
+    pub fn files(&self) -> &HashMap<String, Meta> {
+        &self.files
+    }
+
+    pub fn unique_files(&self) -> &HashMap<u64, HashSet<String>> {
+        &self.fast_checksums
     }
 
     pub fn bytes_read(&self) -> u64 {

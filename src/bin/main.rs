@@ -12,12 +12,12 @@ struct Cli {
     command: tidymedia::Commands,
 }
 
-fn main() {
+fn main() -> std::io::Result<()> {
     let cli = Cli::parse();
 
     tracing_subscriber::registry()
         .with(fmt::layer().with_writer(std::io::stderr))
         .init();
     debug!("cli: {:?}", cli);
-    tidymedia::tidy(cli.command).unwrap();
+    tidymedia::tidy(cli.command)
 }
