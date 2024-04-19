@@ -2,7 +2,7 @@ use std::io;
 
 use tracing::{error, info};
 
-use super::entities::{file_index, file_meta};
+use super::entities::{file_index, file_info};
 
 pub fn find_duplicates(fast: bool, sources: Vec<String>, output: Option<String>) -> io::Result<()> {
     let mut index = file_index::Index::new();
@@ -23,7 +23,7 @@ pub fn find_duplicates(fast: bool, sources: Vec<String>, output: Option<String>)
     }
 
     info!(
-        "Files: {}, FastChecksums: {}, BytesRead: {}",
+        "Files: {}, FastHashs: {}, BytesRead: {}",
         index.files().len(),
         index.similar_files().len(),
         index.bytes_read(),
@@ -38,7 +38,7 @@ pub fn find_duplicates(fast: bool, sources: Vec<String>, output: Option<String>)
 
     match output {
         Some(output) => {
-            let output = file_meta::Meta::get_full_path(std::path::Path::new(&output)).unwrap();
+            let output = file_info::Info::get_full_path(std::path::Path::new(&output)).unwrap();
             let output = output.as_str();
             for (size, paths) in same.iter().rev() {
                 println!("{}SIZE {}\r", comment(), size);

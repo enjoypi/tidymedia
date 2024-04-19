@@ -1,9 +1,9 @@
-use std::{fs, io};
 use std::fs::Metadata;
 use std::io::{Error, ErrorKind, Read};
 use std::path::Path;
 use std::sync::Mutex;
 use std::time::SystemTime;
+use std::{fs, io};
 
 use generic_array::GenericArray;
 use memmap2::Mmap;
@@ -38,7 +38,7 @@ impl Lazy {
 }
 
 #[derive(Debug)]
-pub struct Meta {
+pub struct Info {
     // 64 bit hash  from the first FAST_READ_SIZE bytes
     pub fast_hash: u64,
     pub path: String,
@@ -49,7 +49,7 @@ pub struct Meta {
     lazy: Mutex<Lazy>,
 }
 
-impl Meta {
+impl Info {
     pub fn from_path(path: &Path) -> io::Result<Self> {
         let meta = path.metadata()?;
         if !meta.is_file() {
@@ -122,7 +122,7 @@ impl Meta {
                 l.full = true;
                 Ok(full)
             }
-            Err(e) => Err(Error::new(io::ErrorKind::Other, e.to_string()))
+            Err(e) => Err(Error::new(io::ErrorKind::Other, e.to_string())),
         }
     }
 
@@ -146,7 +146,7 @@ impl Meta {
                 l.secure_hash = secure;
                 Ok(secure)
             }
-            Err(e) => Err(Error::new(io::ErrorKind::Other, e.to_string()))
+            Err(e) => Err(Error::new(io::ErrorKind::Other, e.to_string())),
         }
     }
 
@@ -155,7 +155,7 @@ impl Meta {
     }
 }
 
-impl PartialEq for Meta {
+impl PartialEq for Info {
     fn eq(&self, other: &Self) -> bool {
         self.size == other.size
             && self.fast_hash == other.fast_hash
@@ -190,17 +190,17 @@ fn secure_hash(path: &str) -> io::Result<(usize, SecureHash)> {
 
 #[cfg(test)]
 mod tests {
-    use std::{fs, io};
     use std::io::{Read, Seek};
+    use std::{fs, io};
 
     use sha2::Digest;
     use wyhash;
     use xxhash_rust::xxh3;
 
-    use super::Meta;
     use super::super::test_common as common;
+    use super::Info;
 
-    struct ChecksumTest {
+    struct HashTest {
         short_wyhash: u64,
         short_xxhash: u64,
         short_read: usize,
@@ -210,8 +210,8 @@ mod tests {
         secure: super::SecureHash,
     }
 
-    impl ChecksumTest {
-        fn new(path: &str) -> io::Result<ChecksumTest> {
+    impl HashTest {
+        fn new(path: &str) -> io::Result<HashTest> {
             let mut file = fs::File::open(path)?;
 
             let mut buffer = [0; super::FAST_READ_SIZE];
@@ -235,7 +235,7 @@ mod tests {
             hasher.update(buffer.as_slice());
             let secure = hasher.finalize();
 
-            Ok(ChecksumTest {
+            Ok(HashTest {
                 short_wyhash,
                 short_xxhash,
                 short_read,
@@ -248,7 +248,7 @@ mod tests {
 
     #[test]
     fn small_file() -> common::Result {
-        let ct = ChecksumTest::new(common::DATA_SMALL)?;
+        let ct = HashTest::new(common::DATA_SMALL)?;
         assert_eq!(ct.short_wyhash, common::DATA_SMALL_WYHASH);
         assert_eq!(ct.short_xxhash, common::DATA_SMALL_XXHASH);
         assert!(ct.file_size <= super::FAST_READ_SIZE);
@@ -256,7 +256,7 @@ mod tests {
         assert_eq!(ct.short_xxhash, ct.full);
         assert_eq!(ct.secure, common::data_small_sha512());
 
-        let f = Meta::from(common::DATA_SMALL)?;
+        let f = Info::from(common::DATA_SMALL)?;
         assert_eq!(f.fast_hash, ct.short_wyhash);
         assert_eq!(f.full_hash(), ct.short_xxhash);
         assert_eq!(f.size, ct.file_size as u64);
@@ -270,7 +270,7 @@ mod tests {
 
     #[test]
     fn large_file() -> common::Result {
-        let ct = ChecksumTest::new(common::DATA_LARGE)?;
+        let ct = HashTest::new(common::DATA_LARGE)?;
         assert_eq!(ct.short_wyhash, common::DATA_LARGE_WYHASH);
         assert_ne!(ct.short_xxhash, common::DATA_LARGE_XXHASH);
         assert_eq!(ct.short_read, super::FAST_READ_SIZE);
@@ -278,7 +278,7 @@ mod tests {
         assert_eq!(ct.full, common::DATA_LARGE_XXHASH);
         assert_eq!(ct.secure, common::data_large_sha512());
 
-        let f = Meta::from(common::DATA_LARGE)?;
+        let f = Info::from(common::DATA_LARGE)?;
         assert_eq!(f.fast_hash, ct.short_wyhash);
         assert_eq!(f.full_hash(), ct.short_xxhash);
         assert_eq!(f.size, ct.file_size as u64);
@@ -303,30 +303,24 @@ mod tests {
             assert_eq!(full, common::DATA_LARGE_XXHASH);
         }
 
-        let checksum = super::Meta::from(common::DATA_LARGE)?;
-        assert_eq!(checksum.bytes_read(), super::FAST_READ_SIZE as u64);
-        assert_eq!(checksum.calc_full_hash()?, common::DATA_LARGE_XXHASH);
-        assert_eq!(
-            checksum.bytes_read(),
-            super::FAST_READ_SIZE as u64 + meta.len()
-        );
+        let f = super::Info::from(common::DATA_LARGE)?;
+        assert_eq!(f.bytes_read(), super::FAST_READ_SIZE as u64);
+        assert_eq!(f.calc_full_hash()?, common::DATA_LARGE_XXHASH);
+        assert_eq!(f.bytes_read(), super::FAST_READ_SIZE as u64 + meta.len());
         // no read file when twice
-        assert_eq!(checksum.calc_full_hash()?, common::DATA_LARGE_XXHASH);
-        assert_eq!(
-            checksum.bytes_read(),
-            super::FAST_READ_SIZE as u64 + meta.len()
-        );
+        assert_eq!(f.calc_full_hash()?, common::DATA_LARGE_XXHASH);
+        assert_eq!(f.bytes_read(), super::FAST_READ_SIZE as u64 + meta.len());
 
-        assert_eq!(checksum.secure_hash()?, common::data_large_sha512());
+        assert_eq!(f.secure_hash()?, common::data_large_sha512());
         assert_eq!(
-            checksum.bytes_read(),
+            f.bytes_read(),
             super::FAST_READ_SIZE as u64 + meta.len() * 2
         );
 
         // no read file when twice
-        assert_eq!(checksum.secure_hash()?, common::data_large_sha512());
+        assert_eq!(f.secure_hash()?, common::data_large_sha512());
         assert_eq!(
-            checksum.bytes_read(),
+            f.bytes_read(),
             super::FAST_READ_SIZE as u64 + meta.len() * 2
         );
 
@@ -335,28 +329,28 @@ mod tests {
 
     #[test]
     fn same_small() -> common::Result {
-        let checksum1 = Meta::from(common::DATA_SMALL)?;
-        let checksum2 = Meta::from(common::DATA_SMALL_COPY)?;
+        let f1 = Info::from(common::DATA_SMALL)?;
+        let f2 = Info::from(common::DATA_SMALL_COPY)?;
 
-        assert_eq!(checksum1, checksum2);
-        checksum1.calc_full_hash()?;
+        assert_eq!(f1, f2);
+        f1.calc_full_hash()?;
 
-        assert_eq!(checksum1, checksum2);
+        assert_eq!(f1, f2);
         Ok(())
     }
 
     #[test]
     fn same_large() -> common::Result {
-        let checksum1 = Meta::from(common::DATA_LARGE)?;
-        let checksum2 = Meta::from(common::DATA_LARGE_COPY)?;
+        let f1 = Info::from(common::DATA_LARGE)?;
+        let f2 = Info::from(common::DATA_LARGE_COPY)?;
 
-        assert_eq!(checksum1, checksum2);
-        checksum1.calc_full_hash()?;
+        assert_eq!(f1, f2);
+        f1.calc_full_hash()?;
 
-        assert_ne!(checksum1, checksum2);
+        assert_ne!(f1, f2);
 
-        checksum2.calc_full_hash()?;
-        assert_eq!(checksum1, checksum2);
+        f2.calc_full_hash()?;
+        assert_eq!(f1, f2);
 
         Ok(())
     }

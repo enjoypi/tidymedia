@@ -19,8 +19,8 @@ pub enum Commands {
 
     /// Find all duplicate files in the source directory and print a shell script (using batch file syntax for Windows) to delete the duplicate files on standard output. If the output parameter is provided, then deletion operations for files located in the output directory will be commented out.
     Find {
-        /// Use fast checksum
-        #[arg(short, long, default_value="true", action = clap::ArgAction::SetTrue)]
+        /// Use fast hash
+        #[arg(short, long, default_value = "true", action = clap::ArgAction::SetTrue)]
         fast: bool,
 
         /// The source directories or files

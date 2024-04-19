@@ -1,12 +1,12 @@
-use std::{fs, io};
 use std::path::PathBuf;
 use std::string::ToString;
+use std::{fs, io};
 
 use time::{error, OffsetDateTime, UtcOffset};
 use tracing::{error, info};
 
 use super::entities::file_index::Index;
-use super::entities::file_meta::Meta;
+use super::entities::file_info::Info;
 
 pub fn copy(sources: Vec<String>, output: String) -> io::Result<()> {
     fs::create_dir_all(output.as_str())?;
@@ -21,7 +21,7 @@ pub fn copy(sources: Vec<String>, output: String) -> io::Result<()> {
     }
 
     info!(
-        "Files: {}, FastChecksums: {}, BytesRead: {}",
+        "Files: {}, FastHashs: {}, BytesRead: {}",
         source.files().len(),
         source.similar_files().len(),
         source.bytes_read(),
@@ -40,15 +40,18 @@ pub fn copy(sources: Vec<String>, output: String) -> io::Result<()> {
             continue;
         }
 
-        _ = out.add(Meta::from(target)?);
+        _ = out.add(Info::from(target)?);
     }
 
     // info!("BytesRead: {}", source.bytes_read());
     Ok(())
 }
 
-
-fn generate_unique_name(src_file: &Meta, output_path: &PathBuf, output: &Index) -> io::Result<String> {
+fn generate_unique_name(
+    src_file: &Info,
+    output_path: &PathBuf,
+    output: &Index,
+) -> io::Result<String> {
     let name = std::path::PathBuf::from(src_file.path.as_str());
     let modified_time = src_file.modified_time()?;
 
@@ -56,7 +59,10 @@ fn generate_unique_name(src_file: &Meta, output_path: &PathBuf, output: &Index) 
     let month = dt.month().to_string();
     let year = dt.year().to_string();
 
-    let target = output_path.join(year).join(month).join(name.file_name().unwrap());
+    let target = output_path
+        .join(year)
+        .join(month)
+        .join(name.file_name().unwrap());
     let target_str = target.to_str().unwrap();
 
     if output.files().contains_key(target_str) {

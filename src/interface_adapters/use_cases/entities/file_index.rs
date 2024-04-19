@@ -5,13 +5,13 @@ use std::io;
 use rayon::prelude::*;
 use tracing::error;
 
-use super::file_meta::Meta;
+use super::file_info::Info;
 
 pub struct Index {
-    // fast checksum -> file path, maybe same fast checksum
+    // fast hash -> file path, maybe same fast hash
     similar_files: HashMap<u64, HashSet<String>>,
     // file path -> file meta
-    files: HashMap<String, Meta>,
+    files: HashMap<String, Info>,
 }
 
 impl Index {
@@ -22,7 +22,7 @@ impl Index {
         }
     }
 
-    pub fn files(&self) -> &HashMap<String, Meta> {
+    pub fn files(&self) -> &HashMap<String, Info> {
         &self.files
     }
 
@@ -32,14 +32,14 @@ impl Index {
 
     pub fn bytes_read(&self) -> u64 {
         let mut bytes_read = 0;
-        for (_, checksum) in self.files.iter() {
-            bytes_read += checksum.bytes_read();
+        for (_, info) in self.files.iter() {
+            bytes_read += info.bytes_read();
         }
 
         bytes_read
     }
 
-    pub fn exists(&self, src_file: &Meta) -> io::Result<bool> {
+    pub fn exists(&self, src_file: &Info) -> io::Result<bool> {
         match self.similar_files.get(&src_file.fast_hash) {
             Some(paths) => {
                 for path in paths {
@@ -55,14 +55,14 @@ impl Index {
                 }
                 Ok(false)
             }
-            None => Ok(false)
+            None => Ok(false),
         }
     }
 
     pub fn calc_same<F, T>(&self, calc: F) -> Vec<HashMap<(u64, T), HashSet<String>>>
-        where
-            F: Fn(&Meta) -> io::Result<T> + Send + Sync,
-            T: Eq + Hash + Send,
+    where
+        F: Fn(&Info) -> io::Result<T> + Send + Sync,
+        T: Eq + Hash + Send,
     {
         let multiple: HashMap<_, _> = self
             .similar_files
@@ -75,10 +75,9 @@ impl Index {
             .map(|(_, paths)| {
                 let mut same = HashMap::new();
                 for path in paths.iter() {
-                    let checksum = self.files.get(path).unwrap();
-                    let size = checksum.size;
-                    if let Ok(key) = calc(checksum) {
-                        same.entry((size, key))
+                    let info = self.files.get(path).unwrap();
+                    if let Ok(key) = calc(info) {
+                        same.entry((info.size, key))
                             .or_insert_with(HashSet::new)
                             .insert(path.clone());
                     }
@@ -89,12 +88,12 @@ impl Index {
     }
 
     pub fn search_same(&self) -> BTreeMap<u64, Vec<String>> {
-        let results: Vec<_> = self.calc_same(|checksum| checksum.secure_hash());
+        let results: Vec<_> = self.calc_same(|info| info.secure_hash());
         Self::filter_and_sort(&results)
     }
 
     pub fn fast_search_same(&self) -> BTreeMap<u64, Vec<String>> {
-        let results: Vec<_> = self.calc_same(|checksum| checksum.calc_full_hash());
+        let results: Vec<_> = self.calc_same(|info| info.calc_full_hash());
         Self::filter_and_sort(&results)
     }
 
@@ -116,25 +115,25 @@ impl Index {
         result
     }
 
-    pub fn add(&mut self, checksum: Meta) -> std::io::Result<&Meta> {
-        let file_existed = self.files.get(checksum.path.as_str()).is_some();
+    pub fn add(&mut self, info: Info) -> std::io::Result<&Info> {
+        let file_existed = self.files.get(info.path.as_str()).is_some();
 
         if file_existed {
-            Ok(&self.files[&checksum.path])
+            Ok(&self.files[&info.path])
         } else {
             self.similar_files
-                .entry(checksum.fast_hash)
+                .entry(info.fast_hash)
                 .or_default()
-                .insert(checksum.path.clone());
+                .insert(info.path.clone());
 
-            Ok(self.files.entry(checksum.path.clone()).or_insert(checksum))
+            Ok(self.files.entry(info.path.clone()).or_insert(info))
         }
     }
 
     #[cfg(test)]
-    pub fn insert(&mut self, path: &str) -> std::io::Result<&Meta> {
-        let checksum = Meta::from(path)?;
-        self.add(checksum)
+    pub fn insert(&mut self, path: &str) -> std::io::Result<&Info> {
+        let info = Info::from(path)?;
+        self.add(info)
     }
 
     pub fn visit_dir(&mut self, path: &str) {
@@ -145,14 +144,14 @@ impl Index {
             .map(|entry| entry.path().to_owned())
             .collect();
 
-        let checksums = paths
+        let infos = paths
             .par_iter()
-            .map(|path| Meta::from_path(path))
+            .map(|path| Info::from_path(path))
             .collect::<Vec<_>>();
 
-        for result in checksums {
+        for result in infos {
             match result {
-                Ok(checksum) => _ = self.add(checksum),
+                Ok(info) => _ = self.add(info),
                 Err(ref e) if e.kind() == std::io::ErrorKind::Other => continue,
                 Err(e) => {
                     error!("{}", e)
@@ -167,25 +166,25 @@ mod tests {
     use std::collections::BTreeMap;
     use std::fs;
 
-    use super::Index;
     use super::super::test_common as common;
+    use super::Index;
 
     #[test]
     fn insert() -> common::Result {
         let mut index = Index::new();
-        let checksum = index.insert(common::DATA_SMALL)?;
+        let info = index.insert(common::DATA_SMALL)?;
         assert_eq!(
-            checksum.path,
+            info.path,
             fs::canonicalize(common::DATA_SMALL)
                 .unwrap()
                 .to_str()
                 .unwrap() // .strip_prefix("\\\\?\\")
-            // .unwrap()
+                          // .unwrap()
         );
-        assert_eq!(checksum.fast_hash, common::DATA_SMALL_WYHASH);
+        assert_eq!(info.fast_hash, common::DATA_SMALL_WYHASH);
 
-        assert_eq!(checksum.calc_full_hash()?, common::DATA_SMALL_XXHASH);
-        assert_eq!(checksum.secure_hash()?, common::data_small_sha512());
+        assert_eq!(info.calc_full_hash()?, common::DATA_SMALL_XXHASH);
+        assert_eq!(info.secure_hash()?, common::data_small_sha512());
 
         Ok(())
     }
@@ -202,22 +201,22 @@ mod tests {
         assert_eq!(
             same[&common::DATA_LARGE_LEN][0],
             fs::canonicalize(common::DATA_LARGE)?.to_str().unwrap() // .strip_prefix("\\\\?\\")
-            // .unwrap()
+                                                                    // .unwrap()
         );
         assert_eq!(
             same[&common::DATA_LARGE_LEN][1],
             fs::canonicalize(common::DATA_LARGE_COPY)?.to_str().unwrap() // .strip_prefix("\\\\?\\")
-            // .unwrap()
+                                                                         // .unwrap()
         );
         assert_eq!(
             same[&common::DATA_SMALL_LEN][0],
             fs::canonicalize(common::DATA_SMALL)?.to_str().unwrap() // .strip_prefix("\\\\?\\")
-            // .unwrap()
+                                                                    // .unwrap()
         );
         assert_eq!(
             same[&common::DATA_SMALL_LEN][1],
             fs::canonicalize(common::DATA_SMALL_COPY)?.to_str().unwrap() // .strip_prefix("\\\\?\\")
-            // .unwrap()
+                                                                         // .unwrap()
         );
 
         Ok(())
