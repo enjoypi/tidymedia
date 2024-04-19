@@ -25,7 +25,7 @@ pub fn find_duplicates(fast: bool, sources: Vec<String>, output: Option<String>)
     info!(
         "Files: {}, FastChecksums: {}, BytesRead: {}",
         index.files().len(),
-        index.unique_files().len(),
+        index.similar_files().len(),
         index.bytes_read(),
     );
 

@@ -1,6 +1,6 @@
-use super::SecureChecksum;
+use super::SecureHash;
 
-fn str_to_secure(input_str: &str) -> SecureChecksum {
+fn str_to_secure(input_str: &str) -> SecureHash {
     // Step 1: 将16进制字符串转换成 Vec<u8>
     let vec: Vec<u8> = hex::decode(input_str).unwrap();
 
@@ -8,7 +8,7 @@ fn str_to_secure(input_str: &str) -> SecureChecksum {
         // 为了适应U64类型，我们需要确保数组里面有64项
         generic_array::GenericArray::default()
     } else {
-        SecureChecksum::from_exact_iter(vec).unwrap()
+        SecureHash::from_exact_iter(vec).unwrap()
     }
 }
 
@@ -21,7 +21,7 @@ pub const DATA_SMALL_LEN: u64 = 3057;
 pub const DATA_SMALL_WYHASH: u64 = 13333046383594682858;
 pub const DATA_SMALL_XXHASH: u64 = 0x1a5efdfdbd01a44c;
 
-pub fn data_small_sha512() -> SecureChecksum {
+pub fn data_small_sha512() -> SecureHash {
     str_to_secure("c77d955d24f36057a2fc6eba10d9a386ef6b8a6568e73bb8f6a168b4e2adc65fa2ffdc6f6e479f42199b740b8e83af74caffa6f580d4b7351be20efa65b0fcd2")
 }
 
@@ -32,7 +32,7 @@ pub const DATA_LARGE_LEN: u64 = 7133;
 pub const DATA_LARGE_WYHASH: u64 = 2034553491748707037;
 pub const DATA_LARGE_XXHASH: u64 = 0x9dba53c59ea968e9;
 
-pub fn data_large_sha512() -> SecureChecksum {
+pub fn data_large_sha512() -> SecureHash {
     str_to_secure("0f7fd3e44b860c33de83c19edb759edcad9c6e101910f765e86e2443f533f9c254ad544a84e4bb56b221620148c79b2b8619cfd8f611d30617c6c32f210bcea7")
 }
 

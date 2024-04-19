@@ -1,18 +1,21 @@
 use std::{fs, io};
+use std::path::PathBuf;
+use std::string::ToString;
 
-use tracing::info;
+use time::{error, OffsetDateTime, UtcOffset};
+use tracing::{error, info};
 
-use super::entities::file_index;
-use super::entities::file_meta;
+use super::entities::file_index::Index;
+use super::entities::file_meta::Meta;
 
 pub fn copy(sources: Vec<String>, output: String) -> io::Result<()> {
     fs::create_dir_all(output.as_str())?;
     let output = fs::canonicalize(output.as_str())?;
 
-    let mut out = file_index::Index::new();
+    let mut out = Index::new();
     out.visit_dir(output.to_str().unwrap());
 
-    let mut source = file_index::Index::new();
+    let mut source = Index::new();
     for path in sources {
         source.visit_dir(path.as_str());
     }
@@ -20,58 +23,51 @@ pub fn copy(sources: Vec<String>, output: String) -> io::Result<()> {
     info!(
         "Files: {}, FastChecksums: {}, BytesRead: {}",
         source.files().len(),
-        source.unique_files().len(),
+        source.similar_files().len(),
         source.bytes_read(),
     );
 
-    for (name, meta) in source.files() {
-        let exists = match out.unique_files().get(&meta.short) {
-            Some(paths) => {
-                let mut exists = false;
-                for path in paths {
-                    let cs = out.files().get(path).unwrap();
-                    if cs == meta {
-                        exists = true;
-                        break;
-                    }
-                }
-                exists
-            }
-            None => false,
-        };
-
-        if !exists {
-            let name = std::path::PathBuf::from(name);
-            let _modified_time = meta.modified_time()?;
-            // TODO: get modified time as path
-            let to = output.join(name.file_name().unwrap());
-
-            // 如果目标文件已经存在，再次判断是否相同，不相同则改名
-            if to.exists() {
-                let cs = out.files().get(to.to_str().unwrap()).unwrap();
-                if cs != meta {
-                    let mut i = 1;
-                    let mut to = to.clone();
-                    while to.exists() {
-                        to = output.join(format!(
-                            "{}-{}",
-                            name.file_name().unwrap().to_str().unwrap(),
-                            i
-                        ));
-                        i += 1;
-                    }
-                    fs::copy(name.to_str().unwrap(), to.as_path())?;
-                    _ = out.add(file_meta::Meta::new_path(to.as_path())?);
-                }
-            } else {
-                fs::copy(name.to_str().unwrap(), to.as_path())?;
-                _ = out.add(file_meta::Meta::new_path(to.as_path())?);
-            }
-            fs::copy(name.to_str().unwrap(), to.as_path())?;
-            _ = out.add(file_meta::Meta::new_path(to.as_path())?);
+    for (path, meta) in source.files() {
+        if out.exists(meta)? {
+            continue;
         }
+
+        let target = generate_unique_name(meta, &output, &out)?;
+        let target = target.as_str();
+
+        if fs::copy(path, target)? != meta.size {
+            error!("Copy failed: {} to {}", path, target);
+            continue;
+        }
+
+        _ = out.add(Meta::from(target)?);
     }
 
     // info!("BytesRead: {}", source.bytes_read());
     Ok(())
 }
+
+
+fn generate_unique_name(src_file: &Meta, output_path: &PathBuf, output: &Index) -> io::Result<String> {
+    let name = std::path::PathBuf::from(src_file.path.as_str());
+    let modified_time = src_file.modified_time()?;
+
+    let dt = OffsetDateTime::from(modified_time).to_offset(CST.expect("CST"));
+    let month = dt.month().to_string();
+    let year = dt.year().to_string();
+
+    let target = output_path.join(year).join(month).join(name.file_name().unwrap());
+    let target_str = target.to_str().unwrap();
+
+    if output.files().contains_key(target_str) {
+        return Ok(EMPTY_STRING);
+    }
+    // if !output.exists(target) {
+    //     return Ok(target.to_str().unwrap().to_string());
+    // }
+
+    Ok(target.to_str().unwrap().to_string())
+}
+
+const CST: Result<UtcOffset, error::ComponentRange> = UtcOffset::from_hms(8, 0, 0);
+const EMPTY_STRING: String = String::new();
