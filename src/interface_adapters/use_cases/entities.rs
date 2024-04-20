@@ -1,4 +1,5 @@
-use generic_array::{typenum, GenericArray};
+use generic_array::typenum;
+use generic_array::GenericArray;
 
 pub type SecureHash = GenericArray<u8, typenum::U64>;
 

@@ -1,19 +1,22 @@
+use std::fs;
 use std::fs::Metadata;
-use std::io::{Error, ErrorKind, Read};
+use std::io;
+use std::io::Error;
+use std::io::ErrorKind;
+use std::io::Read;
 use std::path::Path;
 use std::sync::Mutex;
 use std::time::SystemTime;
-use std::{fs, io};
 
 use generic_array::GenericArray;
 use memmap2::Mmap;
-use sha2::{Digest, Sha512};
+use sha2::Digest;
+use sha2::Sha512;
 
 use super::SecureHash;
 
 const FAST_READ_SIZE: usize = 4096;
 
-// #[derive(Debug, Clone)]
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct Lazy {
     bytes_read: u64,
@@ -24,7 +27,6 @@ struct Lazy {
     // Secure hash from the whole file
     secure_hash: SecureHash,
 }
-
 impl Lazy {
     // 初始化时，hash是作为第二个快速hash使用的，并不是整个文件的hash
     fn new(bytes_read: u64, hash: u64) -> Self {
@@ -36,19 +38,17 @@ impl Lazy {
         }
     }
 }
-
 #[derive(Debug)]
 pub struct Info {
     // 64 bit hash  from the first FAST_READ_SIZE bytes
     pub fast_hash: u64,
-    pub path: String,
+    pub full_path: String,
     pub size: u64,
 
     meta: Metadata,
 
     lazy: Mutex<Lazy>,
 }
-
 impl Info {
     pub fn from_path(path: &Path) -> io::Result<Self> {
         let meta = path.metadata()?;
@@ -72,7 +72,7 @@ impl Info {
 
         Ok(Self {
             fast_hash: first_hash,
-            path: p,
+            full_path: p,
             size: meta.len(),
             meta,
             lazy: Mutex::new(Lazy::new(bytes_read as u64, second_hash)),
@@ -93,7 +93,7 @@ impl Info {
             Some(s) => s,
             None => {
                 return Err(Error::new(
-                    ErrorKind::Other,
+                    ErrorKind::InvalidInput,
                     format!("invalid filename {}", path.display()),
                 ));
             }
@@ -115,7 +115,7 @@ impl Info {
                     return Ok(l.hash);
                 }
 
-                let (bytes_read, full) = full_hash(self.path.as_str())?;
+                let (bytes_read, full) = full_hash(self.full_path.as_str())?;
 
                 l.hash = full;
                 l.bytes_read += bytes_read as u64;
@@ -141,7 +141,7 @@ impl Info {
                     return Ok(l.secure_hash);
                 }
 
-                let (bytes_read, secure) = secure_hash(self.path.as_str())?;
+                let (bytes_read, secure) = secure_hash(self.full_path.as_str())?;
                 l.bytes_read += bytes_read as u64;
                 l.secure_hash = secure;
                 Ok(secure)
@@ -190,15 +190,17 @@ fn secure_hash(path: &str) -> io::Result<(usize, SecureHash)> {
 
 #[cfg(test)]
 mod tests {
-    use std::io::{Read, Seek};
-    use std::{fs, io};
+    use std::fs;
+    use std::io;
+    use std::io::Read;
+    use std::io::Seek;
 
     use sha2::Digest;
     use wyhash;
     use xxhash_rust::xxh3;
 
-    use super::super::test_common as common;
     use super::Info;
+    use super::super::test_common as common;
 
     struct HashTest {
         short_wyhash: u64,

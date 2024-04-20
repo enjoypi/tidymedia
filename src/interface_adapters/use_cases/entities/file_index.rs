@@ -1,4 +1,6 @@
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::BTreeMap;
+use std::collections::HashMap;
+use std::collections::HashSet;
 use std::hash::Hash;
 use std::io;
 
@@ -116,17 +118,17 @@ impl Index {
     }
 
     pub fn add(&mut self, info: Info) -> std::io::Result<&Info> {
-        let file_existed = self.files.get(info.path.as_str()).is_some();
+        let file_existed = self.files.get(info.full_path.as_str()).is_some();
 
         if file_existed {
-            Ok(&self.files[&info.path])
+            Ok(&self.files[&info.full_path])
         } else {
             self.similar_files
                 .entry(info.fast_hash)
                 .or_default()
-                .insert(info.path.clone());
+                .insert(info.full_path.clone());
 
-            Ok(self.files.entry(info.path.clone()).or_insert(info))
+            Ok(self.files.entry(info.full_path.clone()).or_insert(info))
         }
     }
 
@@ -174,7 +176,7 @@ mod tests {
         let mut index = Index::new();
         let info = index.insert(common::DATA_SMALL)?;
         assert_eq!(
-            info.path,
+            info.full_path,
             fs::canonicalize(common::DATA_SMALL)
                 .unwrap()
                 .to_str()

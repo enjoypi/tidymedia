@@ -1,8 +1,10 @@
 use std::io;
 
-use tracing::{error, info};
+use tracing::error;
+use tracing::info;
 
-use super::entities::{file_index, file_info};
+use super::entities::file_index;
+use super::entities::file_info;
 
 pub fn find_duplicates(fast: bool, sources: Vec<String>, output: Option<String>) -> io::Result<()> {
     let mut index = file_index::Index::new();

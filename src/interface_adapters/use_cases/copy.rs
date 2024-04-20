@@ -1,19 +1,23 @@
-use std::path::PathBuf;
-use std::string::ToString;
-use std::{fs, io};
+use std::fs;
+use std::io;
+use std::io::Error;
+use std::path::Path;
 
-use time::{error, OffsetDateTime, UtcOffset};
-use tracing::{error, info};
+use time::error;
+use time::OffsetDateTime;
+use time::UtcOffset;
+use tracing::error;
+use tracing::info;
 
 use super::entities::file_index::Index;
 use super::entities::file_info::Info;
 
 pub fn copy(sources: Vec<String>, output: String) -> io::Result<()> {
     fs::create_dir_all(output.as_str())?;
-    let output = fs::canonicalize(output.as_str())?;
+    let output_dir = fs::canonicalize(output.as_str())?;
 
-    let mut out = Index::new();
-    out.visit_dir(output.to_str().unwrap());
+    let mut output_index = Index::new();
+    output_index.visit_dir(output_dir.to_str().unwrap());
 
     let mut source = Index::new();
     for path in sources {
@@ -27,20 +31,27 @@ pub fn copy(sources: Vec<String>, output: String) -> io::Result<()> {
         source.bytes_read(),
     );
 
-    for (path, meta) in source.files() {
-        if out.exists(meta)? {
+    for (path, src) in source.files() {
+        if output_index.exists(src)? {
             continue;
         }
 
-        let target = generate_unique_name(meta, &output, &out)?;
-        let target = target.as_str();
+        if let Some((target_dir, target)) = generate_unique_name(src, &output_dir)? {
+            fs::create_dir_all(target_dir.as_str())?;
+            let target = target.as_str();
 
-        if fs::copy(path, target)? != meta.size {
-            error!("Copy failed: {} to {}", path, target);
-            continue;
+            if fs::copy(path, target)? != src.size {
+                error!("Copy failed: {} to {}", path, target);
+                continue;
+            }
+
+            _ = output_index.add(Info::from(target)?);
+        } else {
+            error!(
+                "Failed to generate unique name for {}",
+                src.full_path.as_str()
+            );
         }
-
-        _ = out.add(Info::from(target)?);
     }
 
     // info!("BytesRead: {}", source.bytes_read());
@@ -49,31 +60,51 @@ pub fn copy(sources: Vec<String>, output: String) -> io::Result<()> {
 
 fn generate_unique_name(
     src_file: &Info,
-    output_path: &PathBuf,
-    output: &Index,
-) -> io::Result<String> {
-    let name = std::path::PathBuf::from(src_file.path.as_str());
+    output_dir: &Path,
+) -> io::Result<Option<(String, String)>> {
+    let full_path = Path::new(src_file.full_path.as_str());
+    let file_name = full_path
+        .file_name()
+        .ok_or(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "Invalid file name",
+        ))?
+        .to_str()
+        .ok_or(Error::new(io::ErrorKind::InvalidInput, "Invalid file name"))?;
+
+    let file_stem = full_path.file_stem().unwrap().to_string_lossy().to_string();
+    let ext = full_path.extension().unwrap().to_string_lossy().to_string();
+
     let modified_time = src_file.modified_time()?;
 
     let dt = OffsetDateTime::from(modified_time).to_offset(CST.expect("CST"));
-    let month = dt.month().to_string();
+    let month = (dt.month() as u8).to_string();
     let year = dt.year().to_string();
 
-    let target = output_path
-        .join(year)
-        .join(month)
-        .join(name.file_name().unwrap());
-    let target_str = target.to_str().unwrap();
+    let sub_dir = output_dir.join(year).join(month);
 
-    if output.files().contains_key(target_str) {
-        return Ok(EMPTY_STRING);
+    // generate unique name by adding a number suffix
+    for i in 0..10 {
+        let target = if i <= 0 {
+            sub_dir.join(file_name)
+        } else {
+            let mut file_name = file_stem.clone();
+
+            file_name.push('_');
+            file_name.push_str(i.to_string().as_str());
+            file_name.push('.');
+            file_name.push_str(ext.as_str());
+            sub_dir.join(file_name)
+        };
+
+        if !target.exists() {
+            return Ok(Some((
+                sub_dir.to_str().unwrap().to_string(),
+                target.to_str().unwrap().to_string(),
+            )));
+        }
     }
-    // if !output.exists(target) {
-    //     return Ok(target.to_str().unwrap().to_string());
-    // }
-
-    Ok(target.to_str().unwrap().to_string())
+    Ok(None)
 }
 
 const CST: Result<UtcOffset, error::ComponentRange> = UtcOffset::from_hms(8, 0, 0);
-const EMPTY_STRING: String = String::new();
