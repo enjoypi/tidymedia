@@ -41,7 +41,7 @@ impl Index {
         bytes_read
     }
 
-    pub fn exists(&self, src_file: &Info) -> io::Result<bool> {
+    pub fn exists(&self, src_file: &Info) -> io::Result<Option<String>> {
         match self.similar_files.get(&src_file.fast_hash) {
             Some(paths) => {
                 for path in paths {
@@ -51,13 +51,13 @@ impl Index {
                         }
 
                         if f.calc_full_hash()? == src_file.calc_full_hash()? {
-                            return Ok(true);
+                            return Ok(Some(f.full_path.clone()));
                         }
                     }
                 }
-                Ok(false)
+                Ok(None)
             }
-            None => Ok(false),
+            None => Ok(None),
         }
     }
 
@@ -168,8 +168,8 @@ mod tests {
     use std::collections::BTreeMap;
     use std::fs;
 
-    use super::super::test_common as common;
     use super::Index;
+    use super::super::test_common as common;
 
     #[test]
     fn insert() -> common::Result {

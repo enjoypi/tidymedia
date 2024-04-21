@@ -8,11 +8,14 @@ use time::OffsetDateTime;
 use time::UtcOffset;
 use tracing::error;
 use tracing::info;
+use tracing::trace;
 
 use super::entities::file_index::Index;
 use super::entities::file_info::Info;
 
-pub fn copy(sources: Vec<String>, output: String) -> io::Result<()> {
+const CST: Result<UtcOffset, error::ComponentRange> = UtcOffset::from_hms(8, 0, 0);
+
+pub fn copy(sources: Vec<String>, output: String, remove: bool) -> io::Result<()> {
     fs::create_dir_all(output.as_str())?;
     let output_dir = fs::canonicalize(output.as_str())?;
 
@@ -25,14 +28,19 @@ pub fn copy(sources: Vec<String>, output: String) -> io::Result<()> {
     }
 
     info!(
-        "Files: {}, FastHashs: {}, BytesRead: {}",
+        "Files: {}, UniqueFiles: {}, BytesRead: {}",
         source.files().len(),
         source.similar_files().len(),
         source.bytes_read(),
     );
 
-    for (path, src) in source.files() {
-        if output_index.exists(src)? {
+    for (_, src) in source.files() {
+        let full_path = src.full_path.as_str();
+        if let Some(dup) = output_index.exists(src)? {
+            trace!("SAME_FILE\t[{}]\t[{}]", full_path, dup);
+            if remove {
+                remove_file(full_path);
+            }
             continue;
         }
 
@@ -40,12 +48,18 @@ pub fn copy(sources: Vec<String>, output: String) -> io::Result<()> {
             fs::create_dir_all(target_dir.as_str())?;
             let target = target.as_str();
 
-            if fs::copy(path, target)? != src.size {
-                error!("Copy failed: {} to {}", path, target);
+            if fs::copy(full_path, target)? != src.size {
+                error!("COPY_FAILED\t[{}]\tTO[{}]", full_path, target);
                 continue;
+            } else {
+                trace!("COPIED\t[{}]\tTO\t[{}]", full_path, target);
             }
 
             _ = output_index.add(Info::from(target)?);
+
+            if remove {
+                remove_file(full_path);
+            }
         } else {
             error!(
                 "Failed to generate unique name for {}",
@@ -107,4 +121,8 @@ fn generate_unique_name(
     Ok(None)
 }
 
-const CST: Result<UtcOffset, error::ComponentRange> = UtcOffset::from_hms(8, 0, 0);
+fn remove_file(full_path: &str) {
+    fs::remove_file(full_path).unwrap_or_else(|e| {
+        error!("Failed to remove {}: {}", full_path, e);
+    });
+}

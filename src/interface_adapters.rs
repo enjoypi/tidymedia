@@ -46,15 +46,12 @@ pub enum Commands {
 
 pub fn tidy(command: Commands) -> io::Result<()> {
     match command {
-        Commands::Copy { sources, output } => use_cases::copy(sources, output),
+        Commands::Copy { sources, output } => use_cases::copy(sources, output, false),
         Commands::Find {
             fast,
             sources,
             output,
         } => use_cases::find_duplicates(fast, sources, output),
-        Commands::Move {
-            sources: _sources,
-            output,
-        } => Ok(println!("{}", output)),
+        Commands::Move { sources, output } => use_cases::copy(sources, output, true),
     }
 }
