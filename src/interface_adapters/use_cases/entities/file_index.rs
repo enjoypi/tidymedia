@@ -168,8 +168,8 @@ mod tests {
     use std::collections::BTreeMap;
     use std::fs;
 
-    use super::Index;
     use super::super::test_common as common;
+    use super::Index;
 
     #[test]
     fn insert() -> common::Result {

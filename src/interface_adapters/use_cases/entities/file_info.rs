@@ -6,6 +6,7 @@ use std::io::ErrorKind;
 use std::io::Read;
 use std::path::Path;
 use std::sync::Mutex;
+use std::time::Duration;
 use std::time::SystemTime;
 
 use generic_array::GenericArray;
@@ -13,9 +14,11 @@ use memmap2::Mmap;
 use sha2::Digest;
 use sha2::Sha512;
 
+use super::exif;
 use super::SecureHash;
 
 const FAST_READ_SIZE: usize = 4096;
+const VALID_DATE_TIME: u64 = 946684800; // 2001-01-01T00:00:00Z
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct Lazy {
@@ -46,7 +49,6 @@ pub struct Info {
     pub size: u64,
 
     meta: Metadata,
-
     lazy: Mutex<Lazy>,
 }
 impl Info {
@@ -151,7 +153,44 @@ impl Info {
     }
 
     pub fn modified_time(&self) -> io::Result<SystemTime> {
-        self.meta.modified()
+        let exif = exif::Exif::from(self.full_path.as_str()).unwrap_or(None);
+        if exif.is_none() {
+            return self.meta.modified();
+        }
+        let exif = exif.unwrap();
+
+        if let Some(mime_type) = exif.mime_type {
+            if !(mime_type.starts_with("image") || mime_type.starts_with("video")) {
+                return self.meta.modified();
+            }
+        } else {
+            return self.meta.modified();
+        }
+
+        let t = if let Some(t) = exif.date_time_original {
+            t
+        } else if let Some(t) = exif.h264_date_time_original {
+            t
+        } else if let Some(t) = exif.qt_date_time {
+            t
+        } else if let Some(t) = exif.exif_create_date {
+            t
+        } else if let Some(t) = exif.file_modify_date {
+            // 	if meta.FileModifyDate > meta.FileCreateDate && meta.FileCreateDate > validDataTime {
+            // 		return meta.FileCreateDate
+            // 	}
+            t
+        } else if let Some(t) = exif.file_create_date {
+            t
+        } else {
+            0
+        };
+
+        if t > VALID_DATE_TIME {
+            Ok(SystemTime::UNIX_EPOCH + Duration::from_secs(t))
+        } else {
+            self.meta.modified()
+        }
     }
 }
 
