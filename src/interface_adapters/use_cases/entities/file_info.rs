@@ -4,7 +4,7 @@ use std::io;
 use std::io::Error;
 use std::io::ErrorKind;
 use std::io::Read;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::Duration;
 use std::time::SystemTime;
@@ -13,9 +13,9 @@ use generic_array::GenericArray;
 use memmap2::Mmap;
 use sha2::Digest;
 use sha2::Sha512;
+use tracing::warn;
 
-use super::exif;
-use super::SecureHash;
+use super::{exif, SecureHash};
 
 const FAST_READ_SIZE: usize = 4096;
 const VALID_DATE_TIME: u64 = 946684800; // 2001-01-01T00:00:00Z
@@ -30,6 +30,7 @@ struct Lazy {
     // Secure hash from the whole file
     secure_hash: SecureHash,
 }
+
 impl Lazy {
     // 初始化时，hash是作为第二个快速hash使用的，并不是整个文件的hash
     fn new(bytes_read: u64, hash: u64) -> Self {
@@ -41,6 +42,7 @@ impl Lazy {
         }
     }
 }
+
 #[derive(Debug)]
 pub struct Info {
     // 64 bit hash  from the first FAST_READ_SIZE bytes
@@ -51,34 +53,39 @@ pub struct Info {
     meta: Metadata,
     lazy: Mutex<Lazy>,
 }
+
 impl Info {
-    pub fn from_path(path: &Path) -> io::Result<Self> {
-        let meta = path.metadata()?;
+    pub fn from(path: &str) -> io::Result<Self> {
+        let (full_path, path_buf) = full_path(path)?;
+
+        let meta = path_buf.metadata()?;
         if !meta.is_file() {
             return Err(Error::new(
                 ErrorKind::Other,
-                format!("{} is a directory", path.display()),
+                format!("{} is a directory", full_path),
             ));
         }
 
         if meta.len() == 0 {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::Other,
-                format!("{} is empty", path.display()),
+                format!("{} is empty", full_path),
             ));
         }
 
-        let p = Self::get_full_path(path)?;
-
-        let (bytes_read, first_hash, second_hash) = fast_hash(p.as_str())?;
+        let (bytes_read, first_hash, second_hash) = fast_hash(full_path.as_str())?;
 
         Ok(Self {
             fast_hash: first_hash,
-            full_path: p,
+            full_path,
             size: meta.len(),
             meta,
             lazy: Mutex::new(Lazy::new(bytes_read as u64, second_hash)),
         })
+    }
+
+    pub fn from_path(path: &Path) -> io::Result<Self> {
+        Self::from(path.to_str().unwrap())
     }
 
     pub fn bytes_read(&self) -> u64 {
@@ -87,27 +94,6 @@ impl Info {
         } else {
             0
         }
-    }
-
-    pub fn get_full_path(path: &Path) -> io::Result<String> {
-        let p = path.canonicalize()?;
-        let p = match p.to_str() {
-            Some(s) => s,
-            None => {
-                return Err(Error::new(
-                    ErrorKind::InvalidInput,
-                    format!("invalid filename {}", path.display()),
-                ));
-            }
-        };
-        let p = p.strip_prefix("\\\\?\\").unwrap_or(p);
-        Ok(p.to_string())
-    }
-
-    pub fn from(path: &str) -> io::Result<Self> {
-        let path = fs::canonicalize(path)?;
-
-        Self::from_path(path.as_path())
     }
 
     pub fn calc_full_hash(&self) -> io::Result<u64> {
@@ -152,45 +138,39 @@ impl Info {
         }
     }
 
-    pub fn modified_time(&self) -> io::Result<SystemTime> {
-        let exif = exif::Exif::from(self.full_path.as_str()).unwrap_or(None);
-        if exif.is_none() {
-            return self.meta.modified();
-        }
-        let exif = exif.unwrap();
+    pub fn create_time(&self) -> io::Result<SystemTime> {
+        let file_create_time = self.meta.created()?;
+        let file_modify_time = self.meta.modified()?;
 
-        if let Some(mime_type) = exif.mime_type {
-            if !(mime_type.starts_with("image") || mime_type.starts_with("video")) {
-                return self.meta.modified();
-            }
+        let real_create_time = if file_modify_time < file_create_time {
+            file_modify_time
         } else {
-            return self.meta.modified();
-        }
-
-        let t = if let Some(t) = exif.date_time_original {
-            t
-        } else if let Some(t) = exif.h264_date_time_original {
-            t
-        } else if let Some(t) = exif.qt_date_time {
-            t
-        } else if let Some(t) = exif.exif_create_date {
-            t
-        } else if let Some(t) = exif.file_modify_date {
-            // 	if meta.FileModifyDate > meta.FileCreateDate && meta.FileCreateDate > validDataTime {
-            // 		return meta.FileCreateDate
-            // 	}
-            t
-        } else if let Some(t) = exif.file_create_date {
-            t
-        } else {
-            0
+            file_create_time
         };
 
+        let exif = exif::Exif::from(self.full_path.as_str()).unwrap_or_else(|e| {
+            warn!("Parse exif info from {} error {}", self.full_path, e);
+            vec![]
+        });
+        if exif.is_empty() {
+            return Ok(real_create_time);
+        }
+        let exif = exif.first().unwrap();
+
+        let t = exif.media_create_date();
         if t > VALID_DATE_TIME {
             Ok(SystemTime::UNIX_EPOCH + Duration::from_secs(t))
         } else {
-            self.meta.modified()
+            Ok(real_create_time)
         }
+    }
+
+    pub fn is_media(&self) -> bool {
+        let exif = exif::Exif::from(self.full_path.as_str()).unwrap_or_else(|_| vec![]);
+        if exif.is_empty() {
+            return false;
+        }
+        exif.first().unwrap().is_media()
     }
 }
 
@@ -200,6 +180,25 @@ impl PartialEq for Info {
             && self.fast_hash == other.fast_hash
             && self.full_hash() == other.full_hash()
     }
+}
+
+pub fn full_path(path: &str) -> io::Result<(String, PathBuf)> {
+    let path_buf = fs::canonicalize(path)?;
+
+    let full = match path_buf.to_str() {
+        Some(s) => s,
+        None => {
+            return Err(Error::new(
+                ErrorKind::InvalidInput,
+                format!("invalid filename {}", path),
+            ));
+        }
+    };
+
+    #[cfg(target_os = "windows")]
+    let full = full.strip_prefix("\\\\?\\").unwrap_or(full);
+
+    Ok((full.to_string(), PathBuf::from(full)))
 }
 
 fn fast_hash(path: &str) -> io::Result<(usize, u64, u64)> {
@@ -238,8 +237,8 @@ mod tests {
     use wyhash;
     use xxhash_rust::xxh3;
 
-    use super::Info;
     use super::super::test_common as common;
+    use super::Info;
 
     struct HashTest {
         short_wyhash: u64,
@@ -399,15 +398,15 @@ mod tests {
     #[test]
     fn strip_prefix() -> common::Result {
         let path = fs::canonicalize(common::DATA_SMALL)?;
-        let _path = path.to_str().unwrap();
-        // assert_eq!(
-        //     path,
-        //     "\\\\?\\D:\\user\\prj\\tidymedia\\tests\\data\\data_small"
-        // );
-        // assert_eq!(
-        //     "D:\\user\\prj\\tidymedia\\tests\\data\\data_small",
-        //     path.strip_prefix("\\\\?\\").unwrap()
-        // );
+        let path = path.to_str().unwrap();
+        assert_eq!(
+            path,
+            "\\\\?\\D:\\zhoufan\\prj\\tidymedia\\tests\\data\\data_small"
+        );
+        assert_eq!(
+            "D:\\zhoufan\\prj\\tidymedia\\tests\\data\\data_small",
+            path.strip_prefix("\\\\?\\").unwrap()
+        );
 
         Ok(())
     }

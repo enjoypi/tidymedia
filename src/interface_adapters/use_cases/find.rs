@@ -40,7 +40,7 @@ pub fn find_duplicates(fast: bool, sources: Vec<String>, output: Option<String>)
 
     match output {
         Some(output) => {
-            let output = file_info::Info::get_full_path(std::path::Path::new(&output)).unwrap();
+            let (output, _) = file_info::full_path(output.as_str()).unwrap();
             let output = output.as_str();
             for (size, paths) in same.iter().rev() {
                 println!("{}SIZE {}\r", comment(), size);

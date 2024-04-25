@@ -8,6 +8,10 @@ mod use_cases;
 pub enum Commands {
     /// Copy non-duplicate files from the source directory to the output directory. No source files will be modified.
     Copy {
+        /// Dry run, do not copy files
+        #[arg(short, long)]
+        dry_run: bool,
+
         /// The source directories or files
         #[arg(required = true)]
         sources: Vec<String>,
@@ -34,6 +38,10 @@ pub enum Commands {
 
     /// Move non-duplicate files from the source directory to the output directory. Duplicate files already present in the output directory will be deleted.
     Move {
+        /// Dry run, do not move files
+        #[arg(short, long)]
+        dry_run: bool,
+
         /// The source directories or files
         #[arg(required = true)]
         sources: Vec<String>,
@@ -46,12 +54,20 @@ pub enum Commands {
 
 pub fn tidy(command: Commands) -> io::Result<()> {
     match command {
-        Commands::Copy { sources, output } => use_cases::copy(sources, output, false),
+        Commands::Copy {
+            dry_run,
+            sources,
+            output,
+        } => use_cases::copy(sources, output, dry_run, false),
         Commands::Find {
             fast,
             sources,
             output,
         } => use_cases::find_duplicates(fast, sources, output),
-        Commands::Move { sources, output } => use_cases::copy(sources, output, true),
+        Commands::Move {
+            dry_run,
+            sources,
+            output,
+        } => use_cases::copy(sources, output, dry_run, true),
     }
 }

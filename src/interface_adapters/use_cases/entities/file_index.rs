@@ -180,8 +180,9 @@ mod tests {
             fs::canonicalize(common::DATA_SMALL)
                 .unwrap()
                 .to_str()
-                .unwrap() // .strip_prefix("\\\\?\\")
-                          // .unwrap()
+                .unwrap()
+                .strip_prefix("\\\\?\\")
+                .unwrap()
         );
         assert_eq!(info.fast_hash, common::DATA_SMALL_WYHASH);
 
@@ -202,23 +203,35 @@ mod tests {
 
         assert_eq!(
             same[&common::DATA_LARGE_LEN][0],
-            fs::canonicalize(common::DATA_LARGE)?.to_str().unwrap() // .strip_prefix("\\\\?\\")
-                                                                    // .unwrap()
+            fs::canonicalize(common::DATA_LARGE)?
+                .to_str()
+                .unwrap()
+                .strip_prefix("\\\\?\\")
+                .unwrap()
         );
         assert_eq!(
             same[&common::DATA_LARGE_LEN][1],
-            fs::canonicalize(common::DATA_LARGE_COPY)?.to_str().unwrap() // .strip_prefix("\\\\?\\")
-                                                                         // .unwrap()
+            fs::canonicalize(common::DATA_LARGE_COPY)?
+                .to_str()
+                .unwrap()
+                .strip_prefix("\\\\?\\")
+                .unwrap()
         );
         assert_eq!(
             same[&common::DATA_SMALL_LEN][0],
-            fs::canonicalize(common::DATA_SMALL)?.to_str().unwrap() // .strip_prefix("\\\\?\\")
-                                                                    // .unwrap()
+            fs::canonicalize(common::DATA_SMALL)?
+                .to_str()
+                .unwrap()
+                .strip_prefix("\\\\?\\")
+                .unwrap()
         );
         assert_eq!(
             same[&common::DATA_SMALL_LEN][1],
-            fs::canonicalize(common::DATA_SMALL_COPY)?.to_str().unwrap() // .strip_prefix("\\\\?\\")
-                                                                         // .unwrap()
+            fs::canonicalize(common::DATA_SMALL_COPY)?
+                .to_str()
+                .unwrap()
+                .strip_prefix("\\\\?\\")
+                .unwrap()
         );
 
         Ok(())

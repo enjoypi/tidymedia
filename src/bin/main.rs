@@ -1,8 +1,8 @@
+use std::fmt::Debug;
+
 use clap::Parser;
-use tracing::debug;
+use tracing::info;
 use tracing_subscriber::fmt;
-use tracing_subscriber::layer::SubscriberExt;
-use tracing_subscriber::util::SubscriberInitExt;
 
 #[derive(Debug, Parser)]
 #[command(author, version, about, long_about = None)]
@@ -17,9 +17,19 @@ struct Cli {
 fn main() -> std::io::Result<()> {
     let cli = Cli::parse();
 
-    tracing_subscriber::registry()
-        .with(fmt::layer().with_writer(std::io::stderr))
+    // Configure a custom event formatter
+    let format = fmt::format()
+        // .with_level(false) // don't include levels in formatted output
+        .with_target(false) // don't include targets
+        .compact(); // use the `Compact` formatting style.
+
+    // Create a `fmt` subscriber that uses our custom event format, and set it
+    // as the default.
+    tracing_subscriber::fmt()
+        .with_max_level(tracing::Level::TRACE)
+        .event_format(format)
         .init();
-    debug!("cli: {:?}", cli);
+
+    info!("cli: {:?}", cli);
     tidymedia::tidy(cli.command)
 }

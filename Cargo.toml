@@ -19,6 +19,6 @@ sha2 = "*"
 thiserror = "*"
 time = "*"
 tracing = "*"
-tracing-subscriber = "*"
+tracing-subscriber = { version = "*", features = ["env-filter"] }
 wyhash = "*"
 xxhash-rust = { version = "*", features = ["xxh3"] }

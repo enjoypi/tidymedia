@@ -37,3 +37,5 @@ pub fn data_large_sha512() -> SecureHash {
 }
 
 pub const DATA_LARGE_COPY: &str = "tests/data/data_large_copy";
+
+pub const DATA_DNS_BENCHMARK: &str = "tests/data/DNSBenchmark.png";
