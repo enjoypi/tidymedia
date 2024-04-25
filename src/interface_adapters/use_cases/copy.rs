@@ -79,17 +79,20 @@ fn do_copy(
 
         fs::create_dir_all(target_dir.as_str())?;
         let target = target.as_str();
-        if fs::copy(full_path, target)? != src.size {
-            error!("COPY_FAILED\t[{}]\t[{}]", full_path, target);
-            return Ok(());
+
+        if remove {
+            fs::rename(full_path, target)?;
+            trace!("MOVED\t[{}]\t[{}]", full_path, target);
+        } else {
+            if fs::copy(full_path, target)? != src.size {
+                error!("COPY_FAILED\t[{}]\t[{}]", full_path, target);
+                return Ok(());
+            }
+            trace!("COPIED\t[{}]\t[{}]", full_path, target);
         }
-        trace!("COPIED\t[{}]\t[{}]", full_path, target);
 
         _ = output_index.add(Info::from(target)?);
 
-        if remove {
-            return fs::remove_file(full_path);
-        }
         Ok(())
     } else {
         Err(io::Error::new(
