@@ -19,6 +19,7 @@ fn main() -> std::io::Result<()> {
 
     // Configure a custom event formatter
     let format = fmt::format()
+        .with_ansi(false)
         // .with_level(false) // don't include levels in formatted output
         .with_target(false) // don't include targets
         .compact(); // use the `Compact` formatting style.

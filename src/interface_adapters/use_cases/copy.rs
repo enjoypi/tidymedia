@@ -36,13 +36,16 @@ pub fn copy(sources: Vec<String>, output: String, dry_run: bool, remove: bool) -
     let mut output_index = Index::new();
     output_index.visit_dir(output_dir.as_str());
 
+    let mut copied = 0;
     source.files().iter().for_each(|(_, src)| {
         if let Err(e) = do_copy(src, &output_path, &mut output_index, dry_run, remove) {
             error!("{}", e)
+        } else {
+            copied += 1;
         }
     });
 
-    // info!("BytesRead: {}", source.bytes_read());
+    info!("Copied files: {}", copied);
     Ok(())
 }
 
