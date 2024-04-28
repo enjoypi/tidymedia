@@ -1,4 +1,4 @@
-use std::{io, process};
+use std::process;
 
 use serde_derive::Deserialize;
 use serde_json::Value;
@@ -7,11 +7,14 @@ use tracing::{error, warn};
 
 #[derive(Debug, Error)]
 pub enum ExifError {
+    #[error("converting from utf8 error occurred: {0}")]
+    FromUtf8(#[from] std::string::FromUtf8Error),
+
     #[error("IO error occurred: {0}")]
-    IoError(#[from] std::io::Error),
+    Io(#[from] std::io::Error),
 
     #[error("Failed to parse an json: {0}")]
-    ParseError(#[from] serde_json::Error),
+    Parse(#[from] serde_json::Error),
 }
 
 const META_TYPE_IMAGE: &str = "image/";
@@ -81,22 +84,22 @@ pub struct Exif {
 impl Exif {
     pub fn from(path: &str) -> Result<Vec<Self>, ExifError> {
         let output = process::Command::new("exiftool")
-            .args(&EXIFTOOL_ARGS)
+            .args(EXIFTOOL_ARGS)
             .arg(path)
             .output()?;
 
         if !output.stderr.is_empty() {
-            warn!("{}", std::str::from_utf8(&output.stderr).unwrap());
+            warn!("{}", String::from_utf8_lossy(&output.stderr));
         }
 
         if !output.status.success() {
-            return Err(ExifError::from(io::Error::new(
-                io::ErrorKind::Other,
-                format!("{:?}:{}", std::str::from_utf8(&output.stderr), path),
+            return Err(ExifError::from(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                format!("{:?}:{}", String::from_utf8_lossy(&output.stderr), path),
             )));
         }
 
-        let output = String::from_utf8(output.stdout).unwrap();
+        let output = String::from_utf8(output.stdout)?;
         let ret: Vec<Exif> = serde_json::from_str(&output)?;
         Ok(ret)
     }
@@ -216,14 +219,13 @@ fn extract_string(value: &Option<String>) -> &str {
 
 #[cfg(test)]
 mod test {
-    use super::super::test_common as common;
     use super::Exif;
+    use super::super::test_common as common;
 
     #[test]
     fn test_exif() -> common::Result {
         let exif = Exif::from(common::DATA_DNS_BENCHMARK).unwrap();
         let exif = &exif[0];
-        // let exif = Exif::from("D:\\todo\\Pictures\\高一元旦晚会\\102_PANA\\P1020486.MP4").unwrap().unwrap();
         assert_eq!(exif.source_file(), common::DATA_DNS_BENCHMARK);
         assert_eq!(exif.file_modify_date(), 1706076164);
         assert_eq!(exif.media_create_date(), 1706076164);
