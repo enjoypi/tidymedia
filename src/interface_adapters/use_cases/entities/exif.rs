@@ -219,8 +219,8 @@ fn extract_string(value: &Option<String>) -> &str {
 
 #[cfg(test)]
 mod test {
-    use super::Exif;
     use super::super::test_common as common;
+    use super::Exif;
 
     #[test]
     fn test_exif() -> common::Result {

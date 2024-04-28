@@ -6,9 +6,9 @@ use std::path::{Component, Path};
 use time::error;
 use time::OffsetDateTime;
 use time::UtcOffset;
-use tracing::{error, warn};
 use tracing::info;
 use tracing::trace;
+use tracing::{error, warn};
 
 use super::entities::file_index::Index;
 use super::entities::file_info::{full_path, Info};
