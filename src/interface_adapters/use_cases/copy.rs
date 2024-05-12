@@ -90,6 +90,7 @@ fn do_copy(
         if remove {
             fs::rename(full_path, target)?;
             trace!("MOVED\t[{}]\t[{}]", full_path, target);
+            // TODO different disk can't use rename
         } else {
             if fs::copy(full_path, target)? != src.size {
                 error!("COPY_FAILED\t[{}]\t[{}]", full_path, target);
