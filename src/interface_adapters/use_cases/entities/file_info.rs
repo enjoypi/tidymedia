@@ -165,12 +165,12 @@ impl Info {
         }
     }
 
-    pub fn is_media(&self) -> bool {
-        let exif = exif::Exif::from(self.full_path.as_str()).unwrap_or_else(|_| vec![]);
+    pub fn is_media(&self) -> Result<bool, exif::ExifError> {
+        let exif = exif::Exif::from(self.full_path.as_str())?;
         if exif.is_empty() {
-            return false;
+            return Ok(false);
         }
-        exif.first().unwrap().is_media()
+        Ok(exif.first().unwrap().is_media())
     }
 }
 

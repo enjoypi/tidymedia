@@ -27,7 +27,7 @@ fn main() -> std::io::Result<()> {
     // Create a `fmt` subscriber that uses our custom event format, and set it
     // as the default.
     tracing_subscriber::fmt()
-        .with_max_level(tracing::Level::TRACE)
+        .with_max_level(tracing::Level::INFO)
         .event_format(format)
         .init();
 

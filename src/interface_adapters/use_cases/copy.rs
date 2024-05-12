@@ -66,9 +66,16 @@ fn do_copy(
         return Ok(());
     }
 
-    if !src.is_media() {
-        warn!("IGNORED\t[{}]", full_path);
-        return Ok(());
+    match src.is_media() {
+        Ok(true) => {}
+        Ok(false) => {
+            warn!("IGNORED\t[{}]", full_path);
+            return Ok(());
+        }
+        Err(e) => {
+            error!("EXIF_ERROR\t[{}]\t{}", full_path, e);
+            return Ok(());
+        }
     }
 
     if let Some((target_dir, target)) = generate_unique_name(src, output_dir)? {
