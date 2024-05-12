@@ -127,7 +127,11 @@ fn generate_unique_name(
         .ok_or(Error::new(io::ErrorKind::InvalidInput, "Invalid file name"))?;
 
     let file_stem = full_path.file_stem().unwrap().to_string_lossy().to_string();
-    let ext = full_path.extension().unwrap().to_string_lossy().to_string();
+    let ext = if full_path.extension().is_none() {
+        "".to_string()
+    } else {
+        full_path.extension().unwrap().to_string_lossy().to_string()
+    };
 
     let create_time = src_file.create_time()?;
     let dt = OffsetDateTime::from(create_time).to_offset(CST.expect("CST"));
