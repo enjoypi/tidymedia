@@ -3,10 +3,12 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 use std::hash::Hash;
 use std::io;
+use std::io::Write;
 
 use rayon::prelude::*;
 use tracing::error;
 
+use super::exif;
 use super::file_info::Info;
 
 pub struct Index {
@@ -160,6 +162,23 @@ impl Index {
                 }
             }
         }
+    }
+
+    pub fn parse_exif(&mut self) -> Result<(), exif::ExifError> {
+        // write all filenames to a file
+        let mut file = std::fs::File::create("filenames.txt")?;
+        for (path, _) in self.files.iter() {
+            // file writeln
+            write!(&mut file, "{}", path)?;
+        }
+
+        let v = exif::Exif::from_args(vec!["-@", "filenames.txt"])?;
+        Ok(v.iter().for_each(|e| {
+            let path = e.source_file();
+            if let Some(info) = self.files.get_mut(path) {
+                info.set_exif(e.clone());
+            }
+        }))
     }
 }
 

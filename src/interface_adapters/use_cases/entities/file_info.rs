@@ -50,8 +50,10 @@ pub struct Info {
     pub full_path: String,
     pub size: u64,
 
-    meta: Metadata,
+    // exif info
+    exif: Option<exif::Exif>,
     lazy: Mutex<Lazy>,
+    meta: Metadata,
 }
 
 impl Info {
@@ -79,8 +81,9 @@ impl Info {
             fast_hash: first_hash,
             full_path,
             size: meta.len(),
-            meta,
+            exif: None,
             lazy: Mutex::new(Lazy::new(bytes_read as u64, second_hash)),
+            meta,
         })
     }
 
@@ -138,6 +141,10 @@ impl Info {
         }
     }
 
+    pub fn set_exif(&mut self, exif: exif::Exif) {
+        self.exif = Some(exif);
+    }
+
     pub fn create_time(&self) -> io::Result<SystemTime> {
         let file_create_time = self.meta.created()?;
         let file_modify_time = self.meta.modified()?;
@@ -165,12 +172,11 @@ impl Info {
         }
     }
 
-    pub fn is_media(&self) -> Result<bool, exif::ExifError> {
-        let exif = exif::Exif::from(self.full_path.as_str())?;
-        if exif.is_empty() {
-            return Ok(false);
+    pub fn is_media(&self) -> bool {
+        if self.exif.is_none() {
+            return false;
         }
-        Ok(exif.first().unwrap().is_media())
+        self.exif.as_ref().unwrap().is_media()
     }
 }
 

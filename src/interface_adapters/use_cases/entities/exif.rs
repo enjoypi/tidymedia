@@ -44,7 +44,6 @@ const EXIFTOOL_ARGS: [&str; 18] = [
 
 #[derive(Clone, Debug, Default, Deserialize)]
 pub struct Exif {
-    #[cfg(test)]
     #[serde(rename = "SourceFile")]
     source_file: Option<String>,
 
@@ -83,9 +82,13 @@ pub struct Exif {
 
 impl Exif {
     pub fn from(path: &str) -> Result<Vec<Self>, ExifError> {
+        Self::from_args(vec![path])
+    }
+
+    pub fn from_args(args: Vec<&str>) -> Result<Vec<Self>, ExifError> {
         let output = process::Command::new("exiftool")
             .args(EXIFTOOL_ARGS)
-            .arg(path)
+            .args(args)
             .output()?;
 
         if !output.stderr.is_empty() {
@@ -95,7 +98,7 @@ impl Exif {
         if !output.status.success() {
             return Err(ExifError::from(std::io::Error::new(
                 std::io::ErrorKind::Other,
-                format!("{:?}:{}", String::from_utf8_lossy(&output.stderr), path),
+                format!("{:?}", String::from_utf8_lossy(&output.stderr)), // TODO , args.clone())
             )));
         }
 
@@ -104,7 +107,6 @@ impl Exif {
         Ok(ret)
     }
 
-    #[cfg(test)]
     pub fn source_file(&self) -> &str {
         extract_string(&self.source_file)
     }

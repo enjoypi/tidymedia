@@ -25,7 +25,10 @@ pub fn copy(sources: Vec<String>, output: String, dry_run: bool, remove: bool) -
     let (output_dir, output_path) = full_path(output.as_str())?;
 
     let mut source = Index::new();
-    sources.iter().for_each(|s| source.visit_dir(s.as_str()));
+    sources.iter().for_each(|s| {
+        source.visit_dir(s.as_str());
+        source.parse_exif().unwrap_or_default();
+    });
     info!(
         "Files: {}, UniqueFiles: {}, BytesRead: {}",
         source.files().len(),
@@ -66,16 +69,9 @@ fn do_copy(
         return Ok(());
     }
 
-    match src.is_media() {
-        Ok(true) => {}
-        Ok(false) => {
-            warn!("IGNORED\t[{}]", full_path);
-            return Ok(());
-        }
-        Err(e) => {
-            error!("EXIF_ERROR\t[{}]\t{}", full_path, e);
-            return Ok(());
-        }
+    if !src.is_media() {
+        warn!("IGNORED\t[{}]", full_path);
+        return Ok(());
     }
 
     if let Some((target_dir, target)) = generate_unique_name(src, output_dir)? {
