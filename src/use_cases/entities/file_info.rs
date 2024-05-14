@@ -141,6 +141,9 @@ impl Info {
         }
     }
 
+    pub fn exif(&self) -> Option<&exif::Exif> {
+        self.exif.as_ref()
+    }
     pub fn set_exif(&mut self, exif: exif::Exif) {
         self.exif = Some(exif);
     }
@@ -190,8 +193,7 @@ impl PartialEq for Info {
 
 pub fn full_path(path: &str) -> io::Result<(String, PathBuf)> {
     let path_buf = fs::canonicalize(path)?;
-
-    let full = match path_buf.to_str() {
+    let mut full = match path_buf.to_str() {
         Some(s) => s,
         None => {
             return Err(Error::new(
@@ -201,9 +203,13 @@ pub fn full_path(path: &str) -> io::Result<(String, PathBuf)> {
         }
     };
 
-    #[cfg(target_os = "windows")]
-    let full = full.strip_prefix("\\\\?\\").unwrap_or(full);
+    #[cfg(target_os = "windows")] {
+        full = full.strip_prefix("\\\\?\\").unwrap_or(full);
+        let full = full.replace('\\', "/");
+        Ok((full.clone(), PathBuf::from(full)))
+    }
 
+    #[cfg(not(target_os = "windows"))]
     Ok((full.to_string(), PathBuf::from(full)))
 }
 
@@ -243,8 +249,8 @@ mod tests {
     use wyhash;
     use xxhash_rust::xxh3;
 
-    use super::super::test_common as common;
     use super::Info;
+    use super::super::test_common as common;
 
     struct HashTest {
         short_wyhash: u64,
@@ -407,10 +413,10 @@ mod tests {
         let path = path.to_str().unwrap();
         assert_eq!(
             path,
-            "\\\\?\\D:\\zhoufan\\prj\\tidymedia\\tests\\data\\data_small"
+            "\\\\?\\C:\\Users\\user\\prj\\tidymedia\\tests\\data\\data_small"
         );
         assert_eq!(
-            "D:\\zhoufan\\prj\\tidymedia\\tests\\data\\data_small",
+            "C:\\Users\\user\\prj\\tidymedia\\tests\\data\\data_small",
             path.strip_prefix("\\\\?\\").unwrap()
         );
 

@@ -64,9 +64,9 @@ impl Index {
     }
 
     pub fn calc_same<F, T>(&self, calc: F) -> Vec<HashMap<(u64, T), HashSet<String>>>
-    where
-        F: Fn(&Info) -> io::Result<T> + Send + Sync,
-        T: Eq + Hash + Send,
+        where
+            F: Fn(&Info) -> io::Result<T> + Send + Sync,
+            T: Eq + Hash + Send,
     {
         let multiple: HashMap<_, _> = self
             .similar_files
@@ -166,19 +166,23 @@ impl Index {
 
     pub fn parse_exif(&mut self) -> Result<(), exif::ExifError> {
         // write all filenames to a file
-        let mut file = std::fs::File::create("filenames.txt")?;
-        for (path, _) in self.files.iter() {
-            // file writeln
-            write!(&mut file, "{}", path)?;
-        }
+        let mut file = tempfile::NamedTempFile::new()?;
+        let mut filenames: Vec<String> = self.files.keys().cloned().collect();
+        filenames.sort();
 
-        let v = exif::Exif::from_args(vec!["-@", "filenames.txt"])?;
-        Ok(v.iter().for_each(|e| {
-            let path = e.source_file();
-            if let Some(info) = self.files.get_mut(path) {
+        for filename in filenames.iter() {
+            // file writeln
+            writeln!(&mut file, "{}", filename)?;
+        }
+        file.flush()?;
+
+        let v = exif::Exif::from_args(vec!["-@", file.path().to_str().unwrap()])?;
+        v.iter().for_each(|e| {
+            if let Some(info) = self.files.get_mut(e.source_file()) {
                 info.set_exif(e.clone());
             }
-        }))
+        });
+        Ok(())
     }
 }
 
@@ -187,8 +191,8 @@ mod tests {
     use std::collections::BTreeMap;
     use std::fs;
 
-    use super::super::test_common as common;
     use super::Index;
+    use super::super::test_common as common;
 
     #[test]
     fn insert() -> common::Result {
@@ -201,7 +205,7 @@ mod tests {
                 .to_str()
                 .unwrap()
                 .strip_prefix("\\\\?\\")
-                .unwrap()
+                .unwrap().replace('\\', "/")
         );
         assert_eq!(info.fast_hash, common::DATA_SMALL_WYHASH);
 
@@ -226,7 +230,7 @@ mod tests {
                 .to_str()
                 .unwrap()
                 .strip_prefix("\\\\?\\")
-                .unwrap()
+                .unwrap().replace('\\', "/")
         );
         assert_eq!(
             same[&common::DATA_LARGE_LEN][1],
@@ -234,7 +238,7 @@ mod tests {
                 .to_str()
                 .unwrap()
                 .strip_prefix("\\\\?\\")
-                .unwrap()
+                .unwrap().replace('\\', "/")
         );
         assert_eq!(
             same[&common::DATA_SMALL_LEN][0],
@@ -242,7 +246,7 @@ mod tests {
                 .to_str()
                 .unwrap()
                 .strip_prefix("\\\\?\\")
-                .unwrap()
+                .unwrap().replace('\\', "/")
         );
         assert_eq!(
             same[&common::DATA_SMALL_LEN][1],
@@ -250,8 +254,26 @@ mod tests {
                 .to_str()
                 .unwrap()
                 .strip_prefix("\\\\?\\")
-                .unwrap()
+                .unwrap().replace('\\', "/")
         );
+
+        Ok(())
+    }
+
+    #[test]
+    fn parse_exif() -> common::Result {
+        let mut index = Index::new();
+        index.visit_dir(common::DATA_DIR);
+        index.parse_exif()?;
+
+        let full_path = fs::canonicalize(common::DATA_DNS_BENCHMARK)?;
+        let full_path = full_path.to_str().unwrap().strip_prefix("\\\\?\\").unwrap().replace('\\', "/");
+        let info = index.files.get(full_path.as_str()).unwrap();
+        let exif = info.exif().unwrap();
+        assert_eq!(exif.source_file(), full_path);
+        assert_eq!(exif.file_modify_date(), 1706076164);
+        assert_eq!(exif.media_create_date(), 1706076164);
+        assert!(exif.is_media());
 
         Ok(())
     }

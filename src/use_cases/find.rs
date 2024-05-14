@@ -81,7 +81,7 @@ fn comment() -> &'static str {
 
 #[cfg(target_os = "windows")]
 fn rm() -> &'static str {
-    "del"
+    "DEL"
 }
 
 #[cfg(not(target_os = "windows"))]
