@@ -6,9 +6,9 @@ use std::path::{Component, Path};
 use time::error;
 use time::OffsetDateTime;
 use time::UtcOffset;
+use tracing::{error, warn};
 use tracing::info;
 use tracing::trace;
-use tracing::{error, warn};
 
 use super::entities::file_index::Index;
 use super::entities::file_info::{full_path, Info};
@@ -27,8 +27,12 @@ pub fn copy(sources: Vec<String>, output: String, dry_run: bool, remove: bool) -
     let mut source = Index::new();
     sources.iter().for_each(|s| {
         source.visit_dir(s.as_str());
-        source.parse_exif().unwrap_or_default();
+        if let Err(e) = source.parse_exif() {
+            error!("{}", e);
+        }
     });
+    trace!("Files: {:#?}", source);
+
     info!(
         "Files: {}, UniqueFiles: {}, BytesRead: {}",
         source.files().len(),

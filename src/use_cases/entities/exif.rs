@@ -19,13 +19,12 @@ pub enum ExifError {
 
 const META_TYPE_IMAGE: &str = "image/";
 const META_TYPE_VIDEO: &str = "video/";
-const EXIFTOOL_ARGS: [&str; 21] = [
+const EXIFTOOL_ARGS: [&str; 20] = [
     "-a", // Allow duplicate tags to be extracted
     "-charset",
     "filename=UTF8", // FileName to specify the encoding of file names on the command line
     "-d",            // Set format for date/time values
     "%s",            // seconds
-    "-ee",           // Extract embedded information
     "-fast2", // -fast2 may be used to also avoid extracting MakerNote information if this is not required
     "-G",     // Print group name for each tag
     "-j",     // Export/import tags in JSON format
@@ -82,6 +81,7 @@ pub struct Exif {
 }
 
 impl Exif {
+    #[cfg(test)]
     pub fn from(path: &str) -> Result<Vec<Self>, ExifError> {
         Self::from_args(vec![path])
     }
@@ -99,7 +99,7 @@ impl Exif {
 
         if !output.status.success() {
             let args: Vec<_> = cmd.get_args().collect();
-            error!("{}\t{:?}", String::from_utf8_lossy(&output.stderr), args);
+            error!("exiftool failed {:?}", args);
         }
 
         let output = String::from_utf8(output.stdout)?;

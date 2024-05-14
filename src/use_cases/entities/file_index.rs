@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::fmt;
 use std::hash::Hash;
 use std::io;
 use std::io::Write;
@@ -16,6 +17,13 @@ pub struct Index {
     similar_files: HashMap<u64, HashSet<String>>,
     // file path -> file meta
     files: HashMap<String, Info>,
+}
+
+impl fmt::Debug for Index {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        writeln!(f, "{:#?}", self.files)?;
+        Ok(())
+    }
 }
 
 impl Index {

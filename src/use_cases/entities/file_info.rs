@@ -13,7 +13,6 @@ use generic_array::GenericArray;
 use memmap2::Mmap;
 use sha2::Digest;
 use sha2::Sha512;
-use tracing::warn;
 
 use super::{exif, SecureHash};
 
@@ -43,7 +42,6 @@ impl Lazy {
     }
 }
 
-#[derive(Debug)]
 pub struct Info {
     // 64 bit hash  from the first FAST_READ_SIZE bytes
     pub fast_hash: u64,
@@ -54,6 +52,18 @@ pub struct Info {
     exif: Option<exif::Exif>,
     lazy: Mutex<Lazy>,
     meta: Metadata,
+}
+
+impl std::fmt::Debug for Info {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "fast_hash: {}, size: {}\n{:#?}",
+            self.fast_hash,
+            self.size,
+            self.exif
+        )
+    }
 }
 
 impl Info {
@@ -141,6 +151,7 @@ impl Info {
         }
     }
 
+    #[cfg(test)]
     pub fn exif(&self) -> Option<&exif::Exif> {
         self.exif.as_ref()
     }
@@ -158,14 +169,10 @@ impl Info {
             file_create_time
         };
 
-        let exif = exif::Exif::from(self.full_path.as_str()).unwrap_or_else(|e| {
-            warn!("Parse exif info from {} error {}", self.full_path, e);
-            vec![]
-        });
-        if exif.is_empty() {
+        if self.exif.is_none() {
             return Ok(real_create_time);
         }
-        let exif = exif.first().unwrap();
+        let exif = self.exif.as_ref().unwrap();
 
         let t = exif.media_create_date();
         if t > VALID_DATE_TIME {
