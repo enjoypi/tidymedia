@@ -19,7 +19,7 @@ pub enum ExifError {
 
 const META_TYPE_IMAGE: &str = "image/";
 const META_TYPE_VIDEO: &str = "video/";
-const EXIFTOOL_ARGS: [&str; 20] = [
+const EXIFTOOL_ARGS: [&str; 19] = [
     "-a", // Allow duplicate tags to be extracted
     "-charset",
     "filename=UTF8", // FileName to specify the encoding of file names on the command line
@@ -28,7 +28,6 @@ const EXIFTOOL_ARGS: [&str; 20] = [
     "-fast2", // -fast2 may be used to also avoid extracting MakerNote information if this is not required
     "-G",     // Print group name for each tag
     "-j",     // Export/import tags in JSON format
-    "-L",     // Use Windows Latin1 encoding
     "-m",     // Ignore minor errors and warnings
     "-q",     // Quiet processing
     "-r",     // Recursively process subdirectories
