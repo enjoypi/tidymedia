@@ -162,14 +162,11 @@ fn generate_unique_name(
             let target = target.to_str().unwrap().to_string();
 
             #[cfg(target_os = "windows")]
-                let sub_dir= sub_dir.replace('\\', "/");
+            let sub_dir = sub_dir.replace('\\', "/");
             #[cfg(target_os = "windows")]
-                let target = target.replace('\\', "/");
+            let target = target.replace('\\', "/");
 
-            return Ok(Some((
-                sub_dir,
-                target,
-            )));
+            return Ok(Some((sub_dir, target)));
         }
     }
     Ok(None)

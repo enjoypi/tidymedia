@@ -72,9 +72,9 @@ impl Index {
     }
 
     pub fn calc_same<F, T>(&self, calc: F) -> Vec<HashMap<(u64, T), HashSet<String>>>
-        where
-            F: Fn(&Info) -> io::Result<T> + Send + Sync,
-            T: Eq + Hash + Send,
+    where
+        F: Fn(&Info) -> io::Result<T> + Send + Sync,
+        T: Eq + Hash + Send,
     {
         let multiple: HashMap<_, _> = self
             .similar_files
@@ -213,7 +213,8 @@ mod tests {
                 .to_str()
                 .unwrap()
                 .strip_prefix("\\\\?\\")
-                .unwrap().replace('\\', "/")
+                .unwrap()
+                .replace('\\', "/")
         );
         assert_eq!(info.fast_hash, common::DATA_SMALL_WYHASH);
 
@@ -238,7 +239,8 @@ mod tests {
                 .to_str()
                 .unwrap()
                 .strip_prefix("\\\\?\\")
-                .unwrap().replace('\\', "/")
+                .unwrap()
+                .replace('\\', "/")
         );
         assert_eq!(
             same[&common::DATA_LARGE_LEN][1],
@@ -246,7 +248,8 @@ mod tests {
                 .to_str()
                 .unwrap()
                 .strip_prefix("\\\\?\\")
-                .unwrap().replace('\\', "/")
+                .unwrap()
+                .replace('\\', "/")
         );
         assert_eq!(
             same[&common::DATA_SMALL_LEN][0],
@@ -254,7 +257,8 @@ mod tests {
                 .to_str()
                 .unwrap()
                 .strip_prefix("\\\\?\\")
-                .unwrap().replace('\\', "/")
+                .unwrap()
+                .replace('\\', "/")
         );
         assert_eq!(
             same[&common::DATA_SMALL_LEN][1],
@@ -262,7 +266,8 @@ mod tests {
                 .to_str()
                 .unwrap()
                 .strip_prefix("\\\\?\\")
-                .unwrap().replace('\\', "/")
+                .unwrap()
+                .replace('\\', "/")
         );
 
         Ok(())
@@ -275,7 +280,12 @@ mod tests {
         index.parse_exif()?;
 
         let full_path = fs::canonicalize(common::DATA_DNS_BENCHMARK)?;
-        let full_path = full_path.to_str().unwrap().strip_prefix("\\\\?\\").unwrap().replace('\\', "/");
+        let full_path = full_path
+            .to_str()
+            .unwrap()
+            .strip_prefix("\\\\?\\")
+            .unwrap()
+            .replace('\\', "/");
         let info = index.files.get(full_path.as_str()).unwrap();
         let exif = info.exif().unwrap();
         assert_eq!(exif.source_file(), full_path);

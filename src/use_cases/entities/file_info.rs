@@ -59,9 +59,7 @@ impl std::fmt::Debug for Info {
         write!(
             f,
             "fast_hash: {}, size: {}\n{:#?}",
-            self.fast_hash,
-            self.size,
-            self.exif
+            self.fast_hash, self.size, self.exif
         )
     }
 }
@@ -210,7 +208,8 @@ pub fn full_path(path: &str) -> io::Result<(String, PathBuf)> {
         }
     };
 
-    #[cfg(target_os = "windows")] {
+    #[cfg(target_os = "windows")]
+    {
         full = full.strip_prefix("\\\\?\\").unwrap_or(full);
         let full = full.replace('\\', "/");
         Ok((full.clone(), PathBuf::from(full)))
