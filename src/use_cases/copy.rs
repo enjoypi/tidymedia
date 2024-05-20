@@ -158,9 +158,17 @@ fn generate_unique_name(
         };
 
         if !target.exists() {
+            let sub_dir = sub_dir.to_str().unwrap().to_string();
+            let target = target.to_str().unwrap().to_string();
+
+            #[cfg(target_os = "windows")]
+                let sub_dir= sub_dir.replace('\\', "/");
+            #[cfg(target_os = "windows")]
+                let target = target.replace('\\', "/");
+
             return Ok(Some((
-                sub_dir.to_str().unwrap().to_string(),
-                target.to_str().unwrap().to_string(),
+                sub_dir,
+                target,
             )));
         }
     }

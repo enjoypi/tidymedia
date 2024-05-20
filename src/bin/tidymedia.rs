@@ -21,13 +21,13 @@ fn main() -> std::io::Result<()> {
     let format = fmt::format()
         .with_ansi(false)
         // .with_level(false) // don't include levels in formatted output
-        .with_target(false) // don't include targets
+        .with_target(true) // don't include targets
         .compact(); // use the `Compact` formatting style.
 
     // Create a `fmt` subscriber that uses our custom event format, and set it
     // as the default.
     tracing_subscriber::fmt()
-        .with_max_level(tracing::Level::INFO)
+        .with_max_level(tracing::Level::TRACE)
         .event_format(format)
         .init();
 
