@@ -8,7 +8,16 @@ use tracing_subscriber::fmt;
 #[command(author, version, about, long_about = None)]
 struct Cli {
     #[arg(short, long, default_value = "info")]
-    log: String,
+    log_level: tracing::Level,
+
+    #[arg(long, default_value = "false")]
+    log_line_number: bool,
+
+    #[arg(long, default_value = "false")]
+    log_target: bool,
+
+    #[arg(long, default_value = "false")]
+    log_thread_ids: bool,
 
     #[clap(subcommand)]
     command: tidymedia::Commands,
@@ -20,14 +29,16 @@ fn main() -> std::io::Result<()> {
     // Configure a custom event formatter
     let format = fmt::format()
         .with_ansi(false)
-        // .with_level(false) // don't include levels in formatted output
-        .with_target(true) // don't include targets
+        .with_line_number(cli.log_line_number)
+        .with_target(cli.log_target)
+        .with_thread_ids(cli.log_thread_ids)
         .compact(); // use the `Compact` formatting style.
 
     // Create a `fmt` subscriber that uses our custom event format, and set it
     // as the default.
     tracing_subscriber::fmt()
-        .with_max_level(tracing::Level::TRACE)
+        .with_max_level(cli.log_level)
+        .with_writer(std::io::stderr)
         .event_format(format)
         .init();
 
