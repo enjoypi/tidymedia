@@ -1,5 +1,7 @@
 use std::process;
 
+use camino::Utf8Path;
+use camino::Utf8PathBuf;
 use serde_derive::Deserialize;
 use serde_json::Value;
 use thiserror::Error;
@@ -44,7 +46,7 @@ const EXIFTOOL_ARGS: [&str; 19] = [
 #[derive(Clone, Debug, Default, Deserialize)]
 pub struct Exif {
     #[serde(rename = "SourceFile")]
-    source_file: String,
+    source_file: Utf8PathBuf,
 
     #[serde(rename = "File:FileModifyDate")]
     file_modify_date: Option<Value>,
@@ -107,8 +109,8 @@ impl Exif {
         Ok(ret)
     }
 
-    pub fn source_file(&self) -> &str {
-        self.source_file.as_str()
+    pub fn source_file(&self) -> &Utf8Path {
+        self.source_file.as_path()
     }
 
     pub fn mime_type(&self) -> &str {

@@ -1,11 +1,12 @@
 [package]
 name = "tidymedia"
-version = "1.0.3"
+version = "1.0.4"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+camino = { version = "*", features = ["serde1"] }
 clap = { version = "*", features = ["derive"] }
 generic-array = "0"
 hex = "*"

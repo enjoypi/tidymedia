@@ -1,8 +1,10 @@
 use std::fs;
 use std::io;
-use std::io::{Error, ErrorKind};
-use std::path::{Component, Path};
+use std::io::ErrorKind;
 
+use camino::Utf8Component;
+use camino::Utf8Path;
+use camino::Utf8PathBuf;
 use time::error;
 use time::OffsetDateTime;
 use time::UtcOffset;
@@ -18,11 +20,11 @@ const MONTH: [&str; 13] = [
     "00", "01", "02", "03", "04", "05", "06", "07", "08", "09", "10", "11", "12",
 ];
 
-pub fn copy(sources: Vec<String>, output: String, dry_run: bool, remove: bool) -> io::Result<()> {
+pub fn copy(sources: Vec<Utf8PathBuf>, output: Utf8PathBuf, dry_run: bool, remove: bool) -> io::Result<()> {
     if !dry_run {
         fs::create_dir_all(output.as_str())?;
     }
-    let (output_dir, output_path) = full_path(output.as_str())?;
+    let output_path = full_path(output.as_str())?;
 
     let mut source = Index::new();
     sources.iter().for_each(|s| {
@@ -41,7 +43,7 @@ pub fn copy(sources: Vec<String>, output: String, dry_run: bool, remove: bool) -
     );
 
     let mut output_index = Index::new();
-    output_index.visit_dir(output_dir.as_str());
+    output_index.visit_dir(output_path.as_str());
 
     let mut copied = 0;
     source.files().iter().for_each(|(_, src)| {
@@ -58,7 +60,7 @@ pub fn copy(sources: Vec<String>, output: String, dry_run: bool, remove: bool) -
 
 fn do_copy(
     src: &Info,
-    output_dir: &Path,
+    output_dir: &Utf8PathBuf,
     output_index: &mut Index,
     dry_run: bool,
     remove: bool,
@@ -115,23 +117,21 @@ fn do_copy(
 
 fn generate_unique_name(
     src_file: &Info,
-    output_dir: &Path,
+    output_dir: &Utf8PathBuf,
 ) -> io::Result<Option<(String, String)>> {
-    let full_path = Path::new(src_file.full_path.as_str());
+    let full_path = Utf8Path::new(src_file.full_path.as_str());
     let file_name = full_path
         .file_name()
         .ok_or(io::Error::new(
             io::ErrorKind::InvalidInput,
             "Invalid file name",
-        ))?
-        .to_str()
-        .ok_or(Error::new(io::ErrorKind::InvalidInput, "Invalid file name"))?;
+        ))?;
 
-    let file_stem = full_path.file_stem().unwrap().to_string_lossy().to_string();
+    let file_stem = full_path.file_stem().unwrap().to_string();
     let ext = if full_path.extension().is_none() {
         "".to_string()
     } else {
-        full_path.extension().unwrap().to_string_lossy().to_string()
+        full_path.extension().unwrap().to_string()
     };
 
     let create_time = src_file.create_time()?;
@@ -158,13 +158,13 @@ fn generate_unique_name(
         };
 
         if !target.exists() {
-            let sub_dir = sub_dir.to_str().unwrap().to_string();
-            let target = target.to_str().unwrap().to_string();
+            let sub_dir = sub_dir.to_string();
+            let target = target.to_string();
 
             #[cfg(target_os = "windows")]
-            let sub_dir = sub_dir.replace('\\', "/");
+                let sub_dir = sub_dir.replace('\\', "/");
             #[cfg(target_os = "windows")]
-            let target = target.replace('\\', "/");
+                let target = target.replace('\\', "/");
 
             return Ok(Some((sub_dir, target)));
         }
@@ -176,17 +176,15 @@ fn any_non_english(s: &str) -> bool {
     s.chars().any(|c| c as u32 > 127)
 }
 
-fn extract_valuable_name(full_path: &Path) -> String {
-    let mut components: Vec<Component> = full_path.components().collect();
+fn extract_valuable_name(full_path: &Utf8Path) -> String {
+    let mut components: Vec<Utf8Component> = full_path.components().collect();
     // pop the file name
     if components.len() > 1 {
         components.pop();
     }
 
     for c in components.into_iter().rev() {
-        if let Component::Normal(s) = c {
-            let s = s.to_string_lossy();
-            let s = s.as_ref();
+        if let Utf8Component::Normal(s) = c {
             if any_non_english(s) {
                 return s.to_string();
             }
@@ -207,25 +205,25 @@ mod test {
 
     #[test]
     fn test_extract_valuable_name() {
-        let path = Path::new("/a/b/c/d/e/f/g/h/i/j/k/l/m/n/o/p/q/r/s/t/u/v/w/x/y/z");
+        let path = Utf8Path::new("/a/b/c/d/e/f/g/h/i/j/k/l/m/n/o/p/q/r/s/t/u/v/w/x/y/z");
         assert_eq!(extract_valuable_name(path), "");
 
-        let path = Path::new("/a/b/c/d/e/f/g/h/i/j/k/l/m/n/o/p/q/r/s/t/u/v/w/x/y/中文/abc");
+        let path = Utf8Path::new("/a/b/c/d/e/f/g/h/i/j/k/l/m/n/o/p/q/r/s/t/u/v/w/x/y/中文/abc");
         assert_eq!(extract_valuable_name(path), "中文");
 
-        let path = Path::new("D:\\todo\\Pictures\\ 高一元 旦晚会 \\102_PANA\\P1020486.MP4");
+        let path = Utf8Path::new("D:\\todo\\Pictures\\ 高一元 旦晚会 \\102_PANA\\P1020486.MP4");
         assert_eq!(extract_valuable_name(path), " 高一元 旦晚会 ");
 
-        let path = Path::new("D:\\todo\\Pictures\\a高一 元旦晚会\\102_PANA\\P1020486.MP4");
+        let path = Utf8Path::new("D:\\todo\\Pictures\\a高一 元旦晚会\\102_PANA\\P1020486.MP4");
         assert_eq!(extract_valuable_name(path), "a高一 元旦晚会");
 
-        let path = Path::new("D:\\todo\\Pictures\\高一 元旦晚会 z\\102_PANA\\P1020486.MP4");
+        let path = Utf8Path::new("D:\\todo\\Pictures\\高一 元旦晚会 z\\102_PANA\\P1020486.MP4");
         assert_eq!(extract_valuable_name(path), "高一 元旦晚会 z");
 
-        let path = Path::new("D:\\todo\\Pictures\\_高一 元旦晚会\\102_PANA\\P1020486.MP4");
+        let path = Utf8Path::new("D:\\todo\\Pictures\\_高一 元旦晚会\\102_PANA\\P1020486.MP4");
         assert_eq!(extract_valuable_name(path), "_高一 元旦晚会");
 
-        let path = Path::new("D:\\todo\\Pictures\\高一 元旦晚会_\\102_PANA\\P1020486.MP4");
+        let path = Utf8Path::new("D:\\todo\\Pictures\\高一 元旦晚会_\\102_PANA\\P1020486.MP4");
         assert_eq!(extract_valuable_name(path), "高一 元旦晚会_");
     }
 }

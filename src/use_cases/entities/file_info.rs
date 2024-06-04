@@ -4,11 +4,12 @@ use std::io;
 use std::io::Error;
 use std::io::ErrorKind;
 use std::io::Read;
-use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::Duration;
 use std::time::SystemTime;
 
+use camino::Utf8Path;
+use camino::Utf8PathBuf;
 use generic_array::GenericArray;
 use memmap2::Mmap;
 use sha2::Digest;
@@ -45,7 +46,7 @@ impl Lazy {
 pub struct Info {
     // 64 bit hash  from the first FAST_READ_SIZE bytes
     pub fast_hash: u64,
-    pub full_path: String,
+    pub full_path: Utf8PathBuf,
     pub size: u64,
 
     // exif info
@@ -66,9 +67,9 @@ impl std::fmt::Debug for Info {
 
 impl Info {
     pub fn from(path: &str) -> io::Result<Self> {
-        let (full_path, path_buf) = full_path(path)?;
+        let full_path = full_path(path)?;
 
-        let meta = path_buf.metadata()?;
+        let meta = full_path.metadata()?;
         if !meta.is_file() {
             return Err(Error::new(
                 ErrorKind::Other,
@@ -95,8 +96,8 @@ impl Info {
         })
     }
 
-    pub fn from_path(path: &Path) -> io::Result<Self> {
-        Self::from(path.to_str().unwrap())
+    pub fn from_path(path: &Utf8Path) -> io::Result<Self> {
+        Self::from(path.as_str())
     }
 
     pub fn bytes_read(&self) -> u64 {
@@ -196,27 +197,19 @@ impl PartialEq for Info {
     }
 }
 
-pub fn full_path(path: &str) -> io::Result<(String, PathBuf)> {
-    let path_buf = fs::canonicalize(path)?;
-    let mut full = match path_buf.to_str() {
-        Some(s) => s,
-        None => {
-            return Err(Error::new(
-                ErrorKind::InvalidInput,
-                format!("invalid filename {}", path),
-            ));
-        }
-    };
+pub fn full_path(path: &str) -> io::Result<Utf8PathBuf> {
+    let full = Utf8Path::new(path).canonicalize_utf8()?;
+    let full = full.as_str();
 
     #[cfg(target_os = "windows")]
     {
-        full = full.strip_prefix("\\\\?\\").unwrap_or(full);
+        let full = full.strip_prefix("\\\\?\\").unwrap_or(full);
         let full = full.replace('\\', "/");
-        Ok((full.clone(), PathBuf::from(full)))
+        Ok(Utf8PathBuf::from(full))
     }
 
     #[cfg(not(target_os = "windows"))]
-    Ok((full.to_string(), PathBuf::from(full)))
+    Ok(Utf8PathBuf::from(full))
 }
 
 fn fast_hash(path: &str) -> io::Result<(usize, u64, u64)> {

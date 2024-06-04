@@ -1,5 +1,6 @@
 use std::io;
 
+use camino::Utf8PathBuf;
 use clap::Subcommand;
 
 mod use_cases;
@@ -14,11 +15,11 @@ pub enum Commands {
 
         /// The source directories or files
         #[arg(required = true)]
-        sources: Vec<String>,
+        sources: Vec<Utf8PathBuf>,
 
         /// The output directory
         #[arg(short, long)]
-        output: String,
+        output: Utf8PathBuf,
     },
 
     /// Find all duplicate files in the source directory and print a shell script (using batch file syntax for Windows) to delete the duplicate files on standard output. If the output parameter is provided, then deletion operations for files located in the output directory will be commented out.
@@ -29,11 +30,11 @@ pub enum Commands {
 
         /// The source directories or files
         #[arg(required = true)]
-        sources: Vec<String>,
+        sources: Vec<Utf8PathBuf>,
 
         /// The output directory
         #[arg(short, long)]
-        output: Option<String>,
+        output: Option<Utf8PathBuf>,
     },
 
     /// Move non-duplicate files from the source directory to the output directory. Duplicate files already present in the output directory will be deleted.
@@ -44,11 +45,11 @@ pub enum Commands {
 
         /// The source directories or files
         #[arg(required = true)]
-        sources: Vec<String>,
+        sources: Vec<Utf8PathBuf>,
 
         /// The output directory
         #[arg(short, long)]
-        output: String,
+        output: Utf8PathBuf,
     },
 }
 
