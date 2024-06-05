@@ -68,7 +68,6 @@ impl std::fmt::Debug for Info {
 impl Info {
     pub fn from(path: &str) -> io::Result<Self> {
         let full_path = full_path(path)?;
-
         let meta = full_path.metadata()?;
         if !meta.is_file() {
             return Err(Error::new(
@@ -198,17 +197,17 @@ impl PartialEq for Info {
 }
 
 pub fn full_path(path: &str) -> io::Result<Utf8PathBuf> {
-    let full = Utf8Path::new(path).canonicalize_utf8()?;
+    let full = Utf8Path::new(path);
+    if full.is_absolute() {
+        return Ok(full.to_path_buf());
+    }
+
+    let full = full.canonicalize_utf8()?;
     let full = full.as_str();
 
     #[cfg(target_os = "windows")]
-    {
-        let full = full.strip_prefix("\\\\?\\").unwrap_or(full);
-        let full = full.replace('\\', "/");
-        Ok(Utf8PathBuf::from(full))
-    }
+    let full = full.strip_prefix("\\\\?\\").unwrap_or(full);
 
-    #[cfg(not(target_os = "windows"))]
     Ok(Utf8PathBuf::from(full))
 }
 
@@ -244,12 +243,13 @@ mod tests {
     use std::io::Read;
     use std::io::Seek;
 
+    use camino::Utf8Path;
     use sha2::Digest;
     use wyhash;
     use xxhash_rust::xxh3;
 
-    use super::Info;
     use super::super::test_common as common;
+    use super::Info;
 
     struct HashTest {
         short_wyhash: u64,
@@ -408,11 +408,11 @@ mod tests {
 
     #[test]
     fn strip_prefix() -> common::Result {
-        let path = fs::canonicalize(common::DATA_SMALL)?;
-        let path = path.to_str().unwrap();
+        let path = Utf8Path::new(common::DATA_SMALL).canonicalize_utf8()?;
+        let path = path.as_str();
         assert_eq!(
-            path,
-            "\\\\?\\C:\\Users\\user\\prj\\tidymedia\\tests\\data\\data_small"
+            "\\\\?\\C:\\Users\\user\\prj\\tidymedia\\tests\\data\\data_small",
+            path
         );
         assert_eq!(
             "C:\\Users\\user\\prj\\tidymedia\\tests\\data\\data_small",

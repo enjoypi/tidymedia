@@ -8,9 +8,9 @@ use camino::Utf8PathBuf;
 use time::error;
 use time::OffsetDateTime;
 use time::UtcOffset;
-use tracing::{error, warn};
 use tracing::info;
 use tracing::trace;
+use tracing::{error, warn};
 
 use super::entities::file_index::Index;
 use super::entities::file_info::{full_path, Info};
@@ -20,14 +20,14 @@ const MONTH: [&str; 13] = [
     "00", "01", "02", "03", "04", "05", "06", "07", "08", "09", "10", "11", "12",
 ];
 
-pub fn copy(sources: Vec<Utf8PathBuf>, output: Utf8PathBuf, dry_run: bool, remove: bool) -> io::Result<()> {
-    if !dry_run {
-        fs::create_dir_all(output.as_str())?;
-    }
-    let output_path = full_path(output.as_str())?;
-
+pub fn copy(
+    input_dirs: Vec<Utf8PathBuf>,
+    output: Utf8PathBuf,
+    dry_run: bool,
+    remove: bool,
+) -> io::Result<()> {
     let mut source = Index::new();
-    sources.iter().for_each(|s| {
+    input_dirs.iter().for_each(|s| {
         source.visit_dir(s.as_str());
         if let Err(e) = source.parse_exif() {
             error!("{}", e);
@@ -41,6 +41,15 @@ pub fn copy(sources: Vec<Utf8PathBuf>, output: Utf8PathBuf, dry_run: bool, remov
         source.similar_files().len(),
         source.bytes_read(),
     );
+
+    if source.files().is_empty() {
+        return Ok(());
+    }
+
+    let output_path = full_path(output.as_str())?;
+    if !dry_run {
+        fs::create_dir_all(output.as_str())?;
+    }
 
     let mut output_index = Index::new();
     output_index.visit_dir(output_path.as_str());
@@ -120,12 +129,10 @@ fn generate_unique_name(
     output_dir: &Utf8PathBuf,
 ) -> io::Result<Option<(String, String)>> {
     let full_path = Utf8Path::new(src_file.full_path.as_str());
-    let file_name = full_path
-        .file_name()
-        .ok_or(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "Invalid file name",
-        ))?;
+    let file_name = full_path.file_name().ok_or(io::Error::new(
+        io::ErrorKind::InvalidInput,
+        "Invalid file name",
+    ))?;
 
     let file_stem = full_path.file_stem().unwrap().to_string();
     let ext = if full_path.extension().is_none() {
@@ -160,11 +167,6 @@ fn generate_unique_name(
         if !target.exists() {
             let sub_dir = sub_dir.to_string();
             let target = target.to_string();
-
-            #[cfg(target_os = "windows")]
-                let sub_dir = sub_dir.replace('\\', "/");
-            #[cfg(target_os = "windows")]
-                let target = target.replace('\\', "/");
 
             return Ok(Some((sub_dir, target)));
         }

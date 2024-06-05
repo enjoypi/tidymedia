@@ -104,7 +104,14 @@ impl Exif {
         }
 
         let output = String::from_utf8(output.stdout)?;
-        let ret: Vec<Exif> = serde_json::from_str(&output)?;
+        let mut ret: Vec<Exif> = serde_json::from_str(&output)?;
+        #[cfg(target_os = "windows")]
+        {
+            ret.iter_mut().for_each(|x| {
+                let s = x.source_file.as_str().replace('/', "\\");
+                x.source_file = Utf8PathBuf::from(s);
+            })
+        }
 
         Ok(ret)
     }
@@ -227,8 +234,8 @@ mod test {
 
     use tempfile;
 
-    use super::Exif;
     use super::super::test_common as common;
+    use super::Exif;
 
     #[test]
     fn test_exif() -> common::Result {

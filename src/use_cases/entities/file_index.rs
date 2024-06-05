@@ -73,9 +73,9 @@ impl Index {
     }
 
     pub fn calc_same<F, T>(&self, calc: F) -> Vec<HashMap<(u64, T), HashSet<Utf8PathBuf>>>
-        where
-            F: Fn(&Info) -> io::Result<T> + Send + Sync,
-            T: Eq + Hash + Send,
+    where
+        F: Fn(&Info) -> io::Result<T> + Send + Sync,
+        T: Eq + Hash + Send,
     {
         let multiple: HashMap<_, _> = self
             .similar_files
@@ -155,7 +155,11 @@ impl Index {
         let paths: Vec<Utf8PathBuf> = Walk::new(path)
             .filter_map(|entry| entry.ok())
             .filter(|entry| entry.metadata().unwrap().is_file())
-            .map(|entry| Utf8PathBuf::from_path_buf(entry.path().to_owned()).unwrap().to_path_buf())
+            .map(|entry| {
+                Utf8PathBuf::from_path_buf(entry.path().to_owned())
+                    .unwrap()
+                    .to_path_buf()
+            })
             .collect();
 
         let infos = paths
@@ -199,12 +203,11 @@ impl Index {
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
-    use std::fs;
 
     use camino::Utf8Path;
 
-    use super::Index;
     use super::super::test_common as common;
+    use super::Index;
 
     #[test]
     fn insert() -> common::Result {
@@ -212,10 +215,9 @@ mod tests {
         let info = index.insert(common::DATA_SMALL)?;
         assert_eq!(
             info.full_path,
-            fs::canonicalize(common::DATA_SMALL)
-                .unwrap()
-                .to_str()
-                .unwrap()
+            Utf8Path::new(common::DATA_SMALL)
+                .canonicalize_utf8()?
+                .as_str()
                 .strip_prefix("\\\\?\\")
                 .unwrap()
                 .replace('\\', "/")
@@ -239,36 +241,36 @@ mod tests {
 
         assert_eq!(
             same[&common::DATA_LARGE_LEN][0],
-            fs::canonicalize(common::DATA_LARGE)?
-                .to_str()
-                .unwrap()
+            Utf8Path::new(common::DATA_LARGE)
+                .canonicalize_utf8()?
+                .as_str()
                 .strip_prefix("\\\\?\\")
                 .unwrap()
                 .replace('\\', "/")
         );
         assert_eq!(
             same[&common::DATA_LARGE_LEN][1],
-            fs::canonicalize(common::DATA_LARGE_COPY)?
-                .to_str()
-                .unwrap()
+            Utf8Path::new(common::DATA_LARGE_COPY)
+                .canonicalize_utf8()?
+                .as_str()
                 .strip_prefix("\\\\?\\")
                 .unwrap()
                 .replace('\\', "/")
         );
         assert_eq!(
             same[&common::DATA_SMALL_LEN][0],
-            fs::canonicalize(common::DATA_SMALL)?
-                .to_str()
-                .unwrap()
+            Utf8Path::new(common::DATA_SMALL)
+                .canonicalize_utf8()?
+                .as_str()
                 .strip_prefix("\\\\?\\")
                 .unwrap()
                 .replace('\\', "/")
         );
         assert_eq!(
             same[&common::DATA_SMALL_LEN][1],
-            fs::canonicalize(common::DATA_SMALL_COPY)?
-                .to_str()
-                .unwrap()
+            Utf8Path::new(common::DATA_SMALL_COPY)
+                .canonicalize_utf8()?
+                .as_str()
                 .strip_prefix("\\\\?\\")
                 .unwrap()
                 .replace('\\', "/")
@@ -284,8 +286,10 @@ mod tests {
         index.parse_exif()?;
 
         let full_path = Utf8Path::new(common::DATA_DNS_BENCHMARK).canonicalize_utf8()?;
-        let full_path = full_path.as_str()
-            .strip_prefix("\\\\?\\").unwrap()
+        let full_path = full_path
+            .as_str()
+            .strip_prefix("\\\\?\\")
+            .unwrap()
             .replace('\\', "/");
         let info = index.files.get(Utf8Path::new(full_path.as_str())).unwrap();
         let exif = info.exif().unwrap();

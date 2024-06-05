@@ -7,7 +7,11 @@ use tracing::info;
 use super::entities::file_index;
 use super::entities::file_info;
 
-pub fn find_duplicates(fast: bool, sources: Vec<Utf8PathBuf>, output: Option<Utf8PathBuf>) -> io::Result<()> {
+pub fn find_duplicates(
+    fast: bool,
+    sources: Vec<Utf8PathBuf>,
+    output: Option<Utf8PathBuf>,
+) -> io::Result<()> {
     let mut index = file_index::Index::new();
 
     if let Some(output) = output.clone() {
