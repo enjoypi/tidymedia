@@ -1,7 +1,7 @@
-use std::io;
-
 use camino::Utf8PathBuf;
 use clap::Subcommand;
+
+pub use use_cases::common::Result;
 
 mod use_cases;
 
@@ -53,7 +53,7 @@ pub enum Commands {
     },
 }
 
-pub fn tidy(command: Commands) -> io::Result<()> {
+pub fn tidy(command: Commands) -> Result<()> {
     match command {
         Commands::Copy {
             dry_run,

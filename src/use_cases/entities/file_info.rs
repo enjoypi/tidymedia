@@ -1,5 +1,4 @@
 use std::fs;
-use std::fs::Metadata;
 use std::io;
 use std::io::Error;
 use std::io::ErrorKind;
@@ -52,7 +51,7 @@ pub struct Info {
     // exif info
     exif: Option<exif::Exif>,
     lazy: Mutex<Lazy>,
-    meta: Metadata,
+    meta: fs::Metadata,
 }
 
 impl std::fmt::Debug for Info {

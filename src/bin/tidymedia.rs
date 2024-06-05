@@ -23,7 +23,7 @@ struct Cli {
     command: tidymedia::Commands,
 }
 
-fn main() -> std::io::Result<()> {
+fn main() -> tidymedia::Result<()> {
     let cli = Cli::parse();
 
     // Configure a custom event formatter

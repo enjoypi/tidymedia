@@ -1,22 +1,20 @@
-use std::fs;
-use std::io;
-use std::io::ErrorKind;
-
 use camino::Utf8Component;
 use camino::Utf8Path;
 use camino::Utf8PathBuf;
-use time::error;
 use time::OffsetDateTime;
 use time::UtcOffset;
+use tracing::debug;
 use tracing::error;
 use tracing::info;
 use tracing::trace;
 use tracing::warn;
 
+use super::entities::common;
 use super::entities::file_index::Index;
 use super::entities::file_info::{full_path, Info};
 
-const CST: Result<UtcOffset, error::ComponentRange> = UtcOffset::from_hms(8, 0, 0);
+const CST: std::result::Result<UtcOffset, time::error::ComponentRange> =
+    UtcOffset::from_hms(8, 0, 0);
 const MONTH: [&str; 13] = [
     "00", "01", "02", "03", "04", "05", "06", "07", "08", "09", "10", "11", "12",
 ];
@@ -26,7 +24,7 @@ pub fn copy(
     output: Utf8PathBuf,
     dry_run: bool,
     remove: bool,
-) -> io::Result<()> {
+) -> common::Result<()> {
     let mut source = Index::new();
     input_dirs.iter().for_each(|s| {
         source.visit_dir(s.as_str());
@@ -45,7 +43,7 @@ pub fn copy(
 
     let output_path = full_path(output.as_str())?;
     if !dry_run {
-        fs::create_dir_all(output.as_str())?;
+        fs_extra::dir::create_all(output.as_str(), false)?;
     }
 
     let mut output_index = Index::new();
@@ -85,13 +83,13 @@ fn do_copy(
     output_index: &mut Index,
     dry_run: bool,
     remove: bool,
-) -> io::Result<bool> {
+) -> common::Result<bool> {
     let full_path = src.full_path.as_str();
 
     if let Some(dup) = output_index.exists(src)? {
         trace!("\"{}\"\t和\t\"{}\"\t相同", full_path, dup);
         if remove && !dry_run {
-            fs::remove_file(full_path)?;
+            fs_extra::file::remove(full_path)?;
         }
         return Ok(false);
     }
@@ -103,43 +101,50 @@ fn do_copy(
 
     if let Some((target_dir, target)) = generate_unique_name(src, output_dir)? {
         if dry_run {
-            trace!("\"{}\"\t复制为\t\"{}\"", full_path, target);
+            debug!("\"{}\"\t复制为\t\"{}\"", full_path, target);
             return Ok(true);
         }
 
-        fs::create_dir_all(target_dir.as_str())?;
+        fs_extra::dir::create_all(target_dir.as_str(), false)?;
         let target = target.as_str();
 
+        let options = fs_extra::file::CopyOptions::new().skip_exist(true);
         if remove {
-            fs::rename(full_path, target)?;
-            trace!("\"{}\"\t移动至\t\"{}\"", full_path, target);
-            // TODO different disk can't use rename
+            // 先尝试rename，同一个磁盘下相当于直接移动
+            if std::fs::rename(full_path, target).is_err() {
+                if let Err(e) = fs_extra::file::move_file(full_path, target, &options) {
+                    error!("{}: \"{}\"\t移动失败\t\"{}\"", e, full_path, target);
+                    return Ok(false);
+                } else {
+                    debug!("\"{}\"\t移动至\t\"{}\"", full_path, target);
+                }
+            }
         } else {
-            if fs::copy(full_path, target)? != src.size {
+            if fs_extra::file::copy(full_path, target, &options)? != src.size {
                 error!("\"{}\"\t复制失败\t\"{}\"", full_path, target);
                 return Ok(false);
             }
-            trace!("\"{}\"\t复制为\t\"{}\"", full_path, target);
+            debug!("\"{}\"\t复制为\t\"{}\"", full_path, target);
         }
 
         _ = output_index.add(Info::from(target)?);
 
         Ok(true)
     } else {
-        Err(io::Error::new(
-            ErrorKind::Other,
+        Err(common::Error::Io(std::io::Error::new(
+            std::io::ErrorKind::Other,
             format!("无法为\"{}\"生成目标目录的文件名", src.full_path.as_str()),
-        ))
+        )))
     }
 }
 
 fn generate_unique_name(
     src_file: &Info,
     output_dir: &Utf8PathBuf,
-) -> io::Result<Option<(String, String)>> {
+) -> common::Result<Option<(String, String)>> {
     let full_path = Utf8Path::new(src_file.full_path.as_str());
-    let file_name = full_path.file_name().ok_or(io::Error::new(
-        io::ErrorKind::InvalidInput,
+    let file_name = full_path.file_name().ok_or(std::io::Error::new(
+        std::io::ErrorKind::InvalidInput,
         "Invalid file name",
     ))?;
 

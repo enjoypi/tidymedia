@@ -210,7 +210,8 @@ impl Exif {
 
     pub fn is_media(&self) -> bool {
         let mime_type = self.mime_type();
-        mime_type.starts_with(META_TYPE_IMAGE) || mime_type.starts_with(META_TYPE_VIDEO)
+        (mime_type.starts_with(META_TYPE_IMAGE) || mime_type.starts_with(META_TYPE_VIDEO))
+            && !mime_type.ends_with(".fpx")
     }
 }
 

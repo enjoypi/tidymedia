@@ -1,9 +1,8 @@
-use std::io;
-
 use camino::Utf8PathBuf;
 use tracing::error;
 use tracing::info;
 
+use super::entities::common;
 use super::entities::file_index;
 use super::entities::file_info;
 
@@ -11,7 +10,7 @@ pub fn find_duplicates(
     fast: bool,
     sources: Vec<Utf8PathBuf>,
     output: Option<Utf8PathBuf>,
-) -> io::Result<()> {
+) -> common::Result<()> {
     let mut index = file_index::Index::new();
 
     if let Some(output) = output.clone() {
