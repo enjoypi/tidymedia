@@ -43,6 +43,12 @@ impl Index {
         &self.similar_files
     }
 
+    pub fn some_files(&self, n: usize) -> Vec<&Info> {
+        let mut ret: Vec<_> = self.files().iter().take(n).map(|x| x.1).collect();
+        ret.sort_by(|x1, x2| x1.full_path.cmp(&x2.full_path));
+        ret
+    }
+
     pub fn bytes_read(&self) -> u64 {
         let mut bytes_read = 0;
         for (_, info) in self.files.iter() {

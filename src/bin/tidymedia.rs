@@ -29,6 +29,7 @@ fn main() -> std::io::Result<()> {
     // Configure a custom event formatter
     let format = fmt::format()
         .with_ansi(false)
+        .with_level(false)
         .with_line_number(cli.log_line_number)
         .with_target(cli.log_target)
         .with_thread_ids(cli.log_thread_ids)

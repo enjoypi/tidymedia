@@ -8,9 +8,10 @@ use camino::Utf8PathBuf;
 use time::error;
 use time::OffsetDateTime;
 use time::UtcOffset;
+use tracing::error;
 use tracing::info;
 use tracing::trace;
-use tracing::{error, warn};
+use tracing::warn;
 
 use super::entities::file_index::Index;
 use super::entities::file_info::{full_path, Info};
@@ -30,21 +31,17 @@ pub fn copy(
     input_dirs.iter().for_each(|s| {
         source.visit_dir(s.as_str());
         if let Err(e) = source.parse_exif() {
-            error!("{}", e);
+            error!("解析 Exif 信息失败：{}", e);
         }
     });
-    trace!("Files: {:#?}", source);
 
-    info!(
-        "Files: {}, UniqueFiles: {}, BytesRead: {}",
-        source.files().len(),
-        source.similar_files().len(),
-        source.bytes_read(),
-    );
+    info!("源目录中有不重复文件 {} 个", source.similar_files().len());
 
     if source.files().is_empty() {
         return Ok(());
     }
+
+    trace!("Files: {:#?}", source.some_files(10));
 
     let output_path = full_path(output.as_str())?;
     if !dry_run {
@@ -55,15 +52,30 @@ pub fn copy(
     output_index.visit_dir(output_path.as_str());
 
     let mut copied = 0;
+    let mut ignored = 0;
+    let mut failed = 0;
     source.files().iter().for_each(|(_, src)| {
-        if let Err(e) = do_copy(src, &output_path, &mut output_index, dry_run, remove) {
-            error!("{}", e)
-        } else {
-            copied += 1;
+        match do_copy(src, &output_path, &mut output_index, dry_run, remove) {
+            Ok(true) => {
+                copied += 1;
+            }
+            Ok(false) => {
+                ignored += 1;
+            }
+            Err(e) => {
+                failed += 1;
+                error!("{}", e);
+            }
         }
     });
 
-    info!("Copied files: {}", copied);
+    info!(
+        "共 {} 个文件，复制了 {} 个文件，忽略了 {} 个文件，失败了 {} 个文件",
+        source.similar_files().len(),
+        copied,
+        ignored,
+        failed
+    );
     Ok(())
 }
 
@@ -73,26 +85,26 @@ fn do_copy(
     output_index: &mut Index,
     dry_run: bool,
     remove: bool,
-) -> io::Result<()> {
+) -> io::Result<bool> {
     let full_path = src.full_path.as_str();
 
     if let Some(dup) = output_index.exists(src)? {
-        trace!("SAME_FILE\t[{}]\t[{}]", full_path, dup);
+        trace!("\"{}\"\t和\t\"{}\"\t相同", full_path, dup);
         if remove && !dry_run {
-            return fs::remove_file(full_path);
+            fs::remove_file(full_path)?;
         }
-        return Ok(());
+        return Ok(false);
     }
 
     if !src.is_media() {
-        warn!("IGNORED\t[{}]", full_path);
-        return Ok(());
+        warn!("\"{}\"\t不是图片或者视频文件", full_path);
+        return Ok(false);
     }
 
     if let Some((target_dir, target)) = generate_unique_name(src, output_dir)? {
         if dry_run {
-            trace!("COPIED\t[{}]\t[{}]", full_path, target);
-            return Ok(());
+            trace!("\"{}\"\t复制为\t\"{}\"", full_path, target);
+            return Ok(true);
         }
 
         fs::create_dir_all(target_dir.as_str())?;
@@ -100,26 +112,23 @@ fn do_copy(
 
         if remove {
             fs::rename(full_path, target)?;
-            trace!("MOVED\t[{}]\t[{}]", full_path, target);
+            trace!("\"{}\"\t移动至\t\"{}\"", full_path, target);
             // TODO different disk can't use rename
         } else {
             if fs::copy(full_path, target)? != src.size {
-                error!("COPY_FAILED\t[{}]\t[{}]", full_path, target);
-                return Ok(());
+                error!("\"{}\"\t复制失败\t\"{}\"", full_path, target);
+                return Ok(false);
             }
-            trace!("COPIED\t[{}]\t[{}]", full_path, target);
+            trace!("\"{}\"\t复制为\t\"{}\"", full_path, target);
         }
 
         _ = output_index.add(Info::from(target)?);
 
-        Ok(())
+        Ok(true)
     } else {
         Err(io::Error::new(
             ErrorKind::Other,
-            format!(
-                "Failed to generate unique name for {}",
-                src.full_path.as_str()
-            ),
+            format!("无法为\"{}\"生成目标目录的文件名", src.full_path.as_str()),
         ))
     }
 }
