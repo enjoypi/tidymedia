@@ -3,7 +3,6 @@ use camino::Utf8Path;
 use camino::Utf8PathBuf;
 use time::OffsetDateTime;
 use time::UtcOffset;
-use tracing::debug;
 use tracing::error;
 use tracing::info;
 use tracing::trace;
@@ -52,7 +51,17 @@ pub fn copy(
     let mut copied = 0;
     let mut ignored = 0;
     let mut failed = 0;
-    source.files().iter().for_each(|(_, src)| {
+    source.similar_files().iter().for_each(|(_, src)| {
+        let src = src.iter().next();
+        if src.is_none() {
+            return;
+        }
+        let src = source.files().get(src.unwrap());
+        if src.is_none() {
+            return;
+        }
+
+        let src = src.unwrap();
         match do_copy(src, &output_path, &mut output_index, dry_run, remove) {
             Ok(true) => {
                 copied += 1;
@@ -101,7 +110,7 @@ fn do_copy(
 
     if let Some((target_dir, target)) = generate_unique_name(src, output_dir)? {
         if dry_run {
-            debug!("\"{}\"\t复制为\t\"{}\"", full_path, target);
+            println!("\"{}\"\t\"{}\"", full_path, target);
             return Ok(true);
         }
 
@@ -115,16 +124,15 @@ fn do_copy(
                 if let Err(e) = fs_extra::file::move_file(full_path, target, &options) {
                     error!("{}: \"{}\"\t移动失败\t\"{}\"", e, full_path, target);
                     return Ok(false);
-                } else {
-                    debug!("\"{}\"\t移动至\t\"{}\"", full_path, target);
                 }
+                println!("\"{}\"\t\"{}\"", full_path, target);
             }
         } else {
             if fs_extra::file::copy(full_path, target, &options)? != src.size {
                 error!("\"{}\"\t复制失败\t\"{}\"", full_path, target);
                 return Ok(false);
             }
-            debug!("\"{}\"\t复制为\t\"{}\"", full_path, target);
+            println!("\"{}\"\t\"{}\"", full_path, target);
         }
 
         _ = output_index.add(Info::from(target)?);
