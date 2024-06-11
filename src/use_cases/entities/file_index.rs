@@ -212,8 +212,8 @@ mod tests {
 
     use camino::Utf8Path;
 
-    use super::super::test_common as common;
     use super::Index;
+    use super::super::test_common as common;
 
     #[test]
     fn insert() -> common::Result {

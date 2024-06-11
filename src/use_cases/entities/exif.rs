@@ -5,7 +5,8 @@ use camino::Utf8PathBuf;
 use serde_derive::Deserialize;
 use serde_json::Value;
 use thiserror::Error;
-use tracing::{error, warn};
+use tracing::error;
+use tracing::warn;
 
 #[derive(Debug, Error)]
 pub enum ExifError {
@@ -104,7 +105,7 @@ impl Exif {
         }
 
         let output = String::from_utf8(output.stdout)?;
-        let mut ret: Vec<Exif> = serde_json::from_str(&output)?;
+        let ret: Vec<Exif> = serde_json::from_str(&output)?;
         #[cfg(target_os = "windows")]
         {
             ret.iter_mut().for_each(|x| {
@@ -235,8 +236,8 @@ mod test {
 
     use tempfile;
 
-    use super::super::test_common as common;
     use super::Exif;
+    use super::super::test_common as common;
 
     #[test]
     fn test_exif() -> common::Result {

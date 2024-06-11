@@ -14,7 +14,8 @@ use memmap2::Mmap;
 use sha2::Digest;
 use sha2::Sha512;
 
-use super::{exif, SecureHash};
+use super::exif;
+use super::SecureHash;
 
 const FAST_READ_SIZE: usize = 4096;
 const VALID_DATE_TIME: u64 = 946684800; // 2001-01-01T00:00:00Z
@@ -247,8 +248,8 @@ mod tests {
     use wyhash;
     use xxhash_rust::xxh3;
 
-    use super::super::test_common as common;
     use super::Info;
+    use super::super::test_common as common;
 
     struct HashTest {
         short_wyhash: u64,

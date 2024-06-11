@@ -10,7 +10,8 @@ use tracing::warn;
 
 use super::entities::common;
 use super::entities::file_index::Index;
-use super::entities::file_info::{full_path, Info};
+use super::entities::file_info::full_path;
+use super::entities::file_info::Info;
 
 const CST: std::result::Result<UtcOffset, time::error::ComponentRange> =
     UtcOffset::from_hms(8, 0, 0);
@@ -32,7 +33,7 @@ pub fn copy(
         }
     });
 
-    info!("源目录中有不重复文件 {} 个", source.similar_files().len());
+    info!("源目录中有文件 {} 个", source.files().len());
 
     if source.files().is_empty() {
         return Ok(());
@@ -51,17 +52,7 @@ pub fn copy(
     let mut copied = 0;
     let mut ignored = 0;
     let mut failed = 0;
-    source.similar_files().iter().for_each(|(_, src)| {
-        let src = src.iter().next();
-        if src.is_none() {
-            return;
-        }
-        let src = source.files().get(src.unwrap());
-        if src.is_none() {
-            return;
-        }
-
-        let src = src.unwrap();
+    source.files().iter().for_each(|(_, src)| {
         match do_copy(src, &output_path, &mut output_index, dry_run, remove) {
             Ok(true) => {
                 copied += 1;
@@ -78,7 +69,7 @@ pub fn copy(
 
     info!(
         "共 {} 个文件，复制了 {} 个文件，忽略了 {} 个文件，失败了 {} 个文件",
-        source.similar_files().len(),
+        source.files().len(),
         copied,
         ignored,
         failed
