@@ -29,7 +29,7 @@ pub fn find_duplicates(
     }
 
     info!(
-        "Files: {}, FastHashs: {}, BytesRead: {}",
+        "Files: {}, Similar Files: {}, Bytes Read: {}",
         index.files().len(),
         index.similar_files().len(),
         index.bytes_read(),
@@ -69,7 +69,7 @@ pub fn find_duplicates(
         }
     }
 
-    info!("BytesRead: {}", index.bytes_read());
+    info!("Bytes Read: {}", index.bytes_read());
     Ok(())
 }
 
