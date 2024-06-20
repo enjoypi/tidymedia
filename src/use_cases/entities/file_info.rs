@@ -248,8 +248,8 @@ mod tests {
     use wyhash;
     use xxhash_rust::xxh3;
 
-    use super::Info;
     use super::super::test_common as common;
+    use super::Info;
 
     struct HashTest {
         short_wyhash: u64,

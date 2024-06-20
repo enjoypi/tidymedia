@@ -4,21 +4,10 @@ use camino::Utf8Path;
 use camino::Utf8PathBuf;
 use serde_derive::Deserialize;
 use serde_json::Value;
-use thiserror::Error;
 use tracing::error;
 use tracing::warn;
 
-#[derive(Debug, Error)]
-pub enum ExifError {
-    #[error("converting from utf8 error occurred: {0}")]
-    FromUtf8(#[from] std::string::FromUtf8Error),
-
-    #[error("IO error occurred: {0}")]
-    Io(#[from] std::io::Error),
-
-    #[error("Failed to parse an json: {0}")]
-    Parse(#[from] serde_json::Error),
-}
+use super::common;
 
 const META_TYPE_IMAGE: &str = "image/";
 const META_TYPE_VIDEO: &str = "video/";
@@ -84,11 +73,11 @@ pub struct Exif {
 
 impl Exif {
     #[cfg(test)]
-    pub fn from(path: &str) -> Result<Vec<Self>, ExifError> {
+    pub fn from(path: &str) -> common::Result<Vec<Self>> {
         Self::from_args(vec![path])
     }
 
-    pub fn from_args(args: Vec<&str>) -> Result<Vec<Self>, ExifError> {
+    pub fn from_args(args: Vec<&str>) -> common::Result<Vec<Self>> {
         let mut cmd = process::Command::new("exiftool");
         let cmd = cmd.args(EXIFTOOL_ARGS);
         let cmd = cmd.args(args);
@@ -104,7 +93,7 @@ impl Exif {
             error!("exiftool failed {:?}", args);
         }
 
-        let output = String::from_utf8(output.stdout)?;
+        let output = String::from_utf8_lossy(output.stdout.as_slice());
         let mut ret: Vec<Exif> = serde_json::from_str(&output)?;
         #[cfg(target_os = "windows")]
         {
@@ -236,8 +225,8 @@ mod test {
 
     use tempfile;
 
-    use super::Exif;
     use super::super::test_common as common;
+    use super::Exif;
 
     #[test]
     fn test_exif() -> common::Result {

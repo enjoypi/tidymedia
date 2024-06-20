@@ -28,10 +28,8 @@ pub fn copy(
     let mut source = Index::new();
     input_dirs.iter().for_each(|s| {
         source.visit_dir(s.as_str());
-        if let Err(e) = source.parse_exif() {
-            error!("解析 Exif 信息失败：{}", e);
-        }
     });
+    source.parse_exif()?;
 
     info!("源目录中有文件 {} 个", source.files().len());
 

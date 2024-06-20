@@ -10,6 +10,7 @@ use camino::Utf8PathBuf;
 use rayon::prelude::*;
 use tracing::error;
 
+use super::common;
 use super::exif;
 use super::file_info::Info;
 
@@ -184,7 +185,7 @@ impl Index {
         }
     }
 
-    pub fn parse_exif(&mut self) -> Result<(), exif::ExifError> {
+    pub fn parse_exif(&mut self) -> common::Result<()> {
         // write all filenames to a file
         let mut file = tempfile::NamedTempFile::new()?;
         let mut filenames: Vec<Utf8PathBuf> = self.files.keys().cloned().collect();
@@ -212,8 +213,8 @@ mod tests {
 
     use camino::Utf8Path;
 
-    use super::Index;
     use super::super::test_common as common;
+    use super::Index;
 
     #[test]
     fn insert() -> common::Result {

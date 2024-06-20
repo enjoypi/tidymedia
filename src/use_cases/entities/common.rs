@@ -7,6 +7,9 @@ pub enum Error {
 
     #[error("IO error occurred: {0}")]
     Io(#[from] std::io::Error),
+
+    #[error("Failed to parse an json: {0}")]
+    ParseJson(#[from] serde_json::Error),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
