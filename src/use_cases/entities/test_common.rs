@@ -1,15 +1,8 @@
 use super::SecureHash;
 
 fn str_to_secure(input_str: &str) -> SecureHash {
-    // Step 1: 将16进制字符串转换成 Vec<u8>
-    let vec: Vec<u8> = hex::decode(input_str).unwrap();
-
-    if vec.len() != 64 {
-        // 为了适应U64类型，我们需要确保数组里面有64项
-        generic_array::GenericArray::default()
-    } else {
-        SecureHash::from_exact_iter(vec).unwrap()
-    }
+    let vec: Vec<u8> = hex::decode(input_str).expect("test hex input must be valid");
+    SecureHash::from_exact_iter(vec).expect("test hex input must encode 64 bytes")
 }
 
 pub type Error = Box<dyn std::error::Error>;

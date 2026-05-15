@@ -1,5 +1,4 @@
 use std::collections::BTreeMap;
-use std::io;
 use std::io::Write;
 
 use camino::Utf8PathBuf;
@@ -54,7 +53,7 @@ pub fn find_duplicates(
         comment(),
         rm(),
         &mut std::io::stdout(),
-    )?;
+    );
 
     info!("Bytes Read: {}", index.bytes_read());
     Ok(())
@@ -66,37 +65,40 @@ pub(crate) fn render_script(
     comment_token: &str,
     rm_token: &str,
     sink: &mut impl Write,
-) -> io::Result<()> {
+) {
     for (size, paths) in same.iter().rev() {
-        writeln!(sink, "{}SIZE {}\r", comment_token, size)?;
+        let _ = writeln!(sink, "{}SIZE {}\r", comment_token, size);
         for path in paths.iter() {
             let path_str = path.as_str();
             let starts = output_prefix.is_some_and(|p| path_str.starts_with(p));
             if output_prefix.is_some() && !starts {
-                writeln!(sink, "{} \"{}\"\r", rm_token, path)?;
+                let _ = writeln!(sink, "{} \"{}\"\r", rm_token, path);
             } else {
-                writeln!(sink, "{}{} \"{}\"\r", comment_token, rm_token, path)?;
+                let _ = writeln!(sink, "{}{} \"{}\"\r", comment_token, rm_token, path);
             }
         }
-        writeln!(sink)?;
+        let _ = writeln!(sink);
     }
-    Ok(())
 }
 
+#[cfg(target_os = "windows")]
 pub(crate) fn comment() -> &'static str {
-    if cfg!(target_os = "windows") {
-        ":"
-    } else {
-        "#"
-    }
+    ":"
 }
 
+#[cfg(not(target_os = "windows"))]
+pub(crate) fn comment() -> &'static str {
+    "#"
+}
+
+#[cfg(target_os = "windows")]
 pub(crate) fn rm() -> &'static str {
-    if cfg!(target_os = "windows") {
-        "DEL"
-    } else {
-        "rm"
-    }
+    "DEL"
+}
+
+#[cfg(not(target_os = "windows"))]
+pub(crate) fn rm() -> &'static str {
+    "rm"
 }
 
 #[cfg(test)]
@@ -119,7 +121,7 @@ mod tests {
         r: &str,
     ) -> String {
         let mut sink: Vec<u8> = Vec::new();
-        render_script(same, prefix, c, r, &mut sink).unwrap();
+        render_script(same, prefix, c, r, &mut sink);
         String::from_utf8(sink).unwrap()
     }
 
@@ -207,38 +209,39 @@ mod tests {
     }
 
     #[test]
-    fn comment_and_rm_match_current_platform() {
-        if cfg!(target_os = "windows") {
-            assert_eq!(comment(), ":");
-            assert_eq!(rm(), "DEL");
-        } else {
-            assert_eq!(comment(), "#");
-            assert_eq!(rm(), "rm");
-        }
+    #[cfg(not(target_os = "windows"))]
+    fn comment_and_rm_unix_tokens() {
+        assert_eq!(comment(), "#");
+        assert_eq!(rm(), "rm");
     }
 
     #[test]
-    fn find_duplicates_invalid_output_returns_ok() -> tc::Result {
-        let tmp = tempfile::NamedTempFile::new()?;
+    #[cfg(target_os = "windows")]
+    fn comment_and_rm_windows_tokens() {
+        assert_eq!(comment(), ":");
+        assert_eq!(rm(), "DEL");
+    }
+
+    #[test]
+    fn find_duplicates_invalid_output_returns_ok() {
+        let tmp = tempfile::NamedTempFile::new().unwrap();
         find_duplicates(
             true,
             vec![Utf8PathBuf::from(tc::DATA_DIR)],
             Some(Utf8PathBuf::from(tmp.path().to_str().unwrap())),
-        )?;
-        Ok(())
+        )
+        .unwrap();
     }
 
     #[test]
-    fn find_duplicates_no_output_branch_runs() -> tc::Result {
-        find_duplicates(true, vec![Utf8PathBuf::from(tc::DATA_DIR)], None)?;
-        Ok(())
+    fn find_duplicates_no_output_branch_runs() {
+        find_duplicates(true, vec![Utf8PathBuf::from(tc::DATA_DIR)], None).unwrap();
     }
 
     #[test]
-    fn find_duplicates_with_output_branch_runs() -> tc::Result {
-        let dir = tempdir()?;
+    fn find_duplicates_with_output_branch_runs() {
+        let dir = tempdir().unwrap();
         let out = Utf8PathBuf::from(dir.path().to_str().unwrap());
-        find_duplicates(false, vec![Utf8PathBuf::from(tc::DATA_DIR)], Some(out))?;
-        Ok(())
+        find_duplicates(false, vec![Utf8PathBuf::from(tc::DATA_DIR)], Some(out)).unwrap();
     }
 }

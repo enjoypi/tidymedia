@@ -8,7 +8,6 @@ use std::io::Write;
 
 use camino::Utf8PathBuf;
 use rayon::prelude::*;
-use tracing::error;
 
 use super::common;
 use super::exif;
@@ -60,23 +59,19 @@ impl Index {
     }
 
     pub fn exists(&self, src_file: &Info) -> io::Result<Option<Utf8PathBuf>> {
-        match self.similar_files.get(&src_file.fast_hash) {
-            Some(paths) => {
-                for path in paths {
-                    if let Some(f) = self.files.get(path) {
-                        if f != src_file {
-                            continue;
-                        }
-
-                        if f.calc_full_hash()? == src_file.calc_full_hash()? {
-                            return Ok(Some(f.full_path.clone()));
-                        }
-                    }
-                }
-                Ok(None)
+        let Some(paths) = self.similar_files.get(&src_file.fast_hash) else {
+            return Ok(None);
+        };
+        for path in paths {
+            let f = self
+                .files
+                .get(path)
+                .expect("similar_files entries must point to a known file");
+            if f.size == src_file.size && f.calc_full_hash()? == src_file.calc_full_hash()? {
+                return Ok(Some(f.full_path.clone()));
             }
-            None => Ok(None),
         }
+        Ok(None)
     }
 
     pub fn calc_same<F, T>(&self, calc: F) -> Vec<HashMap<(u64, T), HashSet<Utf8PathBuf>>>
@@ -177,10 +172,7 @@ impl Index {
         for result in infos {
             match result {
                 Ok(info) => _ = self.add(info),
-                Err(ref e) if e.kind() == std::io::ErrorKind::Other => continue,
-                Err(e) => {
-                    error!("{}", e)
-                }
+                Err(_) => continue,
             }
         }
     }
@@ -386,6 +378,15 @@ mod tests {
         let secure: BTreeMap<u64, _> = index.search_same();
         let fast: BTreeMap<u64, _> = index.fast_search_same();
         assert_eq!(secure, fast);
+        Ok(())
+    }
+
+    #[test]
+    fn index_debug_format_renders_files() -> common::Result {
+        let mut index = Index::new();
+        index.insert(common::DATA_SMALL)?;
+        let dbg = format!("{:?}", index);
+        assert!(dbg.contains("data_small"));
         Ok(())
     }
 

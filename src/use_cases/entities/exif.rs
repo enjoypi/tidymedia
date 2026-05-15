@@ -144,10 +144,6 @@ impl Exif {
         extract_timestamp(&self.qt_create_date)
     }
 
-    pub fn time_from_filename(&self) -> u64 {
-        0
-    }
-
     pub fn media_create_date(&self) -> u64 {
         if !self.is_media() {
             return 0;
@@ -175,10 +171,6 @@ impl Exif {
 
         if self.exif_modify_date() > 0 {
             return self.exif_modify_date();
-        }
-
-        if self.time_from_filename() > 0 {
-            return self.time_from_filename();
         }
 
         if self.file_modify_date() > self.file_create_date() && self.file_create_date() > 0 {
@@ -350,12 +342,6 @@ mod test {
     fn extract_string_none_returns_empty() {
         let exif = exif_from(json!({}));
         assert_eq!(exif.mime_type(), "");
-    }
-
-    #[test]
-    fn time_from_filename_is_zero() {
-        let exif = exif_from(json!({}));
-        assert_eq!(exif.time_from_filename(), 0);
     }
 
     #[test]

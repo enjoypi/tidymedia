@@ -118,10 +118,7 @@ impl Info {
     }
 
     fn full_hash(&self) -> u64 {
-        match self.lazy.try_lock() {
-            Some(l) => l.hash,
-            None => 0,
-        }
+        self.lazy.lock().hash
     }
 
     pub fn secure_hash(&self) -> io::Result<SecureHash> {
@@ -193,12 +190,14 @@ pub fn full_path(path: &str) -> io::Result<Utf8PathBuf> {
     Ok(Utf8PathBuf::from(strip_windows_unc(full.as_str())))
 }
 
+#[cfg(target_os = "windows")]
 pub(crate) fn strip_windows_unc(path: &str) -> &str {
-    if cfg!(target_os = "windows") {
-        path.strip_prefix(r"\\?\").unwrap_or(path)
-    } else {
-        path
-    }
+    path.strip_prefix(r"\\?\").unwrap_or(path)
+}
+
+#[cfg(not(target_os = "windows"))]
+pub(crate) fn strip_windows_unc(path: &str) -> &str {
+    path
 }
 
 fn fast_hash(path: &str) -> io::Result<(usize, u64, u64)> {

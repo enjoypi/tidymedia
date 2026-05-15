@@ -326,3 +326,12 @@
         assert_ne!(small, large);
         Ok(())
     }
+
+    #[test]
+    fn info_debug_format_includes_fast_hash() -> common::Result {
+        let info = Info::from(common::DATA_SMALL)?;
+        let dbg = format!("{:?}", info);
+        assert!(dbg.contains("fast_hash"));
+        assert!(dbg.contains("size"));
+        Ok(())
+    }
