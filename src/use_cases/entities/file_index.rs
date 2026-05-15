@@ -380,6 +380,16 @@ mod tests {
     }
 
     #[test]
+    fn fast_search_same_matches_search_same() -> common::Result {
+        let mut index = Index::new();
+        index.visit_dir(common::DATA_DIR);
+        let secure: BTreeMap<u64, _> = index.search_same();
+        let fast: BTreeMap<u64, _> = index.fast_search_same();
+        assert_eq!(secure, fast);
+        Ok(())
+    }
+
+    #[test]
     fn similar_files_groups_collisions() -> common::Result {
         let mut index = Index::new();
         index.insert(common::DATA_SMALL)?;
