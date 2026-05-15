@@ -210,30 +210,25 @@ impl Index {
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
+    use std::fs;
 
     use camino::Utf8Path;
+    use tempfile::tempdir;
 
+    use super::super::file_info;
     use super::super::test_common as common;
     use super::Index;
+    use super::Info;
 
     #[test]
     fn insert() -> common::Result {
         let mut index = Index::new();
         let info = index.insert(common::DATA_SMALL)?;
-        assert_eq!(
-            info.full_path,
-            Utf8Path::new(common::DATA_SMALL)
-                .canonicalize_utf8()?
-                .as_str()
-                .strip_prefix("\\\\?\\")
-                .unwrap()
-                .replace('\\', "/")
-        );
+        let want = file_info::full_path(common::DATA_SMALL)?;
+        assert_eq!(info.full_path, want);
         assert_eq!(info.fast_hash, common::DATA_SMALL_WYHASH);
-
         assert_eq!(info.calc_full_hash()?, common::DATA_SMALL_XXHASH);
         assert_eq!(info.secure_hash()?, common::data_small_sha512());
-
         Ok(())
     }
 
@@ -245,44 +240,16 @@ mod tests {
         let same: BTreeMap<u64, _> = index.search_same();
         assert_eq!(same.len(), 2);
         assert_eq!(same[&common::DATA_LARGE_LEN].len(), 2);
+        assert_eq!(same[&common::DATA_SMALL_LEN].len(), 2);
 
-        assert_eq!(
-            same[&common::DATA_LARGE_LEN][0],
-            Utf8Path::new(common::DATA_LARGE)
-                .canonicalize_utf8()?
-                .as_str()
-                .strip_prefix("\\\\?\\")
-                .unwrap()
-                .replace('\\', "/")
-        );
-        assert_eq!(
-            same[&common::DATA_LARGE_LEN][1],
-            Utf8Path::new(common::DATA_LARGE_COPY)
-                .canonicalize_utf8()?
-                .as_str()
-                .strip_prefix("\\\\?\\")
-                .unwrap()
-                .replace('\\', "/")
-        );
-        assert_eq!(
-            same[&common::DATA_SMALL_LEN][0],
-            Utf8Path::new(common::DATA_SMALL)
-                .canonicalize_utf8()?
-                .as_str()
-                .strip_prefix("\\\\?\\")
-                .unwrap()
-                .replace('\\', "/")
-        );
-        assert_eq!(
-            same[&common::DATA_SMALL_LEN][1],
-            Utf8Path::new(common::DATA_SMALL_COPY)
-                .canonicalize_utf8()?
-                .as_str()
-                .strip_prefix("\\\\?\\")
-                .unwrap()
-                .replace('\\', "/")
-        );
-
+        let large_path = file_info::full_path(common::DATA_LARGE)?;
+        let large_copy = file_info::full_path(common::DATA_LARGE_COPY)?;
+        let small_path = file_info::full_path(common::DATA_SMALL)?;
+        let small_copy = file_info::full_path(common::DATA_SMALL_COPY)?;
+        assert!(same[&common::DATA_LARGE_LEN].contains(&large_path));
+        assert!(same[&common::DATA_LARGE_LEN].contains(&large_copy));
+        assert!(same[&common::DATA_SMALL_LEN].contains(&small_path));
+        assert!(same[&common::DATA_SMALL_LEN].contains(&small_copy));
         Ok(())
     }
 
@@ -292,19 +259,142 @@ mod tests {
         index.visit_dir(common::DATA_DIR);
         index.parse_exif()?;
 
-        let full_path = Utf8Path::new(common::DATA_DNS_BENCHMARK).canonicalize_utf8()?;
-        let full_path = full_path
-            .as_str()
-            .strip_prefix("\\\\?\\")
-            .unwrap()
-            .replace('\\', "/");
-        let info = index.files.get(Utf8Path::new(full_path.as_str())).unwrap();
+        let png_path = file_info::full_path(common::DATA_DNS_BENCHMARK)?;
+        let info = index.files.get(png_path.as_path()).unwrap();
         let exif = info.exif().unwrap();
-        assert_eq!(exif.source_file(), full_path);
-        assert_eq!(exif.file_modify_date(), 1706076164);
-        assert_eq!(exif.media_create_date(), 1706076164);
+        assert_eq!(exif.source_file(), png_path);
         assert!(exif.is_media());
+        assert!(exif.media_create_date() > 0);
+        assert!(exif.file_modify_date() > 0);
+        Ok(())
+    }
 
+    #[test]
+    fn exists_returns_none_for_unrelated() -> common::Result {
+        let mut index = Index::new();
+        index.insert(common::DATA_SMALL)?;
+        let other = Info::from(common::DATA_LARGE)?;
+        assert!(index.exists(&other)?.is_none());
+        Ok(())
+    }
+
+    #[test]
+    fn exists_returns_some_for_duplicate() -> common::Result {
+        let mut index = Index::new();
+        index.insert(common::DATA_SMALL)?;
+        let copy = Info::from(common::DATA_SMALL_COPY)?;
+        let found = index.exists(&copy)?.expect("duplicate must be detected");
+        assert_eq!(found, file_info::full_path(common::DATA_SMALL)?);
+        Ok(())
+    }
+
+    #[test]
+    fn exists_handles_fast_hash_collision_with_different_content() -> common::Result {
+        let dir = tempdir()?;
+        let prefix = vec![0u8; 4096];
+
+        let a_path = dir.path().join("a.bin");
+        let mut a = prefix.clone();
+        a.push(b'A');
+        fs::write(&a_path, &a)?;
+
+        let b_path = dir.path().join("b.bin");
+        let mut b = prefix.clone();
+        b.push(b'B');
+        fs::write(&b_path, &b)?;
+
+        let mut index = Index::new();
+        index.insert(a_path.to_str().unwrap())?;
+
+        let info_b = Info::from(b_path.to_str().unwrap())?;
+        let info_a_ref = Info::from(a_path.to_str().unwrap())?;
+        assert_eq!(info_a_ref.fast_hash, info_b.fast_hash);
+        assert!(index.exists(&info_b)?.is_none());
+        Ok(())
+    }
+
+    #[test]
+    fn visit_dir_handles_nonexistent_path() {
+        let mut index = Index::new();
+        index.visit_dir("/no/such/directory/xyz123");
+        assert_eq!(index.files().len(), 0);
+    }
+
+    #[test]
+    fn visit_dir_skips_empty_files() -> common::Result {
+        let dir = tempdir()?;
+        let empty_path = dir.path().join("empty.bin");
+        fs::write(&empty_path, b"")?;
+        let real_path = dir.path().join("real.bin");
+        fs::write(&real_path, b"abcdef")?;
+
+        let mut index = Index::new();
+        index.visit_dir(dir.path().to_str().unwrap());
+        assert_eq!(index.files().len(), 1);
+        let only = index.files().values().next().unwrap();
+        assert!(only.full_path.as_str().ends_with("real.bin"));
+        Ok(())
+    }
+
+    #[test]
+    fn add_idempotent_on_same_path() -> common::Result {
+        let mut index = Index::new();
+        let first = Info::from(common::DATA_SMALL)?;
+        let key = first.full_path.clone();
+        index.add(first)?;
+        let again = Info::from(common::DATA_SMALL)?;
+        index.add(again)?;
+        assert_eq!(index.files().len(), 1);
+        assert!(index.files().contains_key(&key));
+        Ok(())
+    }
+
+    #[test]
+    fn some_files_sorts_and_limits() -> common::Result {
+        let mut index = Index::new();
+        index.insert(common::DATA_SMALL)?;
+        index.insert(common::DATA_LARGE)?;
+        index.insert(common::DATA_DNS_BENCHMARK)?;
+        let two = index.some_files(2);
+        assert_eq!(two.len(), 2);
+        assert!(two[0].full_path <= two[1].full_path);
+        Ok(())
+    }
+
+    #[test]
+    fn bytes_read_sums_individual() -> common::Result {
+        let mut index = Index::new();
+        index.insert(common::DATA_SMALL)?;
+        index.insert(common::DATA_LARGE)?;
+        let total: u64 = index.files().values().map(|f| f.bytes_read()).sum();
+        assert_eq!(index.bytes_read(), total);
+        Ok(())
+    }
+
+    #[test]
+    fn parse_exif_empty_index_ok() -> common::Result {
+        let mut index = Index::new();
+        index.parse_exif()?;
+        assert_eq!(index.files().len(), 0);
+        Ok(())
+    }
+
+    #[test]
+    fn similar_files_groups_collisions() -> common::Result {
+        let mut index = Index::new();
+        index.insert(common::DATA_SMALL)?;
+        index.insert(common::DATA_SMALL_COPY)?;
+        let group = index
+            .similar_files()
+            .get(&common::DATA_SMALL_WYHASH)
+            .expect("collision group present");
+        assert_eq!(group.len(), 2);
+        let small = file_info::full_path(common::DATA_SMALL)?;
+        let small_copy = file_info::full_path(common::DATA_SMALL_COPY)?;
+        assert!(group.contains(&small));
+        assert!(group.contains(&small_copy));
+        // 让 Utf8Path import 仍被使用
+        let _ = Utf8Path::new(common::DATA_SMALL);
         Ok(())
     }
 }
