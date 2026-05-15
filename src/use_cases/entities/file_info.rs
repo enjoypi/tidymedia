@@ -439,4 +439,27 @@ mod tests {
         let err = super::full_path("definitely-not-a-real-path-xyz123").unwrap_err();
         assert_eq!(err.kind(), std::io::ErrorKind::NotFound);
     }
+
+    #[test]
+    fn info_from_directory_errors() {
+        let err = Info::from(common::DATA_DIR).unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::Other);
+        assert!(err.to_string().contains("is a directory"), "got: {err}");
+    }
+
+    #[test]
+    fn info_from_empty_file_errors() -> common::Result {
+        let tmp = tempfile::NamedTempFile::new()?;
+        let path = tmp.path().to_str().unwrap();
+        let err = Info::from(path).unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::Other);
+        assert!(err.to_string().contains("is empty"), "got: {err}");
+        Ok(())
+    }
+
+    #[test]
+    fn info_from_missing_path_errors() {
+        let err = Info::from("definitely-missing-path-zzz999").unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::NotFound);
+    }
 }
