@@ -1,9 +1,34 @@
-use camino::Utf8PathBuf;
-use clap::Subcommand;
+use std::ffi::OsString;
 
+use camino::Utf8PathBuf;
+use clap::Parser;
+use clap::Subcommand;
+use tracing::info;
+use tracing_subscriber::fmt;
+
+pub use use_cases::common::Error;
 pub use use_cases::common::Result;
 
 mod use_cases;
+
+#[derive(Debug, Parser)]
+#[command(author, version, about, long_about = None)]
+pub struct Cli {
+    #[arg(short, long, default_value = "info")]
+    pub log_level: tracing::Level,
+
+    #[arg(long, default_value = "false")]
+    pub log_line_number: bool,
+
+    #[arg(long, default_value = "false")]
+    pub log_target: bool,
+
+    #[arg(long, default_value = "false")]
+    pub log_thread_ids: bool,
+
+    #[clap(subcommand)]
+    pub command: Commands,
+}
 
 #[derive(Debug, Subcommand)]
 pub enum Commands {
@@ -71,4 +96,49 @@ pub fn tidy(command: Commands) -> Result<()> {
             output,
         } => use_cases::copy(sources, output, dry_run, true),
     }
+}
+
+pub fn run_cli<I, T>(args: I) -> Result<()>
+where
+    I: IntoIterator<Item = T>,
+    T: Into<OsString> + Clone,
+{
+    let cli = match Cli::try_parse_from(args) {
+        Ok(cli) => cli,
+        Err(e)
+            if matches!(
+                e.kind(),
+                clap::error::ErrorKind::DisplayHelp
+                    | clap::error::ErrorKind::DisplayVersion
+            ) =>
+        {
+            let _ = e.print();
+            return Ok(());
+        }
+        Err(e) => {
+            return Err(Error::Io(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                e.to_string(),
+            )));
+        }
+    };
+    install_logging(&cli);
+    info!("cli: {:?}", cli);
+    tidy(cli.command)
+}
+
+fn install_logging(cli: &Cli) {
+    let format = fmt::format()
+        .with_ansi(false)
+        .with_level(false)
+        .with_line_number(cli.log_line_number)
+        .with_target(cli.log_target)
+        .with_thread_ids(cli.log_thread_ids)
+        .compact();
+
+    let _ = tracing_subscriber::fmt()
+        .with_max_level(cli.log_level)
+        .with_writer(std::io::stderr)
+        .event_format(format)
+        .try_init();
 }
