@@ -39,3 +39,14 @@ pub fn data_large_sha512() -> SecureHash {
 pub const DATA_LARGE_COPY: &str = "tests/data/data_large_copy";
 
 pub const DATA_DNS_BENCHMARK: &str = "tests/data/DNSBenchmark.png";
+
+/// 2024-01-01 12:00:00 UTC，用于固定 PNG 复制目标的 mtime
+pub const FIXED_MEDIA_MTIME: i64 = 1_704_110_400;
+
+pub fn copy_png_to(target_dir: &std::path::Path, name: &str) -> std::io::Result<std::path::PathBuf> {
+    let dst = target_dir.join(name);
+    std::fs::copy(DATA_DNS_BENCHMARK, &dst)?;
+    let ts = filetime::FileTime::from_unix_time(FIXED_MEDIA_MTIME, 0);
+    filetime::set_file_mtime(&dst, ts)?;
+    Ok(dst)
+}

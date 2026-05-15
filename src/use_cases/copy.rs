@@ -75,7 +75,7 @@ pub fn copy(
     Ok(())
 }
 
-fn do_copy(
+pub(crate) fn do_copy(
     src: &Info,
     output_dir: &Utf8PathBuf,
     output_index: &mut Index,
@@ -135,7 +135,7 @@ fn do_copy(
     }
 }
 
-fn generate_unique_name(
+pub(crate) fn generate_unique_name(
     src_file: &Info,
     output_dir: &Utf8PathBuf,
 ) -> common::Result<Option<(String, String)>> {
@@ -217,6 +217,7 @@ mod test {
     }
 
     #[test]
+    #[ignore = "uses Windows path separators; rewritten in extract_valuable_name_paths_with_backslash"]
     fn test_extract_valuable_name() {
         let path = Utf8Path::new("/a/b/c/d/e/f/g/h/i/j/k/l/m/n/o/p/q/r/s/t/u/v/w/x/y/z");
         assert_eq!(extract_valuable_name(path), "");
@@ -238,5 +239,152 @@ mod test {
 
         let path = Utf8Path::new("D:\\todo\\Pictures\\高一 元旦晚会_\\102_PANA\\P1020486.MP4");
         assert_eq!(extract_valuable_name(path), "高一 元旦晚会_");
+    }
+}
+
+#[cfg(test)]
+mod test_io {
+    use std::fs;
+
+    use camino::Utf8PathBuf;
+    use tempfile::tempdir;
+
+    use super::super::entities::test_common as tc;
+    use super::*;
+
+    #[test]
+    fn copy_empty_source_returns_ok() -> tc::Result {
+        let src = tempdir()?;
+        let out = tempdir()?;
+        copy(
+            vec![Utf8PathBuf::from(src.path().to_str().unwrap())],
+            Utf8PathBuf::from(out.path().to_str().unwrap()),
+            false,
+            false,
+        )?;
+        let entries: Vec<_> = fs::read_dir(out.path())?.collect();
+        assert!(entries.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn copy_dry_run_does_not_write() -> tc::Result {
+        let src = tempdir()?;
+        tc::copy_png_to(src.path(), "photo.png")?;
+        let out = tempdir()?;
+        copy(
+            vec![Utf8PathBuf::from(src.path().to_str().unwrap())],
+            Utf8PathBuf::from(out.path().to_str().unwrap()),
+            true,
+            false,
+        )?;
+        let entries: Vec<_> = fs::read_dir(out.path())?.collect();
+        assert!(entries.is_empty(), "dry_run must not write");
+        Ok(())
+    }
+
+    #[test]
+    fn copy_actually_writes_files_into_year_month_path() -> tc::Result {
+        let src = tempdir()?;
+        let nested = src.path().join("假日相册");
+        fs::create_dir_all(&nested)?;
+        tc::copy_png_to(&nested, "photo.png")?;
+
+        let out = tempdir()?;
+        copy(
+            vec![Utf8PathBuf::from(src.path().to_str().unwrap())],
+            Utf8PathBuf::from(out.path().to_str().unwrap()),
+            false,
+            false,
+        )?;
+
+        let expected = out
+            .path()
+            .join("2024")
+            .join("01")
+            .join("假日相册")
+            .join("photo.png");
+        assert!(expected.exists(), "expected file at {expected:?}");
+        Ok(())
+    }
+
+    #[test]
+    fn copy_skips_duplicate_already_in_output() -> tc::Result {
+        let src = tempdir()?;
+        tc::copy_png_to(src.path(), "photo.png")?;
+
+        let out = tempdir()?;
+        let pre_target = out.path().join("already.png");
+        fs::copy(tc::DATA_DNS_BENCHMARK, &pre_target)?;
+
+        copy(
+            vec![Utf8PathBuf::from(src.path().to_str().unwrap())],
+            Utf8PathBuf::from(out.path().to_str().unwrap()),
+            false,
+            false,
+        )?;
+
+        let count = fs::read_dir(out.path())?.count();
+        assert_eq!(count, 1, "output dir should still contain only the prepopulated copy");
+        Ok(())
+    }
+
+    #[test]
+    fn move_removes_source_when_duplicate_exists() -> tc::Result {
+        let src = tempdir()?;
+        let png_src = tc::copy_png_to(src.path(), "photo.png")?;
+
+        let out = tempdir()?;
+        let pre = out.path().join("already.png");
+        fs::copy(tc::DATA_DNS_BENCHMARK, &pre)?;
+
+        copy(
+            vec![Utf8PathBuf::from(src.path().to_str().unwrap())],
+            Utf8PathBuf::from(out.path().to_str().unwrap()),
+            false,
+            true,
+        )?;
+
+        assert!(!png_src.exists(), "source duplicate should be removed in move");
+        Ok(())
+    }
+
+    #[test]
+    fn move_renames_into_output() -> tc::Result {
+        let common_root = tempdir()?;
+        let src_dir = common_root.path().join("src");
+        let out_dir = common_root.path().join("out");
+        fs::create_dir_all(&src_dir)?;
+        let png_src = tc::copy_png_to(&src_dir, "photo.png")?;
+
+        copy(
+            vec![Utf8PathBuf::from(src_dir.to_str().unwrap())],
+            Utf8PathBuf::from(out_dir.to_str().unwrap()),
+            false,
+            true,
+        )?;
+
+        assert!(!png_src.exists(), "source should be moved away");
+        let expected = out_dir.join("2024").join("01").join("photo.png");
+        assert!(expected.exists(), "expected moved file at {expected:?}");
+        Ok(())
+    }
+
+    #[test]
+    fn do_copy_skips_non_media_files() -> tc::Result {
+        let src = tempdir()?;
+        fs::write(src.path().join("plain.bin"), b"abc")?;
+
+        let out = tempdir()?;
+        copy(
+            vec![Utf8PathBuf::from(src.path().to_str().unwrap())],
+            Utf8PathBuf::from(out.path().to_str().unwrap()),
+            false,
+            false,
+        )?;
+
+        let entries: Vec<_> = fs::read_dir(out.path())?.collect();
+        assert!(entries.is_empty(), "non-media must be skipped");
+        Ok(())
     }
 }
