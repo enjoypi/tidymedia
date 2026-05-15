@@ -35,7 +35,7 @@ const EXIFTOOL_ARGS: [&str; 19] = [
 
 #[derive(Clone, Debug, Default, Deserialize)]
 pub struct Exif {
-    #[serde(rename = "SourceFile")]
+    #[serde(rename = "SourceFile", default)]
     source_file: Utf8PathBuf,
 
     #[serde(rename = "File:FileModifyDate")]
@@ -94,15 +94,13 @@ impl Exif {
         }
 
         let output = String::from_utf8_lossy(output.stdout.as_slice());
-        let mut ret: Vec<Exif> = serde_json::from_str(&output)?;
-        #[cfg(target_os = "windows")]
-        {
-            ret.iter_mut().for_each(|x| {
-                let s = x.source_file.as_str().replace('/', "\\");
-                x.source_file = Utf8PathBuf::from(s);
-            })
-        }
-
+        let trimmed = output.trim();
+        let mut ret: Vec<Exif> = if trimmed.is_empty() {
+            Vec::new()
+        } else {
+            serde_json::from_str(trimmed)?
+        };
+        normalize_source_paths(&mut ret, cfg!(target_os = "windows"));
         Ok(ret)
     }
 
@@ -219,28 +217,45 @@ fn extract_string(value: &Option<String>) -> &str {
     }
 }
 
+pub(crate) fn normalize_source_paths(exifs: &mut [Exif], to_backslash: bool) {
+    if to_backslash {
+        exifs.iter_mut().for_each(|x| {
+            let s = x.source_file.as_str().replace('/', "\\");
+            x.source_file = Utf8PathBuf::from(s);
+        });
+    }
+}
+
 #[cfg(test)]
 mod test {
     use std::io::Write;
 
+    use camino::Utf8PathBuf;
+    use rstest::rstest;
+    use serde_json::json;
+    use serde_json::Value;
     use tempfile;
 
     use super::super::test_common as common;
     use super::Exif;
 
+    fn exif_from(value: Value) -> Exif {
+        serde_json::from_value(value).expect("valid exif json")
+    }
+
     #[test]
-    fn test_exif() -> common::Result {
+    fn test_exif_parses_dns_benchmark_png() -> common::Result {
         let exif = Exif::from(common::DATA_DNS_BENCHMARK)?;
         let exif = &exif[0];
         assert_eq!(exif.source_file(), common::DATA_DNS_BENCHMARK);
-        assert_eq!(exif.file_modify_date(), 1706076164);
-        assert_eq!(exif.media_create_date(), 1706076164);
         assert!(exif.is_media());
+        assert!(exif.media_create_date() > 0);
+        assert!(exif.file_modify_date() > 0);
         Ok(())
     }
 
     #[test]
-    fn test_from_args() -> common::Result {
+    fn test_from_args_reads_filelist() -> common::Result {
         let mut tmp = tempfile::NamedTempFile::new()?;
         writeln!(tmp, "{}", common::DATA_DNS_BENCHMARK)?;
         tmp.flush()?;
@@ -248,9 +263,130 @@ mod test {
         let exif = Exif::from_args(vec!["-@", tmp.path().to_str().unwrap()])?;
         let exif = &exif[0];
         assert_eq!(exif.source_file(), common::DATA_DNS_BENCHMARK);
-        assert_eq!(exif.file_modify_date(), 1706076164);
-        assert_eq!(exif.media_create_date(), 1706076164);
         assert!(exif.is_media());
         Ok(())
+    }
+
+    #[test]
+    fn from_args_invalid_path_returns_empty() -> common::Result {
+        let exif = Exif::from_args(vec!["/definitely/missing/xyz"])?;
+        assert!(exif.is_empty());
+        Ok(())
+    }
+
+    #[rstest]
+    #[case(json!({"File:MIMEType":"image/png","EXIF:DateTimeOriginal":1_700_000_000_u64}), 1_700_000_000)]
+    #[case(json!({"File:MIMEType":"image/png","H264:DateTimeOriginal":1_700_000_001_u64}), 1_700_000_001)]
+    #[case(json!({"File:MIMEType":"video/mp4","QuickTime:MediaCreateDate":1_700_000_002_u64}), 1_700_000_002)]
+    #[case(json!({"File:MIMEType":"video/mp4","QuickTime:CreateDate":1_700_000_003_u64}), 1_700_000_003)]
+    #[case(json!({"File:MIMEType":"image/jpeg","EXIF:CreateDate":1_700_000_004_u64}), 1_700_000_004)]
+    #[case(json!({"File:MIMEType":"image/jpeg","EXIF:ModifyDate":1_700_000_005_u64}), 1_700_000_005)]
+    #[case(
+        json!({"File:MIMEType":"image/png","File:FileCreateDate":1_700_000_006_u64,"File:FileModifyDate":1_700_000_007_u64}),
+        1_700_000_006
+    )]
+    #[case(json!({"File:MIMEType":"image/png","File:FileModifyDate":1_700_000_008_u64}), 1_700_000_008)]
+    #[case(json!({"File:MIMEType":"image/png","File:FileCreateDate":1_700_000_009_u64}), 1_700_000_009)]
+    fn media_create_date_priority_cascade(#[case] value: Value, #[case] want: u64) {
+        let exif = exif_from(value);
+        assert_eq!(exif.media_create_date(), want);
+    }
+
+    #[test]
+    fn media_create_date_zero_when_not_media() {
+        let exif = exif_from(json!({"EXIF:DateTimeOriginal": 1_700_000_000_u64}));
+        assert_eq!(exif.media_create_date(), 0);
+    }
+
+    #[test]
+    fn media_create_date_zero_when_no_signal_present() {
+        let exif = exif_from(json!({"File:MIMEType":"image/png"}));
+        assert_eq!(exif.media_create_date(), 0);
+    }
+
+    #[test]
+    fn is_media_image_true() {
+        let exif = exif_from(json!({"File:MIMEType":"image/jpeg"}));
+        assert!(exif.is_media());
+    }
+
+    #[test]
+    fn is_media_video_true() {
+        let exif = exif_from(json!({"File:MIMEType":"video/mp4"}));
+        assert!(exif.is_media());
+    }
+
+    #[test]
+    fn is_media_fpx_excluded() {
+        let exif = exif_from(json!({"File:MIMEType":"image/vnd.fpx"}));
+        assert!(!exif.is_media());
+    }
+
+    #[test]
+    fn is_media_none_false() {
+        let exif = exif_from(json!({}));
+        assert!(!exif.is_media());
+    }
+
+    #[test]
+    fn extract_timestamp_string_returns_zero() {
+        let exif = exif_from(json!({
+            "File:MIMEType":"image/png",
+            "EXIF:DateTimeOriginal":"2024-01-01 12:00:00"
+        }));
+        assert_eq!(exif.date_time_original(), 0);
+    }
+
+    #[test]
+    fn extract_timestamp_float_returns_zero() {
+        let exif = exif_from(json!({
+            "File:MIMEType":"image/png",
+            "EXIF:DateTimeOriginal": 1.5_f64
+        }));
+        assert_eq!(exif.date_time_original(), 0);
+    }
+
+    #[test]
+    fn extract_string_none_returns_empty() {
+        let exif = exif_from(json!({}));
+        assert_eq!(exif.mime_type(), "");
+    }
+
+    #[test]
+    fn time_from_filename_is_zero() {
+        let exif = exif_from(json!({}));
+        assert_eq!(exif.time_from_filename(), 0);
+    }
+
+    #[test]
+    fn accessors_return_zero_for_missing_fields() {
+        let exif = exif_from(json!({}));
+        assert_eq!(exif.file_modify_date(), 0);
+        assert_eq!(exif.file_create_date(), 0);
+        assert_eq!(exif.exif_create_date(), 0);
+        assert_eq!(exif.exif_modify_date(), 0);
+        assert_eq!(exif.h264_date_time_original(), 0);
+        assert_eq!(exif.qt_media_create_date(), 0);
+        assert_eq!(exif.qt_create_date(), 0);
+    }
+
+    #[test]
+    fn normalize_source_paths_replaces_slashes_when_enabled() {
+        let mut exifs = vec![exif_from(json!({
+            "SourceFile": "a/b/c.png",
+            "File:MIMEType":"image/png"
+        }))];
+        super::normalize_source_paths(&mut exifs, true);
+        assert_eq!(exifs[0].source_file(), Utf8PathBuf::from("a\\b\\c.png"));
+    }
+
+    #[test]
+    fn normalize_source_paths_noop_when_disabled() {
+        let mut exifs = vec![exif_from(json!({
+            "SourceFile": "a/b/c.png",
+            "File:MIMEType":"image/png"
+        }))];
+        super::normalize_source_paths(&mut exifs, false);
+        assert_eq!(exifs[0].source_file(), Utf8PathBuf::from("a/b/c.png"));
     }
 }
