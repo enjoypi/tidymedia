@@ -13,6 +13,7 @@ generic-array = "0"
 hex = "*"
 ignore = "*"
 memmap2 = "*"
+parking_lot = "*"
 rayon = "*"
 serde = "*"
 serde_derive = "*"
@@ -25,3 +26,10 @@ tracing = "*"
 tracing-subscriber = { version = "*", features = ["env-filter"] }
 wyhash = "*"
 xxhash-rust = { version = "*", features = ["xxh3"] }
+
+[dev-dependencies]
+assert_cmd = "*"
+filetime = "*"
+predicates = "*"
+pretty_assertions = "*"
+rstest = "*"
