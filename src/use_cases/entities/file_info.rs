@@ -462,4 +462,98 @@ mod tests {
         let err = Info::from("definitely-missing-path-zzz999").unwrap_err();
         assert_eq!(err.kind(), std::io::ErrorKind::NotFound);
     }
+
+    #[test]
+    fn create_time_no_exif_uses_meta() -> common::Result {
+        let info = Info::from(common::DATA_SMALL)?;
+        let t = info.create_time()?;
+        let secs = t
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        assert!(secs > 0);
+        Ok(())
+    }
+
+    #[test]
+    fn create_time_uses_exif_when_valid() -> common::Result {
+        let mut info = Info::from(common::DATA_SMALL)?;
+        let full_path = info.full_path.as_str().to_string();
+        let exif: super::super::exif::Exif = serde_json::from_value(serde_json::json!({
+            "SourceFile": full_path,
+            "File:MIMEType": "image/png",
+            "EXIF:DateTimeOriginal": 1_700_000_000_u64,
+        }))?;
+        info.set_exif(exif);
+        let t = info.create_time()?;
+        let secs = t
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        assert_eq!(secs, 1_700_000_000);
+        Ok(())
+    }
+
+    #[test]
+    fn create_time_falls_back_when_exif_below_threshold() -> common::Result {
+        let mut info = Info::from(common::DATA_SMALL)?;
+        let full_path = info.full_path.as_str().to_string();
+        let exif: super::super::exif::Exif = serde_json::from_value(serde_json::json!({
+            "SourceFile": full_path,
+            "File:MIMEType": "image/png",
+            "EXIF:DateTimeOriginal": 100_u64,
+        }))?;
+        info.set_exif(exif);
+        let t = info.create_time()?;
+        let secs = t
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        assert!(secs > super::VALID_DATE_TIME, "fallback should be > 2001; got {secs}");
+        Ok(())
+    }
+
+    #[test]
+    fn create_time_uses_modify_when_smaller_than_create() -> common::Result {
+        let dir = tempfile::tempdir()?;
+        let path = dir.path().join("ct.bin");
+        fs::write(&path, b"hello")?;
+        let early = filetime::FileTime::from_unix_time(631_152_000, 0);
+        filetime::set_file_mtime(&path, early)?;
+        let info = Info::from(path.to_str().unwrap())?;
+        let t = info.create_time()?;
+        let secs = t
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        assert_eq!(secs, 631_152_000);
+        Ok(())
+    }
+
+    #[test]
+    fn is_media_false_when_no_exif() -> common::Result {
+        let info = Info::from(common::DATA_SMALL)?;
+        assert!(!info.is_media());
+        Ok(())
+    }
+
+    #[test]
+    fn is_media_true_when_exif_present_and_media() -> common::Result {
+        let mut info = Info::from(common::DATA_SMALL)?;
+        let exif: super::super::exif::Exif = serde_json::from_value(serde_json::json!({
+            "SourceFile": info.full_path.as_str().to_string(),
+            "File:MIMEType": "image/jpeg",
+        }))?;
+        info.set_exif(exif);
+        assert!(info.is_media());
+        Ok(())
+    }
+
+    #[test]
+    fn partial_eq_differs_when_size_differs() -> common::Result {
+        let small = Info::from(common::DATA_SMALL)?;
+        let large = Info::from(common::DATA_LARGE)?;
+        assert_ne!(small, large);
+        Ok(())
+    }
 }
