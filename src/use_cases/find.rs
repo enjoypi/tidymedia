@@ -1,3 +1,7 @@
+use std::collections::BTreeMap;
+use std::io;
+use std::io::Write;
+
 use camino::Utf8PathBuf;
 use tracing::error;
 use tracing::info;
@@ -13,12 +17,9 @@ pub fn find_duplicates(
 ) -> common::Result<()> {
     let mut index = file_index::Index::new();
 
-    if let Some(output) = output.clone() {
-        // check if output is directory
-        // if not, create directory
-        // the code is
-        let output = std::path::Path::new(&output);
-        if !output.is_dir() {
+    if let Some(o) = output.as_ref() {
+        let p = std::path::Path::new(o.as_str());
+        if !p.is_dir() {
             error!("output is not a directory");
             return Ok(());
         }
@@ -42,53 +43,58 @@ pub fn find_duplicates(
     };
     info!("Same: {}", same.len());
 
-    match output {
-        Some(output) => {
-            let output = file_info::full_path(output.as_str()).unwrap();
-            let output = output.as_str();
-            for (size, paths) in same.iter().rev() {
-                println!("{}SIZE {}\r", comment(), size);
-                for path in paths.iter() {
-                    if path.starts_with(output) {
-                        println!("{}{} \"{}\"\r", comment(), rm(), path);
-                    } else {
-                        println!("{} \"{}\"\r", rm(), path);
-                    }
-                }
-                println!()
-            }
-        }
-        _ => {
-            for (size, paths) in same.iter().rev() {
-                println!("{}SIZE {}\r", comment(), size);
-                for path in paths.iter() {
-                    println!("{}{} \"{}\"\r", comment(), rm(), path);
-                }
-                println!()
-            }
-        }
-    }
+    let prefix_owned = output
+        .as_ref()
+        .map(|o| file_info::full_path(o.as_str()).map(|p| p.as_str().to_string()))
+        .transpose()?;
+
+    render_script(
+        &same,
+        prefix_owned.as_deref(),
+        comment(),
+        rm(),
+        &mut std::io::stdout(),
+    )?;
 
     info!("Bytes Read: {}", index.bytes_read());
     Ok(())
 }
 
-#[cfg(target_os = "windows")]
-fn comment() -> &'static str {
-    ":"
+pub(crate) fn render_script(
+    same: &BTreeMap<u64, Vec<Utf8PathBuf>>,
+    output_prefix: Option<&str>,
+    comment_token: &str,
+    rm_token: &str,
+    sink: &mut impl Write,
+) -> io::Result<()> {
+    for (size, paths) in same.iter().rev() {
+        writeln!(sink, "{}SIZE {}\r", comment_token, size)?;
+        for path in paths.iter() {
+            let path_str = path.as_str();
+            let starts = output_prefix.is_some_and(|p| path_str.starts_with(p));
+            if output_prefix.is_some() && !starts {
+                writeln!(sink, "{} \"{}\"\r", rm_token, path)?;
+            } else {
+                writeln!(sink, "{}{} \"{}\"\r", comment_token, rm_token, path)?;
+            }
+        }
+        writeln!(sink)?;
+    }
+    Ok(())
 }
 
-#[cfg(not(target_os = "windows"))]
-fn comment() -> &'static str {
-    "#"
+pub(crate) fn comment() -> &'static str {
+    if cfg!(target_os = "windows") {
+        ":"
+    } else {
+        "#"
+    }
 }
 
-#[cfg(target_os = "windows")]
-fn rm() -> &'static str {
-    "DEL"
-}
-
-#[cfg(not(target_os = "windows"))]
-fn rm() -> &'static str {
-    "rm"
+pub(crate) fn rm() -> &'static str {
+    if cfg!(target_os = "windows") {
+        "DEL"
+    } else {
+        "rm"
+    }
 }
