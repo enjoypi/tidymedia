@@ -217,28 +217,41 @@ mod test {
     }
 
     #[test]
-    #[ignore = "uses Windows path separators; rewritten in extract_valuable_name_paths_with_backslash"]
-    fn test_extract_valuable_name() {
+    fn extract_valuable_name_finds_last_non_english_dir() {
+        let path = Utf8Path::new(
+            "/a/b/c/d/e/f/g/h/i/j/k/l/m/n/o/p/q/r/s/t/u/v/w/x/y/中文/abc",
+        );
+        assert_eq!(extract_valuable_name(path), "中文");
+    }
+
+    #[test]
+    fn extract_valuable_name_returns_empty_when_all_ascii() {
         let path = Utf8Path::new("/a/b/c/d/e/f/g/h/i/j/k/l/m/n/o/p/q/r/s/t/u/v/w/x/y/z");
         assert_eq!(extract_valuable_name(path), "");
+    }
 
-        let path = Utf8Path::new("/a/b/c/d/e/f/g/h/i/j/k/l/m/n/o/p/q/r/s/t/u/v/w/x/y/中文/abc");
-        assert_eq!(extract_valuable_name(path), "中文");
+    #[test]
+    fn extract_valuable_name_root_returns_empty() {
+        let path = Utf8Path::new("/");
+        assert_eq!(extract_valuable_name(path), "");
+    }
 
-        let path = Utf8Path::new("D:\\todo\\Pictures\\ 高一元 旦晚会 \\102_PANA\\P1020486.MP4");
-        assert_eq!(extract_valuable_name(path), " 高一元 旦晚会 ");
+    #[test]
+    fn extract_valuable_name_single_component_returns_empty() {
+        let path = Utf8Path::new("photo");
+        assert_eq!(extract_valuable_name(path), "");
+    }
 
-        let path = Utf8Path::new("D:\\todo\\Pictures\\a高一 元旦晚会\\102_PANA\\P1020486.MP4");
+    #[test]
+    fn extract_valuable_name_picks_innermost_non_english() {
+        let path = Utf8Path::new("/外层/内层/file.png");
+        assert_eq!(extract_valuable_name(path), "内层");
+    }
+
+    #[test]
+    fn extract_valuable_name_handles_mixed_chars() {
+        let path = Utf8Path::new("/p/a高一 元旦晚会/sub/p.png");
         assert_eq!(extract_valuable_name(path), "a高一 元旦晚会");
-
-        let path = Utf8Path::new("D:\\todo\\Pictures\\高一 元旦晚会 z\\102_PANA\\P1020486.MP4");
-        assert_eq!(extract_valuable_name(path), "高一 元旦晚会 z");
-
-        let path = Utf8Path::new("D:\\todo\\Pictures\\_高一 元旦晚会\\102_PANA\\P1020486.MP4");
-        assert_eq!(extract_valuable_name(path), "_高一 元旦晚会");
-
-        let path = Utf8Path::new("D:\\todo\\Pictures\\高一 元旦晚会_\\102_PANA\\P1020486.MP4");
-        assert_eq!(extract_valuable_name(path), "高一 元旦晚会_");
     }
 }
 
@@ -385,6 +398,91 @@ mod test_io {
 
         let entries: Vec<_> = fs::read_dir(out.path())?.collect();
         assert!(entries.is_empty(), "non-media must be skipped");
+        Ok(())
+    }
+
+    fn make_media_info(dir: &std::path::Path, name: &str) -> Result<Info, tc::Error> {
+        let png = tc::copy_png_to(dir, name)?;
+        let mut info = Info::from(png.to_str().unwrap())?;
+        let exif: super::super::entities::exif::Exif = serde_json::from_value(
+            serde_json::json!({
+                "SourceFile": info.full_path.as_str().to_string(),
+                "File:MIMEType": "image/png",
+            }),
+        )?;
+        info.set_exif(exif);
+        Ok(info)
+    }
+
+    #[test]
+    fn generate_unique_name_uses_suffix_when_first_taken() -> tc::Result {
+        let src = tempdir()?;
+        let info = make_media_info(src.path(), "photo.png")?;
+
+        let out = tempdir()?;
+        let out_utf8 = Utf8PathBuf::from(out.path().to_str().unwrap());
+        let sub = out.path().join("2024").join("01");
+        fs::create_dir_all(&sub)?;
+        fs::write(sub.join("photo.png"), b"placeholder")?;
+
+        let (_, target) = generate_unique_name(&info, &out_utf8)?
+            .expect("unique name should be generated");
+        assert!(target.ends_with("photo_1.png"), "got {target}");
+        Ok(())
+    }
+
+    #[test]
+    fn generate_unique_name_none_after_10_collisions() -> tc::Result {
+        let src = tempdir()?;
+        let info = make_media_info(src.path(), "photo.png")?;
+
+        let out = tempdir()?;
+        let out_utf8 = Utf8PathBuf::from(out.path().to_str().unwrap());
+        let sub = out.path().join("2024").join("01");
+        fs::create_dir_all(&sub)?;
+        fs::write(sub.join("photo.png"), b"")?;
+        for i in 1..10 {
+            fs::write(sub.join(format!("photo_{i}.png")), b"")?;
+        }
+
+        let res = generate_unique_name(&info, &out_utf8)?;
+        assert!(res.is_none(), "should exhaust after 10 collisions: got {res:?}");
+        Ok(())
+    }
+
+    #[test]
+    fn do_copy_errors_when_unique_name_exhausted() -> tc::Result {
+        let src = tempdir()?;
+        let info = make_media_info(src.path(), "photo.png")?;
+
+        let out = tempdir()?;
+        let out_utf8 = Utf8PathBuf::from(out.path().to_str().unwrap());
+        let sub = out.path().join("2024").join("01");
+        fs::create_dir_all(&sub)?;
+        fs::write(sub.join("photo.png"), b"")?;
+        for i in 1..10 {
+            fs::write(sub.join(format!("photo_{i}.png")), b"")?;
+        }
+
+        let mut idx = super::super::entities::file_index::Index::new();
+        let err = do_copy(&info, &out_utf8, &mut idx, false, false).unwrap_err();
+        assert!(err.to_string().contains("无法为"), "got: {err}");
+        Ok(())
+    }
+
+    #[test]
+    fn do_copy_dry_run_reports_target_but_writes_nothing() -> tc::Result {
+        let src = tempdir()?;
+        let info = make_media_info(src.path(), "photo.png")?;
+
+        let out = tempdir()?;
+        let out_utf8 = Utf8PathBuf::from(out.path().to_str().unwrap());
+        let mut idx = super::super::entities::file_index::Index::new();
+
+        let did_copy = do_copy(&info, &out_utf8, &mut idx, true, false)?;
+        assert!(did_copy, "dry run should report a planned copy");
+        let entries: Vec<_> = fs::read_dir(out.path())?.collect();
+        assert!(entries.is_empty(), "dry run must not write");
         Ok(())
     }
 }
