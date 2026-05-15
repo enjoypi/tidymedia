@@ -190,12 +190,15 @@ pub fn full_path(path: &str) -> io::Result<Utf8PathBuf> {
     }
 
     let full = full.canonicalize_utf8()?;
-    let full = full.as_str();
+    Ok(Utf8PathBuf::from(strip_windows_unc(full.as_str())))
+}
 
-    #[cfg(target_os = "windows")]
-    let full = full.strip_prefix("\\\\?\\").unwrap_or(full);
-
-    Ok(Utf8PathBuf::from(full))
+pub(crate) fn strip_windows_unc(path: &str) -> &str {
+    if cfg!(target_os = "windows") {
+        path.strip_prefix(r"\\?\").unwrap_or(path)
+    } else {
+        path
+    }
 }
 
 fn fast_hash(path: &str) -> io::Result<(usize, u64, u64)> {
@@ -230,7 +233,6 @@ mod tests {
     use std::io::Read;
     use std::io::Seek;
 
-    use camino::Utf8Path;
     use sha2::Digest;
     use wyhash;
     use xxhash_rust::xxh3;
@@ -394,18 +396,47 @@ mod tests {
     }
 
     #[test]
-    fn strip_prefix() -> common::Result {
-        let path = Utf8Path::new(common::DATA_SMALL).canonicalize_utf8()?;
-        let path = path.as_str();
-        assert_eq!(
-            "\\\\?\\C:\\Users\\user\\prj\\tidymedia\\tests\\data\\data_small",
-            path
-        );
-        assert_eq!(
-            "C:\\Users\\user\\prj\\tidymedia\\tests\\data\\data_small",
-            path.strip_prefix("\\\\?\\").unwrap()
-        );
+    fn strip_windows_unc_removes_prefix_only_on_windows() {
+        let input = r"\\?\C:\Users\user\prj\tidymedia\tests\data\data_small";
+        let got = super::strip_windows_unc(input);
+        if cfg!(target_os = "windows") {
+            assert_eq!(got, r"C:\Users\user\prj\tidymedia\tests\data\data_small");
+        } else {
+            assert_eq!(got, input);
+        }
+    }
 
+    #[test]
+    fn strip_windows_unc_passes_through_when_no_prefix() {
+        let input = "/home/ecs-user/tidymedia/tests/data/data_small";
+        assert_eq!(super::strip_windows_unc(input), input);
+    }
+
+    #[test]
+    fn full_path_absolute_passthrough() -> common::Result {
+        let abs = if cfg!(target_os = "windows") {
+            "C:\\windows\\path"
+        } else {
+            "/tmp"
+        };
+        let got = super::full_path(abs)?;
+        assert_eq!(got.as_str(), abs);
         Ok(())
+    }
+
+    #[test]
+    fn full_path_relative_canonicalizes() -> common::Result {
+        let got = super::full_path(common::DATA_SMALL)?;
+        assert!(got.is_absolute(), "expected absolute, got {got}");
+        assert!(got.as_str().ends_with("tests/data/data_small")
+            || got.as_str().ends_with(r"tests\data\data_small"),
+            "unexpected canonical path: {got}");
+        Ok(())
+    }
+
+    #[test]
+    fn full_path_missing_path_errors() {
+        let err = super::full_path("definitely-not-a-real-path-xyz123").unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::NotFound);
     }
 }
