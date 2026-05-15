@@ -3,7 +3,6 @@ use std::io;
 use std::io::Error;
 use std::io::ErrorKind;
 use std::io::Read;
-use std::sync::Mutex;
 use std::time::Duration;
 use std::time::SystemTime;
 
@@ -11,6 +10,7 @@ use camino::Utf8Path;
 use camino::Utf8PathBuf;
 use generic_array::GenericArray;
 use memmap2::Mmap;
+use parking_lot::Mutex;
 use sha2::Digest;
 use sha2::Sha512;
 
@@ -100,53 +100,40 @@ impl Info {
     }
 
     pub fn bytes_read(&self) -> u64 {
-        if let Ok(l) = self.lazy.lock() {
-            l.bytes_read
-        } else {
-            0
-        }
+        self.lazy.lock().bytes_read
     }
 
     pub fn calc_full_hash(&self) -> io::Result<u64> {
-        match self.lazy.lock() {
-            Ok(mut l) => {
-                if l.full {
-                    return Ok(l.hash);
-                }
-
-                let (bytes_read, full) = full_hash(self.full_path.as_str())?;
-
-                l.hash = full;
-                l.bytes_read += bytes_read as u64;
-                l.full = true;
-                Ok(full)
-            }
-            Err(e) => Err(Error::new(io::ErrorKind::Other, e.to_string())),
+        let mut l = self.lazy.lock();
+        if l.full {
+            return Ok(l.hash);
         }
+
+        let (bytes_read, full) = full_hash(self.full_path.as_str())?;
+
+        l.hash = full;
+        l.bytes_read += bytes_read as u64;
+        l.full = true;
+        Ok(full)
     }
 
     fn full_hash(&self) -> u64 {
-        if let Ok(l) = self.lazy.try_lock() {
-            l.hash
-        } else {
-            0
+        match self.lazy.try_lock() {
+            Some(l) => l.hash,
+            None => 0,
         }
     }
 
     pub fn secure_hash(&self) -> io::Result<SecureHash> {
-        match self.lazy.lock() {
-            Ok(mut l) => {
-                if l.secure_hash != GenericArray::default() {
-                    return Ok(l.secure_hash);
-                }
-
-                let (bytes_read, secure) = secure_hash(self.full_path.as_str())?;
-                l.bytes_read += bytes_read as u64;
-                l.secure_hash = secure;
-                Ok(secure)
-            }
-            Err(e) => Err(Error::new(io::ErrorKind::Other, e.to_string())),
+        let mut l = self.lazy.lock();
+        if l.secure_hash != GenericArray::default() {
+            return Ok(l.secure_hash);
         }
+
+        let (bytes_read, secure) = secure_hash(self.full_path.as_str())?;
+        l.bytes_read += bytes_read as u64;
+        l.secure_hash = secure;
+        Ok(secure)
     }
 
     #[cfg(test)]
