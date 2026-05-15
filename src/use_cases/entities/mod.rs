@@ -8,4 +8,4 @@ mod exif;
 pub mod file_index;
 pub mod file_info;
 #[cfg(test)]
-mod test_common;
+pub(crate) mod test_common;
