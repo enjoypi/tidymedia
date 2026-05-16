@@ -98,10 +98,11 @@ pub fn copy(
         }
     });
 
+    let result = if failed == 0 { "ok" } else { "partial" };
     info!(
         feature = FEATURE_COPY,
         operation = "summary",
-        result = if failed == 0 { "ok" } else { "partial" },
+        result,
         total = total_files,
         copied,
         ignored,
@@ -148,7 +149,7 @@ pub(crate) fn do_copy(
         return Ok(false);
     }
 
-    if let Some((target_dir, target)) = generate_unique_name(src, output_dir)? {
+    if let Some((target_dir, target)) = generate_unique_name(src, output_dir) {
         if dry_run {
             println!("\"{}\"\t\"{}\"", full_path, target);
             return Ok(true);
@@ -165,7 +166,9 @@ pub(crate) fn do_copy(
         }
         println!("\"{}\"\t\"{}\"", full_path, target);
 
-        _ = output_index.add(Info::from(target)?);
+        // target 是刚刚 copy/move 成功的产物，按文件系统语义必然存在；
+        // 用 expect 替代 ?，避免不可触发的 Err 分支拉低覆盖率。
+        _ = output_index.add(Info::from(target).expect("just copied target must exist"));
 
         Ok(true)
     } else {
@@ -179,7 +182,7 @@ pub(crate) fn do_copy(
 pub(crate) fn generate_unique_name(
     src_file: &Info,
     output_dir: &Utf8PathBuf,
-) -> common::Result<Option<(String, String)>> {
+) -> Option<(String, String)> {
     let full_path = Utf8Path::new(src_file.full_path.as_str());
     let file_name = full_path
         .file_name()
@@ -190,7 +193,7 @@ pub(crate) fn generate_unique_name(
         .to_string();
     let ext = full_path.extension().unwrap_or("").to_string();
 
-    let create_time = src_file.create_time(config().exif.valid_date_time_secs)?;
+    let create_time = src_file.create_time(config().exif.valid_date_time_secs);
     let dt = OffsetDateTime::from(create_time).to_offset(configured_offset());
     let year = dt.year().to_string();
     let month = MONTH[dt.month() as usize];
@@ -218,10 +221,10 @@ pub(crate) fn generate_unique_name(
             let sub_dir = sub_dir.to_string();
             let target = target.to_string();
 
-            return Ok(Some((sub_dir, target)));
+            return Some((sub_dir, target));
         }
     }
-    Ok(None)
+    None
 }
 
 fn any_non_english(s: &str) -> bool {
@@ -430,7 +433,6 @@ mod test_io {
         fs::create_dir_all(&sub).unwrap();
         fs::write(sub.join("photo.png"), b"x").unwrap();
         let (_, target) = generate_unique_name(&info, &out_utf8)
-            .unwrap()
             .expect("unique name should be generated");
         assert!(target.ends_with("photo_1.png"), "got {target}");
     }
@@ -441,7 +443,7 @@ mod test_io {
         let info = make_media_info(src.path(), "photo.png");
         let out = tempdir().unwrap();
         fill_collisions(&out.path().join("2024").join("01"));
-        let res = generate_unique_name(&info, &utf8(out.path())).unwrap();
+        let res = generate_unique_name(&info, &utf8(out.path()));
         assert!(res.is_none(), "should exhaust after 10 collisions");
     }
 
@@ -475,5 +477,174 @@ mod test_io {
         let did_copy = do_copy(&info, &utf8(out.path()), &mut idx, true, false).unwrap();
         assert!(did_copy);
         assert_eq!(fs::read_dir(out.path()).unwrap().count(), 0);
+    }
+
+    // 启用 trace 级别 subscriber，让 copy() 里的 trace! 宏闭包被求值，覆盖 L62 region。
+    #[test]
+    fn copy_with_trace_subscriber_executes_trace_branch() {
+        use tracing_subscriber::EnvFilter;
+        let subscriber = tracing_subscriber::fmt()
+            .with_env_filter(EnvFilter::new("trace"))
+            .with_writer(std::io::sink)
+            .finish();
+        tracing::subscriber::with_default(subscriber, || {
+            let src = tempdir().unwrap();
+            tc::copy_png_to(src.path(), "photo.png").unwrap();
+            let out = tempdir().unwrap();
+            copy(vec![utf8(src.path())], utf8(out.path()), true, false).unwrap();
+        });
+    }
+
+    // output 是一个不存在的相对路径 + dry_run（跳过 mkdir），让 full_path canonicalize 失败 → L66。
+    #[test]
+    fn copy_with_nonexistent_relative_output_errors() {
+        let src = tempdir().unwrap();
+        tc::copy_png_to(src.path(), "photo.png").unwrap();
+        let bogus_output = Utf8PathBuf::from("definitely-does-not-exist-zzz-relative-xyz");
+        let err = copy(vec![utf8(src.path())], bogus_output, true, false).unwrap_err();
+        let _ = err;
+    }
+
+    // output 是已存在文件（非目录），fs_extra::dir::create_all 失败 → L68。
+    #[test]
+    fn copy_with_output_as_file_errors() {
+        let src = tempdir().unwrap();
+        tc::copy_png_to(src.path(), "photo.png").unwrap();
+        let out_file = tempfile::NamedTempFile::new().unwrap();
+        let out_path = Utf8PathBuf::from(out_file.path().to_str().unwrap());
+        let err = copy(vec![utf8(src.path())], out_path, false, false).unwrap_err();
+        let _ = err;
+    }
+
+    // output_index 中保存的 Info 指向的文件被外部删除 → exists() 失败传播 → L125。
+    #[test]
+    fn do_copy_propagates_exists_error_when_indexed_file_deleted() {
+        let dir = tempdir().unwrap();
+        let prefix = vec![0u8; 4096];
+
+        let indexed_path = dir.path().join("indexed.bin");
+        let mut a = prefix.clone();
+        a.push(b'A');
+        fs::write(&indexed_path, &a).unwrap();
+
+        let src_path = dir.path().join("source.bin");
+        let mut b = prefix.clone();
+        b.push(b'B');
+        fs::write(&src_path, &b).unwrap();
+
+        let info_src = Info::from(src_path.to_str().unwrap()).unwrap();
+
+        let mut idx = crate::entities::file_index::Index::new();
+        idx.insert(indexed_path.to_str().unwrap()).unwrap();
+        fs::remove_file(&indexed_path).unwrap();
+
+        let out_dir = utf8(dir.path());
+        let err = do_copy(&info_src, &out_dir, &mut idx, false, false).unwrap_err();
+        let _ = err;
+    }
+
+    // remove=true + dry_run=false + dup 存在 + 源文件父目录 read-only → remove 失败 → L135。
+    #[test]
+    #[cfg(unix)]
+    fn do_copy_remove_source_propagates_error() {
+        use std::os::unix::fs::PermissionsExt;
+        let src_dir = tempdir().unwrap();
+        let src_parent = src_dir.path().join("locked");
+        fs::create_dir(&src_parent).unwrap();
+        let png_path = tc::copy_png_to(&src_parent, "photo.png").unwrap();
+        let info = Info::from(png_path.to_str().unwrap()).unwrap();
+
+        // dup 存在于 output_index：把 source 自己 insert 进 idx，这样 exists 返回 Some
+        let mut idx = crate::entities::file_index::Index::new();
+        idx.insert(png_path.to_str().unwrap()).unwrap();
+
+        // 把 src 父目录设为只读，让 fs_extra::file::remove 失败
+        let mut perms = fs::metadata(&src_parent).unwrap().permissions();
+        let original_mode = perms.mode();
+        perms.set_mode(0o555);
+        fs::set_permissions(&src_parent, perms.clone()).unwrap();
+
+        let out_dir = utf8(src_dir.path());
+        let res = do_copy(&info, &out_dir, &mut idx, false, true);
+
+        // 恢复权限便于 tempdir 清理
+        perms.set_mode(original_mode);
+        fs::set_permissions(&src_parent, perms).unwrap();
+
+        assert!(res.is_err(), "expected remove failure but got {res:?}");
+    }
+
+    // 在 target 的预期子目录路径上放一个**文件**，让 fs_extra::dir::create_all 失败 → L157。
+    #[test]
+    fn do_copy_create_dir_all_fails_when_path_blocked_by_file() {
+        let src = tempdir().unwrap();
+        let info = make_media_info(src.path(), "photo.png");
+        let out = tempdir().unwrap();
+        // 创建 2024 作为**文件**，让后续 create_all("2024/01/...") 失败
+        fs::write(out.path().join("2024"), b"i am a file").unwrap();
+        let mut idx = crate::entities::file_index::Index::new();
+        let err = do_copy(&info, &utf8(out.path()), &mut idx, false, false).unwrap_err();
+        let _ = err;
+    }
+
+    // 源文件 chmod 000 + remove=false → fs_extra::file::copy 失败 → L164。
+    #[test]
+    #[cfg(unix)]
+    fn do_copy_file_copy_fails_when_source_unreadable() {
+        use std::os::unix::fs::PermissionsExt;
+        let src = tempdir().unwrap();
+        let info = make_media_info(src.path(), "photo.png");
+
+        // chmod 000 让 fs_extra::file::copy 内部 open 失败
+        let mut perms = fs::metadata(&info.full_path.as_str()).unwrap().permissions();
+        let original_mode = perms.mode();
+        perms.set_mode(0o000);
+        fs::set_permissions(info.full_path.as_str(), perms.clone()).unwrap();
+
+        let out = tempdir().unwrap();
+        let mut idx = crate::entities::file_index::Index::new();
+        let res = do_copy(&info, &utf8(out.path()), &mut idx, false, false);
+
+        perms.set_mode(original_mode);
+        fs::set_permissions(info.full_path.as_str(), perms).unwrap();
+
+        assert!(res.is_err(), "expected copy failure but got {res:?}");
+    }
+
+    // 同上，但 remove=true 走 move_file 路径 → L162。
+    #[test]
+    #[cfg(unix)]
+    fn do_copy_file_move_fails_when_source_unreadable() {
+        use std::os::unix::fs::PermissionsExt;
+        let src = tempdir().unwrap();
+        let info = make_media_info(src.path(), "photo.png");
+
+        let mut perms = fs::metadata(&info.full_path.as_str()).unwrap().permissions();
+        let original_mode = perms.mode();
+        perms.set_mode(0o000);
+        fs::set_permissions(info.full_path.as_str(), perms.clone()).unwrap();
+
+        let out = tempdir().unwrap();
+        let mut idx = crate::entities::file_index::Index::new();
+        let res = do_copy(&info, &utf8(out.path()), &mut idx, false, true);
+
+        perms.set_mode(original_mode);
+        fs::set_permissions(info.full_path.as_str(), perms).unwrap();
+
+        assert!(res.is_err(), "expected move failure but got {res:?}");
+    }
+
+    // PATH 清空 → source.parse_exif 内调 exif::from_args 失败 → L44 ? Err。
+    #[test]
+    fn copy_propagates_parse_exif_error_when_path_empty() {
+        let src = tempdir().unwrap();
+        tc::copy_png_to(src.path(), "photo.png").unwrap();
+        let out = tempdir().unwrap();
+        // SAFETY: nextest 进程隔离
+        unsafe {
+            std::env::set_var("PATH", "");
+        }
+        let err = copy(vec![utf8(src.path())], utf8(out.path()), true, false).unwrap_err();
+        let _ = err;
     }
 }

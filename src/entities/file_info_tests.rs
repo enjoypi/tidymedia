@@ -57,8 +57,8 @@
     }
 
     #[test]
-    fn small_file() -> common::Result {
-        let ct = HashTest::new(common::DATA_SMALL)?;
+    fn small_file() {
+        let ct = HashTest::new(common::DATA_SMALL).unwrap();
         assert_eq!(ct.short_wyhash, common::DATA_SMALL_WYHASH);
         assert_eq!(ct.short_xxhash, common::DATA_SMALL_XXHASH);
         assert!(ct.file_size <= super::FAST_READ_SIZE);
@@ -66,21 +66,19 @@
         assert_eq!(ct.short_xxhash, ct.full);
         assert_eq!(ct.secure, common::data_small_sha512());
 
-        let f = Info::from(common::DATA_SMALL)?;
+        let f = Info::from(common::DATA_SMALL).unwrap();
         assert_eq!(f.fast_hash, ct.short_wyhash);
         assert_eq!(f.full_hash(), ct.short_xxhash);
         assert_eq!(f.size, ct.file_size as u64);
-        assert_eq!(f.calc_full_hash()?, ct.full);
+        assert_eq!(f.calc_full_hash().unwrap(), ct.full);
         assert_eq!(f.full_hash(), ct.full);
-        assert_eq!(f.secure_hash()?, common::data_small_sha512());
-        assert_eq!(f.secure_hash()?, common::data_small_sha512());
-
-        Ok(())
+        assert_eq!(f.secure_hash().unwrap(), common::data_small_sha512());
+        assert_eq!(f.secure_hash().unwrap(), common::data_small_sha512());
     }
 
     #[test]
-    fn large_file() -> common::Result {
-        let ct = HashTest::new(common::DATA_LARGE)?;
+    fn large_file() {
+        let ct = HashTest::new(common::DATA_LARGE).unwrap();
         assert_eq!(ct.short_wyhash, common::DATA_LARGE_WYHASH);
         assert_ne!(ct.short_xxhash, common::DATA_LARGE_XXHASH);
         assert_eq!(ct.short_read, super::FAST_READ_SIZE);
@@ -88,81 +86,74 @@
         assert_eq!(ct.full, common::DATA_LARGE_XXHASH);
         assert_eq!(ct.secure, common::data_large_sha512());
 
-        let f = Info::from(common::DATA_LARGE)?;
+        let f = Info::from(common::DATA_LARGE).unwrap();
         assert_eq!(f.fast_hash, ct.short_wyhash);
         assert_eq!(f.full_hash(), ct.short_xxhash);
         assert_eq!(f.size, ct.file_size as u64);
-        assert_eq!(f.calc_full_hash()?, ct.full);
+        assert_eq!(f.calc_full_hash().unwrap(), ct.full);
         assert_eq!(f.full_hash(), ct.full);
-        assert_eq!(f.secure_hash()?, common::data_large_sha512());
-        assert_eq!(f.secure_hash()?, common::data_large_sha512());
-
-        Ok(())
+        assert_eq!(f.secure_hash().unwrap(), common::data_large_sha512());
+        assert_eq!(f.secure_hash().unwrap(), common::data_large_sha512());
     }
 
     #[test]
-    fn bytes_read() -> common::Result {
-        let meta = fs::metadata(common::DATA_LARGE)?;
+    fn bytes_read() {
+        let meta = fs::metadata(common::DATA_LARGE).unwrap();
 
         {
-            let (bytes_read, _fast, _full) = super::fast_hash(common::DATA_LARGE)?;
+            let (bytes_read, _fast, _full) = super::fast_hash(common::DATA_LARGE).unwrap();
             assert_eq!(bytes_read, super::FAST_READ_SIZE);
 
-            let (bytes_read, full) = super::full_hash(common::DATA_LARGE)?;
+            let (bytes_read, full) = super::full_hash(common::DATA_LARGE).unwrap();
             assert_eq!(bytes_read as u64, meta.len());
             assert_eq!(full, common::DATA_LARGE_XXHASH);
         }
 
-        let f = super::Info::from(common::DATA_LARGE)?;
+        let f = super::Info::from(common::DATA_LARGE).unwrap();
         assert_eq!(f.bytes_read(), super::FAST_READ_SIZE as u64);
-        assert_eq!(f.calc_full_hash()?, common::DATA_LARGE_XXHASH);
+        assert_eq!(f.calc_full_hash().unwrap(), common::DATA_LARGE_XXHASH);
         assert_eq!(f.bytes_read(), super::FAST_READ_SIZE as u64 + meta.len());
         // no read file when twice
-        assert_eq!(f.calc_full_hash()?, common::DATA_LARGE_XXHASH);
+        assert_eq!(f.calc_full_hash().unwrap(), common::DATA_LARGE_XXHASH);
         assert_eq!(f.bytes_read(), super::FAST_READ_SIZE as u64 + meta.len());
 
-        assert_eq!(f.secure_hash()?, common::data_large_sha512());
+        assert_eq!(f.secure_hash().unwrap(), common::data_large_sha512());
         assert_eq!(
             f.bytes_read(),
             super::FAST_READ_SIZE as u64 + meta.len() * 2
         );
 
         // no read file when twice
-        assert_eq!(f.secure_hash()?, common::data_large_sha512());
+        assert_eq!(f.secure_hash().unwrap(), common::data_large_sha512());
         assert_eq!(
             f.bytes_read(),
             super::FAST_READ_SIZE as u64 + meta.len() * 2
         );
-
-        Ok(())
     }
 
     #[test]
-    fn same_small() -> common::Result {
-        let f1 = Info::from(common::DATA_SMALL)?;
-        let f2 = Info::from(common::DATA_SMALL_COPY)?;
+    fn same_small() {
+        let f1 = Info::from(common::DATA_SMALL).unwrap();
+        let f2 = Info::from(common::DATA_SMALL_COPY).unwrap();
 
         assert_eq!(f1, f2);
-        f1.calc_full_hash()?;
+        f1.calc_full_hash().unwrap();
 
         assert_eq!(f1, f2);
-        Ok(())
     }
 
     #[test]
-    fn same_large() -> common::Result {
-        let f1 = Info::from(common::DATA_LARGE)?;
-        let f2 = Info::from(common::DATA_LARGE_COPY)?;
+    fn same_large() {
+        let f1 = Info::from(common::DATA_LARGE).unwrap();
+        let f2 = Info::from(common::DATA_LARGE_COPY).unwrap();
 
         assert_eq!(f1, f2);
-        f1.calc_full_hash()?;
+        f1.calc_full_hash().unwrap();
 
         assert_ne!(f1, f2);
 
-        f2.calc_full_hash()?;
+        f2.calc_full_hash().unwrap();
         assert_eq!(f1, f2);
-
-        Ok(())
     }
 
     #[test]
@@ -183,25 +174,23 @@
     }
 
     #[test]
-    fn full_path_absolute_passthrough() -> common::Result {
+    fn full_path_absolute_passthrough() {
         let abs = if cfg!(target_os = "windows") {
             "C:\\windows\\path"
         } else {
             "/tmp"
         };
-        let got = super::full_path(abs)?;
+        let got = super::full_path(abs).unwrap();
         assert_eq!(got.as_str(), abs);
-        Ok(())
     }
 
     #[test]
-    fn full_path_relative_canonicalizes() -> common::Result {
-        let got = super::full_path(common::DATA_SMALL)?;
+    fn full_path_relative_canonicalizes() {
+        let got = super::full_path(common::DATA_SMALL).unwrap();
         assert!(got.is_absolute(), "expected absolute, got {got}");
         assert!(got.as_str().ends_with("tests/data/data_small")
             || got.as_str().ends_with(r"tests\data\data_small"),
             "unexpected canonical path: {got}");
-        Ok(())
     }
 
     #[test]
@@ -218,13 +207,12 @@
     }
 
     #[test]
-    fn info_from_empty_file_errors() -> common::Result {
-        let tmp = tempfile::NamedTempFile::new()?;
+    fn info_from_empty_file_errors() {
+        let tmp = tempfile::NamedTempFile::new().unwrap();
         let path = tmp.path().to_str().unwrap();
         let err = Info::from(path).unwrap_err();
         assert_eq!(err.kind(), std::io::ErrorKind::Other);
         assert!(err.to_string().contains("is empty"), "got: {err}");
-        Ok(())
     }
 
     #[test]
@@ -237,47 +225,47 @@
     const TEST_VALID_THRESHOLD_SECS: u64 = 946_684_800;
 
     #[test]
-    fn create_time_no_exif_uses_meta() -> common::Result {
-        let info = Info::from(common::DATA_SMALL)?;
-        let t = info.create_time(TEST_VALID_THRESHOLD_SECS)?;
+    fn create_time_no_exif_uses_meta() {
+        let info = Info::from(common::DATA_SMALL).unwrap();
+        let t = info.create_time(TEST_VALID_THRESHOLD_SECS);
         let secs = t
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_secs();
         assert!(secs > 0);
-        Ok(())
     }
 
     #[test]
-    fn create_time_uses_exif_when_valid() -> common::Result {
-        let mut info = Info::from(common::DATA_SMALL)?;
+    fn create_time_uses_exif_when_valid() {
+        let mut info = Info::from(common::DATA_SMALL).unwrap();
         let full_path = info.full_path.as_str().to_string();
         let exif: super::super::exif::Exif = serde_json::from_value(serde_json::json!({
             "SourceFile": full_path,
             "File:MIMEType": "image/png",
             "EXIF:DateTimeOriginal": 1_700_000_000_u64,
-        }))?;
+        }))
+        .unwrap();
         info.set_exif(exif);
-        let t = info.create_time(TEST_VALID_THRESHOLD_SECS)?;
+        let t = info.create_time(TEST_VALID_THRESHOLD_SECS);
         let secs = t
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_secs();
         assert_eq!(secs, 1_700_000_000);
-        Ok(())
     }
 
     #[test]
-    fn create_time_falls_back_when_exif_below_threshold() -> common::Result {
-        let mut info = Info::from(common::DATA_SMALL)?;
+    fn create_time_falls_back_when_exif_below_threshold() {
+        let mut info = Info::from(common::DATA_SMALL).unwrap();
         let full_path = info.full_path.as_str().to_string();
         let exif: super::super::exif::Exif = serde_json::from_value(serde_json::json!({
             "SourceFile": full_path,
             "File:MIMEType": "image/png",
             "EXIF:DateTimeOriginal": 100_u64,
-        }))?;
+        }))
+        .unwrap();
         info.set_exif(exif);
-        let t = info.create_time(TEST_VALID_THRESHOLD_SECS)?;
+        let t = info.create_time(TEST_VALID_THRESHOLD_SECS);
         let secs = t
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
@@ -286,58 +274,108 @@
             secs > TEST_VALID_THRESHOLD_SECS,
             "fallback should be > {TEST_VALID_THRESHOLD_SECS}; got {secs}"
         );
-        Ok(())
     }
 
     #[test]
-    fn create_time_uses_modify_when_smaller_than_create() -> common::Result {
-        let dir = tempfile::tempdir()?;
+    fn create_time_uses_modify_when_smaller_than_create() {
+        let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("ct.bin");
-        fs::write(&path, b"hello")?;
+        fs::write(&path, b"hello").unwrap();
         let early = filetime::FileTime::from_unix_time(631_152_000, 0);
-        filetime::set_file_mtime(&path, early)?;
-        let info = Info::from(path.to_str().unwrap())?;
-        let t = info.create_time(TEST_VALID_THRESHOLD_SECS)?;
+        filetime::set_file_mtime(&path, early).unwrap();
+        let info = Info::from(path.to_str().unwrap()).unwrap();
+        let t = info.create_time(TEST_VALID_THRESHOLD_SECS);
         let secs = t
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_secs();
         assert_eq!(secs, 631_152_000);
-        Ok(())
     }
 
     #[test]
-    fn is_media_false_when_no_exif() -> common::Result {
-        let info = Info::from(common::DATA_SMALL)?;
+    fn is_media_false_when_no_exif() {
+        let info = Info::from(common::DATA_SMALL).unwrap();
         assert!(!info.is_media());
-        Ok(())
     }
 
     #[test]
-    fn is_media_true_when_exif_present_and_media() -> common::Result {
-        let mut info = Info::from(common::DATA_SMALL)?;
+    fn is_media_true_when_exif_present_and_media() {
+        let mut info = Info::from(common::DATA_SMALL).unwrap();
         let exif: super::super::exif::Exif = serde_json::from_value(serde_json::json!({
             "SourceFile": info.full_path.as_str().to_string(),
             "File:MIMEType": "image/jpeg",
-        }))?;
+        }))
+        .unwrap();
         info.set_exif(exif);
         assert!(info.is_media());
-        Ok(())
     }
 
     #[test]
-    fn partial_eq_differs_when_size_differs() -> common::Result {
-        let small = Info::from(common::DATA_SMALL)?;
-        let large = Info::from(common::DATA_LARGE)?;
+    fn partial_eq_differs_when_size_differs() {
+        let small = Info::from(common::DATA_SMALL).unwrap();
+        let large = Info::from(common::DATA_LARGE).unwrap();
         assert_ne!(small, large);
-        Ok(())
     }
 
     #[test]
-    fn info_debug_format_includes_fast_hash() -> common::Result {
-        let info = Info::from(common::DATA_SMALL)?;
+    fn info_debug_format_includes_fast_hash() {
+        let info = Info::from(common::DATA_SMALL).unwrap();
         let dbg = format!("{:?}", info);
         assert!(dbg.contains("fast_hash"));
         assert!(dbg.contains("size"));
-        Ok(())
+    }
+
+    // 绝对路径直接跳过 canonicalize（full_path 内 is_absolute() 分支），随后 metadata() 失败。
+    // 触发 file_info.rs L71 metadata()? 的 Err region。
+    #[test]
+    fn info_from_absolute_missing_path_errors() {
+        let err = Info::from("/definitely/missing/zzz_abs_path_xyz").unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::NotFound);
+    }
+
+    // 文件 metadata 可读但 read 不可（chmod 000），让 fast_hash 内 File::open 失败。
+    // 触发 file_info.rs L86 + L206/L209 的 Err region。
+    // 注意：测试结束前需恢复权限，否则 tempdir 清理会失败。
+    #[test]
+    #[cfg(unix)]
+    fn info_from_unreadable_file_errors() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("locked.bin");
+        fs::write(&path, b"non-empty content").unwrap();
+        let mut perms = fs::metadata(&path).unwrap().permissions();
+        perms.set_mode(0o000);
+        fs::set_permissions(&path, perms.clone()).unwrap();
+
+        let err = Info::from(path.to_str().unwrap()).unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::PermissionDenied);
+
+        // 恢复权限，让 tempdir 在测试结束清理时能删除该文件
+        perms.set_mode(0o644);
+        fs::set_permissions(&path, perms).unwrap();
+    }
+
+    // Info 实例创建后立刻删除底层文件，再调 calc_full_hash → mmap 打开失败。
+    // 触发 file_info.rs L112 + L218/L219 的 Err region。
+    #[test]
+    fn calc_full_hash_errors_when_file_deleted() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("vanishing.bin");
+        fs::write(&path, b"contents that will vanish").unwrap();
+        let info = Info::from(path.to_str().unwrap()).unwrap();
+        fs::remove_file(&path).unwrap();
+        let err = info.calc_full_hash().unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::NotFound);
+    }
+
+    // 同上，但走 secure_hash 路径。触发 L130 + L225/L226 的 Err region。
+    #[test]
+    fn secure_hash_errors_when_file_deleted() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("vanishing2.bin");
+        fs::write(&path, b"contents that will vanish 2").unwrap();
+        let info = Info::from(path.to_str().unwrap()).unwrap();
+        fs::remove_file(&path).unwrap();
+        let err = info.secure_hash().unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::NotFound);
     }

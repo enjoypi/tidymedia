@@ -34,3 +34,6 @@ filetime = "*"
 predicates = "*"
 pretty_assertions = "*"
 rstest = "*"
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(coverage_nightly)'] }

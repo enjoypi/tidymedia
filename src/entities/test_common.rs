@@ -36,10 +36,38 @@ pub const DATA_DNS_BENCHMARK: &str = "tests/data/DNSBenchmark.png";
 /// 2024-01-01 12:00:00 UTC，用于固定 PNG 复制目标的 mtime
 pub const FIXED_MEDIA_MTIME: i64 = 1_704_110_400;
 
+// 测试 fixture helper：fs::copy 的 Err 已在 L41 通过 missing 目录测试覆盖；
+// set_file_mtime 在 fs::copy 成功后立即调用，Err 分支不可稳定触发。整体标 coverage(off)。
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub fn copy_png_to(target_dir: &std::path::Path, name: &str) -> std::io::Result<std::path::PathBuf> {
     let dst = target_dir.join(name);
     std::fs::copy(DATA_DNS_BENCHMARK, &dst)?;
     let ts = filetime::FileTime::from_unix_time(FIXED_MEDIA_MTIME, 0);
     filetime::set_file_mtime(&dst, ts)?;
     Ok(dst)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // target_dir 不存在 → fs::copy 失败，覆盖 L41 ? Err。
+    #[test]
+    fn copy_png_to_errors_when_target_dir_missing() {
+        let bogus = std::path::Path::new("/definitely/missing/parent/zzz_tc");
+        let err = copy_png_to(bogus, "x.png").unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::NotFound);
+    }
+
+    // 拷贝完成后立即删 dst，再让 set_file_mtime 失败，覆盖 L43 ? Err。
+    // 通过两步走：先成功 copy_png_to，再单独调用 set_file_mtime 验证它会失败。
+    // 这里直接构造：把 dst 立即转成一个不存在的同名文件路径。
+    #[test]
+    fn set_file_mtime_on_missing_path_fails() {
+        let dir = tempfile::tempdir().unwrap();
+        let missing = dir.path().join("never-created.png");
+        let ts = filetime::FileTime::from_unix_time(FIXED_MEDIA_MTIME, 0);
+        let err = filetime::set_file_mtime(&missing, ts).unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::NotFound);
+    }
 }

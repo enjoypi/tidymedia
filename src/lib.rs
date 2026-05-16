@@ -1,3 +1,8 @@
+// 严格覆盖率模式：跑 `RUSTFLAGS="--cfg=coverage_nightly" cargo +nightly llvm-cov nextest`
+// 时启用，让带有 `#[cfg_attr(coverage_nightly, coverage(off))]` 的函数被 LLVM 跳过统计。
+// 不影响默认 stable 构建。
+#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
+
 use std::ffi::OsString;
 
 use camino::Utf8PathBuf;
