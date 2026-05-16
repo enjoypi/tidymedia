@@ -10,6 +10,7 @@ use clap::Parser;
 use clap::Subcommand;
 use tracing::debug;
 use tracing_subscriber::fmt;
+use tracing_subscriber::EnvFilter;
 
 pub use entities::common::Error;
 pub use entities::common::Result;
@@ -40,13 +41,13 @@ pub struct Cli {
 
 #[derive(Debug, Subcommand)]
 pub enum Commands {
-    /// Copy non-duplicate media files (images / videos recognized by exiftool) from sources to the output directory. Pass --include-non-media to also copy everything else. Duplicate detection uses SHA-512. No source files are modified.
+    /// Copy non-duplicate media files (images / videos recognized via magic-bytes MIME) from sources to the output directory. Pass --include-non-media to also copy everything else. Duplicate detection uses SHA-512. No source files are modified.
     Copy {
         /// Dry run, do not copy files
         #[arg(short, long)]
         dry_run: bool,
 
-        /// Also copy files that exiftool does not classify as image/video (e.g. documents, archives, raw types unknown to exiftool)
+        /// Also copy files that magic-bytes MIME does not classify as image/video (e.g. documents, archives, unknown formats)
         #[arg(long)]
         include_non_media: bool,
 
@@ -80,7 +81,7 @@ pub enum Commands {
         #[arg(short, long)]
         dry_run: bool,
 
-        /// Also move files that exiftool does not classify as image/video
+        /// Also move files that magic-bytes MIME does not classify as image/video
         #[arg(long)]
         include_non_media: bool,
 
@@ -161,8 +162,15 @@ fn install_logging(cli: &Cli) {
         .with_thread_ids(cli.log_thread_ids)
         .compact();
 
+    // 默认让 tidymedia 走 --log-level（默认 info），同时把 nom_exif 内部噪声
+    // （parse_gps "find" info、"GPSInfo not found" warn 等）压到 error。
+    // 用户可通过 RUST_LOG 覆盖（如 RUST_LOG=nom_exif=debug）。
+    let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| {
+        EnvFilter::new(format!("{}={},nom_exif=error", env!("CARGO_PKG_NAME"), cli.log_level))
+    });
+
     let _ = tracing_subscriber::fmt()
-        .with_max_level(cli.log_level)
+        .with_env_filter(env_filter)
         .with_writer(std::io::stderr)
         .event_format(format)
         .try_init();

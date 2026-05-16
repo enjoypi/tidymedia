@@ -45,12 +45,12 @@
     fn parse_exif() {
         let mut index = Index::new();
         index.visit_dir(common::DATA_DIR);
-        index.parse_exif().unwrap();
+        index.parse_exif();
 
         let png_path = file_info::full_path(common::DATA_DNS_BENCHMARK).unwrap();
         let info = index.files.get(png_path.as_path()).unwrap();
         let exif = info.exif().unwrap();
-        assert_eq!(exif.source_file(), png_path);
+        assert_eq!(exif.mime_type(), "image/png");
         assert!(exif.is_media());
         assert!(exif.media_create_date() > 0);
         assert!(exif.file_modify_date() > 0);
@@ -154,8 +154,23 @@
     #[test]
     fn parse_exif_empty_index_ok() {
         let mut index = Index::new();
-        index.parse_exif().unwrap();
+        index.parse_exif();
         assert_eq!(index.files().len(), 0);
+    }
+
+    /// 文件在 visit_dir 之后被删除 → Exif::from_path 返回 Err →
+    /// parse_exif 内 `if let Ok` 的 Err 分支被覆盖，对应 entry 保留无 exif。
+    #[test]
+    fn parse_exif_skips_files_deleted_between_visit_and_parse() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("ghost.bin");
+        fs::write(&path, [0xFFu8; 32]).unwrap();
+        let mut index = Index::new();
+        index.visit_dir(dir.path().to_str().unwrap());
+        assert_eq!(index.files().len(), 1);
+        fs::remove_file(&path).unwrap();
+        index.parse_exif();
+        assert_eq!(index.files().len(), 1);
     }
 
     #[test]
@@ -299,21 +314,6 @@
         assert!(group.contains(&small_copy));
         // 让 Utf8Path import 仍被使用
         let _ = Utf8Path::new(common::DATA_SMALL);
-    }
-
-    // 清空 PATH 让 exiftool 找不到，parse_exif 内 from_args 会失败传播到 L192 的 ? Err。
-    // nextest 每个测试独立进程，set_var 不会污染其他测试。
-    #[test]
-    fn parse_exif_propagates_command_error_when_path_empty() {
-        let mut index = Index::new();
-        index.insert(common::DATA_SMALL).unwrap();
-        // SAFETY: nextest 进程隔离，本测试独占该进程
-        unsafe {
-            std::env::set_var("PATH", "");
-        }
-        let err = index.parse_exif().unwrap_err();
-        // 错误类型来自 exif::from_args 的 io::Error（Command 找不到 exiftool）
-        let _ = err;  // 仅断言 Err 即可，错误细节随 OS 不同
     }
 
     // exists(secure=true) 命中：覆盖 SHA-512 判等分支

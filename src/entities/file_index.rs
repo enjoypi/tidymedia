@@ -4,13 +4,11 @@ use std::collections::HashSet;
 use std::fmt;
 use std::hash::Hash;
 use std::io;
-use std::io::Write;
 
 use camino::Utf8PathBuf;
 use rayon::prelude::*;
 use tracing::warn;
 
-use super::common;
 use super::exif;
 use super::file_info::Info;
 
@@ -283,28 +281,14 @@ impl Index {
         }
     }
 
-    // tempfile/writeln/flush 等系统调用 Err 分支几乎不可稳定触发；exif::from_args 已在
-    // 阶段 2C 通过 PATH=空 case 覆盖。整体把这个 IO 编排函数排出严格覆盖率统计。
-    #[cfg_attr(coverage_nightly, coverage(off))]
-    pub fn parse_exif(&mut self) -> common::Result<()> {
-        // write all filenames to a file
-        let mut file = tempfile::NamedTempFile::new()?;
-        let mut filenames: Vec<Utf8PathBuf> = self.files.keys().cloned().collect();
-        filenames.sort();
-
-        for filename in filenames.iter() {
-            // file writeln
-            writeln!(&mut file, "{}", filename)?;
-        }
-        file.flush()?;
-
-        let v = exif::Exif::from_args(vec!["-@", file.path().to_str().unwrap()])?;
-        v.iter().for_each(|e| {
-            if let Some(info) = self.files.get_mut(e.source_file()) {
-                info.set_exif(e.clone());
+    /// 并行对每个 indexed 文件用 nom-exif + infer 读取元数据；解析失败的文件被
+    /// 静默跳过（"尽力而为"语义）。从不返回错误。
+    pub fn parse_exif(&mut self) {
+        self.files.par_iter_mut().for_each(|(path, info)| {
+            if let Ok(e) = exif::Exif::from_path(path) {
+                info.set_exif(e);
             }
         });
-        Ok(())
     }
 }
 

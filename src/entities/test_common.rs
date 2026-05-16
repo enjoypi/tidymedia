@@ -5,9 +5,6 @@ fn str_to_secure(input_str: &str) -> SecureHash {
     SecureHash::from_exact_iter(vec).expect("test hex input must encode 64 bytes")
 }
 
-pub type Error = Box<dyn std::error::Error>;
-pub type Result = std::result::Result<(), Error>;
-
 pub const DATA_DIR: &str = "tests/data";
 pub const DATA_SMALL: &str = "tests/data/data_small";
 pub const DATA_SMALL_LEN: u64 = 3057;
@@ -32,6 +29,15 @@ pub fn data_large_sha512() -> SecureHash {
 pub const DATA_LARGE_COPY: &str = "tests/data/data_large_copy";
 
 pub const DATA_DNS_BENCHMARK: &str = "tests/data/DNSBenchmark.png";
+
+/// 含 EXIF DateTimeOriginal/CreateDate/ModifyDate 的小 JPEG，ffmpeg+exiftool 生成。
+pub const DATA_JPEG_WITH_EXIF: &str = "tests/data/sample-with-exif.jpg";
+/// 有 EXIF block（仅 Make 标签），三个日期字段全无 —— 用于覆盖 if let Some 的 None 分支。
+pub const DATA_JPEG_NO_DATES: &str = "tests/data/sample-no-dates.jpg";
+/// 含 QuickTime track CreateDate 的小 MP4，ffmpeg 生成。
+pub const DATA_MP4_WITH_TRACK: &str = "tests/data/sample-with-track.mp4";
+/// Matroska 视频，track 但无 CreateDate —— 用于覆盖 populate_video_dates 的 None 分支。
+pub const DATA_MKV_NO_TRACK_DATE: &str = "tests/data/sample-no-track-date.mkv";
 
 /// 2024-01-01 12:00:00 UTC，用于固定 PNG 复制目标的 mtime
 pub const FIXED_MEDIA_MTIME: i64 = 1_704_110_400;

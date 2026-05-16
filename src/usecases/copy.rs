@@ -42,7 +42,7 @@ pub fn copy(
     input_dirs.iter().for_each(|s| {
         source.visit_dir(s.as_str());
     });
-    source.parse_exif()?;
+    source.parse_exif();
 
     let total_files = source.files().len();
     let scan_stats = source.stats();

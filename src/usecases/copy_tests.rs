@@ -78,14 +78,7 @@ mod test_io {
     fn make_media_info(dir: &Path, name: &str) -> Info {
         let png = tc::copy_png_to(dir, name).unwrap();
         let mut info = Info::from(png.to_str().unwrap()).unwrap();
-        let exif: crate::entities::exif::Exif = serde_json::from_value(
-            serde_json::json!({
-                "SourceFile": info.full_path.as_str().to_string(),
-                "File:MIMEType": "image/png",
-            }),
-        )
-        .unwrap();
-        info.set_exif(exif);
+        info.set_exif(crate::entities::exif::Exif::with_mime("image/png"));
         info
     }
 
@@ -384,20 +377,6 @@ mod test_io {
         assert!(res.is_err(), "expected move failure but got {res:?}");
     }
 
-    // PATH 清空 → source.parse_exif 内调 exif::from_args 失败 → L44 ? Err。
-    #[test]
-    fn copy_propagates_parse_exif_error_when_path_empty() {
-        let src = tempdir().unwrap();
-        tc::copy_png_to(src.path(), "photo.png").unwrap();
-        let out = tempdir().unwrap();
-        // SAFETY: nextest 进程隔离
-        unsafe {
-            std::env::set_var("PATH", "");
-        }
-        let err = copy(vec![utf8(src.path())], utf8(out.path()), true, false, false).unwrap_err();
-        let _ = err;
-    }
-
     fn walk_files(root: &Path) -> Vec<std::path::PathBuf> {
         let mut out = Vec::new();
         let mut stack = vec![root.to_path_buf()];
@@ -416,7 +395,7 @@ mod test_io {
         out
     }
 
-    // include_non_media=true → 非媒体（.txt 等 exiftool 不识别 MIME 的）也被搬运
+    // include_non_media=true → 非媒体（.txt 等 magic-bytes MIME 未识别为 image/video 的）也被搬运
     #[test]
     fn copy_include_non_media_copies_plain_files() {
         let src = tempdir().unwrap();

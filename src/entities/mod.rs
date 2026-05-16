@@ -1,5 +1,5 @@
 // Entities 层：业务对象 + 业务规则。
-// 注意：file_info/file_index/exif 当前混入了文件 IO 与 exiftool 子进程调用。
+// 注意：file_info/file_index/exif 当前混入了文件 IO 与 nom-exif/infer 库调用。
 // 严格按 Clean Architecture 这些应进 Adapter 的 Gateway，但本仓库是 CLI
 // 单体工具，无替换框架/DB 的实际场景；按 YAGNI 暂不再抽 Gateway 抽象。
 use generic_array::typenum;

@@ -12,7 +12,9 @@ fs_extra = "*"
 generic-array = "0"
 hex = "*"
 ignore = "*"
+infer = "*"
 memmap2 = "*"
+nom-exif = "*"
 parking_lot = "*"
 rayon = "*"
 serde = "*"
@@ -30,6 +32,7 @@ xxhash-rust = { version = "*", features = ["xxh3"] }
 
 [dev-dependencies]
 assert_cmd = "*"
+chrono = "*"
 filetime = "*"
 predicates = "*"
 pretty_assertions = "*"

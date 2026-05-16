@@ -238,13 +238,8 @@
     #[test]
     fn create_time_uses_exif_when_valid() {
         let mut info = Info::from(common::DATA_SMALL).unwrap();
-        let full_path = info.full_path.as_str().to_string();
-        let exif: super::super::exif::Exif = serde_json::from_value(serde_json::json!({
-            "SourceFile": full_path,
-            "File:MIMEType": "image/png",
-            "EXIF:DateTimeOriginal": 1_700_000_000_u64,
-        }))
-        .unwrap();
+        let exif = super::super::exif::Exif::with_mime("image/png")
+            .with_date_time_original(1_700_000_000);
         info.set_exif(exif);
         let t = info.create_time(TEST_VALID_THRESHOLD_SECS);
         let secs = t
@@ -257,13 +252,7 @@
     #[test]
     fn create_time_falls_back_when_exif_below_threshold() {
         let mut info = Info::from(common::DATA_SMALL).unwrap();
-        let full_path = info.full_path.as_str().to_string();
-        let exif: super::super::exif::Exif = serde_json::from_value(serde_json::json!({
-            "SourceFile": full_path,
-            "File:MIMEType": "image/png",
-            "EXIF:DateTimeOriginal": 100_u64,
-        }))
-        .unwrap();
+        let exif = super::super::exif::Exif::with_mime("image/png").with_date_time_original(100);
         info.set_exif(exif);
         let t = info.create_time(TEST_VALID_THRESHOLD_SECS);
         let secs = t
@@ -301,12 +290,7 @@
     #[test]
     fn is_media_true_when_exif_present_and_media() {
         let mut info = Info::from(common::DATA_SMALL).unwrap();
-        let exif: super::super::exif::Exif = serde_json::from_value(serde_json::json!({
-            "SourceFile": info.full_path.as_str().to_string(),
-            "File:MIMEType": "image/jpeg",
-        }))
-        .unwrap();
-        info.set_exif(exif);
+        info.set_exif(super::super::exif::Exif::with_mime("image/jpeg"));
         assert!(info.is_media());
     }
 
