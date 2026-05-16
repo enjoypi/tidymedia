@@ -40,11 +40,15 @@ pub struct Cli {
 
 #[derive(Debug, Subcommand)]
 pub enum Commands {
-    /// Copy non-duplicate files from the source directory to the output directory. No source files will be modified.
+    /// Copy non-duplicate media files (images / videos recognized by exiftool) from sources to the output directory. Pass --include-non-media to also copy everything else. Duplicate detection uses SHA-512. No source files are modified.
     Copy {
         /// Dry run, do not copy files
         #[arg(short, long)]
         dry_run: bool,
+
+        /// Also copy files that exiftool does not classify as image/video (e.g. documents, archives, raw types unknown to exiftool)
+        #[arg(long)]
+        include_non_media: bool,
 
         /// The source directories or files
         #[arg(required = true)]
@@ -55,26 +59,30 @@ pub enum Commands {
         output: Utf8PathBuf,
     },
 
-    /// Find all duplicate files in the source directory and print a shell script (using batch file syntax for Windows) to delete the duplicate files on standard output. If the output parameter is provided, then deletion operations for files located in the output directory will be commented out.
+    /// Find duplicate files under the sources and print a shell script (batch syntax on Windows) that deletes the duplicates. Default uses a fast non-cryptographic hash (xxh3-64); pass --secure to use SHA-512 instead. If --output is given, deletions for files under that directory are commented out.
     Find {
-        /// Use fast hash
-        #[arg(short, long, default_value = "true", action = clap::ArgAction::SetTrue)]
-        fast: bool,
+        /// Use the cryptographic hash (SHA-512) instead of the default fast non-cryptographic hash (xxh3-64). Slower but eliminates the (already astronomically small) collision risk.
+        #[arg(short, long)]
+        secure: bool,
 
         /// The source directories or files
         #[arg(required = true)]
         sources: Vec<Utf8PathBuf>,
 
-        /// The output directory
+        /// The output directory; deletions for files under it are commented out
         #[arg(short, long)]
         output: Option<Utf8PathBuf>,
     },
 
-    /// Move non-duplicate files from the source directory to the output directory. Duplicate files already present in the output directory will be deleted.
+    /// Move non-duplicate media files from sources into the output directory. Sources that duplicate something already in output are physically deleted; duplicate detection uses SHA-512. Pass --include-non-media to also move everything else.
     Move {
-        /// Dry run, do not move files
+        /// Dry run, do not move or delete files
         #[arg(short, long)]
         dry_run: bool,
+
+        /// Also move files that exiftool does not classify as image/video
+        #[arg(long)]
+        include_non_media: bool,
 
         /// The source directories or files
         #[arg(required = true)]
@@ -90,19 +98,21 @@ pub fn tidy(command: Commands) -> Result<()> {
     match command {
         Commands::Copy {
             dry_run,
+            include_non_media,
             sources,
             output,
-        } => usecases::copy(sources, output, dry_run, false),
+        } => usecases::copy(sources, output, dry_run, false, include_non_media),
         Commands::Find {
-            fast,
+            secure,
             sources,
             output,
-        } => usecases::find_duplicates(fast, sources, output),
+        } => usecases::find_duplicates(secure, sources, output),
         Commands::Move {
             dry_run,
+            include_non_media,
             sources,
             output,
-        } => usecases::copy(sources, output, dry_run, true),
+        } => usecases::copy(sources, output, dry_run, true, include_non_media),
     }
 }
 

@@ -15,7 +15,7 @@ const FEATURE_FIND: &str = "find";
 // 已经被各种集成测试覆盖。整体标 coverage(off) 让严格覆盖率统计稳定。
 #[cfg_attr(coverage_nightly, coverage(off))]
 pub fn find_duplicates(
-    fast: bool,
+    secure: bool,
     sources: Vec<Utf8PathBuf>,
     output: Option<Utf8PathBuf>,
 ) -> common::Result<()> {
@@ -39,27 +39,31 @@ pub fn find_duplicates(
         index.visit_dir(path.as_str());
     }
 
+    let scan_stats = index.stats();
     info!(
         feature = FEATURE_FIND,
         operation = "scan_complete",
         result = "ok",
-        fast,
+        secure,
         files = index.files().len(),
         similar_files = index.similar_files().len(),
         bytes_read = index.bytes_read(),
+        skipped_empty = scan_stats.skipped_empty,
+        skipped_unreadable = scan_stats.skipped_unreadable,
+        walker_errors = scan_stats.walker_errors,
         "index built"
     );
 
-    let same = if fast {
-        index.fast_search_same()
-    } else {
+    let same = if secure {
         index.search_same()
+    } else {
+        index.fast_search_same()
     };
     info!(
         feature = FEATURE_FIND,
         operation = "search_same",
         result = "ok",
-        fast,
+        secure,
         groups = same.len(),
         "duplicate groups discovered"
     );
