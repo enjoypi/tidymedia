@@ -9,6 +9,8 @@ use super::entities::common;
 use super::entities::file_index;
 use super::entities::file_info;
 
+const FEATURE_FIND: &str = "find";
+
 pub fn find_duplicates(
     fast: bool,
     sources: Vec<Utf8PathBuf>,
@@ -19,7 +21,13 @@ pub fn find_duplicates(
     if let Some(o) = output.as_ref() {
         let p = std::path::Path::new(o.as_str());
         if !p.is_dir() {
-            error!("output is not a directory");
+            error!(
+                feature = FEATURE_FIND,
+                operation = "validate_output",
+                result = "not_a_directory",
+                output = %o,
+                "output path is not a directory"
+            );
             return Ok(());
         }
     }
@@ -29,10 +37,14 @@ pub fn find_duplicates(
     }
 
     info!(
-        "Files: {}, Similar Files: {}, Bytes Read: {}",
-        index.files().len(),
-        index.similar_files().len(),
-        index.bytes_read(),
+        feature = FEATURE_FIND,
+        operation = "scan_complete",
+        result = "ok",
+        fast,
+        files = index.files().len(),
+        similar_files = index.similar_files().len(),
+        bytes_read = index.bytes_read(),
+        "index built"
     );
 
     let same = if fast {
@@ -40,7 +52,14 @@ pub fn find_duplicates(
     } else {
         index.search_same()
     };
-    info!("Same: {}", same.len());
+    info!(
+        feature = FEATURE_FIND,
+        operation = "search_same",
+        result = "ok",
+        fast,
+        groups = same.len(),
+        "duplicate groups discovered"
+    );
 
     let prefix_owned = output
         .as_ref()
@@ -55,7 +74,13 @@ pub fn find_duplicates(
         &mut std::io::stdout(),
     );
 
-    info!("Bytes Read: {}", index.bytes_read());
+    info!(
+        feature = FEATURE_FIND,
+        operation = "finalize",
+        result = "ok",
+        bytes_read = index.bytes_read(),
+        "find_duplicates done"
+    );
     Ok(())
 }
 

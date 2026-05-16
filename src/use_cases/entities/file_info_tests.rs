@@ -279,7 +279,9 @@
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_secs();
-        assert!(secs > super::VALID_DATE_TIME, "fallback should be > 2001; got {secs}");
+        // 配置中阈值默认 2001-01-01，回退到文件 mtime，应大于该阈值
+        let threshold = super::super::super::config::config().exif.valid_date_time_secs;
+        assert!(secs > threshold, "fallback should be > {threshold}; got {secs}");
         Ok(())
     }
 

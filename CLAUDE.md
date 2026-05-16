@@ -19,3 +19,14 @@
 ## 文件组织
 - 单文件 > 512 行时拆测试：`#[cfg(test)] #[path = "X_tests.rs"] mod tests;`（保留 `super::` 路径关系）
 - `entities/test_common` 与 `entities/exif` 是 `pub(crate)`，跨模块测试可访问
+
+## 配置与日志
+- 运行时配置：`config.yaml`（项目根）+ `src/use_cases/config.rs`，`config()` 返回 `&'static Config`（`OnceLock`）
+- 切换配置：`TIDYMEDIA_CONFIG=/path/to.yaml`；语法 `${VAR:-default}` 由 `expand_env` 自实现（不引 dotenv）
+- `FAST_READ_SIZE` 因 `[0; FAST_READ_SIZE]` 栈数组要求编译期常量，**不外置**（R1 合理例外）
+- 结构化日志字段约定：`feature` / `operation` / `result`（CLI 工具无 request_id/user_id）
+- `UtcOffset::from_whole_seconds` 范围 ±25:59:59，越界返回 `None`，用 `.unwrap_or(UtcOffset::UTC)` 兜底
+
+## 工具链注意
+- nextest 每个测试独立进程，`set_var`/`remove_var`/`OnceLock` 不会跨测试污染（区别于 `cargo test`）
+- 仓库 baseline 已有 clippy errors（`io_other_error` 等），改动前先 `git stash` 跑 baseline 再对照

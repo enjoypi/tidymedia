@@ -3,21 +3,32 @@ use camino::Utf8Path;
 use camino::Utf8PathBuf;
 use time::OffsetDateTime;
 use time::UtcOffset;
+use tracing::debug;
 use tracing::error;
 use tracing::info;
 use tracing::trace;
 use tracing::warn;
 
+use super::config::config;
 use super::entities::common;
 use super::entities::file_index::Index;
 use super::entities::file_info::full_path;
 use super::entities::file_info::Info;
 
-const CST: std::result::Result<UtcOffset, time::error::ComponentRange> =
-    UtcOffset::from_hms(8, 0, 0);
 const MONTH: [&str; 13] = [
     "00", "01", "02", "03", "04", "05", "06", "07", "08", "09", "10", "11", "12",
 ];
+
+const FEATURE_COPY: &str = "copy";
+
+fn configured_offset() -> UtcOffset {
+    offset_from_hours(config().copy.timezone_offset_hours)
+}
+
+// 越界回退到 UTC，避免 panic；time crate 的合法范围 ±25:59:59 之内
+fn offset_from_hours(hours: i8) -> UtcOffset {
+    UtcOffset::from_whole_seconds(i32::from(hours) * 3600).unwrap_or(UtcOffset::UTC)
+}
 
 pub fn copy(
     input_dirs: Vec<Utf8PathBuf>,
@@ -31,13 +42,25 @@ pub fn copy(
     });
     source.parse_exif()?;
 
-    info!("源目录中有文件 {} 个", source.files().len());
+    let total_files = source.files().len();
+    info!(
+        feature = FEATURE_COPY,
+        operation = "scan_sources",
+        result = "ok",
+        total_files,
+        "scanned source files"
+    );
 
-    if source.files().is_empty() {
+    if total_files == 0 {
         return Ok(());
     }
 
-    trace!("Files: {:#?}", source.some_files(10));
+    trace!(
+        feature = FEATURE_COPY,
+        operation = "sample_files",
+        sample = ?source.some_files(10),
+        "first files sample"
+    );
 
     let output_path = full_path(output.as_str())?;
     if !dry_run {
@@ -60,17 +83,31 @@ pub fn copy(
             }
             Err(e) => {
                 failed += 1;
-                error!("{}", e);
+                error!(
+                    feature = FEATURE_COPY,
+                    operation = "do_copy",
+                    result = "error",
+                    source = %src.full_path,
+                    dry_run,
+                    remove,
+                    error = %e,
+                    "copy item failed"
+                );
             }
         }
     });
 
     info!(
-        "共 {} 个文件，复制了 {} 个文件，忽略了 {} 个文件，失败了 {} 个文件",
-        source.files().len(),
+        feature = FEATURE_COPY,
+        operation = "summary",
+        result = if failed == 0 { "ok" } else { "partial" },
+        total = total_files,
         copied,
         ignored,
-        failed
+        failed,
+        dry_run,
+        remove,
+        "copy operation summary"
     );
     Ok(())
 }
@@ -85,7 +122,14 @@ pub(crate) fn do_copy(
     let full_path = src.full_path.as_str();
 
     if let Some(dup) = output_index.exists(src)? {
-        trace!("\"{}\"\t和\t\"{}\"\t相同", full_path, dup);
+        debug!(
+            feature = FEATURE_COPY,
+            operation = "detect_duplicate",
+            result = "duplicate",
+            source = full_path,
+            duplicate = %dup,
+            "source duplicates an existing file in output"
+        );
         if remove && !dry_run {
             fs_extra::file::remove(full_path)?;
         }
@@ -93,7 +137,13 @@ pub(crate) fn do_copy(
     }
 
     if !src.is_media() {
-        warn!("\"{}\"\t不是图片或者视频文件", full_path);
+        warn!(
+            feature = FEATURE_COPY,
+            operation = "filter_media",
+            result = "skipped_non_media",
+            source = full_path,
+            "file is not an image or video"
+        );
         return Ok(false);
     }
 
@@ -140,7 +190,7 @@ pub(crate) fn generate_unique_name(
     let ext = full_path.extension().unwrap_or("").to_string();
 
     let create_time = src_file.create_time()?;
-    let dt = OffsetDateTime::from(create_time).to_offset(CST.expect("CST"));
+    let dt = OffsetDateTime::from(create_time).to_offset(configured_offset());
     let year = dt.year().to_string();
     let month = MONTH[dt.month() as usize];
 
@@ -149,8 +199,9 @@ pub(crate) fn generate_unique_name(
     let sub_dir = output_dir.join(year).join(month).join(valuable_name);
 
     // generate unique name by adding a number suffix
-    for i in 0..10 {
-        let target = if i <= 0 {
+    let max_attempts = config().copy.unique_name_max_attempts;
+    for i in 0..max_attempts {
+        let target = if i == 0 {
             sub_dir.join(file_name)
         } else {
             let mut file_name = file_stem.to_string();
@@ -239,6 +290,19 @@ mod test {
     fn extract_valuable_name_handles_mixed_chars() {
         let path = Utf8Path::new("/p/a高一 元旦晚会/sub/p.png");
         assert_eq!(extract_valuable_name(path), "a高一 元旦晚会");
+    }
+
+    #[test]
+    fn offset_from_hours_valid_value_produces_expected_offset() {
+        let off = offset_from_hours(8);
+        assert_eq!(off.whole_hours(), 8);
+    }
+
+    #[test]
+    fn offset_from_hours_out_of_range_falls_back_to_utc() {
+        // 127*3600 秒远超 time crate ±25:59:59 范围，应回退 UTC
+        let off = offset_from_hours(127);
+        assert_eq!(off, UtcOffset::UTC);
     }
 }
 

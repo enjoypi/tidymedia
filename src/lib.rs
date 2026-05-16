@@ -3,13 +3,15 @@ use std::ffi::OsString;
 use camino::Utf8PathBuf;
 use clap::Parser;
 use clap::Subcommand;
-use tracing::info;
+use tracing::debug;
 use tracing_subscriber::fmt;
 
 pub use use_cases::common::Error;
 pub use use_cases::common::Result;
 
 mod use_cases;
+
+const FEATURE_CLI: &str = "cli";
 
 #[derive(Debug, Parser)]
 #[command(author, version, about, long_about = None)]
@@ -123,7 +125,14 @@ where
         }
     };
     install_logging(&cli);
-    info!("cli: {:?}", cli);
+    debug!(
+        feature = FEATURE_CLI,
+        operation = "parse_args",
+        result = "ok",
+        log_level = %cli.log_level,
+        command = ?cli.command,
+        "cli parsed"
+    );
     tidy(cli.command)
 }
 

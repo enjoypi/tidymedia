@@ -1,0 +1,11 @@
+# tidymedia 运行配置
+# 加载顺序：默认值 -> 当前文件 -> 环境变量覆盖
+# Secret 通过 ${VAR:-default} 语法从环境变量加载；本项目目前无 secret
+copy:
+  # 输出目录按 年/月 分桶时使用的时区，单位：整小时（北京时间默认 +8）
+  timezone_offset_hours: ${TIDYMEDIA_TIMEZONE_OFFSET_HOURS:-8}
+  # 目标文件命中重名时尝试 file_stem_<i>.<ext> 的最大次数
+  unique_name_max_attempts: ${TIDYMEDIA_UNIQUE_NAME_MAX_ATTEMPTS:-10}
+exif:
+  # EXIF 时间戳小于此 UNIX 秒数视为不可信（默认 2001-01-01T00:00:00Z）
+  valid_date_time_secs: ${TIDYMEDIA_VALID_DATE_TIME_SECS:-946684800}

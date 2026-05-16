@@ -16,9 +16,10 @@ use sha2::Sha512;
 
 use super::exif;
 use super::SecureHash;
+use super::super::config::config;
 
+// 栈数组要求编译期常量，保留为 const（性能边界例外）
 const FAST_READ_SIZE: usize = 4096;
-const VALID_DATE_TIME: u64 = 946684800; // 2001-01-01T00:00:00Z
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct Lazy {
@@ -157,7 +158,7 @@ impl Info {
         let exif = self.exif.as_ref().unwrap();
 
         let t = exif.media_create_date();
-        if t > VALID_DATE_TIME {
+        if t > config().exif.valid_date_time_secs {
             Ok(SystemTime::UNIX_EPOCH + Duration::from_secs(t))
         } else {
             Ok(real_create_time)

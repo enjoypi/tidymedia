@@ -9,6 +9,7 @@ use tracing::warn;
 
 use super::common;
 
+const FEATURE_EXIF: &str = "exif";
 const META_TYPE_IMAGE: &str = "image/";
 const META_TYPE_VIDEO: &str = "video/";
 const EXIFTOOL_ARGS: [&str; 19] = [
@@ -85,12 +86,25 @@ impl Exif {
         let output = cmd.output()?;
 
         if !output.stderr.is_empty() {
-            warn!("{}", String::from_utf8_lossy(&output.stderr));
+            warn!(
+                feature = FEATURE_EXIF,
+                operation = "exiftool",
+                result = "stderr",
+                stderr = %String::from_utf8_lossy(&output.stderr),
+                "exiftool produced stderr"
+            );
         }
 
         if !output.status.success() {
             let args: Vec<_> = cmd.get_args().collect();
-            error!("exiftool failed {:?}", args);
+            error!(
+                feature = FEATURE_EXIF,
+                operation = "exiftool",
+                result = "exit_failure",
+                status = ?output.status.code(),
+                args = ?args,
+                "exiftool exited non-zero"
+            );
         }
 
         let output = String::from_utf8_lossy(output.stdout.as_slice());
