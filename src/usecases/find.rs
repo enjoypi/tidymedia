@@ -5,9 +5,9 @@ use camino::Utf8PathBuf;
 use tracing::error;
 use tracing::info;
 
-use super::entities::common;
-use super::entities::file_index;
-use super::entities::file_info;
+use crate::entities::common;
+use crate::entities::file_index;
+use crate::entities::file_info;
 
 const FEATURE_FIND: &str = "find";
 
@@ -133,7 +133,7 @@ mod tests {
     use camino::Utf8PathBuf;
     use tempfile::tempdir;
 
-    use super::super::entities::test_common as tc;
+    use crate::entities::test_common as tc;
     use super::comment;
     use super::find_duplicates;
     use super::render_script;

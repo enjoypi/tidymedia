@@ -20,8 +20,16 @@
 - 单文件 > 512 行时拆测试：`#[cfg(test)] #[path = "X_tests.rs"] mod tests;`（保留 `super::` 路径关系）
 - `entities/test_common` 与 `entities/exif` 是 `pub(crate)`，跨模块测试可访问
 
+## 项目分层（Clean Architecture）
+- 三层（自外向内）：`src/bin/tidymedia.rs`（Frameworks）→ `src/lib.rs`（Interface Adapter / CLI）→ `src/usecases/`（Use Cases）→ `src/entities/`（Entities）
+- `bin/tidymedia.rs` **只**调 `tidymedia::run_cli(env::args_os())`，零业务逻辑，所有可测代码上移到 `lib.rs`
+- `lib.rs` 持有 `Cli`/`Commands` 与 `tidy()` 调度；clap 解析、日志初始化、命令分发都在这层
+- `usecases/` 仅依赖 `entities/`，对外通过 `mod.rs` 用 `pub(super)` 暴露 `copy` / `find_duplicates`；不直接面向 CLI 参数结构
+- `entities/` 注释明示：`file_info` / `file_index` / `exif` 混入了文件 IO 与 `exiftool` 子进程调用，**按 YAGNI 暂不抽 Gateway**（CLI 单体工具，无替换框架/DB 场景）
+- 目录名是 `usecases`（无下划线），跨层导入用 `crate::usecases::...` / `crate::entities::...`
+
 ## 配置与日志
-- 运行时配置：`config.yaml`（项目根）+ `src/use_cases/config.rs`，`config()` 返回 `&'static Config`（`OnceLock`）
+- 运行时配置：`config.yaml`（项目根）+ `src/usecases/config.rs`，`config()` 返回 `&'static Config`（`OnceLock`）
 - 切换配置：`TIDYMEDIA_CONFIG=/path/to.yaml`；语法 `${VAR:-default}` 由 `expand_env` 自实现（不引 dotenv）
 - `FAST_READ_SIZE` 因 `[0; FAST_READ_SIZE]` 栈数组要求编译期常量，**不外置**（R1 合理例外）
 - 结构化日志字段约定：`feature` / `operation` / `result`（CLI 工具无 request_id/user_id）

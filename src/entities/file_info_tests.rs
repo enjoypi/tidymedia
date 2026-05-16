@@ -233,10 +233,13 @@
         assert_eq!(err.kind(), std::io::ErrorKind::NotFound);
     }
 
+    // 测试用阈值：2001-01-01T00:00:00Z（与配置默认值一致）。
+    const TEST_VALID_THRESHOLD_SECS: u64 = 946_684_800;
+
     #[test]
     fn create_time_no_exif_uses_meta() -> common::Result {
         let info = Info::from(common::DATA_SMALL)?;
-        let t = info.create_time()?;
+        let t = info.create_time(TEST_VALID_THRESHOLD_SECS)?;
         let secs = t
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
@@ -255,7 +258,7 @@
             "EXIF:DateTimeOriginal": 1_700_000_000_u64,
         }))?;
         info.set_exif(exif);
-        let t = info.create_time()?;
+        let t = info.create_time(TEST_VALID_THRESHOLD_SECS)?;
         let secs = t
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
@@ -274,14 +277,15 @@
             "EXIF:DateTimeOriginal": 100_u64,
         }))?;
         info.set_exif(exif);
-        let t = info.create_time()?;
+        let t = info.create_time(TEST_VALID_THRESHOLD_SECS)?;
         let secs = t
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_secs();
-        // 配置中阈值默认 2001-01-01，回退到文件 mtime，应大于该阈值
-        let threshold = super::super::super::config::config().exif.valid_date_time_secs;
-        assert!(secs > threshold, "fallback should be > {threshold}; got {secs}");
+        assert!(
+            secs > TEST_VALID_THRESHOLD_SECS,
+            "fallback should be > {TEST_VALID_THRESHOLD_SECS}; got {secs}"
+        );
         Ok(())
     }
 
@@ -293,7 +297,7 @@
         let early = filetime::FileTime::from_unix_time(631_152_000, 0);
         filetime::set_file_mtime(&path, early)?;
         let info = Info::from(path.to_str().unwrap())?;
-        let t = info.create_time()?;
+        let t = info.create_time(TEST_VALID_THRESHOLD_SECS)?;
         let secs = t
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()

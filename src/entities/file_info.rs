@@ -16,7 +16,6 @@ use sha2::Sha512;
 
 use super::exif;
 use super::SecureHash;
-use super::super::config::config;
 
 // 栈数组要求编译期常量，保留为 const（性能边界例外）
 const FAST_READ_SIZE: usize = 4096;
@@ -142,7 +141,9 @@ impl Info {
         self.exif = Some(exif);
     }
 
-    pub fn create_time(&self) -> io::Result<SystemTime> {
+    /// 计算创建时间。EXIF 时间戳若小于 `valid_threshold_secs` 视为无效，回退到文件 mtime。
+    /// 阈值由调用方（Use Case 层）从配置读取并传入——Entity 不直接依赖配置加载。
+    pub fn create_time(&self, valid_threshold_secs: u64) -> io::Result<SystemTime> {
         let file_create_time = self.meta.created()?;
         let file_modify_time = self.meta.modified()?;
 
@@ -158,7 +159,7 @@ impl Info {
         let exif = self.exif.as_ref().unwrap();
 
         let t = exif.media_create_date();
-        if t > config().exif.valid_date_time_secs {
+        if t > valid_threshold_secs {
             Ok(SystemTime::UNIX_EPOCH + Duration::from_secs(t))
         } else {
             Ok(real_create_time)

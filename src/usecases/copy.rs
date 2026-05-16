@@ -9,11 +9,12 @@ use tracing::info;
 use tracing::trace;
 use tracing::warn;
 
+use crate::entities::common;
+use crate::entities::file_index::Index;
+use crate::entities::file_info::full_path;
+use crate::entities::file_info::Info;
+
 use super::config::config;
-use super::entities::common;
-use super::entities::file_index::Index;
-use super::entities::file_info::full_path;
-use super::entities::file_info::Info;
 
 const MONTH: [&str; 13] = [
     "00", "01", "02", "03", "04", "05", "06", "07", "08", "09", "10", "11", "12",
@@ -189,7 +190,7 @@ pub(crate) fn generate_unique_name(
         .to_string();
     let ext = full_path.extension().unwrap_or("").to_string();
 
-    let create_time = src_file.create_time()?;
+    let create_time = src_file.create_time(config().exif.valid_date_time_secs)?;
     let dt = OffsetDateTime::from(create_time).to_offset(configured_offset());
     let year = dt.year().to_string();
     let month = MONTH[dt.month() as usize];
@@ -314,7 +315,7 @@ mod test_io {
     use camino::Utf8PathBuf;
     use tempfile::tempdir;
 
-    use super::super::entities::test_common as tc;
+    use crate::entities::test_common as tc;
     use super::*;
 
     fn utf8(p: &Path) -> Utf8PathBuf {
@@ -324,7 +325,7 @@ mod test_io {
     fn make_media_info(dir: &Path, name: &str) -> Info {
         let png = tc::copy_png_to(dir, name).unwrap();
         let mut info = Info::from(png.to_str().unwrap()).unwrap();
-        let exif: super::super::entities::exif::Exif = serde_json::from_value(
+        let exif: crate::entities::exif::Exif = serde_json::from_value(
             serde_json::json!({
                 "SourceFile": info.full_path.as_str().to_string(),
                 "File:MIMEType": "image/png",
@@ -450,7 +451,7 @@ mod test_io {
         let info = make_media_info(src.path(), "photo.png");
         let out = tempdir().unwrap();
         fill_collisions(&out.path().join("2024").join("01"));
-        let mut idx = super::super::entities::file_index::Index::new();
+        let mut idx = crate::entities::file_index::Index::new();
         let err = do_copy(&info, &utf8(out.path()), &mut idx, false, false)
             .expect_err("must error after collisions");
         assert!(err.to_string().contains("无法为"));
@@ -470,7 +471,7 @@ mod test_io {
         let src = tempdir().unwrap();
         let info = make_media_info(src.path(), "photo.png");
         let out = tempdir().unwrap();
-        let mut idx = super::super::entities::file_index::Index::new();
+        let mut idx = crate::entities::file_index::Index::new();
         let did_copy = do_copy(&info, &utf8(out.path()), &mut idx, true, false).unwrap();
         assert!(did_copy);
         assert_eq!(fs::read_dir(out.path()).unwrap().count(), 0);

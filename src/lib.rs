@@ -6,10 +6,11 @@ use clap::Subcommand;
 use tracing::debug;
 use tracing_subscriber::fmt;
 
-pub use use_cases::common::Error;
-pub use use_cases::common::Result;
+pub use entities::common::Error;
+pub use entities::common::Result;
 
-mod use_cases;
+mod entities;
+mod usecases;
 
 const FEATURE_CLI: &str = "cli";
 
@@ -86,17 +87,17 @@ pub fn tidy(command: Commands) -> Result<()> {
             dry_run,
             sources,
             output,
-        } => use_cases::copy(sources, output, dry_run, false),
+        } => usecases::copy(sources, output, dry_run, false),
         Commands::Find {
             fast,
             sources,
             output,
-        } => use_cases::find_duplicates(fast, sources, output),
+        } => usecases::find_duplicates(fast, sources, output),
         Commands::Move {
             dry_run,
             sources,
             output,
-        } => use_cases::copy(sources, output, dry_run, true),
+        } => usecases::copy(sources, output, dry_run, true),
     }
 }
 
