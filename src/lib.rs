@@ -16,6 +16,10 @@ pub use entities::backend::local::LocalBackend;
 pub use entities::backend::mtp::{MtpBackend, MtpClient, MtpMatch, MtpTarget};
 pub use entities::backend::smb::{SmbBackend, SmbClient, SmbTarget};
 pub use entities::backend::{Backend, Entry, EntryKind, MediaReader, MediaWriter, Metadata};
+
+// 测试 helper：集成测试通过 FakeBackend / FakeOp 组装混合 scheme 调度。
+#[doc(hidden)]
+pub use entities::backend::fake::{FakeBackend, Op as FakeOp};
 pub use entities::common::Error;
 pub use entities::common::Result;
 pub use entities::media_time;

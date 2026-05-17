@@ -11,8 +11,10 @@ pub mod local;
 pub mod mtp;
 pub mod smb;
 
-#[cfg(test)]
-pub(crate) mod fake;
+// FakeBackend 是常驻编译的测试 helper：集成测试（`tests/`）需要在 `#[cfg(test)]`
+// 之外引用它来组装 FakeBackendFactory。`#[doc(hidden)]` 让它不出现在公开 docs。
+#[doc(hidden)]
+pub mod fake;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum EntryKind {
