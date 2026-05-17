@@ -44,7 +44,9 @@ impl Default for ExifConfig {
 pub struct SmbBackendConfig {
     /// URI 内未写 `user@` 时兜底；密码总是经环境变量 `SMB_PASSWORD` 注入
     pub default_user: String,
-    /// 单次 SMB 操作超时秒数；真实 client 接入后生效
+    /// NTLM 工作组名；pavao `SmbCredentials::workgroup` 必填
+    pub workgroup: String,
+    /// 单次 SMB 操作超时秒数；当前 pavao 暴露面无显式 timeout API，仅作配置占位
     pub timeout_secs: u64,
 }
 
@@ -52,6 +54,7 @@ impl Default for SmbBackendConfig {
     fn default() -> Self {
         Self {
             default_user: String::new(),
+            workgroup: "WORKGROUP".into(),
             timeout_secs: 30,
         }
     }
@@ -234,6 +237,7 @@ mod tests {
         assert_eq!(c.copy.unique_name_max_attempts, 10);
         assert_eq!(c.exif.valid_date_time_secs, 946_684_800);
         assert_eq!(c.backend.smb.default_user, "");
+        assert_eq!(c.backend.smb.workgroup, "WORKGROUP");
         assert_eq!(c.backend.smb.timeout_secs, 30);
         assert_eq!(c.backend.mtp.device_match, "fuzzy");
         assert_eq!(c.backend.mtp.storage_match, "fuzzy");
@@ -245,12 +249,13 @@ mod tests {
         let path = dir.path().join("backend.yaml");
         std::fs::write(
             &path,
-            "backend:\n  smb:\n    default_user: alice\n    timeout_secs: 60\n  mtp:\n    device_match: exact\n    storage_match: exact\n",
+            "backend:\n  smb:\n    default_user: alice\n    workgroup: HOME\n    timeout_secs: 60\n  mtp:\n    device_match: exact\n    storage_match: exact\n",
         )
         .unwrap();
         std::env::set_var("TIDYMEDIA_CONFIG", path.to_str().unwrap());
         let cfg = load();
         assert_eq!(cfg.backend.smb.default_user, "alice");
+        assert_eq!(cfg.backend.smb.workgroup, "HOME");
         assert_eq!(cfg.backend.smb.timeout_secs, 60);
         assert_eq!(cfg.backend.mtp.device_match, "exact");
         assert_eq!(cfg.backend.mtp.storage_match, "exact");

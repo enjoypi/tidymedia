@@ -15,7 +15,9 @@ backend:
   smb:
     # URI 未写 `user@` 时兜底用户名；真实 client 接入后由 SmbBackend 读取
     default_user: ${SMB_USER:-}
-    # 单次 SMB 操作超时秒数；真实 client 接入后生效
+    # NTLM 工作组；pavao SmbCredentials::workgroup 必填
+    workgroup: ${SMB_WORKGROUP:-WORKGROUP}
+    # 单次 SMB 操作超时秒数；当前 pavao 无显式 timeout API，仅作配置占位
     timeout_secs: ${TIDYMEDIA_SMB_TIMEOUT_SECS:-30}
   mtp:
     # 设备 / 存储匹配策略：`exact` 或 `fuzzy`，fuzzy 由 client 自决（通常走 contains）

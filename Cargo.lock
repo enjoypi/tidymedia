@@ -187,6 +187,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9330f8b2ff13f34540b44e946ef35111825727b38d33286ef986142615121801"
 
 [[package]]
+name = "cfg_aliases"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "613afe47fcd5fac7ccf1db93babcb082c5994d996f20b8b159f2ad1658eb5724"
+
+[[package]]
 name = "chrono"
 version = "0.4.44"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -796,6 +802,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "pavao"
+version = "0.2.16"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cca8302d5f1b5dc7a8dfb04e5ea7185b43571db5811e084746bf0aeb0d7b18f1"
+dependencies = [
+ "cfg_aliases",
+ "lazy_static",
+ "libc",
+ "log",
+ "pavao-sys",
+ "thiserror",
+]
+
+[[package]]
+name = "pavao-sys"
+version = "0.2.16"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "07b390d8c7372e94c7e0f7d92e36c98404634c554a52b1cb9ae030b4e7888cde"
+dependencies = [
+ "libc",
+ "pkg-config",
+]
+
+[[package]]
 name = "percent-encoding"
 version = "2.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -806,6 +836,12 @@ name = "pin-project-lite"
 version = "0.2.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a89322df9ebe1c1578d689c92318e070967d1042b512afbe49518723f4e6d5cd"
+
+[[package]]
+name = "pkg-config"
+version = "0.3.33"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "19f132c84eca552bf34cab8ec81f1c1dcc229b811638f9d283dceabe58c5569e"
 
 [[package]]
 name = "powerfmt"
@@ -1226,6 +1262,7 @@ dependencies = [
  "memmap2",
  "nom-exif",
  "parking_lot",
+ "pavao",
  "percent-encoding",
  "predicates",
  "pretty_assertions",

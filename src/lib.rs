@@ -124,16 +124,74 @@ impl BackendFactory for DefaultBackendFactory {
     fn for_location(&self, loc: &Location) -> Result<Arc<dyn Backend>> {
         match loc {
             Location::Local(_) => Ok(LocalBackend::arc()),
-            Location::Smb { .. } | Location::Mtp { .. } => Err(Error::Io(std::io::Error::new(
-                std::io::ErrorKind::Unsupported,
-                format!(
-                    "{} backend not enabled in this build; rebuild with --features {}-backend",
-                    loc.scheme(),
-                    loc.scheme()
-                ),
-            ))),
+            Location::Smb { .. } => build_smb_backend(loc),
+            Location::Mtp { .. } => build_mtp_backend(loc),
         }
     }
+}
+
+#[cfg(feature = "smb-backend")]
+#[cfg_attr(coverage_nightly, coverage(off))]
+fn build_smb_backend(loc: &Location) -> Result<Arc<dyn Backend>> {
+    use entities::backend::smb::real::RealSmbClient;
+    let target = entities::backend::smb::SmbTarget {
+        user: match loc {
+            Location::Smb { user, .. } => user.clone(),
+            _ => None,
+        },
+        host: match loc {
+            Location::Smb { host, .. } => host.clone(),
+            _ => String::new(),
+        },
+        port: match loc {
+            Location::Smb { port, .. } => *port,
+            _ => None,
+        },
+        share: match loc {
+            Location::Smb { share, .. } => share.clone(),
+            _ => String::new(),
+        },
+        path: Default::default(),
+        password: std::env::var("SMB_PASSWORD").ok(),
+        krb5_ccname: std::env::var("KRB5CCNAME").ok(),
+    };
+    let cfg = &usecases::config::config().backend.smb;
+    let client = RealSmbClient::new(&target, &cfg.default_user, &cfg.workgroup)
+        .map_err(Error::Io)?;
+    Ok(SmbBackend::arc_with_client(Arc::new(client)))
+}
+
+#[cfg(not(feature = "smb-backend"))]
+fn build_smb_backend(loc: &Location) -> Result<Arc<dyn Backend>> {
+    Err(Error::Io(std::io::Error::new(
+        std::io::ErrorKind::Unsupported,
+        format!(
+            "{} backend not enabled in this build; rebuild with --features smb-backend",
+            loc.scheme()
+        ),
+    )))
+}
+
+#[cfg(feature = "mtp-backend")]
+#[cfg_attr(coverage_nightly, coverage(off))]
+fn build_mtp_backend(loc: &Location) -> Result<Arc<dyn Backend>> {
+    // RealMtpClient 当前是 stub：feature 启用编译通过，运行期仍返 Unsupported，
+    // 错误消息指向未来 PR 选定具体 crate（libmtp-rs / gphoto2 / 自接 rusb）。
+    use entities::backend::mtp::real::RealMtpClient;
+    let _ = loc;
+    let _ = RealMtpClient::new()?;
+    unreachable!("RealMtpClient::new always returns Err in the stub phase");
+}
+
+#[cfg(not(feature = "mtp-backend"))]
+fn build_mtp_backend(loc: &Location) -> Result<Arc<dyn Backend>> {
+    Err(Error::Io(std::io::Error::new(
+        std::io::ErrorKind::Unsupported,
+        format!(
+            "{} backend not enabled in this build; rebuild with --features mtp-backend",
+            loc.scheme()
+        ),
+    )))
 }
 
 /// 用默认 backend factory 跑命令；旧入口，等价于 `tidy_with(&DefaultBackendFactory, ...)`。

@@ -5,6 +5,16 @@ edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[features]
+default = []
+# 启用真实 SMB 后端（pavao + libsmbclient C 库）。
+# 编译前需安装系统包：`apt install -y libsmbclient-dev libsmbclient`。
+# 未启用时 SmbBackend::new() 返 Unsupported，但 SmbBackend::with_client(fake) 仍可用于测试。
+smb-backend = ["dep:pavao"]
+# 占位：真实 MTP 后端待 future PR 选定 crate（libmtp-rs / gphoto2 / 自接 rusb）。
+# 当前启用 feature 也仍是 stub，运行期返 Unsupported。
+mtp-backend = []
+
 [dependencies]
 camino = { version = "*", features = ["serde1"] }
 chrono = "*"
@@ -17,6 +27,7 @@ infer = "*"
 memmap2 = "*"
 nom-exif = "*"
 parking_lot = "*"
+pavao = { version = "0.2", optional = true }
 percent-encoding = "*"
 rayon = "*"
 serde = "*"
