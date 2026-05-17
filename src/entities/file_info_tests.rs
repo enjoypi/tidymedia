@@ -571,3 +571,74 @@
             io::ErrorKind::PermissionDenied
         );
     }
+
+    // --- backend-aware Info::open 覆盖路径 ---
+
+    use super::super::backend::fake::FakeBackend;
+    use super::super::uri::Location;
+    use camino::Utf8PathBuf;
+    use std::sync::Arc;
+
+    /// Info::open 走非 Local Location 时，full_path 从 [`Location::display`] 派生。
+    /// 顺带覆盖 calc_full_hash / secure_hash 的 FakeBackend 路径。
+    #[test]
+    fn info_open_smb_location_derives_full_path_from_display() {
+        let fake = Arc::new(FakeBackend::new("smb"));
+        let loc = Location::Smb {
+            user: Some("alice".into()),
+            host: "nas.local".into(),
+            port: None,
+            share: "photos".into(),
+            path: Utf8PathBuf::from("dir/x.bin"),
+        };
+        fake.add_file(loc.clone(), b"hello-smb-content".to_vec());
+
+        let info = super::Info::open(&loc, fake.clone()).unwrap();
+        assert_eq!(info.size, 17);
+        assert_eq!(info.full_path.as_str(), loc.display());
+        // calc_full_hash 与 secure_hash 也走 FakeBackend
+        let xxh = info.calc_full_hash().unwrap();
+        assert_eq!(xxh, xxhash_rust::xxh3::xxh3_64(b"hello-smb-content"));
+        let sha = info.secure_hash().unwrap();
+        assert_eq!(sha, sha2::Sha512::digest(b"hello-smb-content"));
+    }
+
+    /// FakeBackend::inject_reader_error 让 open_read 成功但 read Err → Info::open 内
+    /// fast_hash_stream(reader.as_mut())? 的 Err 分支被触发。
+    #[test]
+    fn info_open_propagates_reader_error_from_fast_hash() {
+        let fake = Arc::new(FakeBackend::new("fake"));
+        let loc = Location::Local(Utf8PathBuf::from("/in-memory/x.bin"));
+        fake.add_file(loc.clone(), vec![0u8; 64]);
+        fake.inject_reader_error(loc.clone(), io::ErrorKind::Interrupted);
+
+        let err = super::Info::open(&loc, fake).unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::Interrupted);
+    }
+
+    /// 用 FakeBackend 让 calc_full_hash 的 full_hash_stream `?` Err 分支被命中：
+    /// Info::open 走 add_file 的正常 reader 通过；之后注入 reader 错误，再调 calc_full_hash。
+    #[test]
+    fn calc_full_hash_propagates_reader_stream_error() {
+        let fake = Arc::new(FakeBackend::new("fake"));
+        let loc = Location::Local(Utf8PathBuf::from("/in-memory/y.bin"));
+        fake.add_file(loc.clone(), vec![1u8; 64]);
+
+        let info = super::Info::open(&loc, fake.clone()).unwrap();
+        fake.inject_reader_error(loc, io::ErrorKind::ConnectionReset);
+        let err = info.calc_full_hash().unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::ConnectionReset);
+    }
+
+    /// 同上，覆盖 secure_hash 的 `?` Err 分支。
+    #[test]
+    fn secure_hash_propagates_reader_stream_error() {
+        let fake = Arc::new(FakeBackend::new("fake"));
+        let loc = Location::Local(Utf8PathBuf::from("/in-memory/z.bin"));
+        fake.add_file(loc.clone(), vec![2u8; 64]);
+
+        let info = super::Info::open(&loc, fake.clone()).unwrap();
+        fake.inject_reader_error(loc, io::ErrorKind::TimedOut);
+        let err = info.secure_hash().unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::TimedOut);
+    }

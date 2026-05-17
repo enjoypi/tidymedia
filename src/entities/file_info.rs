@@ -1,8 +1,5 @@
-use std::fs;
 use std::io;
-use std::io::Error;
-use std::io::ErrorKind;
-use std::io::Read;
+use std::sync::Arc;
 use std::time::Duration;
 use std::time::SystemTime;
 
@@ -11,19 +8,20 @@ use camino::Utf8PathBuf;
 use chrono::FixedOffset;
 use chrono::Utc;
 use generic_array::GenericArray;
-use memmap2::Mmap;
 use parking_lot::Mutex;
 use sha2::Digest;
 use sha2::Sha512;
 
+use super::backend::local::LocalBackend;
+use super::backend::{Backend, EntryKind, MediaReader, Metadata as BackendMetadata};
 use super::exif;
 use super::media_time;
+use super::uri::Location;
 use super::SecureHash;
 
 // 栈数组要求编译期常量，保留为 const（性能边界例外）
 const FAST_READ_SIZE: usize = 4096;
 // 流式哈希分块。1 MiB 平衡 syscall 频率与远程 backend 网络往返。
-#[allow(dead_code)]
 const STREAM_CHUNK: usize = 1 << 20;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -50,15 +48,20 @@ impl Lazy {
 }
 
 pub struct Info {
-    // 64 bit hash  from the first FAST_READ_SIZE bytes
+    // 64 bit hash from the first FAST_READ_SIZE bytes
     pub fast_hash: u64,
     pub full_path: Utf8PathBuf,
     pub size: u64,
 
-    // exif info
+    // Backend Gateway 抽象：calc_full_hash / secure_hash 需要重新 open_read 时
+    // 复用这把后端句柄，并按 [`Location`] 表达文件位置。Local 路径下与 full_path 等价；
+    // SMB/MTP 等远端则以 URI 形式承载（Task 4 起接入）。
+    location: Location,
+    backend: Arc<dyn Backend>,
+
     exif: Option<exif::Exif>,
     lazy: Mutex<Lazy>,
-    meta: fs::Metadata,
+    meta: BackendMetadata,
 }
 
 impl std::fmt::Debug for Info {
@@ -72,37 +75,40 @@ impl std::fmt::Debug for Info {
 }
 
 impl Info {
+    /// 旧入口：根据本地路径字符串构造 Info。等价于以 [`LocalBackend`] 调用
+    /// [`Info::open`] 的 shim；调用方迁移到 backend-aware API 之前保留。
     pub fn from(path: &str) -> io::Result<Self> {
-        let full_path = full_path(path)?;
-        let meta = full_path.metadata()?;
-        if !meta.is_file() {
-            return Err(Error::new(
-                ErrorKind::Other,
-                format!("{} is a directory", full_path),
-            ));
+        let fp = full_path(path)?;
+        Self::open(&Location::Local(fp), LocalBackend::arc())
+    }
+
+    /// Backend Gateway 入口：按 [`Location`] + [`Backend`] 抽象 stat 文件、读首 4 KiB
+    /// 算 fast hash，并把后端句柄留住以便 [`Self::calc_full_hash`] / [`Self::secure_hash`]
+    /// 复用。错误语义沿用旧 `from(&str)`：目录返回 `is a directory`、0 字节返回 `is empty`。
+    pub fn open(loc: &Location, backend: Arc<dyn Backend>) -> io::Result<Self> {
+        let meta = backend.metadata(loc)?;
+        if meta.kind != EntryKind::File {
+            return Err(io::Error::other(format!("{} is a directory", loc.display())));
         }
-
-        if meta.len() == 0 {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                format!("{} is empty", full_path),
-            ));
+        if meta.size == 0 {
+            return Err(io::Error::other(format!("{} is empty", loc.display())));
         }
-
-        let (bytes_read, first_hash, second_hash) = fast_hash(full_path.as_str())?;
-
+        let mut reader = backend.open_read(loc)?;
+        let (bytes_read, first_hash, second_hash) = fast_hash_stream(reader.as_mut())?;
+        let full_path: Utf8PathBuf = match loc {
+            Location::Local(p) => p.clone(),
+            other => other.display().into(),
+        };
         Ok(Self {
             fast_hash: first_hash,
             full_path,
-            size: meta.len(),
+            size: meta.size,
+            location: loc.clone(),
+            backend,
             exif: None,
             lazy: Mutex::new(Lazy::new(bytes_read as u64, second_hash)),
             meta,
         })
-    }
-
-    pub fn from_path(path: &Utf8Path) -> io::Result<Self> {
-        Self::from(path.as_str())
     }
 
     pub fn bytes_read(&self) -> u64 {
@@ -114,11 +120,10 @@ impl Info {
         if l.full {
             return Ok(l.hash);
         }
-
-        let (bytes_read, full) = full_hash(self.full_path.as_str())?;
-
+        let mut reader = self.backend.open_read(&self.location)?;
+        let (bytes_read, full) = full_hash_stream(reader.as_mut())?;
         l.hash = full;
-        l.bytes_read += bytes_read as u64;
+        l.bytes_read += bytes_read;
         l.full = true;
         Ok(full)
     }
@@ -132,9 +137,9 @@ impl Info {
         if l.secure_hash != GenericArray::default() {
             return Ok(l.secure_hash);
         }
-
-        let (bytes_read, secure) = secure_hash(self.full_path.as_str())?;
-        l.bytes_read += bytes_read as u64;
+        let mut reader = self.backend.open_read(&self.location)?;
+        let (bytes_read, secure) = secure_hash_stream(reader.as_mut())?;
+        l.bytes_read += bytes_read;
         l.secure_hash = secure;
         Ok(secure)
     }
@@ -152,8 +157,8 @@ impl Info {
     /// `valid_threshold_secs`（配置层的"软阈值"）则回退到 fs 兜底。
     /// `valid_threshold_secs` 由 Use Case 层从配置读入；Entity 不直接依赖配置加载。
     pub fn create_time(&self, valid_threshold_secs: u64) -> SystemTime {
-        let modified = self.meta.modified().ok();
-        let created = self.meta.created().ok();
+        let modified = self.meta.modified;
+        let created = self.meta.created;
         let fs_fallback = pick_fs_fallback(modified, created);
 
         let Some(exif) = self.exif.as_ref() else {
@@ -229,44 +234,11 @@ pub(crate) fn strip_windows_unc(path: &str) -> &str {
     path
 }
 
-// LLVM 对 `buffer[..bytes_read]` 等 slice 操作会插入越界 panic guard region，
-// 在 buffer 固定长度的实现里永远不可触发；用 coverage(off) 排除。
-#[cfg_attr(coverage_nightly, coverage(off))]
-fn fast_hash(path: &str) -> io::Result<(usize, u64, u64)> {
-    let mut file = fs::File::open(path)?;
-
-    let mut buffer = [0; FAST_READ_SIZE];
-    let bytes_read = file.read(&mut buffer)?;
-
-    let short = wyhash::wyhash(&(buffer[..bytes_read]), 0);
-    let full = xxhash_rust::xxh3::xxh3_64(&(buffer[..bytes_read]));
-
-    Ok((bytes_read, short, full))
-}
-
-#[cfg_attr(coverage_nightly, coverage(off))]
-fn full_hash(path: &str) -> io::Result<(usize, u64)> {
-    let file = fs::File::open(path)?;
-    let mmap = unsafe { Mmap::map(&file)? };
-
-    Ok((mmap.len(), xxhash_rust::xxh3::xxh3_64(&mmap)))
-}
-
-#[cfg_attr(coverage_nightly, coverage(off))]
-fn secure_hash(path: &str) -> io::Result<(usize, SecureHash)> {
-    let file = fs::File::open(path)?;
-    let mmap = unsafe { Mmap::map(&file)? };
-    Ok((mmap.len(), Sha512::digest(&mmap)))
-}
-
 /// 读首 [`FAST_READ_SIZE`] 字节算 wyhash + xxh3 双哈希。
 ///
 /// 返回 (`bytes_read`, wyhash, xxhash)。
 /// 调用方须保证 reader 已 seek 到起点。
-#[allow(dead_code)]
-pub fn fast_hash_stream(r: &mut dyn super::backend::MediaReader)
-    -> io::Result<(usize, u64, u64)>
-{
+pub fn fast_hash_stream(r: &mut dyn MediaReader) -> io::Result<(usize, u64, u64)> {
     let mut buffer = [0u8; FAST_READ_SIZE];
     let n = read_fill(r, &mut buffer)?;
     let slice = &buffer[..n];
@@ -275,10 +247,7 @@ pub fn fast_hash_stream(r: &mut dyn super::backend::MediaReader)
 
 /// 流式整文件 xxh3-64 哈希。返回 (`bytes_read`, xxh3-64)。
 /// 调用方须保证 reader 已 seek 到起点。
-#[allow(dead_code)]
-pub fn full_hash_stream(r: &mut dyn super::backend::MediaReader)
-    -> io::Result<(u64, u64)>
-{
+pub fn full_hash_stream(r: &mut dyn MediaReader) -> io::Result<(u64, u64)> {
     let mut hasher = xxhash_rust::xxh3::Xxh3::new();
     let mut buf = vec![0u8; STREAM_CHUNK];
     let mut total = 0u64;
@@ -295,10 +264,7 @@ pub fn full_hash_stream(r: &mut dyn super::backend::MediaReader)
 
 /// 流式整文件 SHA-512 哈希。返回 (`bytes_read`, sha512)。
 /// 调用方须保证 reader 已 seek 到起点。
-#[allow(dead_code)]
-pub fn secure_hash_stream(r: &mut dyn super::backend::MediaReader)
-    -> io::Result<(u64, SecureHash)>
-{
+pub fn secure_hash_stream(r: &mut dyn MediaReader) -> io::Result<(u64, SecureHash)> {
     let mut hasher = Sha512::new();
     let mut buf = vec![0u8; STREAM_CHUNK];
     let mut total = 0u64;
@@ -315,8 +281,7 @@ pub fn secure_hash_stream(r: &mut dyn super::backend::MediaReader)
 
 /// 把 reader 读满到 buf；返回真实读取字节数。EOF 提前停止不算错误。
 /// 抽出来是为了让 `fast_hash_stream` 函数体保持在 64 行以内。
-#[allow(dead_code)]
-fn read_fill(r: &mut dyn super::backend::MediaReader, buf: &mut [u8]) -> io::Result<usize> {
+fn read_fill(r: &mut dyn MediaReader, buf: &mut [u8]) -> io::Result<usize> {
     let mut filled = 0;
     while filled < buf.len() {
         let n = r.read(&mut buf[filled..])?;
@@ -326,6 +291,36 @@ fn read_fill(r: &mut dyn super::backend::MediaReader, buf: &mut [u8]) -> io::Res
         filled += n;
     }
     Ok(filled)
+}
+
+// --- 测试专用：保留旧的 path-only 哈希实现，供 file_info_tests 对照 stream 版 ---
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+fn fast_hash(path: &str) -> io::Result<(usize, u64, u64)> {
+    use std::io::Read;
+    let mut file = std::fs::File::open(path)?;
+    let mut buffer = [0; FAST_READ_SIZE];
+    let bytes_read = file.read(&mut buffer)?;
+    let short = wyhash::wyhash(&(buffer[..bytes_read]), 0);
+    let full = xxhash_rust::xxh3::xxh3_64(&(buffer[..bytes_read]));
+    Ok((bytes_read, short, full))
+}
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+fn full_hash(path: &str) -> io::Result<(usize, u64)> {
+    let file = std::fs::File::open(path)?;
+    let mmap = unsafe { memmap2::Mmap::map(&file)? };
+    Ok((mmap.len(), xxhash_rust::xxh3::xxh3_64(&mmap)))
+}
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+fn secure_hash(path: &str) -> io::Result<(usize, SecureHash)> {
+    let file = std::fs::File::open(path)?;
+    let mmap = unsafe { memmap2::Mmap::map(&file)? };
+    Ok((mmap.len(), Sha512::digest(&mmap)))
 }
 
 #[cfg(test)]

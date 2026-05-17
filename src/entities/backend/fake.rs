@@ -34,6 +34,9 @@ struct State {
     files: HashMap<Location, Vec<u8>>,
     metas: HashMap<Location, Metadata>,
     errors: HashMap<(Location, Op), io::ErrorKind>,
+    /// 让 `open_read` 成功但返回的 reader 在 read 时立即报错；用于覆盖
+    /// 调用方在 stream hash / 解析阶段的 `?` Err 分支。
+    reader_errors: HashMap<Location, io::ErrorKind>,
 }
 
 pub struct FakeBackend {
@@ -79,6 +82,12 @@ impl FakeBackend {
 
     pub fn inject_error(&self, loc: Location, op: Op, kind: io::ErrorKind) {
         self.state.lock().unwrap().errors.insert((loc, op), kind);
+    }
+
+    /// 让针对 `loc` 的 `open_read` 返回一个 reader：调用 `read` 时立即抛 `kind`。
+    /// 覆盖 "open_read 成功但 stream 阶段失败" 这类只在远端 backend 真实出现的失败模式。
+    pub fn inject_reader_error(&self, loc: Location, kind: io::ErrorKind) {
+        self.state.lock().unwrap().reader_errors.insert(loc, kind);
     }
 
     fn check_error(&self, loc: &Location, op: Op) -> io::Result<()> {
@@ -139,6 +148,9 @@ impl Backend for FakeBackend {
     fn open_read(&self, loc: &Location) -> io::Result<Box<dyn MediaReader>> {
         self.check_error(loc, Op::OpenRead)?;
         let s = self.state.lock().unwrap();
+        if let Some(kind) = s.reader_errors.get(loc) {
+            return Ok(Box::new(FailingReader { kind: *kind }));
+        }
         let bytes = s
             .files
             .get(loc)
@@ -217,6 +229,24 @@ impl Backend for FakeBackend {
             },
         );
         Ok(size)
+    }
+}
+
+/// 总是 read 报错的 reader。Seek 走通：只是让 `Box<dyn MediaReader>` 类型对得上。
+#[derive(Debug)]
+struct FailingReader {
+    kind: io::ErrorKind,
+}
+
+impl io::Read for FailingReader {
+    fn read(&mut self, _: &mut [u8]) -> io::Result<usize> {
+        Err(io::Error::from(self.kind))
+    }
+}
+
+impl io::Seek for FailingReader {
+    fn seek(&mut self, _: io::SeekFrom) -> io::Result<u64> {
+        Ok(0)
     }
 }
 

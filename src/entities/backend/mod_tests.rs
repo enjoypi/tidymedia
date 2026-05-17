@@ -296,6 +296,21 @@ fn fake_scheme_returns_init_value() {
 }
 
 #[test]
+fn inject_reader_error_returns_failing_reader() {
+    let b = FakeBackend::new("fake");
+    let loc = local("/in-mem/x.bin");
+    b.add_file(loc.clone(), vec![1u8; 8]);
+    b.inject_reader_error(loc.clone(), io::ErrorKind::Interrupted);
+
+    let mut r = b.open_read(&loc).unwrap();
+    let mut buf = [0u8; 4];
+    let err = r.read(&mut buf).unwrap_err();
+    assert_eq!(err.kind(), io::ErrorKind::Interrupted);
+    // Seek 始终返回 Ok(0)，让 `Box<dyn MediaReader>` 类型边界生效
+    assert_eq!(r.seek(SeekFrom::Start(123)).unwrap(), 0);
+}
+
+#[test]
 fn op_variants_distinct() {
     use Op::*;
     let all = [

@@ -57,7 +57,15 @@ impl Backend for LocalBackend {
             Ok(p) => p,
             Err(e) => return Box::new(std::iter::once(Err(e))),
         };
-        let walker = WalkBuilder::new(path.as_std_path()).build();
+        // 媒体归档场景：用户媒体目录可能恰好在 git 工作树里，
+        // .gitignore 列出的文件也必须被纳入索引，故全部关掉。
+        let walker = WalkBuilder::new(path.as_std_path())
+            .git_ignore(false)
+            .git_global(false)
+            .git_exclude(false)
+            .ignore(false)
+            .require_git(false)
+            .build();
         let entries: Vec<io::Result<Entry>> = walker.map(walk_entry_to_io).collect();
         Box::new(entries.into_iter())
     }

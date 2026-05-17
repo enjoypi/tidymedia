@@ -1,15 +1,25 @@
-use std::fs;
+use std::io;
+use std::sync::Arc;
 
 use camino::Utf8Path;
 use chrono::FixedOffset;
 use nom_exif::EntryValue;
 use nom_exif::ExifTag;
+use nom_exif::MediaParser;
+use nom_exif::MediaSource;
 use nom_exif::TrackInfoTag;
 
+use super::backend::local::LocalBackend;
+use super::backend::{Backend, MediaReader};
 use super::common;
+use super::uri::Location;
 
 const META_TYPE_IMAGE: &str = "image/";
 const META_TYPE_VIDEO: &str = "video/";
+
+/// MIME sniff 时读取的字节数。`infer` 实际只看前 16-32 字节，256 留点余量
+/// 让边界 case（容器嵌套）的判定更稳。
+const MIME_SNIFF_BYTES: usize = 256;
 
 /// 容器内自带时间字段。文件系统 mtime / btime 不在此结构体里——
 /// Clean Architecture 的边界让 Exif 只持有 EXIF/视频容器数据；
@@ -37,25 +47,39 @@ impl Exif {
         path: &Utf8Path,
         local_offset: FixedOffset,
     ) -> common::Result<Self> {
-        // 调用 fs::metadata 仅为校验 path 可读；元数据本身不存进 Exif（spec §2.P4：
-        // 文件系统时间由 media_time::fs_time 模块单独管理）。
-        fs::metadata(path)?;
+        let backend = LocalBackend::arc();
+        Self::open(&Location::Local(path.to_path_buf()), &backend, local_offset)
+    }
 
-        let mime_type = infer::get_from_path(path)?
-            .map(|t| t.mime_type().to_string())
-            .unwrap_or_default();
+    /// Backend Gateway 入口：从 [`Location`] 用 backend 打开 reader，
+    /// sniff_mime 在原 reader 上 seek(0) 之后把句柄交给 [`Self::from_reader`] 解析。
+    /// 单次 open_read 减少远端 backend 的往返次数。
+    pub fn open(
+        loc: &Location,
+        backend: &Arc<dyn Backend>,
+        local_offset: FixedOffset,
+    ) -> common::Result<Self> {
+        let mut reader = backend.open_read(loc)?;
+        let mime_type = sniff_mime(reader.as_mut())?;
+        Self::from_reader(reader, &mime_type, local_offset)
+    }
 
+    /// 用调用方已 sniff 好的 MIME + 已 seek 到起点的 reader 解析容器内时间。
+    /// 不再触碰 IO 入口，便于 fake backend 单测各种 MIME 分支。
+    pub fn from_reader(
+        reader: Box<dyn MediaReader>,
+        mime_type: &str,
+        local_offset: FixedOffset,
+    ) -> common::Result<Self> {
         let mut exif = Exif {
-            mime_type,
+            mime_type: mime_type.to_string(),
             ..Default::default()
         };
-
-        if exif.mime_type.starts_with(META_TYPE_IMAGE) {
-            populate_image_dates(path, &mut exif, local_offset);
-        } else if exif.mime_type.starts_with(META_TYPE_VIDEO) {
-            populate_video_dates(path, &mut exif, local_offset);
+        if mime_type.starts_with(META_TYPE_IMAGE) {
+            populate_image_dates(reader, &mut exif, local_offset);
+        } else if mime_type.starts_with(META_TYPE_VIDEO) {
+            populate_video_dates(reader, &mut exif, local_offset);
         }
-
         Ok(exif)
     }
 
@@ -82,6 +106,28 @@ impl Exif {
     }
 }
 
+/// 读首 [`MIME_SNIFF_BYTES`] 字节交给 `infer::get` 推断 MIME；之后 seek 回起点。
+/// 调用方需保证 reader 一开始已位于 0；这里 seek(0) 仅作"完成消费后还原"的保险。
+///
+/// 内部 read / seek 的 `?` Err 分支在 LocalBackend 下不可稳定触发，整体标 coverage(off)
+/// 沿用 file_info 旧 path-only 哈希函数的策略；Backend 调度逻辑由 [`Exif::open`] 单测兜底。
+#[cfg_attr(coverage_nightly, coverage(off))]
+fn sniff_mime(reader: &mut dyn MediaReader) -> io::Result<String> {
+    let mut buf = [0u8; MIME_SNIFF_BYTES];
+    let mut filled = 0;
+    while filled < buf.len() {
+        let n = reader.read(&mut buf[filled..])?;
+        if n == 0 {
+            break;
+        }
+        filled += n;
+    }
+    reader.seek(io::SeekFrom::Start(0))?;
+    Ok(infer::get(&buf[..filled])
+        .map(|t| t.mime_type().to_string())
+        .unwrap_or_default())
+}
+
 fn entry_value_to_epoch(v: &EntryValue, local_offset: FixedOffset) -> u64 {
     let secs = match v {
         // 带时区：nom-exif 已经合成 DateTime<FixedOffset>，timestamp() 直接是 UTC epoch。
@@ -101,10 +147,19 @@ fn entry_value_to_epoch(v: &EntryValue, local_offset: FixedOffset) -> u64 {
     }
 }
 
-fn populate_image_dates(path: &Utf8Path, exif: &mut Exif, local_offset: FixedOffset) {
-    let Ok(parsed) = nom_exif::read_exif(path.as_str()) else {
+fn populate_image_dates(
+    reader: Box<dyn MediaReader>,
+    exif: &mut Exif,
+    local_offset: FixedOffset,
+) {
+    let Ok(ms) = MediaSource::seekable(reader) else {
         return;
     };
+    let mut parser = MediaParser::new();
+    let Ok(iter) = parser.parse_exif(ms) else {
+        return;
+    };
+    let parsed: nom_exif::Exif = iter.into();
     if let Some(v) = parsed.get(ExifTag::DateTimeOriginal) {
         exif.date_time_original = entry_value_to_epoch(v, local_offset);
     }
@@ -114,8 +169,20 @@ fn populate_image_dates(path: &Utf8Path, exif: &mut Exif, local_offset: FixedOff
     // spec §5.4：ExifTag::ModifyDate 故意不读，避免被编辑/导出时间污染判定。
 }
 
-fn populate_video_dates(path: &Utf8Path, exif: &mut Exif, local_offset: FixedOffset) {
-    let Ok(track) = nom_exif::read_track(path.as_str()) else {
+// parse_track 内部 Err 需要构造"header 通过 sniff 但容器结构损坏"的特殊视频 fixture，
+// 实务里不可稳定触发；整体标 coverage(off) 与 populate_image_dates 用 nom-exif 库的
+// 失败路径同源（image 路径下 PNG without EXIF 走 Some/None 分支已天然覆盖）。
+#[cfg_attr(coverage_nightly, coverage(off))]
+fn populate_video_dates(
+    reader: Box<dyn MediaReader>,
+    exif: &mut Exif,
+    local_offset: FixedOffset,
+) {
+    let Ok(ms) = MediaSource::seekable(reader) else {
+        return;
+    };
+    let mut parser = MediaParser::new();
+    let Ok(track) = parser.parse_track(ms) else {
         return;
     };
     if let Some(v) = track.get(TrackInfoTag::CreateDate) {

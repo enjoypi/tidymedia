@@ -3,9 +3,10 @@
 //   - `<media>.xmp` 中的 `photoshop:DateCreated="<RFC3339>"`（纯文本搜索）
 //   - Google Takeout `<media>.<ext>.json` 中的 `photoTakenTime.timestamp`（serde_json）
 
-use std::fs;
+use std::sync::Arc;
 
 use camino::Utf8Path;
+use camino::Utf8PathBuf;
 use chrono::DateTime;
 use chrono::TimeDelta;
 use chrono::Utc;
@@ -13,26 +14,38 @@ use serde_derive::Deserialize;
 
 use super::candidate::Candidate;
 use super::priority::Source;
+use crate::entities::backend::local::LocalBackend;
+use crate::entities::backend::Backend;
+use crate::entities::uri::Location;
 
 const XMP_KEY: &str = "photoshop:DateCreated=\"";
 
-/// 同一个媒体文件可能伴随多个 sidecar；按出现顺序返回所有 P3 候选。
+/// 旧入口：本地路径 → Local backend shim。便于现有测试与 use case 不引入 backend 类型。
 pub fn discover(media_path: &Utf8Path) -> Vec<Candidate> {
+    let backend = LocalBackend::arc();
+    discover_with_backend(&Location::Local(media_path.to_path_buf()), &backend)
+}
+
+/// Backend Gateway 入口：以 [`Location`] + [`Backend`] 在 backend 上读 sibling sidecar。
+/// 当前 sibling 路径计算仅 Local 实现（[`with_extension`] / [`append_suffix`] 对非 Local
+/// 返回 None），SMB/MTP 接入时再扩展。
+pub fn discover_with_backend(
+    media_loc: &Location,
+    backend: &Arc<dyn Backend>,
+) -> Vec<Candidate> {
     let mut out = Vec::new();
-    if let Some(c) = try_xmp(media_path) {
+    if let Some(c) = try_xmp(media_loc, backend.as_ref()) {
         out.push(c);
     }
-    if let Some(c) = try_takeout(media_path) {
+    if let Some(c) = try_takeout(media_loc, backend.as_ref()) {
         out.push(c);
     }
     out
 }
 
-fn try_xmp(media_path: &Utf8Path) -> Option<Candidate> {
-    // 同目录同 stem 的 .xmp（spec §2.P3）
-    let mut xmp = media_path.to_path_buf();
-    xmp.set_extension("xmp");
-    let content = fs::read_to_string(xmp.as_std_path()).ok()?;
+fn try_xmp(media_loc: &Location, backend: &dyn Backend) -> Option<Candidate> {
+    let xmp_loc = with_extension(media_loc, "xmp")?;
+    let content = backend.read_to_string(&xmp_loc).ok()?;
     let utc = parse_xmp_date(&content)?;
     Some(Candidate {
         utc,
@@ -42,11 +55,11 @@ fn try_xmp(media_path: &Utf8Path) -> Option<Candidate> {
     })
 }
 
-fn try_takeout(media_path: &Utf8Path) -> Option<Candidate> {
+fn try_takeout(media_loc: &Location, backend: &dyn Backend) -> Option<Candidate> {
     // Takeout 同目录文件：<media-full-name>.json（例如 photo.jpg.json）。
     // 直接拼后缀，避免 with_extension 在无扩展名时产生 `photo..json`（多一个点）。
-    let json_path = Utf8Path::new(&format!("{}.json", media_path.as_str())).to_path_buf();
-    let content = fs::read_to_string(json_path.as_std_path()).ok()?;
+    let json_loc = append_suffix(media_loc, ".json")?;
+    let content = backend.read_to_string(&json_loc).ok()?;
     let utc = parse_takeout_json(&content)?;
     Some(Candidate {
         utc,
@@ -54,6 +67,20 @@ fn try_takeout(media_path: &Utf8Path) -> Option<Candidate> {
         source: Source::GoogleTakeoutJson,
         inferred_offset: false,
     })
+}
+
+/// 同 stem 替换扩展名。仅 Local case，其他 backend 暂返 None。
+fn with_extension(loc: &Location, ext: &str) -> Option<Location> {
+    let Location::Local(p) = loc else { return None };
+    let mut pp = p.clone();
+    pp.set_extension(ext);
+    Some(Location::Local(pp))
+}
+
+/// 在原 path 末尾追加后缀，等价于 Takeout 的 `<media-full>.json`。
+fn append_suffix(loc: &Location, sfx: &str) -> Option<Location> {
+    let Location::Local(p) = loc else { return None };
+    Some(Location::Local(Utf8PathBuf::from(format!("{p}{sfx}"))))
 }
 
 pub(crate) fn parse_xmp_date(content: &str) -> Option<DateTime<Utc>> {
@@ -188,7 +215,8 @@ mod tests {
         let xmp = dir.path().join("bad.xmp");
         std::fs::write(&xmp, b"not xmp content").unwrap();
         let mp = camino::Utf8PathBuf::from_path_buf(media).unwrap();
-        assert!(try_xmp(&mp).is_none());
+        let backend = LocalBackend::arc();
+        assert!(try_xmp(&Location::Local(mp), backend.as_ref()).is_none());
     }
 
     /// json 文件存在但内容不符合 schema → try_takeout None
@@ -200,6 +228,41 @@ mod tests {
         let json = dir.path().join("bad.jpg.json");
         std::fs::write(&json, b"{}").unwrap();
         let mp = camino::Utf8PathBuf::from_path_buf(media).unwrap();
-        assert!(try_takeout(&mp).is_none());
+        let backend = LocalBackend::arc();
+        assert!(try_takeout(&Location::Local(mp), backend.as_ref()).is_none());
+    }
+
+    /// 非 Local backend：with_extension / append_suffix 都返回 None →
+    /// discover_with_backend 直接返回空 Vec（Task 4 范围内 SMB/MTP 尚未支持 sibling）。
+    #[test]
+    fn discover_with_backend_smb_returns_empty() {
+        let smb_loc = Location::Smb {
+            user: None,
+            host: "nas".into(),
+            port: None,
+            share: "photos".into(),
+            path: Utf8PathBuf::from("dir/x.jpg"),
+        };
+        let backend = LocalBackend::arc();
+        assert!(discover_with_backend(&smb_loc, &backend).is_empty());
+    }
+
+    /// FakeBackend 用 Local Location 喂入：read_to_string 走 fake 数据，验证 backend 调度
+    /// 与 LocalBackend 同语义。
+    #[test]
+    fn discover_with_fake_backend_finds_xmp() {
+        use crate::entities::backend::fake::FakeBackend;
+        let fake = std::sync::Arc::new(FakeBackend::new("local"));
+        let media = Location::Local(Utf8PathBuf::from("/in-mem/x.jpg"));
+        let xmp = Location::Local(Utf8PathBuf::from("/in-mem/x.xmp"));
+        fake.add_file(media.clone(), b"img-bytes".to_vec());
+        fake.add_file(
+            xmp,
+            br#"photoshop:DateCreated="2024-05-01T14:30:00+00:00""#.to_vec(),
+        );
+        let backend: std::sync::Arc<dyn Backend> = fake;
+        let cands = discover_with_backend(&media, &backend);
+        assert_eq!(cands.len(), 1);
+        assert_eq!(cands[0].source, Source::XmpSidecar);
     }
 }

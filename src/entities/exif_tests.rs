@@ -110,16 +110,20 @@ fn entry_value_to_epoch_negative_clamps_to_zero() {
 
 #[test]
 fn populate_image_dates_on_non_image_returns_early() {
-    // data_small 是非图片二进制 → nom_exif::read_exif 应返回 Err → 函数早返回，字段不变
+    // data_small 是非图片二进制 → MediaSource::seekable 探测 mime 应失败 → 提前 return
     let mut exif = mk_exif("image/png", |_| {});
-    super::populate_image_dates(Utf8Path::new(common::DATA_SMALL), &mut exif, utc());
+    let reader: Box<dyn super::MediaReader> =
+        Box::new(std::fs::File::open(common::DATA_SMALL).unwrap());
+    super::populate_image_dates(reader, &mut exif, utc());
     assert_eq!(exif.date_time_original, 0);
 }
 
 #[test]
 fn populate_video_dates_on_non_video_returns_early() {
     let mut exif = mk_exif("video/mp4", |_| {});
-    super::populate_video_dates(Utf8Path::new(common::DATA_SMALL), &mut exif, utc());
+    let reader: Box<dyn super::MediaReader> =
+        Box::new(std::fs::File::open(common::DATA_SMALL).unwrap());
+    super::populate_video_dates(reader, &mut exif, utc());
     assert_eq!(exif.qt_create_date, 0);
 }
 
@@ -190,6 +194,25 @@ fn from_path_propagates_infer_io_error_when_unreadable() {
 
     // 恢复权限避免 tempdir 清理失败
     std::fs::set_permissions(&path, orig).unwrap();
+}
+
+/// Exif::open 内 sniff_mime 失败 → `?` Err 分支。FakeBackend 让 open_read 返回
+/// 立即 read Err 的 reader：sniff_mime 内 `?` 把 Err 上抛到 open。
+#[test]
+fn open_propagates_sniff_mime_io_error() {
+    use std::sync::Arc;
+    use super::super::backend::fake::FakeBackend;
+    use super::super::uri::Location;
+
+    let fake = Arc::new(FakeBackend::new("fake"));
+    let loc = Location::Local(camino::Utf8PathBuf::from("/in-mem/x.bin"));
+    fake.add_file(loc.clone(), vec![0u8; 32]);
+    fake.inject_reader_error(loc.clone(), std::io::ErrorKind::Interrupted);
+
+    let backend: Arc<dyn super::super::backend::Backend> = fake;
+    let err = Exif::open(&loc, &backend, utc()).unwrap_err();
+    let msg = format!("{err}");
+    assert!(msg.contains("IO"), "got: {msg}");
 }
 
 fn mk_exif(mime: &str, init: impl FnOnce(&mut Exif)) -> Exif {

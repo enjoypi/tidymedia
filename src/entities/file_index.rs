@@ -4,14 +4,18 @@ use std::collections::HashSet;
 use std::fmt;
 use std::hash::Hash;
 use std::io;
+use std::sync::Arc;
 
 use camino::Utf8PathBuf;
 use chrono::FixedOffset;
 use rayon::prelude::*;
 use tracing::warn;
 
+use super::backend::local::LocalBackend;
+use super::backend::{Backend, EntryKind};
 use super::exif;
 use super::file_info::Info;
+use super::uri::Location;
 
 const FEATURE_INDEX: &str = "index";
 
@@ -32,6 +36,7 @@ pub struct Index {
     // file path -> file meta
     files: HashMap<Utf8PathBuf, Info>,
     stats: VisitStats,
+    backend: Arc<dyn Backend>,
 }
 
 impl fmt::Debug for Index {
@@ -43,10 +48,17 @@ impl fmt::Debug for Index {
 
 impl Index {
     pub fn new() -> Self {
+        Self::with_backend(LocalBackend::arc())
+    }
+
+    /// Backend Gateway 入口：调用方注入自定义后端（fake / 远端）。`Index::new()` 是
+    /// Local 默认 shim。
+    pub fn with_backend(backend: Arc<dyn Backend>) -> Self {
         Self {
             files: HashMap::new(),
             similar_files: HashMap::new(),
             stats: VisitStats::default(),
+            backend,
         }
     }
 
@@ -181,26 +193,30 @@ impl Index {
         self.add(info)
     }
 
-    // walker 错误处理分支（metadata Err / non-UTF-8 path）依赖文件系统状态，构造不稳定；
-    // warn! 宏内的字段表达式还要求安装 warn 级 subscriber 才被求值。整体标 coverage(off)
-    // 让 nightly 严格覆盖率稳定，与 parse_exif / find_duplicates 同风格。
+    /// 旧入口：本地路径字符串。`visit_location` 的 Local shim，让现有 use cases / 测试
+    /// 不必感知 [`Location`] 类型。
+    /// 相对路径先 canonicalize 成绝对路径，让 backend.walk 输出的 entry 与 Info 内
+    /// `full_path` 字段保持"全路径"语义（旧 Info::from 的不变量）。
     #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn visit_dir(&mut self, path: &str) {
-        use ignore::WalkBuilder;
+        // canonicalize 失败（路径不存在）回退到原字符串，让 walker 自身报 walker_error
+        let root = super::file_info::full_path(path).unwrap_or_else(|_| Utf8PathBuf::from(path));
+        self.visit_location(&Location::Local(root));
+    }
 
-        // 默认 `ignore::Walk` 会读取 .gitignore / .ignore / .git/info/exclude，
-        // 对照片归档场景（用户媒体目录恰好在 git 工作树里）会静默漏文件，故全部关闭。
-        let walker = WalkBuilder::new(path)
-            .git_ignore(false)
-            .git_global(false)
-            .git_exclude(false)
-            .ignore(false)
-            .require_git(false)
-            .build();
-
-        let mut paths: Vec<Utf8PathBuf> = Vec::new();
-        for entry in walker {
-            let entry = match entry {
+    /// Backend Gateway 入口：扫描 `root` 下所有文件并入索引。
+    /// 错误处理与原 `visit_dir` 等价：
+    /// - walker 自身 Err（缺路径、非 UTF-8、权限）→ `walker_errors += 1`
+    /// - 0 字节文件 → `skipped_empty += 1`
+    /// - Info::open 失败（chmod 000 / 中途删除等）→ `skipped_unreadable += 1`
+    ///
+    /// 函数体内分支多数依赖文件系统状态构造，且 `warn!` 字段表达式要求安装
+    /// subscriber 才被求值。整体标 coverage(off)，沿用旧 visit_dir 的覆盖率策略。
+    #[cfg_attr(coverage_nightly, coverage(off))]
+    pub fn visit_location(&mut self, root: &Location) {
+        let mut locs: Vec<Location> = Vec::new();
+        for entry_res in self.backend.walk(root) {
+            let entry = match entry_res {
                 Ok(e) => e,
                 Err(e) => {
                     self.stats.walker_errors += 1;
@@ -208,63 +224,36 @@ impl Index {
                         feature = FEATURE_INDEX,
                         operation = "walk",
                         result = "walker_error",
-                        root = path,
+                        root = %root.display(),
                         error = %e,
                         "walker reported an error entry",
                     );
                     continue;
                 }
             };
-            let meta = match entry.metadata() {
-                Ok(m) => m,
-                Err(e) => {
-                    self.stats.walker_errors += 1;
-                    warn!(
-                        feature = FEATURE_INDEX,
-                        operation = "walk",
-                        result = "metadata_error",
-                        path = ?entry.path(),
-                        error = %e,
-                        "metadata fetch failed",
-                    );
-                    continue;
-                }
-            };
-            if !meta.is_file() {
+            if entry.kind != EntryKind::File {
                 continue;
             }
-            if meta.len() == 0 {
+            if entry.size == 0 {
                 self.stats.skipped_empty += 1;
                 warn!(
                     feature = FEATURE_INDEX,
                     operation = "walk",
                     result = "skipped_empty",
-                    path = ?entry.path(),
+                    location = %entry.location.display(),
                     "empty file skipped",
                 );
                 continue;
             }
-            match Utf8PathBuf::from_path_buf(entry.path().to_owned()) {
-                Ok(p) => paths.push(p),
-                Err(_) => {
-                    self.stats.walker_errors += 1;
-                    warn!(
-                        feature = FEATURE_INDEX,
-                        operation = "walk",
-                        result = "non_utf8_path",
-                        path = ?entry.path(),
-                        "non-UTF-8 path skipped",
-                    );
-                }
-            }
+            locs.push(entry.location);
         }
 
-        let infos = paths
+        let backend = Arc::clone(&self.backend);
+        let infos: Vec<_> = locs
             .par_iter()
-            .map(|p| Info::from_path(p))
-            .collect::<Vec<_>>();
-
-        for (path, result) in paths.iter().zip(infos) {
+            .map(|loc| Info::open(loc, Arc::clone(&backend)))
+            .collect();
+        for (loc, result) in locs.iter().zip(infos) {
             match result {
                 Ok(info) => _ = self.add(info),
                 Err(e) => {
@@ -273,7 +262,7 @@ impl Index {
                         feature = FEATURE_INDEX,
                         operation = "walk",
                         result = "skipped_unreadable",
-                        path = %path,
+                        location = %loc.display(),
                         error = %e,
                         "file could not be indexed",
                     );
