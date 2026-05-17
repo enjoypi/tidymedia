@@ -14,6 +14,7 @@ use tracing_subscriber::EnvFilter;
 
 pub use entities::common::Error;
 pub use entities::common::Result;
+pub use entities::media_time;
 
 mod entities;
 mod usecases;

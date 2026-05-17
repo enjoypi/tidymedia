@@ -1,6 +1,4 @@
 use std::fs;
-use std::time::SystemTime;
-use std::time::UNIX_EPOCH;
 
 use camino::Utf8Path;
 use chrono::FixedOffset;
@@ -13,23 +11,19 @@ use super::common;
 const META_TYPE_IMAGE: &str = "image/";
 const META_TYPE_VIDEO: &str = "video/";
 
-// 时钟偏移宽容值：未来超过此秒数视为伪造（相机日期没设对、电池掉电跳到 2099 年等）。
-// 24h 足够覆盖跨时区上传 + NTP 漂移，又不会让真正未来的伪造时间逃逸。
-const FUTURE_SKEW_SECS: u64 = 86_400;
-
+/// 容器内自带时间字段。文件系统 mtime / btime 不在此结构体里——
+/// Clean Architecture 的边界让 Exif 只持有 EXIF/视频容器数据；
+/// 文件系统时间由 `entities::media_time::fs_time` 直接从 fs::Metadata 取。
+/// spec §5.4：EXIF ModifyDate 故意不解析，避免编辑/导出时间污染判定。
 #[derive(Clone, Debug, Default)]
 pub struct Exif {
     mime_type: String,
 
-    file_modify_date: u64,
-    file_create_date: u64,
-
     exif_create_date: u64,
-    exif_modify_date: u64,
     date_time_original: u64,
 
     // 视频容器（QuickTime / MP4 / MKV）创建时间。
-    // 注：iPhone 的 `com.apple.quicktime.creationdate`（带时区）被 nom-exif
+    // iPhone 的 `com.apple.quicktime.creationdate`（带时区）被 nom-exif
     // 内部合并到 TrackInfoTag::CreateDate，因此这里只读一个字段即可。
     qt_create_date: u64,
 }
@@ -43,7 +37,9 @@ impl Exif {
         path: &Utf8Path,
         local_offset: FixedOffset,
     ) -> common::Result<Self> {
-        let meta = fs::metadata(path)?;
+        // 调用 fs::metadata 仅为校验 path 可读；元数据本身不存进 Exif（spec §2.P4：
+        // 文件系统时间由 media_time::fs_time 模块单独管理）。
+        fs::metadata(path)?;
 
         let mime_type = infer::get_from_path(path)?
             .map(|t| t.mime_type().to_string())
@@ -51,8 +47,6 @@ impl Exif {
 
         let mut exif = Exif {
             mime_type,
-            file_modify_date: system_time_to_epoch(meta.modified().ok()),
-            file_create_date: system_time_to_epoch(meta.created().ok()),
             ..Default::default()
         };
 
@@ -69,20 +63,8 @@ impl Exif {
         self.mime_type.as_str()
     }
 
-    pub fn file_modify_date(&self) -> u64 {
-        self.file_modify_date
-    }
-
-    pub fn file_create_date(&self) -> u64 {
-        self.file_create_date
-    }
-
     pub fn exif_create_date(&self) -> u64 {
         self.exif_create_date
-    }
-
-    pub fn exif_modify_date(&self) -> u64 {
-        self.exif_modify_date
     }
 
     pub fn date_time_original(&self) -> u64 {
@@ -93,63 +75,11 @@ impl Exif {
         self.qt_create_date
     }
 
-    /// 按"拍摄 → 容器 → 文件 → ModifyDate"顺序回退到第一个非伪造时间。
-    /// exif_modify_date 放在 file 时间之后：ModifyDate 常被 Lightroom/Photoshop
-    /// 改写为编辑/导出时间，比文件 mtime/btime 更不可信。
-    pub fn media_create_date(&self) -> u64 {
-        if !self.is_media() {
-            return 0;
-        }
-        let upper = future_skew_cap();
-        let pick = |t: u64| t > 0 && t < upper;
-
-        if pick(self.date_time_original()) {
-            return self.date_time_original();
-        }
-        if pick(self.qt_create_date()) {
-            return self.qt_create_date();
-        }
-        if pick(self.exif_create_date()) {
-            return self.exif_create_date();
-        }
-
-        if self.file_modify_date() > self.file_create_date() && pick(self.file_create_date()) {
-            return self.file_create_date();
-        }
-        if pick(self.file_modify_date()) {
-            return self.file_modify_date();
-        }
-        if pick(self.file_create_date()) {
-            return self.file_create_date();
-        }
-
-        if pick(self.exif_modify_date()) {
-            return self.exif_modify_date();
-        }
-
-        0
-    }
-
     pub fn is_media(&self) -> bool {
         let mime_type = self.mime_type();
         (mime_type.starts_with(META_TYPE_IMAGE) || mime_type.starts_with(META_TYPE_VIDEO))
             && !mime_type.ends_with(".fpx")
     }
-}
-
-fn system_time_to_epoch(t: Option<SystemTime>) -> u64 {
-    t.and_then(|s| s.duration_since(UNIX_EPOCH).ok())
-        .map(|d| d.as_secs())
-        .unwrap_or(0)
-}
-
-// SystemTime::now() 在常规系统上不会 Err（要早于 UNIX_EPOCH 才会）；
-// 极端情况下退到 u64::MAX 等价"无上限"，保留兼容行为而非崩溃。
-fn future_skew_cap() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs().saturating_add(FUTURE_SKEW_SECS))
-        .unwrap_or(u64::MAX)
 }
 
 fn entry_value_to_epoch(v: &EntryValue, local_offset: FixedOffset) -> u64 {
@@ -181,9 +111,7 @@ fn populate_image_dates(path: &Utf8Path, exif: &mut Exif, local_offset: FixedOff
     if let Some(v) = parsed.get(ExifTag::CreateDate) {
         exif.exif_create_date = entry_value_to_epoch(v, local_offset);
     }
-    if let Some(v) = parsed.get(ExifTag::ModifyDate) {
-        exif.exif_modify_date = entry_value_to_epoch(v, local_offset);
-    }
+    // spec §5.4：ExifTag::ModifyDate 故意不读，避免被编辑/导出时间污染判定。
 }
 
 fn populate_video_dates(path: &Utf8Path, exif: &mut Exif, local_offset: FixedOffset) {

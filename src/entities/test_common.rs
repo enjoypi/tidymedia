@@ -39,6 +39,10 @@ pub const DATA_MP4_WITH_TRACK: &str = "tests/data/sample-with-track.mp4";
 /// Matroska 视频，track 但无 CreateDate —— 用于覆盖 populate_video_dates 的 None 分支。
 pub const DATA_MKV_NO_TRACK_DATE: &str = "tests/data/sample-no-track-date.mkv";
 
+// docs/media-time-detection.md spec contract fixture：tests/fixtures/gen.sh 生成，
+// tests/media_time_spec.rs 集成测试通过 tests/media_time/common.rs 内的等价常量引用
+// （集成测试是独立 crate，看不见 pub(crate) 项）。
+
 /// 2024-01-01 12:00:00 UTC，用于固定 PNG 复制目标的 mtime
 pub const FIXED_MEDIA_MTIME: i64 = 1_704_110_400;
 

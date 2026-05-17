@@ -11,5 +11,6 @@ pub mod common;
 pub(crate) mod exif;
 pub mod file_index;
 pub mod file_info;
+pub mod media_time;
 #[cfg(test)]
 pub(crate) mod test_common;

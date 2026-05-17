@@ -8,6 +8,8 @@ use std::time::SystemTime;
 
 use camino::Utf8Path;
 use camino::Utf8PathBuf;
+use chrono::FixedOffset;
+use chrono::Utc;
 use generic_array::GenericArray;
 use memmap2::Mmap;
 use parking_lot::Mutex;
@@ -15,6 +17,7 @@ use sha2::Digest;
 use sha2::Sha512;
 
 use super::exif;
+use super::media_time;
 use super::SecureHash;
 
 // 栈数组要求编译期常量，保留为 const（性能边界例外）
@@ -141,31 +144,36 @@ impl Info {
         self.exif = Some(exif);
     }
 
-    /// 计算创建时间。EXIF 时间戳若小于 `valid_threshold_secs` 视为无效，回退到文件 mtime。
-    /// 阈值由调用方（Use Case 层）从配置读取并传入——Entity 不直接依赖配置加载。
-    // ext4 等 Linux 文件系统可能不报 btime；mtime 极少不可用。这里用 UNIX_EPOCH/兄弟字段兜底，
-    // 让函数对 fs 差异具有鲁棒性，同时消除调用链中无法触发的 IO Err 分支。
+    /// 计算创建时间。走 docs/media-time-detection.md 的 P0→P4 优先级判定：
+    /// 把 EXIF/视频容器字段、文件 mtime 喂给 `media_time::resolve`，decision 时间若小于
+    /// `valid_threshold_secs`（配置层的"软阈值"）则回退到 fs 兜底。
+    /// `valid_threshold_secs` 由 Use Case 层从配置读入；Entity 不直接依赖配置加载。
     pub fn create_time(&self, valid_threshold_secs: u64) -> SystemTime {
-        let file_modify_time = self.meta.modified().unwrap_or(SystemTime::UNIX_EPOCH);
-        let file_create_time = self.meta.created().unwrap_or(file_modify_time);
+        let modified = self.meta.modified().ok();
+        let created = self.meta.created().ok();
+        let fs_fallback = pick_fs_fallback(modified, created);
 
-        let real_create_time = if file_modify_time < file_create_time {
-            file_modify_time
-        } else {
-            file_create_time
+        let Some(exif) = self.exif.as_ref() else {
+            return fs_fallback;
         };
 
-        if self.exif.is_none() {
-            return real_create_time;
-        }
-        let exif = self.exif.as_ref().unwrap();
+        // 当前实现统一用 UTC 作为 NaiveDateTime 的解释时区——上层（usecases::copy）
+        // 已用 from_path_with_offset 把 EXIF 转 epoch 了，这里的 offset 仅作 P2 推断用，
+        // 但本入口未喂入 filename/sidecar 候选，因此 offset 实际不被消费。
+        let utc_offset = FixedOffset::east_opt(0).expect("0 offset is valid");
+        let mut candidates = media_time::candidates_from_exif(exif, utc_offset);
+        // Option<Candidate> 实现 IntoIterator → extend 不引入 if-let 分支。
+        candidates.extend(media_time::fs_time::from_modified(modified));
 
-        let t = exif.media_create_date();
-        // ">=" 与"小于此值视为不可信"的注释语义一致：等于阈值的边界值采纳。
-        if t >= valid_threshold_secs {
-            SystemTime::UNIX_EPOCH + Duration::from_secs(t)
+        // resolve 返回 None（候选全部被过滤）与"低于阈值"走同一条 fallback 路径，
+        // 避免在 create_time 里多一条不可稳定触发的分支。
+        let secs = media_time::resolve(candidates, None, Utc::now())
+            .map(|d| d.utc.timestamp())
+            .unwrap_or(0);
+        if secs > 0 && (secs as u64) >= valid_threshold_secs {
+            SystemTime::UNIX_EPOCH + Duration::from_secs(secs as u64)
         } else {
-            real_create_time
+            fs_fallback
         }
     }
 
@@ -174,6 +182,19 @@ impl Info {
             return false;
         }
         self.exif.as_ref().unwrap().is_media()
+    }
+}
+
+/// fs 兜底：取 mtime 与 btime 的较早值；任一缺失就用另一方；都缺失退到 UNIX_EPOCH。
+/// 这是 P4 内部决策（spec §2.P4：mtime 兜底）——选较早值是因为 btime 在某些
+/// 文件系统上 == ctime，受 inode 变更影响，比 mtime 更不稳定。
+fn pick_fs_fallback(modified: Option<SystemTime>, created: Option<SystemTime>) -> SystemTime {
+    match (modified, created) {
+        (Some(m), Some(c)) if m < c => m,
+        (Some(_), Some(c)) => c,
+        (Some(m), None) => m,
+        (None, Some(c)) => c,
+        (None, None) => SystemTime::UNIX_EPOCH,
     }
 }
 

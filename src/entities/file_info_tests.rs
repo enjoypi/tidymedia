@@ -363,3 +363,47 @@
         let err = info.secure_hash().unwrap_err();
         assert_eq!(err.kind(), std::io::ErrorKind::NotFound);
     }
+
+    use std::time::Duration;
+    use std::time::SystemTime;
+
+    /// pick_fs_fallback：modified < created（罕见但合法）→ 取 modified。
+    #[test]
+    fn pick_fs_fallback_modified_smaller_than_created() {
+        let m = SystemTime::UNIX_EPOCH + Duration::from_secs(100);
+        let c = SystemTime::UNIX_EPOCH + Duration::from_secs(200);
+        let got = super::pick_fs_fallback(Some(m), Some(c));
+        assert_eq!(got.duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs(), 100);
+    }
+
+    /// pick_fs_fallback：modified ≥ created → 取 created。
+    #[test]
+    fn pick_fs_fallback_modified_ge_created() {
+        let m = SystemTime::UNIX_EPOCH + Duration::from_secs(200);
+        let c = SystemTime::UNIX_EPOCH + Duration::from_secs(100);
+        let got = super::pick_fs_fallback(Some(m), Some(c));
+        assert_eq!(got.duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs(), 100);
+    }
+
+    /// pick_fs_fallback：created 不可用（btime 缺失），只看 modified。
+    #[test]
+    fn pick_fs_fallback_created_none() {
+        let m = SystemTime::UNIX_EPOCH + Duration::from_secs(50);
+        let got = super::pick_fs_fallback(Some(m), None);
+        assert_eq!(got.duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs(), 50);
+    }
+
+    /// pick_fs_fallback：modified 不可用（极端 fs），只看 created。
+    #[test]
+    fn pick_fs_fallback_modified_none() {
+        let c = SystemTime::UNIX_EPOCH + Duration::from_secs(75);
+        let got = super::pick_fs_fallback(None, Some(c));
+        assert_eq!(got.duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs(), 75);
+    }
+
+    /// pick_fs_fallback：两个时间都不可用 → UNIX_EPOCH 兜底。
+    #[test]
+    fn pick_fs_fallback_both_none() {
+        let got = super::pick_fs_fallback(None, None);
+        assert_eq!(got, SystemTime::UNIX_EPOCH);
+    }

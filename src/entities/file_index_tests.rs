@@ -47,13 +47,13 @@
         index.visit_dir(common::DATA_DIR);
         index.parse_exif(chrono::FixedOffset::east_opt(0).unwrap());
 
-        let png_path = file_info::full_path(common::DATA_DNS_BENCHMARK).unwrap();
-        let info = index.files.get(png_path.as_path()).unwrap();
+        let jpeg_path = file_info::full_path(common::DATA_JPEG_WITH_EXIF).unwrap();
+        let info = index.files.get(jpeg_path.as_path()).unwrap();
         let exif = info.exif().unwrap();
-        assert_eq!(exif.mime_type(), "image/png");
+        assert_eq!(exif.mime_type(), "image/jpeg");
         assert!(exif.is_media());
-        assert!(exif.media_create_date() > 0);
-        assert!(exif.file_modify_date() > 0);
+        // 本 fixture EXIF 含 DateTimeOriginal=2024-01-01
+        assert_eq!(exif.date_time_original(), 1_704_110_400);
     }
 
     #[test]

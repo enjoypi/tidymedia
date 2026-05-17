@@ -53,6 +53,12 @@
 - `FAST_READ_SIZE` 因 `[0; FAST_READ_SIZE]` 栈数组要求编译期常量，**不外置**（R1 合理例外）
 - 结构化日志字段约定：`feature` / `operation` / `result`（CLI 工具无 request_id/user_id）
 - `UtcOffset::from_whole_seconds` 范围 ±25:59:59，越界返回 `None`，用 `.unwrap_or(UtcOffset::UTC)` 兜底
+- **R1 外置范围**：仅 `copy.timezone_offset_hours` / `copy.unique_name_max_attempts` / `exif.valid_date_time_secs` 三项需运维可调。其余 const 属 R1 边界例外**不外置**：
+  - **spec §X 算法常量**：`EPOCH_1904` / `SOFT_THRESHOLD_1995` / `FUTURE_TOLERANCE_SECS` / `MTIME_VS_P0_HINT_SECS`（filter/resolve）
+  - **协议字面量**：`PHONE_PREFIX="IMG_"` / `CAMERA_PREFIX="DSC_"` / `SCREENSHOT_PREFIX="Screenshot_"` / `XMP_KEY` / `META_TYPE_IMAGE` / `META_TYPE_VIDEO`
+  - **日志维度名**：`FEATURE_CLI` / `FEATURE_COPY` / `FEATURE_FIND` / `FEATURE_INDEX`
+  - **lookup 表**：`MONTH: [&str; 13]`（copy.rs 月份零填充表）
+- `src/usecases/copy.rs` 的 `println!("\"{}\"\t\"{}\"", src, dst)` 是 CLI 脚本可读输出（dry-run + 完成回执），**不是** R3 日志路径，不要改成 tracing
 
 ## 工具链注意
 - nextest 每个测试独立进程，`set_var`/`remove_var`/`OnceLock` 不会跨测试污染（区别于 `cargo test`）
