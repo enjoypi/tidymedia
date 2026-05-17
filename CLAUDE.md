@@ -54,16 +54,18 @@
   - `smb://[user@]host[:port]/share/path` ⇒ `Location::Smb`
   - `mtp://device/storage/path` ⇒ `Location::Mtp`
   - 字段内空格 / 中文 / 路径分隔符走 `percent-encoding`，**不引 `url` crate**（`entities/uri.rs` 自实现解析）
-- SMB 凭据：`SMB_USER` 经配置 `backend.smb.default_user` 兜底；`SMB_PASSWORD` 由 `SmbTarget::password` 在 `build_target` 处读 env；Kerberos 走 `KRB5CCNAME`。**密码永远不入 YAML**（CLAUDE.md P0.13）
-- 当前 `SmbBackend::new()` / `MtpBackend::new()` 返 `io::ErrorKind::Unsupported` "not enabled"；测试入口是 `SmbBackend::with_client(Arc<dyn SmbClient>)` / `MtpBackend::with_client(...)`；真实 `RealSmbClient` / `RealMtpClient` 适配器留作未来 PR
-- `tidy()` 内 `require_local_path` adapter：Local 透传，Smb/Mtp 报清晰 "<scheme> backend not enabled in this build; rebuild with --features <scheme>-backend"
-- Registry / `for_scheme` 路由暂未实装：现行仅 Local 路径走 use case；Smb/Mtp 在 Cli adapter 处被拒收
+- SMB 凭据：`SMB_USER` 经配置 `backend.smb.default_user` 兜底；`SMB_PASSWORD` 由 `SmbTarget::password` 在 `build_target` 处读 env；Kerberos 走 `KRB5CCNAME`。`backend.smb.workgroup` 默认 `WORKGROUP`，pavao `SmbCredentials::workgroup` 必填。**密码永远不入 YAML**（CLAUDE.md P0.13）
+- `lib.rs::BackendFactory` trait + `DefaultBackendFactory` 按 [`Location`] 装配 [`Backend`]：Local 直接给 `LocalBackend`；SMB / MTP 走 cfg-gated 分支：
+  - `--features smb-backend` 启用：`RealSmbClient`（`smb_real.rs`，包 pavao + libsmbclient C 库；Mutex 串行化 + `unsafe impl Send+Sync`）；未启用时返 `Unsupported "smb backend not enabled; rebuild with --features smb-backend"`
+  - `--features mtp-backend` 启用：`RealMtpClient` 当前是 stub（`mtp_real.rs`），运行期仍返 `Unsupported`，错误消息引导 future PR 选定 crate（libmtp-rs / gphoto2-rs / 自接 rusb-PTP，无现成跨平台 + Android NDK 友好方案）；未启用时返 `Unsupported "mtp backend not enabled; rebuild with --features mtp-backend"`
+- 测试侧 `tidy_with(factory, command)` 接 `BackendFactory` 注入：集成测试通过 `FakeBackendFactory`（`HashMap<scheme, Arc<dyn Backend>>`）挂载 `FakeBackend` 验证跨 scheme 调度；`FakeBackend` / `FakeOp` 已 `#[doc(hidden)] pub use` 到 crate 根，integration test 可直接 import
+- 任意混合 sources 已支持：`copy smb://a /local/b mtp://c -o /x` 合法；[`Index`] 内部每条 `Info` 自带 `Arc<dyn Backend>`，`visit_location(&Location, Arc<dyn Backend>)` 显式接 backend 入参
 
 ## SMB/MTP 测试套路
 - **手写 FakeSmbClient / FakeMtpClient**：state 用 `Arc<Mutex<HashMap<...>>>`；`inject(SmbOp::Read, path, ErrorKind::TimedOut)` 注入逐 op + 逐 path 的错误，无须 `mockall`
 - **EACCES 映射**：`map_smb_error` 对 `io::Error::other` + 文案含 `"EACCES"` 转 `PermissionDenied`；FakeSmbClient 用同一文案触发
 - **env 凭据传递**：`build_target` 读 `SMB_PASSWORD` / `KRB5CCNAME`；测试用 `unsafe { std::env::set_var(...) }` + nextest 进程隔离让其安全（与 `OnceLock` / `expand_env` 测试同套路，见 P0.4 与 CLAUDE.md「工具链注意」）
-- **真实 client 适配器**：未来 `RealSmbClient::{stat, list, read, write, unlink, mkdir}` / `RealMtpClient::{...}` 各函数标 `#[cfg_attr(coverage_nightly, coverage(off))]`；调度逻辑（`build_target` / `parent_target` / `map_smb_error` / `SmbBufferedWriter`）已 100% 覆盖
+- **真实 client 适配器**：`RealSmbClient::{stat, list, read, write, unlink, mkdir}`（`smb_real.rs`，包 pavao）已接入，整模块标 `#![cfg_attr(coverage_nightly, coverage(off))]`（需 share 服务器才能稳定触发，CI 不可覆盖）；`RealMtpClient::new()` 是 stub 占位（`mtp_real.rs`），同样 coverage(off)。调度逻辑（`build_target` / `parent_target` / `map_smb_error` / `SmbBufferedWriter` / `lib.rs::tidy_with` 各分支）默认编译走 fake 注入 100% 覆盖。`lib.rs::build_smb_backend` / `build_mtp_backend` 在 feature 启用时也标 coverage(off)（构造 Real* 需服务器；feature off 时的 Unsupported Err 分支默认编译可覆盖）
 - **Backend trait 方法的 rejection 测试**：每个方法测三类输入——OK / client Err 注入 / 非自家 scheme 返回 `InvalidInput`
 - **FakeBackend `inject_reader_error`**：让 `open_read` 成功但返回的 reader 在 `read` 时立即 Err，专门覆盖调用方在 stream hash / `sniff_mime` 等位置的 `?` Err 分支
 
@@ -73,7 +75,7 @@
 - `FAST_READ_SIZE` 因 `[0; FAST_READ_SIZE]` 栈数组要求编译期常量，**不外置**（R1 合理例外）
 - 结构化日志字段约定：`feature` / `operation` / `result`（CLI 工具无 request_id/user_id）
 - `UtcOffset::from_whole_seconds` 范围 ±25:59:59，越界返回 `None`，用 `.unwrap_or(UtcOffset::UTC)` 兜底
-- **R1 外置范围**：`copy.timezone_offset_hours` / `copy.unique_name_max_attempts` / `exif.valid_date_time_secs` + `backend.smb.{default_user,timeout_secs}` / `backend.mtp.{device_match,storage_match}` 需运维可调。其余 const 属 R1 边界例外**不外置**：
+- **R1 外置范围**：`copy.timezone_offset_hours` / `copy.unique_name_max_attempts` / `exif.valid_date_time_secs` + `backend.smb.{default_user,workgroup,timeout_secs}` / `backend.mtp.{device_match,storage_match}` 需运维可调。其余 const 属 R1 边界例外**不外置**：
   - **spec §X 算法常量**：`EPOCH_1904` / `SOFT_THRESHOLD_1995` / `FUTURE_TOLERANCE_SECS` / `MTIME_VS_P0_HINT_SECS`（filter/resolve）
   - **协议字面量**：`PHONE_PREFIX="IMG_"` / `CAMERA_PREFIX="DSC_"` / `SCREENSHOT_PREFIX="Screenshot_"` / `XMP_KEY` / `META_TYPE_IMAGE` / `META_TYPE_VIDEO`
   - **日志维度名**：`FEATURE_CLI` / `FEATURE_COPY` / `FEATURE_FIND` / `FEATURE_INDEX`
