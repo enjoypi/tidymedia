@@ -36,7 +36,6 @@ pub struct Index {
     // file path -> file meta
     files: HashMap<Utf8PathBuf, Info>,
     stats: VisitStats,
-    backend: Arc<dyn Backend>,
 }
 
 impl fmt::Debug for Index {
@@ -46,19 +45,20 @@ impl fmt::Debug for Index {
     }
 }
 
-impl Index {
-    pub fn new() -> Self {
-        Self::with_backend(LocalBackend::arc())
+impl Default for Index {
+    fn default() -> Self {
+        Self::new()
     }
+}
 
-    /// Backend Gateway 入口：调用方注入自定义后端（fake / 远端）。`Index::new()` 是
-    /// Local 默认 shim。
-    pub fn with_backend(backend: Arc<dyn Backend>) -> Self {
+impl Index {
+    /// 零依赖构造：Index 不再绑定单一 Backend；每条 [`Info`] 自带其 backend 句柄，
+    /// 跨 scheme 索引由调用方按需 `visit_location(loc, backend)` 多次注入。
+    pub fn new() -> Self {
         Self {
             files: HashMap::new(),
             similar_files: HashMap::new(),
             stats: VisitStats::default(),
-            backend,
         }
     }
 
@@ -201,10 +201,14 @@ impl Index {
     pub fn visit_dir(&mut self, path: &str) {
         // canonicalize 失败（路径不存在）回退到原字符串，让 walker 自身报 walker_error
         let root = super::file_info::full_path(path).unwrap_or_else(|_| Utf8PathBuf::from(path));
-        self.visit_location(&Location::Local(root));
+        self.visit_location(&Location::Local(root), LocalBackend::arc());
     }
 
-    /// Backend Gateway 入口：扫描 `root` 下所有文件并入索引。
+    /// Backend Gateway 入口：扫描 `root` 下所有文件并入索引。`backend` 显式入参，
+    /// 让单 [`Index`] 实例可承载多 scheme（先 `visit_location(smb_root, smb_be)`
+    /// 再 `visit_location(local_root, local_be)`），每条 [`Info`] 的 `Info.backend`
+    /// 沿用调用时传入的 backend。
+    ///
     /// 错误处理与原 `visit_dir` 等价：
     /// - walker 自身 Err（缺路径、非 UTF-8、权限）→ `walker_errors += 1`
     /// - 0 字节文件 → `skipped_empty += 1`
@@ -213,9 +217,9 @@ impl Index {
     /// 函数体内分支多数依赖文件系统状态构造，且 `warn!` 字段表达式要求安装
     /// subscriber 才被求值。整体标 coverage(off)，沿用旧 visit_dir 的覆盖率策略。
     #[cfg_attr(coverage_nightly, coverage(off))]
-    pub fn visit_location(&mut self, root: &Location) {
+    pub fn visit_location(&mut self, root: &Location, backend: Arc<dyn Backend>) {
         let mut locs: Vec<Location> = Vec::new();
-        for entry_res in self.backend.walk(root) {
+        for entry_res in backend.walk(root) {
             let entry = match entry_res {
                 Ok(e) => e,
                 Err(e) => {
@@ -248,7 +252,6 @@ impl Index {
             locs.push(entry.location);
         }
 
-        let backend = Arc::clone(&self.backend);
         let infos: Vec<_> = locs
             .par_iter()
             .map(|loc| Info::open(loc, Arc::clone(&backend)))

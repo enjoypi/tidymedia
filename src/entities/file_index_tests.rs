@@ -488,6 +488,83 @@
         assert_eq!(s, super::VisitStats { skipped_empty: 0, skipped_unreadable: 0, walker_errors: 0 });
     }
 
+    #[test]
+    fn default_constructs_zero_state_index() {
+        let index: Index = Default::default();
+        assert!(index.files().is_empty());
+        assert_eq!(index.stats(), super::VisitStats::default());
+    }
+
+    // 同一 Index 承载两个不同 backend 的 visit_location 调用：
+    // - FakeBackend(smb)：放 1 个 1KiB 文件
+    // - FakeBackend(mtp)：放 1 个不同字节序列的 1KiB 文件
+    // 期望：files() 含两条记录，fast_hash 不同；Info 内部 backend 句柄各自归属。
+    #[test]
+    fn visit_location_accepts_multiple_backends_in_one_index() {
+        use std::sync::Arc;
+
+        use camino::Utf8PathBuf;
+
+        use crate::entities::backend::fake::FakeBackend;
+        use crate::entities::backend::Backend;
+        use crate::entities::uri::Location;
+
+        let smb_root = Location::Smb {
+            user: None,
+            host: "nas".into(),
+            port: None,
+            share: "photos".into(),
+            path: Utf8PathBuf::new(),
+        };
+        let smb_file = Location::Smb {
+            user: None,
+            host: "nas".into(),
+            port: None,
+            share: "photos".into(),
+            path: Utf8PathBuf::from("a.jpg"),
+        };
+        let mtp_root = Location::Mtp {
+            device: "Pixel".into(),
+            storage: "Internal".into(),
+            path: Utf8PathBuf::new(),
+        };
+        let mtp_file = Location::Mtp {
+            device: "Pixel".into(),
+            storage: "Internal".into(),
+            path: Utf8PathBuf::from("b.jpg"),
+        };
+
+        let smb = Arc::new(FakeBackend::new("smb"));
+        smb.add_dir(smb_root.clone());
+        smb.add_file(smb_file.clone(), vec![0xAA; 1024]);
+
+        let mtp = Arc::new(FakeBackend::new("mtp"));
+        mtp.add_dir(mtp_root.clone());
+        mtp.add_file(mtp_file.clone(), vec![0x55; 1024]);
+
+        let mut index = Index::new();
+        index.visit_location(&smb_root, Arc::clone(&smb) as Arc<dyn Backend>);
+        index.visit_location(&mtp_root, Arc::clone(&mtp) as Arc<dyn Backend>);
+
+        let files = index.files();
+        assert_eq!(files.len(), 2, "both backends contributed one file each");
+
+        let smb_key = Utf8PathBuf::from(smb_file.display());
+        let mtp_key = Utf8PathBuf::from(mtp_file.display());
+        assert!(files.contains_key(&smb_key));
+        assert!(files.contains_key(&mtp_key));
+        assert_ne!(
+            files[&smb_key].fast_hash,
+            files[&mtp_key].fast_hash,
+            "distinct byte content should hash differently"
+        );
+
+        // 重新算 full_hash 必须走各自 Info 内部的 Arc<dyn Backend>——
+        // 若实现退化为单 backend 共享，跨 scheme 的 open_read 会失败。
+        assert!(files[&smb_key].calc_full_hash().is_ok());
+        assert!(files[&mtp_key].calc_full_hash().is_ok());
+    }
+
     // 文件名含非 UTF-8 字节时，Utf8PathBuf::from_path_buf 失败 → 计 walker_errors
     #[test]
     #[cfg(unix)]
