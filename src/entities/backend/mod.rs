@@ -8,6 +8,7 @@ use std::time::SystemTime;
 use super::uri::Location;
 
 pub mod local;
+pub mod smb;
 
 #[cfg(test)]
 pub(crate) mod fake;
