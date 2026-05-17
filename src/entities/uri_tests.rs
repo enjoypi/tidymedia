@@ -305,6 +305,54 @@ fn display_mtp_no_path() {
 }
 
 #[test]
+fn path_returns_inner_path_each_variant() {
+    let local = Location::Local(Utf8PathBuf::from("/a/b/c"));
+    assert_eq!(local.path(), Utf8PathBuf::from("/a/b/c"));
+
+    let smb = Location::parse("smb://nas/photos/2024/Jan").unwrap();
+    assert_eq!(smb.path(), Utf8PathBuf::from("2024/Jan"));
+
+    let mtp = Location::parse("mtp://Phone/Card/DCIM").unwrap();
+    assert_eq!(mtp.path(), Utf8PathBuf::from("DCIM"));
+}
+
+#[test]
+fn with_path_preserves_scheme_and_connection_fields() {
+    // Local：换 path 仍是 Local
+    let local = Location::Local(Utf8PathBuf::from("/a"));
+    assert_eq!(
+        local.with_path(Utf8PathBuf::from("/x/y")),
+        Location::Local(Utf8PathBuf::from("/x/y"))
+    );
+
+    // SMB：user/host/port/share 全部保留，仅 path 覆盖
+    let smb = Location::parse("smb://alice@nas:1445/photos/old").unwrap();
+    let new_smb = smb.with_path(Utf8PathBuf::from("new/sub"));
+    assert_eq!(
+        new_smb,
+        Location::Smb {
+            user: Some("alice".into()),
+            host: "nas".into(),
+            port: Some(1445),
+            share: "photos".into(),
+            path: Utf8PathBuf::from("new/sub"),
+        }
+    );
+
+    // MTP：device/storage 保留，path 覆盖
+    let mtp = Location::parse("mtp://Pixel/Internal/DCIM").unwrap();
+    let new_mtp = mtp.with_path(Utf8PathBuf::from("Movies"));
+    assert_eq!(
+        new_mtp,
+        Location::Mtp {
+            device: "Pixel".into(),
+            storage: "Internal".into(),
+            path: Utf8PathBuf::from("Movies"),
+        }
+    );
+}
+
+#[test]
 fn parse_error_display_each_variant() {
     assert!(ParseError::MissingHost("x".into())
         .to_string()

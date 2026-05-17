@@ -115,6 +115,16 @@ impl Info {
         self.lazy.lock().bytes_read
     }
 
+    /// 当前文件归属的 [`Location`]：Local 是绝对路径 wrap，远端是原始 URI。
+    pub fn location(&self) -> &Location {
+        &self.location
+    }
+
+    /// 返回打开 Info 时使用的 backend 句柄；caller 用来对相同文件再做 IO（如 `remove_file`）。
+    pub fn backend(&self) -> Arc<dyn Backend> {
+        Arc::clone(&self.backend)
+    }
+
     pub fn calc_full_hash(&self) -> io::Result<u64> {
         let mut l = self.lazy.lock();
         if l.full {

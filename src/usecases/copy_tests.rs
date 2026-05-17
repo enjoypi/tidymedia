@@ -77,15 +77,31 @@ mod test {
 mod test_io {
     use std::fs;
     use std::path::Path;
+    use std::sync::Arc;
 
     use camino::Utf8PathBuf;
     use tempfile::tempdir;
 
+    use crate::entities::backend::local::LocalBackend;
+    use crate::entities::backend::Backend;
     use crate::entities::test_common as tc;
+    use crate::entities::uri::Location;
     use super::super::*;
 
     fn utf8(p: &Path) -> Utf8PathBuf {
         Utf8PathBuf::from(p.to_str().unwrap())
+    }
+
+    fn local_loc(p: &Path) -> Location {
+        Location::Local(utf8(p))
+    }
+
+    fn local_arc() -> Arc<dyn Backend> {
+        LocalBackend::arc()
+    }
+
+    fn local_source(p: &Path) -> (Location, Arc<dyn Backend>) {
+        (local_loc(p), local_arc())
     }
 
     fn make_media_info(dir: &Path, name: &str) -> Info {
@@ -107,7 +123,7 @@ mod test_io {
     fn copy_empty_source_returns_ok() {
         let src = tempdir().unwrap();
         let out = tempdir().unwrap();
-        copy(vec![utf8(src.path())], utf8(out.path()), false, false, false).unwrap();
+        copy(vec![local_source(src.path())], local_source(out.path()), false, false, false).unwrap();
         assert_eq!(fs::read_dir(out.path()).unwrap().count(), 0);
     }
 
@@ -116,7 +132,7 @@ mod test_io {
         let src = tempdir().unwrap();
         tc::copy_png_to(src.path(), "photo.png").unwrap();
         let out = tempdir().unwrap();
-        copy(vec![utf8(src.path())], utf8(out.path()), true, false, false).unwrap();
+        copy(vec![local_source(src.path())], local_source(out.path()), true, false, false).unwrap();
         assert_eq!(fs::read_dir(out.path()).unwrap().count(), 0);
     }
 
@@ -127,7 +143,7 @@ mod test_io {
         fs::create_dir_all(&nested).unwrap();
         tc::copy_png_to(&nested, "photo.png").unwrap();
         let out = tempdir().unwrap();
-        copy(vec![utf8(src.path())], utf8(out.path()), false, false, false).unwrap();
+        copy(vec![local_source(src.path())], local_source(out.path()), false, false, false).unwrap();
         let expected = out
             .path()
             .join("2024")
@@ -143,7 +159,7 @@ mod test_io {
         tc::copy_png_to(src.path(), "photo.png").unwrap();
         let out = tempdir().unwrap();
         fs::copy(tc::DATA_DNS_BENCHMARK, out.path().join("already.png")).unwrap();
-        copy(vec![utf8(src.path())], utf8(out.path()), false, false, false).unwrap();
+        copy(vec![local_source(src.path())], local_source(out.path()), false, false, false).unwrap();
         assert_eq!(fs::read_dir(out.path()).unwrap().count(), 1);
     }
 
@@ -153,7 +169,7 @@ mod test_io {
         let png_src = tc::copy_png_to(src.path(), "photo.png").unwrap();
         let out = tempdir().unwrap();
         fs::copy(tc::DATA_DNS_BENCHMARK, out.path().join("already.png")).unwrap();
-        copy(vec![utf8(src.path())], utf8(out.path()), false, true, false).unwrap();
+        copy(vec![local_source(src.path())], local_source(out.path()), false, true, false).unwrap();
         assert!(!png_src.exists(), "source duplicate should be removed");
     }
 
@@ -164,7 +180,7 @@ mod test_io {
         let out_dir = root.path().join("out");
         fs::create_dir_all(&src_dir).unwrap();
         let png_src = tc::copy_png_to(&src_dir, "photo.png").unwrap();
-        copy(vec![utf8(&src_dir)], utf8(&out_dir), false, true, false).unwrap();
+        copy(vec![local_source(&src_dir)], local_source(&out_dir), false, true, false).unwrap();
         assert!(!png_src.exists());
         let expected = out_dir.join("2024").join("01").join("photo.png");
         assert!(expected.exists(), "expected moved file at {expected:?}");
@@ -175,7 +191,7 @@ mod test_io {
         let src = tempdir().unwrap();
         fs::write(src.path().join("plain.bin"), b"abc").unwrap();
         let out = tempdir().unwrap();
-        copy(vec![utf8(src.path())], utf8(out.path()), false, false, false).unwrap();
+        copy(vec![local_source(src.path())], local_source(out.path()), false, false, false).unwrap();
         assert_eq!(fs::read_dir(out.path()).unwrap().count(), 0);
     }
 
@@ -188,9 +204,11 @@ mod test_io {
         let sub = out.path().join("2024").join("01");
         fs::create_dir_all(&sub).unwrap();
         fs::write(sub.join("photo.png"), b"x").unwrap();
-        let (_, target) = generate_unique_name(&info, &out_utf8)
+        let _ = out_utf8; // out_utf8 不再传入 generate_unique_name；保留变量让上下文不变
+        let (_, target) = generate_unique_name(&info, &local_loc(out.path()), &local_arc())
             .expect("unique name should be generated");
-        assert!(target.ends_with("photo_1.png"), "got {target}");
+        let target_str = target.display();
+        assert!(target_str.ends_with("photo_1.png"), "got {target_str}");
     }
 
     #[test]
@@ -199,7 +217,7 @@ mod test_io {
         let info = make_media_info(src.path(), "photo.png");
         let out = tempdir().unwrap();
         fill_collisions(&out.path().join("2024").join("01"));
-        let res = generate_unique_name(&info, &utf8(out.path()));
+        let res = generate_unique_name(&info, &local_loc(out.path()), &local_arc());
         assert!(res.is_none(), "should exhaust after 10 collisions");
     }
 
@@ -210,7 +228,7 @@ mod test_io {
         let out = tempdir().unwrap();
         fill_collisions(&out.path().join("2024").join("01"));
         let mut idx = crate::entities::file_index::Index::new();
-        let err = do_copy(&info, &utf8(out.path()), &mut idx, false, false, false)
+        let err = do_copy(&info, &local_loc(out.path()), &local_arc(), &mut idx, false, false, false)
             .expect_err("must error after collisions");
         assert!(err.to_string().contains("无法为"));
     }
@@ -221,7 +239,7 @@ mod test_io {
         tc::copy_png_to(src.path(), "photo.png").unwrap();
         let out = tempdir().unwrap();
         fill_collisions(&out.path().join("2024").join("01"));
-        copy(vec![utf8(src.path())], utf8(out.path()), false, false, false).unwrap();
+        copy(vec![local_source(src.path())], local_source(out.path()), false, false, false).unwrap();
     }
 
     #[test]
@@ -230,7 +248,7 @@ mod test_io {
         let info = make_media_info(src.path(), "photo.png");
         let out = tempdir().unwrap();
         let mut idx = crate::entities::file_index::Index::new();
-        let did_copy = do_copy(&info, &utf8(out.path()), &mut idx, true, false, false).unwrap();
+        let did_copy = do_copy(&info, &local_loc(out.path()), &local_arc(), &mut idx, true, false, false).unwrap();
         assert!(did_copy);
         assert_eq!(fs::read_dir(out.path()).unwrap().count(), 0);
     }
@@ -247,28 +265,18 @@ mod test_io {
             let src = tempdir().unwrap();
             tc::copy_png_to(src.path(), "photo.png").unwrap();
             let out = tempdir().unwrap();
-            copy(vec![utf8(src.path())], utf8(out.path()), true, false, false).unwrap();
+            copy(vec![local_source(src.path())], local_source(out.path()), true, false, false).unwrap();
         });
     }
 
-    // output 是一个不存在的相对路径 + dry_run（跳过 mkdir），让 full_path canonicalize 失败 → L66。
-    #[test]
-    fn copy_with_nonexistent_relative_output_errors() {
-        let src = tempdir().unwrap();
-        tc::copy_png_to(src.path(), "photo.png").unwrap();
-        let bogus_output = Utf8PathBuf::from("definitely-does-not-exist-zzz-relative-xyz");
-        let err = copy(vec![utf8(src.path())], bogus_output, true, false, false).unwrap_err();
-        let _ = err;
-    }
-
-    // output 是已存在文件（非目录），fs_extra::dir::create_all 失败 → L68。
+    // output 是已存在文件（非目录），backend.mkdir_p 失败 → 覆盖 copy() 内 `?` Err 分支。
     #[test]
     fn copy_with_output_as_file_errors() {
         let src = tempdir().unwrap();
         tc::copy_png_to(src.path(), "photo.png").unwrap();
         let out_file = tempfile::NamedTempFile::new().unwrap();
-        let out_path = Utf8PathBuf::from(out_file.path().to_str().unwrap());
-        let err = copy(vec![utf8(src.path())], out_path, false, false, false).unwrap_err();
+        let out_loc = Location::Local(Utf8PathBuf::from(out_file.path().to_str().unwrap()));
+        let err = copy(vec![local_source(src.path())], (out_loc, local_arc()), false, false, false).unwrap_err();
         let _ = err;
     }
 
@@ -294,8 +302,8 @@ mod test_io {
         idx.insert(indexed_path.to_str().unwrap()).unwrap();
         fs::remove_file(&indexed_path).unwrap();
 
-        let out_dir = utf8(dir.path());
-        let err = do_copy(&info_src, &out_dir, &mut idx, false, false, false).unwrap_err();
+        let out_dir = local_loc(dir.path());
+        let err = do_copy(&info_src, &out_dir, &local_arc(), &mut idx, false, false, false).unwrap_err();
         let _ = err;
     }
 
@@ -320,8 +328,8 @@ mod test_io {
         perms.set_mode(0o555);
         fs::set_permissions(&src_parent, perms.clone()).unwrap();
 
-        let out_dir = utf8(src_dir.path());
-        let res = do_copy(&info, &out_dir, &mut idx, false, true, false);
+        let out_dir = local_loc(src_dir.path());
+        let res = do_copy(&info, &out_dir, &local_arc(), &mut idx, false, true, false);
 
         // 恢复权限便于 tempdir 清理
         perms.set_mode(original_mode);
@@ -339,7 +347,7 @@ mod test_io {
         // 创建 2024 作为**文件**，让后续 create_all("2024/01/...") 失败
         fs::write(out.path().join("2024"), b"i am a file").unwrap();
         let mut idx = crate::entities::file_index::Index::new();
-        let err = do_copy(&info, &utf8(out.path()), &mut idx, false, false, false).unwrap_err();
+        let err = do_copy(&info, &local_loc(out.path()), &local_arc(), &mut idx, false, false, false).unwrap_err();
         let _ = err;
     }
 
@@ -359,12 +367,42 @@ mod test_io {
 
         let out = tempdir().unwrap();
         let mut idx = crate::entities::file_index::Index::new();
-        let res = do_copy(&info, &utf8(out.path()), &mut idx, false, false, false);
+        let res = do_copy(&info, &local_loc(out.path()), &local_arc(), &mut idx, false, false, false);
 
         perms.set_mode(original_mode);
         fs::set_permissions(info.full_path.as_str(), perms).unwrap();
 
         assert!(res.is_err(), "expected copy failure but got {res:?}");
+    }
+
+    // copy 成功 + remove=true，但 src 父目录 read-only → 之后的 remove_file fail → 覆盖 do_copy
+    // 内 "stream_copy 成功 + remove 阶段失败" 的 `?` Err 分支。
+    #[test]
+    #[cfg(unix)]
+    fn do_copy_remove_after_stream_copy_propagates_error() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = tempdir().unwrap();
+        let src_parent = root.path().join("locked_src");
+        fs::create_dir(&src_parent).unwrap();
+        let info = make_media_info(&src_parent, "photo.png");
+
+        let out = root.path().join("out");
+        fs::create_dir(&out).unwrap();
+        let mut idx = crate::entities::file_index::Index::new();
+
+        // 把 src 父目录设为 read-only：src 本身仍可读（copy 阶段成功），
+        // 但之后的 fs::remove_file 会因父目录写权限不足失败。
+        let mut perms = fs::metadata(&src_parent).unwrap().permissions();
+        let original_mode = perms.mode();
+        perms.set_mode(0o555);
+        fs::set_permissions(&src_parent, perms.clone()).unwrap();
+
+        let res = do_copy(&info, &local_loc(&out), &local_arc(), &mut idx, false, true, false);
+
+        perms.set_mode(original_mode);
+        fs::set_permissions(&src_parent, perms).unwrap();
+
+        assert!(res.is_err(), "expected remove failure after successful stream_copy");
     }
 
     // 同上，但 remove=true 走 move_file 路径 → L162。
@@ -382,7 +420,7 @@ mod test_io {
 
         let out = tempdir().unwrap();
         let mut idx = crate::entities::file_index::Index::new();
-        let res = do_copy(&info, &utf8(out.path()), &mut idx, false, true, false);
+        let res = do_copy(&info, &local_loc(out.path()), &local_arc(), &mut idx, false, true, false);
 
         perms.set_mode(original_mode);
         fs::set_permissions(info.full_path.as_str(), perms).unwrap();
@@ -414,7 +452,7 @@ mod test_io {
         let src = tempdir().unwrap();
         fs::write(src.path().join("readme.txt"), b"hello world").unwrap();
         let out = tempdir().unwrap();
-        copy(vec![utf8(src.path())], utf8(out.path()), false, false, true).unwrap();
+        copy(vec![local_source(src.path())], local_source(out.path()), false, false, true).unwrap();
         let copied = walk_files(out.path());
         assert!(!copied.is_empty(), "include_non_media must copy non-media files");
     }
@@ -428,7 +466,7 @@ mod test_io {
         let info = Info::from(src.path().join("doc.txt").to_str().unwrap()).unwrap();
         assert!(!info.is_media());
         let mut idx = crate::entities::file_index::Index::new();
-        let did = do_copy(&info, &utf8(out.path()), &mut idx, false, false, true).unwrap();
+        let did = do_copy(&info, &local_loc(out.path()), &local_arc(), &mut idx, false, false, true).unwrap();
         assert!(did, "non-media must be copied when include_non_media=true");
     }
 
@@ -440,7 +478,7 @@ mod test_io {
         let out = tempdir().unwrap();
         let info = Info::from(src.path().join("doc.txt").to_str().unwrap()).unwrap();
         let mut idx = crate::entities::file_index::Index::new();
-        let did = do_copy(&info, &utf8(out.path()), &mut idx, false, false, false).unwrap();
+        let did = do_copy(&info, &local_loc(out.path()), &local_arc(), &mut idx, false, false, false).unwrap();
         assert!(!did);
         assert_eq!(walk_files(out.path()).len(), 0);
     }

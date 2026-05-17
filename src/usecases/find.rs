@@ -1,42 +1,50 @@
 use std::collections::BTreeMap;
 use std::io::Write;
+use std::sync::Arc;
 
 use camino::Utf8PathBuf;
 use tracing::error;
 use tracing::info;
 
+use crate::entities::backend::EntryKind;
 use crate::entities::common;
 use crate::entities::file_index;
 use crate::entities::file_info;
+use crate::entities::uri::Location;
+
+use super::copy::Source;
 
 const FEATURE_FIND: &str = "find";
 
 // info!/error! 宏在不同 instantiation 间会产生重复的内部 region；用例入口本身的逻辑
 // 已经被各种集成测试覆盖。整体标 coverage(off) 让严格覆盖率统计稳定。
 #[cfg_attr(coverage_nightly, coverage(off))]
-pub fn find_duplicates(
+pub(crate) fn find_duplicates(
     secure: bool,
-    sources: Vec<Utf8PathBuf>,
-    output: Option<Utf8PathBuf>,
+    sources: Vec<Source>,
+    output: Option<Source>,
 ) -> common::Result<()> {
     let mut index = file_index::Index::new();
 
-    if let Some(o) = output.as_ref() {
-        let p = std::path::Path::new(o.as_str());
-        if !p.is_dir() {
+    if let Some((loc, backend)) = output.as_ref() {
+        let is_dir = backend
+            .metadata(loc)
+            .map(|m| m.kind == EntryKind::Dir)
+            .unwrap_or(false);
+        if !is_dir {
             error!(
                 feature = FEATURE_FIND,
                 operation = "validate_output",
                 result = "not_a_directory",
-                output = %o,
+                output = %loc.display(),
                 "output path is not a directory"
             );
             return Ok(());
         }
     }
 
-    for path in sources {
-        index.visit_dir(path.as_str());
+    for (loc, backend) in sources {
+        index.visit_location(&loc, Arc::clone(&backend));
     }
 
     let scan_stats = index.stats();
@@ -88,15 +96,17 @@ pub fn find_duplicates(
     Ok(())
 }
 
-// 上方 L23 已断言 `p.is_dir()`，到这里 full_path 不会失败；
+// 上方 is_dir 断言已经过滤掉非目录；到这里 output 必然是 (Location, Backend) 形态。
+// Local 走 full_path canonicalize（兼容旧 prefix 字符串语义）；远端走 Location::display。
 // expect 的 panic 边永远不被触发，被 LLVM 当作 region miss，故抽出后标 coverage(off)。
 #[cfg_attr(coverage_nightly, coverage(off))]
-fn compute_output_prefix(output: Option<&Utf8PathBuf>) -> Option<String> {
-    output.map(|o| {
-        file_info::full_path(o.as_str())
+fn compute_output_prefix(output: Option<&Source>) -> Option<String> {
+    output.map(|(loc, _)| match loc {
+        Location::Local(p) => file_info::full_path(p.as_str())
             .expect("output path validated as directory above")
             .as_str()
-            .to_string()
+            .to_string(),
+        other => other.display(),
     })
 }
 
@@ -145,15 +155,33 @@ pub(crate) fn rm() -> &'static str {
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
+    use std::sync::Arc;
 
     use camino::Utf8PathBuf;
     use tempfile::tempdir;
 
+    use crate::entities::backend::local::LocalBackend;
+    use crate::entities::backend::Backend;
     use crate::entities::test_common as tc;
+    use crate::entities::uri::Location;
     use super::comment;
     use super::find_duplicates;
     use super::render_script;
     use super::rm;
+
+    fn local_data_dir() -> (Location, Arc<dyn Backend>) {
+        (
+            Location::Local(Utf8PathBuf::from(tc::DATA_DIR)),
+            LocalBackend::arc(),
+        )
+    }
+
+    fn local_dir(p: &std::path::Path) -> (Location, Arc<dyn Backend>) {
+        (
+            Location::Local(Utf8PathBuf::from(p.to_str().unwrap())),
+            LocalBackend::arc(),
+        )
+    }
 
     fn run_render(
         same: &BTreeMap<u64, Vec<Utf8PathBuf>>,
@@ -266,23 +294,23 @@ mod tests {
     #[test]
     fn find_duplicates_invalid_output_returns_ok() {
         let tmp = tempfile::NamedTempFile::new().unwrap();
+        let out_loc = Location::Local(Utf8PathBuf::from(tmp.path().to_str().unwrap()));
         find_duplicates(
             true,
-            vec![Utf8PathBuf::from(tc::DATA_DIR)],
-            Some(Utf8PathBuf::from(tmp.path().to_str().unwrap())),
+            vec![local_data_dir()],
+            Some((out_loc, LocalBackend::arc())),
         )
         .unwrap();
     }
 
     #[test]
     fn find_duplicates_no_output_branch_runs() {
-        find_duplicates(true, vec![Utf8PathBuf::from(tc::DATA_DIR)], None).unwrap();
+        find_duplicates(true, vec![local_data_dir()], None).unwrap();
     }
 
     #[test]
     fn find_duplicates_with_output_branch_runs() {
         let dir = tempdir().unwrap();
-        let out = Utf8PathBuf::from(dir.path().to_str().unwrap());
-        find_duplicates(false, vec![Utf8PathBuf::from(tc::DATA_DIR)], Some(out)).unwrap();
+        find_duplicates(false, vec![local_data_dir()], Some(local_dir(dir.path()))).unwrap();
     }
 }

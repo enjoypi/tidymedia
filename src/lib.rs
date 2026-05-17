@@ -4,8 +4,8 @@
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 
 use std::ffi::OsString;
+use std::sync::Arc;
 
-use camino::Utf8PathBuf;
 use clap::Parser;
 use clap::Subcommand;
 use tracing::debug;
@@ -109,18 +109,18 @@ pub fn tidy(command: Commands) -> Result<()> {
             sources,
             output,
         } => {
-            let src_paths = require_local_paths(sources)?;
-            let out_path = require_local_path(output)?;
-            usecases::copy(src_paths, out_path, dry_run, false, include_non_media)
+            let src_pairs = require_local_sources(sources)?;
+            let out_pair = require_local_source(output)?;
+            usecases::copy(src_pairs, out_pair, dry_run, false, include_non_media)
         }
         Commands::Find {
             secure,
             sources,
             output,
         } => {
-            let src_paths = require_local_paths(sources)?;
-            let out_path = output.map(require_local_path).transpose()?;
-            usecases::find_duplicates(secure, src_paths, out_path)
+            let src_pairs = require_local_sources(sources)?;
+            let out_pair = output.map(require_local_source).transpose()?;
+            usecases::find_duplicates(secure, src_pairs, out_pair)
         }
         Commands::Move {
             dry_run,
@@ -128,18 +128,21 @@ pub fn tidy(command: Commands) -> Result<()> {
             sources,
             output,
         } => {
-            let src_paths = require_local_paths(sources)?;
-            let out_path = require_local_path(output)?;
-            usecases::copy(src_paths, out_path, dry_run, true, include_non_media)
+            let src_pairs = require_local_sources(sources)?;
+            let out_pair = require_local_source(output)?;
+            usecases::copy(src_pairs, out_pair, dry_run, true, include_non_media)
         }
     }
 }
 
-/// 把 [`Location`] 收窄回 Local 路径；非 Local scheme 报清晰 "not enabled"。
-/// 当前 usecases 仍接 [`Utf8PathBuf`]，待真实 SMB/MTP client 接入时再下推到 Location。
-fn require_local_path(loc: Location) -> Result<Utf8PathBuf> {
+/// 把 [`Location`] 收窄为 Local [`usecases::Source`]；非 Local scheme 报清晰 "not enabled"。
+/// Task 3 将抽 BackendFactory 替换本函数，让 SMB / MTP 真实 / fake backend 都能装配。
+fn require_local_source(loc: Location) -> Result<usecases::Source> {
     match loc {
-        Location::Local(p) => Ok(p),
+        Location::Local(p) => Ok((
+            Location::Local(p),
+            LocalBackend::arc() as Arc<dyn Backend>,
+        )),
         other => Err(Error::Io(std::io::Error::new(
             std::io::ErrorKind::Unsupported,
             format!(
@@ -151,8 +154,8 @@ fn require_local_path(loc: Location) -> Result<Utf8PathBuf> {
     }
 }
 
-fn require_local_paths(locs: Vec<Location>) -> Result<Vec<Utf8PathBuf>> {
-    locs.into_iter().map(require_local_path).collect()
+fn require_local_sources(locs: Vec<Location>) -> Result<Vec<usecases::Source>> {
+    locs.into_iter().map(require_local_source).collect()
 }
 
 pub fn run_cli<I, T>(args: I) -> Result<()>

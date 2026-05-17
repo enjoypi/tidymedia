@@ -10,7 +10,7 @@
 
 use std::str::FromStr;
 
-use camino::Utf8PathBuf;
+use camino::{Utf8Path, Utf8PathBuf};
 use percent_encoding::{percent_decode_str, utf8_percent_encode, AsciiSet, CONTROLS};
 use thiserror::Error;
 
@@ -112,6 +112,44 @@ impl Location {
             Self::Local(_) => SCHEME_LOCAL,
             Self::Smb { .. } => SCHEME_SMB,
             Self::Mtp { .. } => SCHEME_MTP,
+        }
+    }
+
+    /// 返回内部 path 字段（所有 variant 都持 path：Local 是绝对路径，
+    /// Smb 是 share 内相对路径，Mtp 是 storage 内相对路径）。
+    pub fn path(&self) -> &Utf8Path {
+        match self {
+            Self::Local(p) => p.as_path(),
+            Self::Smb { path, .. } => path.as_path(),
+            Self::Mtp { path, .. } => path.as_path(),
+        }
+    }
+
+    /// 保留 scheme + 连接参数（user/host/share / device/storage），覆写 path 字段。
+    /// 用于在远端 backend 下 join 子目录（如 `output.with_path(year/month/file)`）。
+    pub fn with_path(&self, new_path: Utf8PathBuf) -> Self {
+        match self {
+            Self::Local(_) => Self::Local(new_path),
+            Self::Smb {
+                user,
+                host,
+                port,
+                share,
+                ..
+            } => Self::Smb {
+                user: user.clone(),
+                host: host.clone(),
+                port: *port,
+                share: share.clone(),
+                path: new_path,
+            },
+            Self::Mtp {
+                device, storage, ..
+            } => Self::Mtp {
+                device: device.clone(),
+                storage: storage.clone(),
+                path: new_path,
+            },
         }
     }
 
