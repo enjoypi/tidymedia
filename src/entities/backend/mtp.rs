@@ -265,3 +265,7 @@ fn parent_target(t: &MtpTarget) -> Option<MtpTarget> {
 #[cfg(test)]
 #[path = "mtp_tests.rs"]
 mod tests;
+
+#[cfg(feature = "mtp-backend")]
+#[path = "mtp_real.rs"]
+pub mod real;
