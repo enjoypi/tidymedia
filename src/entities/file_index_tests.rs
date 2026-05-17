@@ -45,7 +45,7 @@
     fn parse_exif() {
         let mut index = Index::new();
         index.visit_dir(common::DATA_DIR);
-        index.parse_exif();
+        index.parse_exif(chrono::FixedOffset::east_opt(0).unwrap());
 
         let png_path = file_info::full_path(common::DATA_DNS_BENCHMARK).unwrap();
         let info = index.files.get(png_path.as_path()).unwrap();
@@ -154,7 +154,7 @@
     #[test]
     fn parse_exif_empty_index_ok() {
         let mut index = Index::new();
-        index.parse_exif();
+        index.parse_exif(chrono::FixedOffset::east_opt(0).unwrap());
         assert_eq!(index.files().len(), 0);
     }
 
@@ -169,7 +169,7 @@
         index.visit_dir(dir.path().to_str().unwrap());
         assert_eq!(index.files().len(), 1);
         fs::remove_file(&path).unwrap();
-        index.parse_exif();
+        index.parse_exif(chrono::FixedOffset::east_opt(0).unwrap());
         assert_eq!(index.files().len(), 1);
     }
 

@@ -161,7 +161,8 @@ impl Info {
         let exif = self.exif.as_ref().unwrap();
 
         let t = exif.media_create_date();
-        if t > valid_threshold_secs {
+        // ">=" 与"小于此值视为不可信"的注释语义一致：等于阈值的边界值采纳。
+        if t >= valid_threshold_secs {
             SystemTime::UNIX_EPOCH + Duration::from_secs(t)
         } else {
             real_create_time

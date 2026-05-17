@@ -7,5 +7,5 @@ copy:
   # 目标文件命中重名时尝试 file_stem_<i>.<ext> 的最大次数
   unique_name_max_attempts: ${TIDYMEDIA_UNIQUE_NAME_MAX_ATTEMPTS:-10}
 exif:
-  # EXIF 时间戳小于此 UNIX 秒数视为不可信（默认 2001-01-01T00:00:00Z）
+  # EXIF 时间戳小于此 UNIX 秒数视为不可信（默认 2000-01-01T00:00:00Z）
   valid_date_time_secs: ${TIDYMEDIA_VALID_DATE_TIME_SECS:-946684800}

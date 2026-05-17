@@ -58,6 +58,19 @@ mod test {
         let off = offset_from_hours(127);
         assert_eq!(off, UtcOffset::UTC);
     }
+
+    #[test]
+    fn chrono_offset_from_hours_valid() {
+        let off = chrono_offset_from_hours(8);
+        assert_eq!(off.local_minus_utc(), 8 * 3600);
+    }
+
+    #[test]
+    fn chrono_offset_from_hours_out_of_range_falls_back_to_utc() {
+        // 25*3600 秒超过 chrono FixedOffset 的 ±24h 边界，应回退 UTC
+        let off = chrono_offset_from_hours(25);
+        assert_eq!(off.local_minus_utc(), 0);
+    }
 }
 
 #[cfg(test)]

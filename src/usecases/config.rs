@@ -34,7 +34,7 @@ pub struct ExifConfig {
 
 impl Default for ExifConfig {
     fn default() -> Self {
-        // 2001-01-01T00:00:00Z，对应原 VALID_DATE_TIME
+        // 2000-01-01T00:00:00Z，对应原 VALID_DATE_TIME
         Self { valid_date_time_secs: 946_684_800 }
     }
 }

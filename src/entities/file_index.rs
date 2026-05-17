@@ -6,6 +6,7 @@ use std::hash::Hash;
 use std::io;
 
 use camino::Utf8PathBuf;
+use chrono::FixedOffset;
 use rayon::prelude::*;
 use tracing::warn;
 
@@ -283,9 +284,10 @@ impl Index {
 
     /// 并行对每个 indexed 文件用 nom-exif + infer 读取元数据；解析失败的文件被
     /// 静默跳过（"尽力而为"语义）。从不返回错误。
-    pub fn parse_exif(&mut self) {
+    /// `local_offset` 用于解释 EXIF 内无时区的 NaiveDateTime（相机本地时区）。
+    pub fn parse_exif(&mut self, local_offset: FixedOffset) {
         self.files.par_iter_mut().for_each(|(path, info)| {
-            if let Ok(e) = exif::Exif::from_path(path) {
+            if let Ok(e) = exif::Exif::from_path_with_offset(path, local_offset) {
                 info.set_exif(e);
             }
         });

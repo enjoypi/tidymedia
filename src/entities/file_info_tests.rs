@@ -221,7 +221,7 @@
         assert_eq!(err.kind(), std::io::ErrorKind::NotFound);
     }
 
-    // 测试用阈值：2001-01-01T00:00:00Z（与配置默认值一致）。
+    // 测试用阈值：2000-01-01T00:00:00Z（与配置默认值一致）。
     const TEST_VALID_THRESHOLD_SECS: u64 = 946_684_800;
 
     #[test]

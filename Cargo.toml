@@ -7,6 +7,7 @@ edition = "2021"
 
 [dependencies]
 camino = { version = "*", features = ["serde1"] }
+chrono = "*"
 clap = { version = "*", features = ["derive"] }
 fs_extra = "*"
 generic-array = "0"

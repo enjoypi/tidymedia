@@ -1,6 +1,8 @@
 use camino::Utf8Component;
 use camino::Utf8Path;
 use camino::Utf8PathBuf;
+use chrono::FixedOffset;
+use chrono::Offset;
 use time::OffsetDateTime;
 use time::UtcOffset;
 use tracing::debug;
@@ -31,6 +33,17 @@ fn offset_from_hours(hours: i8) -> UtcOffset {
     UtcOffset::from_whole_seconds(i32::from(hours) * 3600).unwrap_or(UtcOffset::UTC)
 }
 
+// chrono::FixedOffset 用于把 EXIF 内无时区的 NaiveDateTime 当相机本地时间解释。
+// 与 time::UtcOffset 共用同一个 timezone_offset_hours 配置。
+fn configured_chrono_offset() -> FixedOffset {
+    chrono_offset_from_hours(config().copy.timezone_offset_hours)
+}
+
+// 越界（chrono::FixedOffset 合法 ±86_400 秒，即 ±24h）回退到 UTC。
+fn chrono_offset_from_hours(hours: i8) -> FixedOffset {
+    FixedOffset::east_opt(i32::from(hours) * 3600).unwrap_or_else(|| chrono::Utc.fix())
+}
+
 pub fn copy(
     input_dirs: Vec<Utf8PathBuf>,
     output: Utf8PathBuf,
@@ -42,7 +55,7 @@ pub fn copy(
     input_dirs.iter().for_each(|s| {
         source.visit_dir(s.as_str());
     });
-    source.parse_exif();
+    source.parse_exif(configured_chrono_offset());
 
     let total_files = source.files().len();
     let scan_stats = source.stats();
