@@ -13,6 +13,7 @@ use tracing_subscriber::fmt;
 use tracing_subscriber::EnvFilter;
 
 pub use entities::backend::local::LocalBackend;
+pub use entities::backend::mtp::{MtpBackend, MtpClient, MtpMatch, MtpTarget};
 pub use entities::backend::smb::{SmbBackend, SmbClient, SmbTarget};
 pub use entities::backend::{Backend, Entry, EntryKind, MediaReader, MediaWriter, Metadata};
 pub use entities::common::Error;
