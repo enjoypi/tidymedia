@@ -25,6 +25,7 @@
   - **trace! 宏未启用导致 region miss** → 测试用 `tracing::subscriber::with_default(...)` 注入 trace-level subscriber 让闭包被求值
   - **EXIF/track 的 None 分支** → 用"无日期标签的 JPEG / 无 CreateDate 的 MKV"两个 fixture 让 `parsed.get(...)` 返回 None
   - **parse_exif 的 Err 分支** → visit_dir 之后立刻 `fs::remove_file` 删源，`Exif::from_path` metadata 失败
+  - **`open_read` 成功但 stream Err** → `FakeBackend::inject_reader_error(loc, kind)` 注入 read 立即 Err 的 reader，专门触发 `fast_hash_stream` / `sniff_mime` 等调用点的 `?` Err（替代原 `fast_hash`/`full_hash`/`secure_hash` 的 path 版 `coverage(off)`，stream 版默认 100% 覆盖）
 - **expect/unwrap 的 panic 边永远算 region miss**：不可通过测试 cover，要么抽 helper 单独标 `coverage(off)`，要么直接接受
 - 消除生产代码 `?` Err 不可触发分支的优先级：①改 `unwrap_or` 兜底 → ②返 `Option` 替代 `Result`（小重构）→ ③才考虑 `#[cfg_attr(coverage_nightly, coverage(off))]`。前两者让 stable 默认就 100%
 - `std::env::set_var` 在 Rust 1.75+ 必须包 `unsafe { }`（与 edition 无关）；nextest 进程隔离让其可安全用于单测
@@ -44,8 +45,27 @@
 - `bin/tidymedia.rs` **只**调 `tidymedia::run_cli(env::args_os())`，零业务逻辑，所有可测代码上移到 `lib.rs`
 - `lib.rs` 持有 `Cli`/`Commands` 与 `tidy()` 调度；clap 解析、日志初始化、命令分发都在这层
 - `usecases/` 仅依赖 `entities/`，对外通过 `mod.rs` 用 `pub(super)` 暴露 `copy` / `find_duplicates`；不直接面向 CLI 参数结构
-- `entities/` 注释明示：`file_info` / `file_index` / `exif` 混入了文件 IO 与 `nom-exif`/`infer` 库调用，**按 YAGNI 暂不抽 Gateway**（CLI 单体工具，无替换框架/DB 场景）
+- `entities/backend/` 是 Gateway 抽象：`trait Backend` + `Local / Smb / Mtp` 三实现 + 测试 `FakeBackend`；`file_info` / `file_index` / `exif` / `sidecar` 都 backend-aware（持 `Arc<dyn Backend>`，旧 `Info::from(&str)` / `Index::new()` / `Exif::from_path_with_offset` / `sidecar::discover` 均退化为 LocalBackend shim）
 - 目录名是 `usecases`（无下划线），跨层导入用 `crate::usecases::...` / `crate::entities::...`
+
+## URI 与 Backend
+- CLI `sources` / `output` 接 `Location`（实现 `FromStr` 让 clap 自动 value_parser）：
+  - 无 `://` 或 `local://` ⇒ `Location::Local`
+  - `smb://[user@]host[:port]/share/path` ⇒ `Location::Smb`
+  - `mtp://device/storage/path` ⇒ `Location::Mtp`
+  - 字段内空格 / 中文 / 路径分隔符走 `percent-encoding`，**不引 `url` crate**（`entities/uri.rs` 自实现解析）
+- SMB 凭据：`SMB_USER` 经配置 `backend.smb.default_user` 兜底；`SMB_PASSWORD` 由 `SmbTarget::password` 在 `build_target` 处读 env；Kerberos 走 `KRB5CCNAME`。**密码永远不入 YAML**（CLAUDE.md P0.13）
+- 当前 `SmbBackend::new()` / `MtpBackend::new()` 返 `io::ErrorKind::Unsupported` "not enabled"；测试入口是 `SmbBackend::with_client(Arc<dyn SmbClient>)` / `MtpBackend::with_client(...)`；真实 `RealSmbClient` / `RealMtpClient` 适配器留作未来 PR
+- `tidy()` 内 `require_local_path` adapter：Local 透传，Smb/Mtp 报清晰 "<scheme> backend not enabled in this build; rebuild with --features <scheme>-backend"
+- Registry / `for_scheme` 路由暂未实装：现行仅 Local 路径走 use case；Smb/Mtp 在 Cli adapter 处被拒收
+
+## SMB/MTP 测试套路
+- **手写 FakeSmbClient / FakeMtpClient**：state 用 `Arc<Mutex<HashMap<...>>>`；`inject(SmbOp::Read, path, ErrorKind::TimedOut)` 注入逐 op + 逐 path 的错误，无须 `mockall`
+- **EACCES 映射**：`map_smb_error` 对 `io::Error::other` + 文案含 `"EACCES"` 转 `PermissionDenied`；FakeSmbClient 用同一文案触发
+- **env 凭据传递**：`build_target` 读 `SMB_PASSWORD` / `KRB5CCNAME`；测试用 `unsafe { std::env::set_var(...) }` + nextest 进程隔离让其安全（与 `OnceLock` / `expand_env` 测试同套路，见 P0.4 与 CLAUDE.md「工具链注意」）
+- **真实 client 适配器**：未来 `RealSmbClient::{stat, list, read, write, unlink, mkdir}` / `RealMtpClient::{...}` 各函数标 `#[cfg_attr(coverage_nightly, coverage(off))]`；调度逻辑（`build_target` / `parent_target` / `map_smb_error` / `SmbBufferedWriter`）已 100% 覆盖
+- **Backend trait 方法的 rejection 测试**：每个方法测三类输入——OK / client Err 注入 / 非自家 scheme 返回 `InvalidInput`
+- **FakeBackend `inject_reader_error`**：让 `open_read` 成功但返回的 reader 在 `read` 时立即 Err，专门覆盖调用方在 stream hash / `sniff_mime` 等位置的 `?` Err 分支
 
 ## 配置与日志
 - 运行时配置：`config.yaml`（项目根）+ `src/usecases/config.rs`，`config()` 返回 `&'static Config`（`OnceLock`）
@@ -53,11 +73,12 @@
 - `FAST_READ_SIZE` 因 `[0; FAST_READ_SIZE]` 栈数组要求编译期常量，**不外置**（R1 合理例外）
 - 结构化日志字段约定：`feature` / `operation` / `result`（CLI 工具无 request_id/user_id）
 - `UtcOffset::from_whole_seconds` 范围 ±25:59:59，越界返回 `None`，用 `.unwrap_or(UtcOffset::UTC)` 兜底
-- **R1 外置范围**：仅 `copy.timezone_offset_hours` / `copy.unique_name_max_attempts` / `exif.valid_date_time_secs` 三项需运维可调。其余 const 属 R1 边界例外**不外置**：
+- **R1 外置范围**：`copy.timezone_offset_hours` / `copy.unique_name_max_attempts` / `exif.valid_date_time_secs` + `backend.smb.{default_user,timeout_secs}` / `backend.mtp.{device_match,storage_match}` 需运维可调。其余 const 属 R1 边界例外**不外置**：
   - **spec §X 算法常量**：`EPOCH_1904` / `SOFT_THRESHOLD_1995` / `FUTURE_TOLERANCE_SECS` / `MTIME_VS_P0_HINT_SECS`（filter/resolve）
   - **协议字面量**：`PHONE_PREFIX="IMG_"` / `CAMERA_PREFIX="DSC_"` / `SCREENSHOT_PREFIX="Screenshot_"` / `XMP_KEY` / `META_TYPE_IMAGE` / `META_TYPE_VIDEO`
   - **日志维度名**：`FEATURE_CLI` / `FEATURE_COPY` / `FEATURE_FIND` / `FEATURE_INDEX`
   - **lookup 表**：`MONTH: [&str; 13]`（copy.rs 月份零填充表）
+  - **流式哈希**：`FAST_READ_SIZE`（栈数组要求编译期常量）/ `STREAM_CHUNK = 1 MiB`（远端 backend syscall 频率 vs 网络往返平衡）/ `MIME_SNIFF_BYTES = 256`（`infer::get` 仅看前 16-32 字节）
 - `src/usecases/copy.rs` 的 `println!("\"{}\"\t\"{}\"", src, dst)` 是 CLI 脚本可读输出（dry-run + 完成回执），**不是** R3 日志路径，不要改成 tracing
 
 ## 工具链注意

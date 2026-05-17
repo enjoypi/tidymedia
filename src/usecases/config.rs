@@ -39,11 +39,54 @@ impl Default for ExifConfig {
     }
 }
 
+#[derive(Clone, Debug, Deserialize)]
+#[serde(default)]
+pub struct SmbBackendConfig {
+    /// URI 内未写 `user@` 时兜底；密码总是经环境变量 `SMB_PASSWORD` 注入
+    pub default_user: String,
+    /// 单次 SMB 操作超时秒数；真实 client 接入后生效
+    pub timeout_secs: u64,
+}
+
+impl Default for SmbBackendConfig {
+    fn default() -> Self {
+        Self {
+            default_user: String::new(),
+            timeout_secs: 30,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(default)]
+pub struct MtpBackendConfig {
+    /// `exact` 或 `fuzzy`；fuzzy 由 client 自决（通常走 contains）
+    pub device_match: String,
+    pub storage_match: String,
+}
+
+impl Default for MtpBackendConfig {
+    fn default() -> Self {
+        Self {
+            device_match: "fuzzy".into(),
+            storage_match: "fuzzy".into(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(default)]
+pub struct BackendConfig {
+    pub smb: SmbBackendConfig,
+    pub mtp: MtpBackendConfig,
+}
+
 #[derive(Clone, Debug, Default, Deserialize)]
 #[serde(default)]
 pub struct Config {
     pub copy: CopyConfig,
     pub exif: ExifConfig,
+    pub backend: BackendConfig,
 }
 
 static CONFIG: OnceLock<Config> = OnceLock::new();
@@ -190,6 +233,28 @@ mod tests {
         assert_eq!(c.copy.timezone_offset_hours, 8);
         assert_eq!(c.copy.unique_name_max_attempts, 10);
         assert_eq!(c.exif.valid_date_time_secs, 946_684_800);
+        assert_eq!(c.backend.smb.default_user, "");
+        assert_eq!(c.backend.smb.timeout_secs, 30);
+        assert_eq!(c.backend.mtp.device_match, "fuzzy");
+        assert_eq!(c.backend.mtp.storage_match, "fuzzy");
+    }
+
+    #[test]
+    fn backend_config_yaml_overrides_defaults() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("backend.yaml");
+        std::fs::write(
+            &path,
+            "backend:\n  smb:\n    default_user: alice\n    timeout_secs: 60\n  mtp:\n    device_match: exact\n    storage_match: exact\n",
+        )
+        .unwrap();
+        std::env::set_var("TIDYMEDIA_CONFIG", path.to_str().unwrap());
+        let cfg = load();
+        assert_eq!(cfg.backend.smb.default_user, "alice");
+        assert_eq!(cfg.backend.smb.timeout_secs, 60);
+        assert_eq!(cfg.backend.mtp.device_match, "exact");
+        assert_eq!(cfg.backend.mtp.storage_match, "exact");
+        std::env::remove_var("TIDYMEDIA_CONFIG");
     }
 
     #[test]

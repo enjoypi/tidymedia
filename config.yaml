@@ -9,3 +9,15 @@ copy:
 exif:
   # EXIF 时间戳小于此 UNIX 秒数视为不可信（默认 2000-01-01T00:00:00Z）
   valid_date_time_secs: ${TIDYMEDIA_VALID_DATE_TIME_SECS:-946684800}
+# Backend Gateway 全局开关：仅放非凭据可调项；
+# SMB 密码经 SMB_PASSWORD env、Kerberos 走 KRB5CCNAME，均不入 yaml
+backend:
+  smb:
+    # URI 未写 `user@` 时兜底用户名；真实 client 接入后由 SmbBackend 读取
+    default_user: ${SMB_USER:-}
+    # 单次 SMB 操作超时秒数；真实 client 接入后生效
+    timeout_secs: ${TIDYMEDIA_SMB_TIMEOUT_SECS:-30}
+  mtp:
+    # 设备 / 存储匹配策略：`exact` 或 `fuzzy`，fuzzy 由 client 自决（通常走 contains）
+    device_match: ${TIDYMEDIA_MTP_DEVICE_MATCH:-fuzzy}
+    storage_match: ${TIDYMEDIA_MTP_STORAGE_MATCH:-fuzzy}
