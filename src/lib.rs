@@ -101,7 +101,44 @@ pub enum Commands {
     },
 }
 
+/// Backend 装配抽象：按 [`Location`] 构造对应的 [`Backend`] 句柄。
+///
+/// 生产路径走 [`DefaultBackendFactory`]：Local 直接给 [`LocalBackend`]，SMB / MTP
+/// 在未启用对应 feature 时报 `Unsupported`。测试用 fake 实现注入 [`FakeBackend`]
+/// 覆盖跨 scheme 调度（见 `tests/lib_tidy.rs`）。
+pub trait BackendFactory: Send + Sync {
+    fn for_location(&self, loc: &Location) -> Result<Arc<dyn Backend>>;
+}
+
+/// 生产 [`BackendFactory`]：根据 Location.scheme 选 backend；当前仅 Local 真实可用，
+/// SMB / MTP 等真实适配器分别由 `smb-backend` / `mtp-backend` cargo feature 启用
+/// （Task 4 / Task 5 接入），未启用时返 `Unsupported`。
+#[derive(Debug, Default)]
+pub struct DefaultBackendFactory;
+
+impl BackendFactory for DefaultBackendFactory {
+    fn for_location(&self, loc: &Location) -> Result<Arc<dyn Backend>> {
+        match loc {
+            Location::Local(_) => Ok(LocalBackend::arc()),
+            Location::Smb { .. } | Location::Mtp { .. } => Err(Error::Io(std::io::Error::new(
+                std::io::ErrorKind::Unsupported,
+                format!(
+                    "{} backend not enabled in this build; rebuild with --features {}-backend",
+                    loc.scheme(),
+                    loc.scheme()
+                ),
+            ))),
+        }
+    }
+}
+
+/// 用默认 backend factory 跑命令；旧入口，等价于 `tidy_with(&DefaultBackendFactory, ...)`。
 pub fn tidy(command: Commands) -> Result<()> {
+    tidy_with(&DefaultBackendFactory, command)
+}
+
+/// 注入版入口：调用方提供 [`BackendFactory`]，常用于集成测试用 fake 装配混合 scheme。
+pub fn tidy_with(factory: &dyn BackendFactory, command: Commands) -> Result<()> {
     match command {
         Commands::Copy {
             dry_run,
@@ -109,8 +146,8 @@ pub fn tidy(command: Commands) -> Result<()> {
             sources,
             output,
         } => {
-            let src_pairs = require_local_sources(sources)?;
-            let out_pair = require_local_source(output)?;
+            let src_pairs = build_sources(factory, sources)?;
+            let out_pair = build_source(factory, output)?;
             usecases::copy(src_pairs, out_pair, dry_run, false, include_non_media)
         }
         Commands::Find {
@@ -118,8 +155,10 @@ pub fn tidy(command: Commands) -> Result<()> {
             sources,
             output,
         } => {
-            let src_pairs = require_local_sources(sources)?;
-            let out_pair = output.map(require_local_source).transpose()?;
+            let src_pairs = build_sources(factory, sources)?;
+            let out_pair = output
+                .map(|loc| build_source(factory, loc))
+                .transpose()?;
             usecases::find_duplicates(secure, src_pairs, out_pair)
         }
         Commands::Move {
@@ -128,34 +167,23 @@ pub fn tidy(command: Commands) -> Result<()> {
             sources,
             output,
         } => {
-            let src_pairs = require_local_sources(sources)?;
-            let out_pair = require_local_source(output)?;
+            let src_pairs = build_sources(factory, sources)?;
+            let out_pair = build_source(factory, output)?;
             usecases::copy(src_pairs, out_pair, dry_run, true, include_non_media)
         }
     }
 }
 
-/// 把 [`Location`] 收窄为 Local [`usecases::Source`]；非 Local scheme 报清晰 "not enabled"。
-/// Task 3 将抽 BackendFactory 替换本函数，让 SMB / MTP 真实 / fake backend 都能装配。
-fn require_local_source(loc: Location) -> Result<usecases::Source> {
-    match loc {
-        Location::Local(p) => Ok((
-            Location::Local(p),
-            LocalBackend::arc() as Arc<dyn Backend>,
-        )),
-        other => Err(Error::Io(std::io::Error::new(
-            std::io::ErrorKind::Unsupported,
-            format!(
-                "{} backend not enabled in this build; rebuild with --features {}-backend",
-                other.scheme(),
-                other.scheme()
-            ),
-        ))),
-    }
+fn build_source(factory: &dyn BackendFactory, loc: Location) -> Result<usecases::Source> {
+    let backend = factory.for_location(&loc)?;
+    Ok((loc, backend))
 }
 
-fn require_local_sources(locs: Vec<Location>) -> Result<Vec<usecases::Source>> {
-    locs.into_iter().map(require_local_source).collect()
+fn build_sources(
+    factory: &dyn BackendFactory,
+    locs: Vec<Location>,
+) -> Result<Vec<usecases::Source>> {
+    locs.into_iter().map(|loc| build_source(factory, loc)).collect()
 }
 
 pub fn run_cli<I, T>(args: I) -> Result<()>
