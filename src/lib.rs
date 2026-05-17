@@ -47,7 +47,7 @@ pub struct Cli {
 
 #[derive(Debug, Subcommand)]
 pub enum Commands {
-    /// Copy non-duplicate media files (images / videos recognized via magic-bytes MIME) from sources to the output directory. Pass --include-non-media to also copy everything else. Duplicate detection uses SHA-512. No source files are modified.
+    /// Copy non-duplicate media files (images / videos recognized via magic-bytes MIME) from sources to the output directory. Pass --include-non-media to also copy everything else. Duplicate detection uses SHA-512. No source files are modified. Sources / output accept URI form: `smb://[user@]host[:port]/share/path`, `mtp://device/storage/path` or plain local path.
     Copy {
         /// Dry run, do not copy files
         #[arg(short, long)]
@@ -57,13 +57,13 @@ pub enum Commands {
         #[arg(long)]
         include_non_media: bool,
 
-        /// The source directories or files
+        /// The source directories or files (URI or local path)
         #[arg(required = true)]
-        sources: Vec<Utf8PathBuf>,
+        sources: Vec<Location>,
 
-        /// The output directory
+        /// The output directory (URI or local path)
         #[arg(short, long)]
-        output: Utf8PathBuf,
+        output: Location,
     },
 
     /// Find duplicate files under the sources and print a shell script (batch syntax on Windows) that deletes the duplicates. Default uses a fast non-cryptographic hash (xxh3-64); pass --secure to use SHA-512 instead. If --output is given, deletions for files under that directory are commented out.
@@ -72,13 +72,13 @@ pub enum Commands {
         #[arg(short, long)]
         secure: bool,
 
-        /// The source directories or files
+        /// The source directories or files (URI or local path)
         #[arg(required = true)]
-        sources: Vec<Utf8PathBuf>,
+        sources: Vec<Location>,
 
         /// The output directory; deletions for files under it are commented out
         #[arg(short, long)]
-        output: Option<Utf8PathBuf>,
+        output: Option<Location>,
     },
 
     /// Move non-duplicate media files from sources into the output directory. Sources that duplicate something already in output are physically deleted; duplicate detection uses SHA-512. Pass --include-non-media to also move everything else.
@@ -91,13 +91,13 @@ pub enum Commands {
         #[arg(long)]
         include_non_media: bool,
 
-        /// The source directories or files
+        /// The source directories or files (URI or local path)
         #[arg(required = true)]
-        sources: Vec<Utf8PathBuf>,
+        sources: Vec<Location>,
 
-        /// The output directory
+        /// The output directory (URI or local path)
         #[arg(short, long)]
-        output: Utf8PathBuf,
+        output: Location,
     },
 }
 
@@ -108,19 +108,51 @@ pub fn tidy(command: Commands) -> Result<()> {
             include_non_media,
             sources,
             output,
-        } => usecases::copy(sources, output, dry_run, false, include_non_media),
+        } => {
+            let src_paths = require_local_paths(sources)?;
+            let out_path = require_local_path(output)?;
+            usecases::copy(src_paths, out_path, dry_run, false, include_non_media)
+        }
         Commands::Find {
             secure,
             sources,
             output,
-        } => usecases::find_duplicates(secure, sources, output),
+        } => {
+            let src_paths = require_local_paths(sources)?;
+            let out_path = output.map(require_local_path).transpose()?;
+            usecases::find_duplicates(secure, src_paths, out_path)
+        }
         Commands::Move {
             dry_run,
             include_non_media,
             sources,
             output,
-        } => usecases::copy(sources, output, dry_run, true, include_non_media),
+        } => {
+            let src_paths = require_local_paths(sources)?;
+            let out_path = require_local_path(output)?;
+            usecases::copy(src_paths, out_path, dry_run, true, include_non_media)
+        }
     }
+}
+
+/// 把 [`Location`] 收窄回 Local 路径；非 Local scheme 报清晰 "not enabled"。
+/// 当前 usecases 仍接 [`Utf8PathBuf`]，待真实 SMB/MTP client 接入时再下推到 Location。
+fn require_local_path(loc: Location) -> Result<Utf8PathBuf> {
+    match loc {
+        Location::Local(p) => Ok(p),
+        other => Err(Error::Io(std::io::Error::new(
+            std::io::ErrorKind::Unsupported,
+            format!(
+                "{} backend not enabled in this build; rebuild with --features {}-backend",
+                other.scheme(),
+                other.scheme()
+            ),
+        ))),
+    }
+}
+
+fn require_local_paths(locs: Vec<Location>) -> Result<Vec<Utf8PathBuf>> {
+    locs.into_iter().map(require_local_path).collect()
 }
 
 pub fn run_cli<I, T>(args: I) -> Result<()>

@@ -1,14 +1,18 @@
 use camino::Utf8PathBuf;
 use tempfile::tempdir;
-use tidymedia::{run_cli, tidy, Commands};
+use tidymedia::{run_cli, tidy, Commands, Location};
 
 const DATA_DIR: &str = "tests/data";
+
+fn local(p: &str) -> Location {
+    Location::Local(Utf8PathBuf::from(p))
+}
 
 #[test]
 fn tidy_dispatches_find_fast_on_data_dir() {
     tidy(Commands::Find {
         secure: false,
-        sources: vec![Utf8PathBuf::from(DATA_DIR)],
+        sources: vec![local(DATA_DIR)],
         output: None,
     })
     .expect("find fast should succeed");
@@ -18,7 +22,7 @@ fn tidy_dispatches_find_fast_on_data_dir() {
 fn tidy_dispatches_find_secure_on_data_dir() {
     tidy(Commands::Find {
         secure: true,
-        sources: vec![Utf8PathBuf::from(DATA_DIR)],
+        sources: vec![local(DATA_DIR)],
         output: None,
     })
     .expect("find secure should succeed");
@@ -29,8 +33,8 @@ fn tidy_dispatches_find_with_output_directory() {
     let out = tempdir().unwrap();
     tidy(Commands::Find {
         secure: false,
-        sources: vec![Utf8PathBuf::from(DATA_DIR)],
-        output: Some(Utf8PathBuf::from(out.path().to_str().unwrap())),
+        sources: vec![local(DATA_DIR)],
+        output: Some(local(out.path().to_str().unwrap())),
     })
     .expect("find with output should succeed");
 }
@@ -41,8 +45,8 @@ fn tidy_dispatches_copy_dry_run_on_data_dir() {
     tidy(Commands::Copy {
         dry_run: true,
         include_non_media: false,
-        sources: vec![Utf8PathBuf::from(DATA_DIR)],
-        output: Utf8PathBuf::from(out.path().to_str().unwrap()),
+        sources: vec![local(DATA_DIR)],
+        output: local(out.path().to_str().unwrap()),
     })
     .expect("copy dry run should succeed");
 }
@@ -54,10 +58,125 @@ fn tidy_dispatches_move_dry_run_on_empty_source() {
     tidy(Commands::Move {
         dry_run: true,
         include_non_media: false,
-        sources: vec![Utf8PathBuf::from(src.path().to_str().unwrap())],
-        output: Utf8PathBuf::from(out.path().to_str().unwrap()),
+        sources: vec![local(src.path().to_str().unwrap())],
+        output: local(out.path().to_str().unwrap()),
     })
     .expect("move dry run should succeed");
+}
+
+/// SMB/MTP URI 当前未启用真实 client：CLI 解析成功（URI 语法正确）但 tidy
+/// adapter 拒收，给出清晰 Unsupported 错误。
+#[test]
+fn tidy_rejects_smb_uri_with_clear_error() {
+    let res = tidy(Commands::Find {
+        secure: false,
+        sources: vec![Location::Smb {
+            user: None,
+            host: "nas".into(),
+            port: None,
+            share: "photos".into(),
+            path: Utf8PathBuf::new(),
+        }],
+        output: None,
+    });
+    let err = res.unwrap_err();
+    let msg = format!("{err}");
+    assert!(msg.contains("smb backend not enabled"), "got: {msg}");
+}
+
+#[test]
+fn tidy_rejects_mtp_output_with_clear_error() {
+    let res = tidy(Commands::Copy {
+        dry_run: true,
+        include_non_media: false,
+        sources: vec![local(DATA_DIR)],
+        output: Location::Mtp {
+            device: "Pixel 8".into(),
+            storage: "Internal".into(),
+            path: Utf8PathBuf::new(),
+        },
+    });
+    let err = res.unwrap_err();
+    let msg = format!("{err}");
+    assert!(msg.contains("mtp backend not enabled"), "got: {msg}");
+}
+
+/// Copy 分支：sources 含非 Local Location → require_local_paths ? Err
+#[test]
+fn tidy_rejects_copy_smb_source() {
+    let out = tempdir().unwrap();
+    let res = tidy(Commands::Copy {
+        dry_run: true,
+        include_non_media: false,
+        sources: vec![Location::Smb {
+            user: None,
+            host: "nas".into(),
+            port: None,
+            share: "p".into(),
+            path: Utf8PathBuf::new(),
+        }],
+        output: local(out.path().to_str().unwrap()),
+    });
+    assert!(format!("{}", res.unwrap_err()).contains("smb backend not enabled"));
+}
+
+/// Find 分支：output 是非 Local Location → option.map.transpose ? Err
+#[test]
+fn tidy_rejects_find_mtp_output() {
+    let res = tidy(Commands::Find {
+        secure: false,
+        sources: vec![local(DATA_DIR)],
+        output: Some(Location::Mtp {
+            device: "d".into(),
+            storage: "s".into(),
+            path: Utf8PathBuf::new(),
+        }),
+    });
+    assert!(format!("{}", res.unwrap_err()).contains("mtp backend not enabled"));
+}
+
+/// Move 分支：sources 非 Local → require_local_paths ? Err
+#[test]
+fn tidy_rejects_move_smb_source() {
+    let out = tempdir().unwrap();
+    let res = tidy(Commands::Move {
+        dry_run: true,
+        include_non_media: false,
+        sources: vec![Location::Smb {
+            user: None,
+            host: "h".into(),
+            port: None,
+            share: "s".into(),
+            path: Utf8PathBuf::new(),
+        }],
+        output: local(out.path().to_str().unwrap()),
+    });
+    assert!(format!("{}", res.unwrap_err()).contains("smb backend not enabled"));
+}
+
+/// Move 分支：output 非 Local → require_local_path ? Err
+#[test]
+fn tidy_rejects_move_mtp_output() {
+    let src = tempdir().unwrap();
+    let res = tidy(Commands::Move {
+        dry_run: true,
+        include_non_media: false,
+        sources: vec![local(src.path().to_str().unwrap())],
+        output: Location::Mtp {
+            device: "d".into(),
+            storage: "s".into(),
+            path: Utf8PathBuf::new(),
+        },
+    });
+    assert!(format!("{}", res.unwrap_err()).contains("mtp backend not enabled"));
+}
+
+#[test]
+fn run_cli_accepts_uri_form_smb_and_reports_unsupported() {
+    let r = run_cli(["tidymedia", "find", "smb://nas/photos"]);
+    let err = r.unwrap_err();
+    let msg = format!("{err}");
+    assert!(msg.contains("smb backend not enabled"), "got: {msg}");
 }
 
 #[test]
