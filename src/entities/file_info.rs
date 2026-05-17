@@ -22,6 +22,9 @@ use super::SecureHash;
 
 // 栈数组要求编译期常量，保留为 const（性能边界例外）
 const FAST_READ_SIZE: usize = 4096;
+// 流式哈希分块。1 MiB 平衡 syscall 频率与远程 backend 网络往返。
+#[allow(dead_code)]
+const STREAM_CHUNK: usize = 1 << 20;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct Lazy {
@@ -254,6 +257,75 @@ fn secure_hash(path: &str) -> io::Result<(usize, SecureHash)> {
     let file = fs::File::open(path)?;
     let mmap = unsafe { Mmap::map(&file)? };
     Ok((mmap.len(), Sha512::digest(&mmap)))
+}
+
+/// 读首 [`FAST_READ_SIZE`] 字节算 wyhash + xxh3 双哈希。
+///
+/// 返回 (`bytes_read`, wyhash, xxhash)。
+/// 调用方须保证 reader 已 seek 到起点。
+#[allow(dead_code)]
+pub fn fast_hash_stream(r: &mut dyn super::backend::MediaReader)
+    -> io::Result<(usize, u64, u64)>
+{
+    let mut buffer = [0u8; FAST_READ_SIZE];
+    let n = read_fill(r, &mut buffer)?;
+    let slice = &buffer[..n];
+    Ok((n, wyhash::wyhash(slice, 0), xxhash_rust::xxh3::xxh3_64(slice)))
+}
+
+/// 流式整文件 xxh3-64 哈希。返回 (`bytes_read`, xxh3-64)。
+/// 调用方须保证 reader 已 seek 到起点。
+#[allow(dead_code)]
+pub fn full_hash_stream(r: &mut dyn super::backend::MediaReader)
+    -> io::Result<(u64, u64)>
+{
+    let mut hasher = xxhash_rust::xxh3::Xxh3::new();
+    let mut buf = vec![0u8; STREAM_CHUNK];
+    let mut total = 0u64;
+    loop {
+        let n = r.read(&mut buf)?;
+        if n == 0 {
+            break;
+        }
+        hasher.update(&buf[..n]);
+        total += n as u64;
+    }
+    Ok((total, hasher.digest()))
+}
+
+/// 流式整文件 SHA-512 哈希。返回 (`bytes_read`, sha512)。
+/// 调用方须保证 reader 已 seek 到起点。
+#[allow(dead_code)]
+pub fn secure_hash_stream(r: &mut dyn super::backend::MediaReader)
+    -> io::Result<(u64, SecureHash)>
+{
+    let mut hasher = Sha512::new();
+    let mut buf = vec![0u8; STREAM_CHUNK];
+    let mut total = 0u64;
+    loop {
+        let n = r.read(&mut buf)?;
+        if n == 0 {
+            break;
+        }
+        hasher.update(&buf[..n]);
+        total += n as u64;
+    }
+    Ok((total, hasher.finalize()))
+}
+
+/// 把 reader 读满到 buf；返回真实读取字节数。EOF 提前停止不算错误。
+/// 抽出来是为了让 `fast_hash_stream` 函数体保持在 64 行以内。
+#[allow(dead_code)]
+fn read_fill(r: &mut dyn super::backend::MediaReader, buf: &mut [u8]) -> io::Result<usize> {
+    let mut filled = 0;
+    while filled < buf.len() {
+        let n = r.read(&mut buf[filled..])?;
+        if n == 0 {
+            break;
+        }
+        filled += n;
+    }
+    Ok(filled)
 }
 
 #[cfg(test)]

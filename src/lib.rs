@@ -12,9 +12,12 @@ use tracing::debug;
 use tracing_subscriber::fmt;
 use tracing_subscriber::EnvFilter;
 
+pub use entities::backend::local::LocalBackend;
+pub use entities::backend::{Backend, Entry, EntryKind, MediaReader, MediaWriter, Metadata};
 pub use entities::common::Error;
 pub use entities::common::Result;
 pub use entities::media_time;
+pub use entities::uri::{Location, ParseError as LocationParseError};
 
 mod entities;
 mod usecases;

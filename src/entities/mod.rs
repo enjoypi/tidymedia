@@ -7,10 +7,12 @@ use generic_array::GenericArray;
 
 pub type SecureHash = GenericArray<u8, typenum::U64>;
 
+pub mod backend;
 pub mod common;
 pub(crate) mod exif;
 pub mod file_index;
 pub mod file_info;
 pub mod media_time;
+pub mod uri;
 #[cfg(test)]
 pub(crate) mod test_common;
