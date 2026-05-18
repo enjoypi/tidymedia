@@ -18,9 +18,20 @@ mtp-backend = []
 # 运行前需要在 host 上启动 `adb start-server`，目标 Android 设备开 USB 调试 + 文件传输。
 # 未启用时 AdbBackend::new() 返 Unsupported，但 AdbBackend::with_client(fake) 仍可用于测试。
 adb-backend = ["dep:adb_client"]
+# 启用 Android 应用层（uniffi 接口 + cdylib），交叉编译到 aarch64-linux-android 用。
+# 桌面 build 不应启用此 feature（cdylib 在 Linux 上会拉空 stub）。
+# 编译流程：`cargo ndk -t aarch64-linux-android -p 30 build --release --features android-app`
+# 之后 `uniffi-bindgen-cli generate ... --library libtidymedia.so --language kotlin`
+# 生成 Kotlin 绑定，见 `mobile/build-android.sh`。
+android-app = ["dep:uniffi"]
+
+# Android 端把 Rust 编成 cdylib（被 JVM dlopen），同时保留 rlib 让桌面测试链得上。
+[lib]
+crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 adb_client = { version = "3.2", optional = true }
+uniffi = { version = "0.31", optional = true }
 camino = { version = "*", features = ["serde1"] }
 chrono = "*"
 clap = { version = "*", features = ["derive"] }

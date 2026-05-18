@@ -29,6 +29,14 @@ pub use entities::uri::{Location, ParseError as LocationParseError};
 mod entities;
 mod usecases;
 
+// Android / 移动端 uniffi 绑定层：feature 启用时生成 FFI scaffolding 并暴露
+// `tidy_dry_run` / `tidy_run` 等顶层函数给 Kotlin 调用。
+#[cfg(feature = "android-app")]
+uniffi::setup_scaffolding!();
+
+#[cfg(feature = "android-app")]
+pub mod mobile;
+
 const FEATURE_CLI: &str = "cli";
 
 #[derive(Debug, Parser)]
