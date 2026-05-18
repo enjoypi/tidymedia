@@ -1,6 +1,6 @@
 //! `RealMtpClient` 占位 stub。仅在 `--features mtp-backend` 启用时编译，
-//! 但当前实现 `RealMtpClient::new()` 直接返 `Unsupported`，错误消息引导
-//! 选定具体 crate 的 future PR。
+//! 但当前实现 `RealMtpClient::new()` 直接返 `Unsupported`：跨平台 MTP 库
+//! 尚未在 libmtp-rs / gphoto2-rs / 自接 rusb-PTP 三者之间定下选型。
 //!
 //! ## 待评估方案
 //!
@@ -16,7 +16,7 @@
 //!
 //! 调度层（[`super::MtpBackend::with_client`]）已经在测试中通过 FakeMtpClient
 //! 完整验证；本 stub 仅占位 lib.rs `DefaultBackendFactory::for_location` 的
-//! feature-gated 分支语义对称。真实 MTP IO 不在本 PR 范围内。
+//! feature-gated 分支语义对称。
 
 #![cfg_attr(coverage_nightly, coverage(off))]
 
@@ -27,7 +27,7 @@ pub struct RealMtpClient;
 impl RealMtpClient {
     pub fn new() -> io::Result<Self> {
         Err(io::Error::other(
-            "RealMtpClient is a stub; future PR will pick between libmtp-rs / gphoto2-rs / rusb-PTP",
+            "RealMtpClient is a stub; pick between libmtp-rs / gphoto2-rs / rusb-PTP before enabling",
         ))
     }
 }

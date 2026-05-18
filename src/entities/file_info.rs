@@ -27,16 +27,14 @@ const STREAM_CHUNK: usize = 1 << 20;
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct Lazy {
     bytes_read: u64,
-    // true if full_hash is the whole file hash
+    // 初始构造时 hash 字段先放 `fast_hash_stream` 的第二条 xxh3 (前 4 KiB)，
+    // 直到 calc_full_hash 跑过才被替换成整文件 hash；`full` 区分这两种语义。
     full: bool,
-    // 64 bit hash from the whole file
     hash: u64,
-    // Secure hash from the whole file
     secure_hash: SecureHash,
 }
 
 impl Lazy {
-    // 初始化时，hash是作为第二个快速hash使用的，并不是整个文件的hash
     fn new(bytes_read: u64, hash: u64) -> Self {
         Self {
             bytes_read,
@@ -48,14 +46,12 @@ impl Lazy {
 }
 
 pub struct Info {
-    // 64 bit hash from the first FAST_READ_SIZE bytes
     pub fast_hash: u64,
     pub full_path: Utf8PathBuf,
     pub size: u64,
 
     // Backend Gateway 抽象：calc_full_hash / secure_hash 需要重新 open_read 时
-    // 复用这把后端句柄，并按 [`Location`] 表达文件位置。Local 路径下与 full_path 等价；
-    // SMB/MTP 等远端则以 URI 形式承载（Task 4 起接入）。
+    // 复用这把后端句柄；Local 下 location 与 full_path 等价，远端则以 URI 承载。
     location: Location,
     backend: Arc<dyn Backend>,
 
@@ -196,10 +192,7 @@ impl Info {
     }
 
     pub fn is_media(&self) -> bool {
-        if self.exif.is_none() {
-            return false;
-        }
-        self.exif.as_ref().unwrap().is_media()
+        self.exif.as_ref().is_some_and(exif::Exif::is_media)
     }
 }
 
@@ -290,8 +283,9 @@ pub fn secure_hash_stream(r: &mut dyn MediaReader) -> io::Result<(u64, SecureHas
 }
 
 /// 把 reader 读满到 buf；返回真实读取字节数。EOF 提前停止不算错误。
-/// 抽出来是为了让 `fast_hash_stream` 函数体保持在 64 行以内。
-fn read_fill(r: &mut dyn MediaReader, buf: &mut [u8]) -> io::Result<usize> {
+/// 抽出来是为了让 `fast_hash_stream` 函数体保持在 64 行以内，同时给 `exif::sniff_mime`
+/// 复用，避免两份同款 read-to-fill 循环。
+pub(crate) fn read_fill(r: &mut dyn MediaReader, buf: &mut [u8]) -> io::Result<usize> {
     let mut filled = 0;
     while filled < buf.len() {
         let n = r.read(&mut buf[filled..])?;
@@ -303,7 +297,7 @@ fn read_fill(r: &mut dyn MediaReader, buf: &mut [u8]) -> io::Result<usize> {
     Ok(filled)
 }
 
-// --- 测试专用：保留旧的 path-only 哈希实现，供 file_info_tests 对照 stream 版 ---
+// 测试专用 path-only 哈希实现：file_info_tests 用作 stream 版的对照基线。
 
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]

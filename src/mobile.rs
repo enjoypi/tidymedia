@@ -78,8 +78,8 @@ fn run_internal(
         output: out_loc,
     };
     tidy_with(&DefaultBackendFactory, cmd)?;
-    // tidy_with 内部已经把 stats 打到 stdout / debug log；本层只回执"ok"
-    // —— 详细计数后续 PR 加（要从 use case 内导出结构体）
+    // tidy_with 内部已经把 stats 打到 stdout / debug log；本层先只回执 status，
+    // total_scanned / copied 暂留 0——结构化导出需要从 use case 内回传计数。
     Ok(TidyStats {
         total_scanned: 0,
         copied: 0,

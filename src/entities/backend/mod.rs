@@ -8,8 +8,10 @@ use std::time::SystemTime;
 use super::uri::Location;
 
 pub mod adb;
+pub(crate) mod fake_remote;
 pub mod local;
 pub mod mtp;
+pub(crate) mod remote;
 pub mod smb;
 
 // FakeBackend 是常驻编译的测试 helper：集成测试（`tests/`）需要在 `#[cfg(test)]`

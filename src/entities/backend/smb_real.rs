@@ -28,7 +28,8 @@ use pavao::{
     SmbClient as PavaoClient, SmbCredentials, SmbDirentType, SmbMode, SmbOpenOptions, SmbOptions,
 };
 
-use super::{SmbClient, SmbTarget};
+use super::{SmbTarget};
+use super::super::remote::RemoteClient;
 use super::super::{Entry, EntryKind, Metadata};
 use crate::entities::uri::Location;
 
@@ -123,7 +124,7 @@ impl RealSmbClient {
     }
 }
 
-impl SmbClient for RealSmbClient {
+impl RemoteClient<SmbTarget> for RealSmbClient {
     fn stat(&self, target: &SmbTarget) -> io::Result<Metadata> {
         let url = self.url_for(target);
         let s = self.inner.lock().stat(&url).map_err(map_smb_err)?;
@@ -236,10 +237,4 @@ fn smb_location_from_target(t: &SmbTarget) -> Location {
         share: t.share.clone(),
         path: t.path.clone(),
     }
-}
-
-/// 时间戳静态使用：避免 SystemTime 在某些平台下未实现 `Default`。
-#[allow(dead_code)]
-fn epoch_fallback() -> SystemTime {
-    SystemTime::UNIX_EPOCH
 }

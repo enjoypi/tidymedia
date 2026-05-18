@@ -121,14 +121,9 @@ impl Index {
         F: Fn(&Info) -> io::Result<T> + Send + Sync,
         T: Eq + Hash + Send,
     {
-        let multiple: HashMap<_, _> = self
-            .similar_files
-            .iter()
-            .filter(|(_, paths)| paths.len() > 1)
-            .collect();
-
-        multiple
+        self.similar_files
             .par_iter()
+            .filter(|(_, paths)| paths.len() > 1)
             .map(|(_, paths)| {
                 let mut same = HashMap::new();
                 for path in paths.iter() {
@@ -278,8 +273,8 @@ impl Index {
     /// 静默跳过（"尽力而为"语义）。从不返回错误。
     /// `local_offset` 用于解释 EXIF 内无时区的 NaiveDateTime（相机本地时区）。
     pub fn parse_exif(&mut self, local_offset: FixedOffset) {
-        self.files.par_iter_mut().for_each(|(path, info)| {
-            if let Ok(e) = exif::Exif::from_path_with_offset(path, local_offset) {
+        self.files.par_iter_mut().for_each(|(_, info)| {
+            if let Ok(e) = exif::Exif::open(info.location(), &info.backend(), local_offset) {
                 info.set_exif(e);
             }
         });

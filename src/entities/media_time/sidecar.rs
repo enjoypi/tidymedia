@@ -233,7 +233,7 @@ mod tests {
     }
 
     /// 非 Local backend：with_extension / append_suffix 都返回 None →
-    /// discover_with_backend 直接返回空 Vec（Task 4 范围内 SMB/MTP 尚未支持 sibling）。
+    /// discover_with_backend 直接返回空 Vec（SMB/MTP 暂未支持 sibling 探测）。
     #[test]
     fn discover_with_backend_smb_returns_empty() {
         let smb_loc = Location::Smb {

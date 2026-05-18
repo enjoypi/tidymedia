@@ -36,7 +36,8 @@ use adb_client::server_device::ADBServerDevice;
 use adb_client::{ADBDeviceExt, ADBListItemType};
 use parking_lot::Mutex;
 
-use super::{shell_quote, AdbClient, AdbTarget};
+use super::{shell_quote, AdbTarget};
+use super::super::remote::RemoteClient;
 use super::super::{Entry, EntryKind, Metadata};
 use crate::entities::uri::Location;
 
@@ -79,7 +80,7 @@ impl RealAdbClient {
     }
 }
 
-impl AdbClient for RealAdbClient {
+impl RemoteClient<AdbTarget> for RealAdbClient {
     fn stat(&self, target: &AdbTarget) -> io::Result<Metadata> {
         let path = target.path.as_str();
         // adb_client `stat` 接 `&dyn AsRef<str>` trait object，必须 `&&str` 二级借用；

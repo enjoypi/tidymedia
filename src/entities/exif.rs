@@ -12,6 +12,7 @@ use nom_exif::TrackInfoTag;
 use super::backend::local::LocalBackend;
 use super::backend::{Backend, MediaReader};
 use super::common;
+use super::file_info::read_fill;
 use super::uri::Location;
 
 const META_TYPE_IMAGE: &str = "image/";
@@ -114,14 +115,7 @@ impl Exif {
 #[cfg_attr(coverage_nightly, coverage(off))]
 fn sniff_mime(reader: &mut dyn MediaReader) -> io::Result<String> {
     let mut buf = [0u8; MIME_SNIFF_BYTES];
-    let mut filled = 0;
-    while filled < buf.len() {
-        let n = reader.read(&mut buf[filled..])?;
-        if n == 0 {
-            break;
-        }
-        filled += n;
-    }
+    let filled = read_fill(reader, &mut buf)?;
     reader.seek(io::SeekFrom::Start(0))?;
     Ok(infer::get(&buf[..filled])
         .map(|t| t.mime_type().to_string())

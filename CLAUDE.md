@@ -113,3 +113,4 @@
 - HashMap 并行 in-place 改 value：用 `self.files.par_iter_mut().for_each(|(k, v)| ...)`，避免"par_iter→Vec→再 get_mut Option None"的不可达分支
 - 调研第三方 crate：`cargo info <crate>` 看版本 / features / 传递依赖；查公开 API 用 `find ~/.cargo/registry/src -path '*/<crate>-<ver>/*' -name 'lib.rs'` 后 `grep ^pub`，比开 docs.rs 快
 - clippy `needless_borrows_for_generic_args` 对 `&dyn AsRef<T>` trait object 参数 false-positive：例如 adb_client `stat/list/pull/push` 需 `&path: &&str` 二级借用，直接传 `path: &str` 编译失败；用本地 `#[allow(clippy::needless_borrows_for_generic_args)]` 标方法或调用
+- 泛型函数从 `impl<A: Trait>` 块提取到模块级后，调用处必须 turbofish `func::<A>()` 显式标注类型参数；编译器无法从 `self.adapter` 反推

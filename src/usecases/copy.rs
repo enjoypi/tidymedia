@@ -34,13 +34,13 @@ fn configured_offset() -> UtcOffset {
     offset_from_hours(config().copy.timezone_offset_hours)
 }
 
-// 越界回退到 UTC，避免 panic；time crate 的合法范围 ±25:59:59 之内
+// 越界回退到 UTC，避免 panic；time crate 合法范围 ±25:59:59。
 fn offset_from_hours(hours: i8) -> UtcOffset {
     UtcOffset::from_whole_seconds(i32::from(hours) * 3600).unwrap_or(UtcOffset::UTC)
 }
 
-// chrono::FixedOffset 用于把 EXIF 内无时区的 NaiveDateTime 当相机本地时间解释。
-// 与 time::UtcOffset 共用同一个 timezone_offset_hours 配置。
+// chrono::FixedOffset 用于把 EXIF 内无时区的 NaiveDateTime 当相机本地时间解释；
+// 与 time::UtcOffset 共用同一份 timezone_offset_hours 配置。
 fn configured_chrono_offset() -> FixedOffset {
     chrono_offset_from_hours(config().copy.timezone_offset_hours)
 }
@@ -228,8 +228,8 @@ pub(crate) fn do_copy(
 /// 内部 4 个 `?` Err 分支（open_read / open_write / io::copy / writer.finish）中，
 /// open_read Err 已被 `do_copy_file_copy_fails_when_source_unreadable` 稳定覆盖；
 /// 后三者在 LocalBackend 下要构造 disk-full / 父目录在 mkdir_p 后被外部抢删等
-/// 不可稳定的场景，整函数随 CLAUDE.md「不可稳定触发」套路标 coverage(off)。
-/// Task 6 集成测试通过 FakeBackend reader/writer error 注入覆盖剩余分支。
+/// 不可稳定的场景，整函数随 CLAUDE.md「不可稳定触发」套路标 coverage(off)；
+/// 剩余分支由 FakeBackend reader/writer error 注入的集成测试覆盖。
 #[cfg_attr(coverage_nightly, coverage(off))]
 fn stream_copy(
     src: &Info,

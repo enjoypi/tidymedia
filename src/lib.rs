@@ -18,7 +18,6 @@ pub use entities::backend::mtp::{MtpBackend, MtpClient, MtpMatch, MtpTarget};
 pub use entities::backend::smb::{SmbBackend, SmbClient, SmbTarget};
 pub use entities::backend::{Backend, Entry, EntryKind, MediaReader, MediaWriter, Metadata};
 
-// 测试 helper：集成测试通过 FakeBackend / FakeOp 组装混合 scheme 调度。
 #[doc(hidden)]
 pub use entities::backend::fake::{FakeBackend, Op as FakeOp};
 pub use entities::common::Error;
@@ -29,8 +28,6 @@ pub use entities::uri::{Location, ParseError as LocationParseError};
 mod entities;
 mod usecases;
 
-// Android / 移动端 uniffi 绑定层：feature 启用时生成 FFI scaffolding 并暴露
-// `tidy_dry_run` / `tidy_run` 等顶层函数给 Kotlin 调用。
 #[cfg(feature = "android-app")]
 uniffi::setup_scaffolding!();
 
@@ -124,8 +121,7 @@ pub trait BackendFactory: Send + Sync {
 }
 
 /// 生产 [`BackendFactory`]：根据 Location.scheme 选 backend；当前仅 Local 真实可用，
-/// SMB / MTP 等真实适配器分别由 `smb-backend` / `mtp-backend` cargo feature 启用
-/// （Task 4 / Task 5 接入），未启用时返 `Unsupported`。
+/// SMB / MTP / ADB 真实适配器分别由对应 cargo feature 启用，未启用时返 `Unsupported`。
 #[derive(Debug, Default)]
 pub struct DefaultBackendFactory;
 
@@ -140,27 +136,29 @@ impl BackendFactory for DefaultBackendFactory {
     }
 }
 
+fn unsupported_backend(loc: &Location, feature: &str) -> Error {
+    Error::Io(std::io::Error::new(
+        std::io::ErrorKind::Unsupported,
+        format!(
+            "{} backend not enabled in this build; rebuild with --features {}",
+            loc.scheme(),
+            feature,
+        ),
+    ))
+}
+
 #[cfg(feature = "smb-backend")]
 #[cfg_attr(coverage_nightly, coverage(off))]
 fn build_smb_backend(loc: &Location) -> Result<Arc<dyn Backend>> {
     use entities::backend::smb::real::RealSmbClient;
+    let Location::Smb { user, host, port, share, .. } = loc else {
+        unreachable!("DefaultBackendFactory routes only Location::Smb here")
+    };
     let target = entities::backend::smb::SmbTarget {
-        user: match loc {
-            Location::Smb { user, .. } => user.clone(),
-            _ => None,
-        },
-        host: match loc {
-            Location::Smb { host, .. } => host.clone(),
-            _ => String::new(),
-        },
-        port: match loc {
-            Location::Smb { port, .. } => *port,
-            _ => None,
-        },
-        share: match loc {
-            Location::Smb { share, .. } => share.clone(),
-            _ => String::new(),
-        },
+        user: user.clone(),
+        host: host.clone(),
+        port: *port,
+        share: share.clone(),
         path: Default::default(),
         password: std::env::var("SMB_PASSWORD").ok(),
         krb5_ccname: std::env::var("KRB5CCNAME").ok(),
@@ -173,20 +171,13 @@ fn build_smb_backend(loc: &Location) -> Result<Arc<dyn Backend>> {
 
 #[cfg(not(feature = "smb-backend"))]
 fn build_smb_backend(loc: &Location) -> Result<Arc<dyn Backend>> {
-    Err(Error::Io(std::io::Error::new(
-        std::io::ErrorKind::Unsupported,
-        format!(
-            "{} backend not enabled in this build; rebuild with --features smb-backend",
-            loc.scheme()
-        ),
-    )))
+    Err(unsupported_backend(loc, "smb-backend"))
 }
 
 #[cfg(feature = "mtp-backend")]
 #[cfg_attr(coverage_nightly, coverage(off))]
 fn build_mtp_backend(loc: &Location) -> Result<Arc<dyn Backend>> {
-    // RealMtpClient 当前是 stub：feature 启用编译通过，运行期仍返 Unsupported，
-    // 错误消息指向未来 PR 选定具体 crate（libmtp-rs / gphoto2 / 自接 rusb）。
+    // RealMtpClient 当前是 stub：feature 启用编译通过，运行期仍返 Unsupported。
     use entities::backend::mtp::real::RealMtpClient;
     let _ = loc;
     let _ = RealMtpClient::new()?;
@@ -195,13 +186,7 @@ fn build_mtp_backend(loc: &Location) -> Result<Arc<dyn Backend>> {
 
 #[cfg(not(feature = "mtp-backend"))]
 fn build_mtp_backend(loc: &Location) -> Result<Arc<dyn Backend>> {
-    Err(Error::Io(std::io::Error::new(
-        std::io::ErrorKind::Unsupported,
-        format!(
-            "{} backend not enabled in this build; rebuild with --features mtp-backend",
-            loc.scheme()
-        ),
-    )))
+    Err(unsupported_backend(loc, "mtp-backend"))
 }
 
 #[cfg(feature = "adb-backend")]
@@ -209,25 +194,18 @@ fn build_mtp_backend(loc: &Location) -> Result<Arc<dyn Backend>> {
 fn build_adb_backend(loc: &Location) -> Result<Arc<dyn Backend>> {
     use entities::backend::adb::real::RealAdbClient;
     use entities::backend::adb::AdbBackend;
-    let serial = match loc {
-        Location::Adb { serial, .. } => serial.clone(),
-        _ => None,
+    let Location::Adb { serial, .. } = loc else {
+        unreachable!("DefaultBackendFactory routes only Location::Adb here")
     };
     let cfg = &usecases::config::config().backend.adb;
     let client =
-        RealAdbClient::new(serial, &cfg.server_host, cfg.server_port).map_err(Error::Io)?;
+        RealAdbClient::new(serial.clone(), &cfg.server_host, cfg.server_port).map_err(Error::Io)?;
     Ok(AdbBackend::arc_with_client(Arc::new(client)))
 }
 
 #[cfg(not(feature = "adb-backend"))]
 fn build_adb_backend(loc: &Location) -> Result<Arc<dyn Backend>> {
-    Err(Error::Io(std::io::Error::new(
-        std::io::ErrorKind::Unsupported,
-        format!(
-            "{} backend not enabled in this build; rebuild with --features adb-backend",
-            loc.scheme()
-        ),
-    )))
+    Err(unsupported_backend(loc, "adb-backend"))
 }
 
 /// 用默认 backend factory 跑命令；旧入口，等价于 `tidy_with(&DefaultBackendFactory, ...)`。
