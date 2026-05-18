@@ -1,9 +1,11 @@
-//! URI 解析：把 CLI 字符串映射为 [`Location`]，区分本地 / SMB / MTP。
+//! URI 解析：把 CLI 字符串映射为 [`Location`]，区分本地 / SMB / MTP / ADB。
 //!
 //! 语法：
 //! - 无 `://` 或 `local://` ⇒ 本地路径
 //! - `smb://[user@]host[:port]/share[/path]`
 //! - `mtp://device/storage[/path]`
+//! - `adb://[serial]/abs/path` —— Android 设备走 adb 协议；serial 为空时表示让
+//!   `adb_client` 自动选唯一在线设备；path 始终是设备上的绝对路径（`/sdcard/...`）
 //!
 //! 字段内的空格 / 中文 / 路径分隔符走 percent-encoding。
 //! 详细约定见 CLAUDE.md「URI 与 Backend」段。
@@ -17,6 +19,7 @@ use thiserror::Error;
 const SCHEME_LOCAL: &str = "local";
 const SCHEME_SMB: &str = "smb";
 const SCHEME_MTP: &str = "mtp";
+const SCHEME_ADB: &str = "adb";
 const SEP: &str = "://";
 
 /// 业务对象：定位一段媒体内容所在的存储位置。
@@ -35,6 +38,13 @@ pub enum Location {
         storage: String,
         path: Utf8PathBuf,
     },
+    Adb {
+        /// 设备 serial（`adb devices` 列出的标识）；`None` 表示由 client 自动选择
+        /// 唯一在线设备，对应 URI `adb:///path` 形态
+        serial: Option<String>,
+        /// 设备上的绝对路径，始终以 `/` 开头（如 `/sdcard/DCIM`）
+        path: Utf8PathBuf,
+    },
 }
 
 #[derive(Debug, Error, PartialEq, Eq)]
@@ -45,6 +55,8 @@ pub enum ParseError {
     MissingShare(String),
     #[error("missing storage in {0:?}")]
     MissingStorage(String),
+    #[error("missing path in {0:?}")]
+    MissingPath(String),
     #[error("invalid percent-encoding in {0:?}")]
     PercentDecode(String),
     #[error("unsupported scheme: {0:?}")]
@@ -62,6 +74,7 @@ impl Location {
             SCHEME_LOCAL => Ok(Self::Local(Utf8PathBuf::from(decode(rest)?))),
             SCHEME_SMB => Self::parse_smb(rest),
             SCHEME_MTP => Self::parse_mtp(rest),
+            SCHEME_ADB => Self::parse_adb(rest),
             other => Err(ParseError::UnsupportedScheme(other.to_string())),
         }
     }
@@ -107,26 +120,57 @@ impl Location {
         })
     }
 
+    fn parse_adb(rest: &str) -> Result<Self, ParseError> {
+        // rest 形态：
+        //   "EMULATOR5554/sdcard/DCIM" → serial=Some, path=/sdcard/DCIM
+        //   "/sdcard/DCIM"             → serial=None, path=/sdcard/DCIM
+        //   "EMULATOR5554"             → 缺 path（adb 没有 share/storage 抽象，path 必填）
+        //   ""                         → 缺 path（adb:/// 无内容）
+        let (serial_raw, tail) = rest
+            .split_once('/')
+            .ok_or_else(|| ParseError::MissingPath(rest.to_string()))?;
+        let serial = if serial_raw.is_empty() {
+            None
+        } else {
+            Some(decode(serial_raw)?)
+        };
+        let decoded_tail = decode_path(tail)?;
+        if decoded_tail.is_empty() {
+            return Err(ParseError::MissingPath(rest.to_string()));
+        }
+        // 设备上始终是绝对路径；split_once('/') 后 tail 不再带前导 '/'
+        let mut abs = String::with_capacity(decoded_tail.len() + 1);
+        abs.push('/');
+        abs.push_str(&decoded_tail);
+        Ok(Self::Adb {
+            serial,
+            path: Utf8PathBuf::from(abs),
+        })
+    }
+
     pub fn scheme(&self) -> &'static str {
         match self {
             Self::Local(_) => SCHEME_LOCAL,
             Self::Smb { .. } => SCHEME_SMB,
             Self::Mtp { .. } => SCHEME_MTP,
+            Self::Adb { .. } => SCHEME_ADB,
         }
     }
 
     /// 返回内部 path 字段（所有 variant 都持 path：Local 是绝对路径，
-    /// Smb 是 share 内相对路径，Mtp 是 storage 内相对路径）。
+    /// Smb 是 share 内相对路径，Mtp 是 storage 内相对路径，Adb 是设备上绝对路径）。
     pub fn path(&self) -> &Utf8Path {
         match self {
             Self::Local(p) => p.as_path(),
             Self::Smb { path, .. } => path.as_path(),
             Self::Mtp { path, .. } => path.as_path(),
+            Self::Adb { path, .. } => path.as_path(),
         }
     }
 
-    /// 保留 scheme + 连接参数（user/host/share / device/storage），覆写 path 字段。
-    /// 用于在远端 backend 下 join 子目录（如 `output.with_path(year/month/file)`）。
+    /// 保留 scheme + 连接参数（user/host/share / device/storage / serial），
+    /// 覆写 path 字段。用于在远端 backend 下 join 子目录
+    /// （如 `output.with_path(year/month/file)`）。
     pub fn with_path(&self, new_path: Utf8PathBuf) -> Self {
         match self {
             Self::Local(_) => Self::Local(new_path),
@@ -150,6 +194,10 @@ impl Location {
                 storage: storage.clone(),
                 path: new_path,
             },
+            Self::Adb { serial, .. } => Self::Adb {
+                serial: serial.clone(),
+                path: new_path,
+            },
         }
     }
 
@@ -168,6 +216,7 @@ impl Location {
                 storage,
                 path,
             } => render_mtp(device, storage, path.as_str()),
+            Self::Adb { serial, path } => render_adb(serial.as_deref(), path.as_str()),
         }
     }
 }
@@ -284,6 +333,18 @@ fn render_mtp(device: &str, storage: &str, path: &str) -> String {
         out.push('/');
         out.push_str(&encode_path(path));
     }
+    out
+}
+
+fn render_adb(serial: Option<&str>, path: &str) -> String {
+    let mut out = format!("{SCHEME_ADB}{SEP}");
+    if let Some(s) = serial {
+        out.push_str(&encode(s));
+    }
+    // path 已是 `/abs`，直接编码各段后拼接；前导 '/' 让 `adb:///abs` 形态自然出现
+    let trimmed = path.strip_prefix('/').unwrap_or(path);
+    out.push('/');
+    out.push_str(&encode_path(trimmed));
     out
 }
 

@@ -7,6 +7,7 @@ use std::time::SystemTime;
 
 use super::uri::Location;
 
+pub mod adb;
 pub mod local;
 pub mod mtp;
 pub mod smb;

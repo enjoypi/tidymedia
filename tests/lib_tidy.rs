@@ -65,6 +65,13 @@ fn mtp_loc(path: &str) -> Location {
     }
 }
 
+fn adb_loc(path: &str) -> Location {
+    Location::Adb {
+        serial: Some("EMULATOR5554".into()),
+        path: Utf8PathBuf::from(path),
+    }
+}
+
 #[test]
 fn tidy_dispatches_find_fast_on_data_dir() {
     tidy(Commands::Find {
@@ -156,6 +163,33 @@ fn tidy_rejects_mtp_output_with_clear_error() {
     let err = res.unwrap_err();
     let msg = format!("{err}");
     assert!(msg.contains("mtp backend not enabled"), "got: {msg}");
+}
+
+#[cfg(not(feature = "adb-backend"))]
+#[test]
+fn tidy_rejects_adb_uri_with_clear_error() {
+    let res = tidy(Commands::Find {
+        secure: false,
+        sources: vec![adb_loc("/sdcard/DCIM")],
+        output: None,
+    });
+    let err = res.unwrap_err();
+    let msg = format!("{err}");
+    assert!(msg.contains("adb backend not enabled"), "got: {msg}");
+}
+
+#[cfg(not(feature = "adb-backend"))]
+#[test]
+fn tidy_rejects_adb_output_with_clear_error() {
+    let res = tidy(Commands::Copy {
+        dry_run: true,
+        include_non_media: false,
+        sources: vec![local(DATA_DIR)],
+        output: adb_loc("/sdcard/Out"),
+    });
+    let err = res.unwrap_err();
+    let msg = format!("{err}");
+    assert!(msg.contains("adb backend not enabled"), "got: {msg}");
 }
 
 /// Copy 分支：sources 含非 Local Location → require_local_paths ? Err
@@ -493,5 +527,118 @@ fn default_factory_smb_without_feature_returns_unsupported() {
     assert!(
         format!("{err}").contains("smb backend not enabled"),
         "expected unsupported, got: {err}"
+    );
+}
+
+#[cfg(not(feature = "adb-backend"))]
+#[test]
+fn default_factory_adb_without_feature_returns_unsupported() {
+    let res = tidy(Commands::Find {
+        secure: false,
+        sources: vec![adb_loc("/sdcard/DCIM")],
+        output: None,
+    });
+    let err = res.unwrap_err();
+    assert!(
+        format!("{err}").contains("adb backend not enabled"),
+        "expected unsupported, got: {err}"
+    );
+}
+
+#[test]
+fn tidy_with_copy_fake_adb_to_local_writes_file() {
+    // 模拟 PC 端从手机 ADB 把照片整理到本地：fake adb 提供文件，tidy 读后写入本地输出。
+    let adb_root = adb_loc("/sdcard/DCIM");
+    let adb_file = adb_loc("/sdcard/DCIM/foo.jpg");
+
+    let fake_adb = Arc::new(FakeBackend::new("adb"));
+    fake_adb.add_dir(adb_root.clone());
+    fake_adb.add_file(adb_file, b"FAKE-PHOTO-BYTES".to_vec());
+
+    let out_dir = tempdir().unwrap();
+    let out_loc = local(out_dir.path().to_str().unwrap());
+
+    let mut factory = FakeBackendFactory::new();
+    factory.insert("adb", fake_adb);
+
+    tidy_with(
+        &factory,
+        Commands::Copy {
+            dry_run: false,
+            include_non_media: true,
+            sources: vec![adb_root],
+            output: out_loc,
+        },
+    )
+    .expect("adb -> local copy should succeed");
+
+    // FakeBackend metadata 走 UNIX_EPOCH → 1970/01 桶。
+    let target = out_dir.path().join("1970").join("01").join("foo.jpg");
+    assert!(target.exists(), "expected copied file at {target:?}");
+}
+
+#[test]
+fn tidy_with_find_mixed_local_smb_adb_sources() {
+    let smb_root = smb_loc("");
+    let smb_file = smb_loc("a.bin");
+    let fake_smb = Arc::new(FakeBackend::new("smb"));
+    fake_smb.add_dir(smb_root.clone());
+    fake_smb.add_file(smb_file, vec![0xAA; 2048]);
+
+    let adb_root = adb_loc("/sdcard");
+    let adb_file = adb_loc("/sdcard/b.bin");
+    let fake_adb = Arc::new(FakeBackend::new("adb"));
+    fake_adb.add_dir(adb_root.clone());
+    fake_adb.add_file(adb_file, vec![0x55; 2048]);
+
+    let local_src = tempdir().unwrap();
+    std::fs::write(local_src.path().join("c.bin"), vec![0xCC; 2048]).unwrap();
+
+    let mut factory = FakeBackendFactory::new();
+    factory.insert("smb", fake_smb);
+    factory.insert("adb", fake_adb);
+
+    tidy_with(
+        &factory,
+        Commands::Find {
+            secure: false,
+            sources: vec![smb_root, adb_root, local(local_src.path().to_str().unwrap())],
+            output: None,
+        },
+    )
+    .expect("find across smb/adb/local should succeed");
+}
+
+#[test]
+fn tidy_with_move_local_to_fake_adb_removes_src() {
+    let src_dir = tempdir().unwrap();
+    let src_file = src_dir.path().join("photo.bin");
+    std::fs::write(&src_file, b"hello adb").unwrap();
+    let mtime = filetime::FileTime::from_unix_time(1_704_067_200, 0);
+    filetime::set_file_mtime(&src_file, mtime).unwrap();
+
+    let adb_root = adb_loc("/sdcard/Inbox");
+    let fake_adb = Arc::new(FakeBackend::new("adb"));
+    fake_adb.add_dir(adb_root.clone());
+
+    let mut factory = FakeBackendFactory::new();
+    factory.insert("adb", Arc::clone(&fake_adb) as Arc<dyn Backend>);
+
+    tidy_with(
+        &factory,
+        Commands::Move {
+            dry_run: false,
+            include_non_media: true,
+            sources: vec![local(src_dir.path().to_str().unwrap())],
+            output: adb_root,
+        },
+    )
+    .expect("local -> adb move should succeed");
+
+    assert!(!src_file.exists(), "src must be removed after move");
+    let dst_loc = adb_loc("/sdcard/Inbox/2024/01/photo.bin");
+    assert!(
+        fake_adb.read_bytes(&dst_loc).is_some(),
+        "expected fake adb to hold copied file at /sdcard/Inbox/2024/01/photo.bin"
     );
 }

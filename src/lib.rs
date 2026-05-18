@@ -12,6 +12,7 @@ use tracing::debug;
 use tracing_subscriber::fmt;
 use tracing_subscriber::EnvFilter;
 
+pub use entities::backend::adb::{AdbBackend, AdbClient, AdbTarget};
 pub use entities::backend::local::LocalBackend;
 pub use entities::backend::mtp::{MtpBackend, MtpClient, MtpMatch, MtpTarget};
 pub use entities::backend::smb::{SmbBackend, SmbClient, SmbTarget};
@@ -126,6 +127,7 @@ impl BackendFactory for DefaultBackendFactory {
             Location::Local(_) => Ok(LocalBackend::arc()),
             Location::Smb { .. } => build_smb_backend(loc),
             Location::Mtp { .. } => build_mtp_backend(loc),
+            Location::Adb { .. } => build_adb_backend(loc),
         }
     }
 }
@@ -189,6 +191,32 @@ fn build_mtp_backend(loc: &Location) -> Result<Arc<dyn Backend>> {
         std::io::ErrorKind::Unsupported,
         format!(
             "{} backend not enabled in this build; rebuild with --features mtp-backend",
+            loc.scheme()
+        ),
+    )))
+}
+
+#[cfg(feature = "adb-backend")]
+#[cfg_attr(coverage_nightly, coverage(off))]
+fn build_adb_backend(loc: &Location) -> Result<Arc<dyn Backend>> {
+    use entities::backend::adb::real::RealAdbClient;
+    use entities::backend::adb::AdbBackend;
+    let serial = match loc {
+        Location::Adb { serial, .. } => serial.clone(),
+        _ => None,
+    };
+    let cfg = &usecases::config::config().backend.adb;
+    let client =
+        RealAdbClient::new(serial, &cfg.server_host, cfg.server_port).map_err(Error::Io)?;
+    Ok(AdbBackend::arc_with_client(Arc::new(client)))
+}
+
+#[cfg(not(feature = "adb-backend"))]
+fn build_adb_backend(loc: &Location) -> Result<Arc<dyn Backend>> {
+    Err(Error::Io(std::io::Error::new(
+        std::io::ErrorKind::Unsupported,
+        format!(
+            "{} backend not enabled in this build; rebuild with --features adb-backend",
             loc.scheme()
         ),
     )))

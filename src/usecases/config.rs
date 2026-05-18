@@ -77,11 +77,33 @@ impl Default for MtpBackendConfig {
     }
 }
 
+#[derive(Clone, Debug, Deserialize)]
+#[serde(default)]
+pub struct AdbBackendConfig {
+    /// 本机 adb daemon 监听地址（adb_client 通过 TCP 连接）
+    pub server_host: String,
+    /// 本机 adb daemon 监听端口；adb 默认 5037
+    pub server_port: u16,
+    /// 单次 ADB 操作超时秒数；当前 adb_client 暴露面无显式 timeout API，仅作配置占位
+    pub timeout_secs: u64,
+}
+
+impl Default for AdbBackendConfig {
+    fn default() -> Self {
+        Self {
+            server_host: "127.0.0.1".into(),
+            server_port: 5037,
+            timeout_secs: 30,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Default, Deserialize)]
 #[serde(default)]
 pub struct BackendConfig {
     pub smb: SmbBackendConfig,
     pub mtp: MtpBackendConfig,
+    pub adb: AdbBackendConfig,
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
@@ -241,6 +263,9 @@ mod tests {
         assert_eq!(c.backend.smb.timeout_secs, 30);
         assert_eq!(c.backend.mtp.device_match, "fuzzy");
         assert_eq!(c.backend.mtp.storage_match, "fuzzy");
+        assert_eq!(c.backend.adb.server_host, "127.0.0.1");
+        assert_eq!(c.backend.adb.server_port, 5037);
+        assert_eq!(c.backend.adb.timeout_secs, 30);
     }
 
     #[test]
@@ -249,7 +274,7 @@ mod tests {
         let path = dir.path().join("backend.yaml");
         std::fs::write(
             &path,
-            "backend:\n  smb:\n    default_user: alice\n    workgroup: HOME\n    timeout_secs: 60\n  mtp:\n    device_match: exact\n    storage_match: exact\n",
+            "backend:\n  smb:\n    default_user: alice\n    workgroup: HOME\n    timeout_secs: 60\n  mtp:\n    device_match: exact\n    storage_match: exact\n  adb:\n    server_host: 10.0.0.5\n    server_port: 15037\n    timeout_secs: 90\n",
         )
         .unwrap();
         std::env::set_var("TIDYMEDIA_CONFIG", path.to_str().unwrap());
@@ -259,6 +284,9 @@ mod tests {
         assert_eq!(cfg.backend.smb.timeout_secs, 60);
         assert_eq!(cfg.backend.mtp.device_match, "exact");
         assert_eq!(cfg.backend.mtp.storage_match, "exact");
+        assert_eq!(cfg.backend.adb.server_host, "10.0.0.5");
+        assert_eq!(cfg.backend.adb.server_port, 15037);
+        assert_eq!(cfg.backend.adb.timeout_secs, 90);
         std::env::remove_var("TIDYMEDIA_CONFIG");
     }
 
