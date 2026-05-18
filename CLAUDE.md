@@ -76,6 +76,7 @@
   - `RealAdbClient::{stat, list, read, write, unlink, mkdir}`（`adb_real.rs`，包 adb_client 3.2）已接入，整模块 coverage(off)；unlink/mkdir 走 `shell_command("rm -f")` / `shell_command("mkdir -p")` + `shell_quote` 防注入。adb_client `stat/list/pull/push` 接 `&dyn AsRef<str>` trait object，传 `&path: &&str` 是正确二级借用；clippy `needless_borrows_for_generic_args` 在此 false-positive，本地 `#[allow]` 屏蔽
   - 调度逻辑（`build_target` / `parent_target` / `map_*_error` / `*BufferedWriter` / `lib.rs::tidy_with` 各分支）默认编译走 fake 注入 100% 覆盖。`lib.rs::build_smb_backend` / `build_mtp_backend` / `build_adb_backend` 在 feature 启用时也标 coverage(off)（构造 Real* 可能需服务器；feature off 时的 Unsupported Err 分支默认编译可覆盖）
 - **Backend trait 方法的 rejection 测试**：每个方法测三类输入——OK / client Err 注入 / 非自家 scheme 返回 `InvalidInput`
+- **"未启用 feature 返 Unsupported" 类集成测试**：`tidy_rejects_adb_uri_*` / `default_factory_adb_without_feature_*` 必须 `#[cfg(not(feature = "adb-backend"))]` gate，否则启用 feature 跑 nextest 会 fail（默认 factory 真去构造 Real* client，可能 Ok）；SMB 同类测试历史上未 gate，启用 `smb-backend` 跑会失败，属 baseline 缺陷
 - **FakeBackend `inject_reader_error`**：让 `open_read` 成功但返回的 reader 在 `read` 时立即 Err，专门覆盖调用方在 stream hash / `sniff_mime` 等位置的 `?` Err 分支
 
 ## 配置与日志
@@ -92,7 +93,17 @@
   - **流式哈希**：`FAST_READ_SIZE`（栈数组要求编译期常量）/ `STREAM_CHUNK = 1 MiB`（远端 backend syscall 频率 vs 网络往返平衡）/ `MIME_SNIFF_BYTES = 256`（`infer::get` 仅看前 16-32 字节）
 - `src/usecases/copy.rs` 的 `println!("\"{}\"\t\"{}\"", src, dst)` 是 CLI 脚本可读输出（dry-run + 完成回执），**不是** R3 日志路径，不要改成 tracing
 
+## Android / 移动端（feature `android-app`）
+- uniffi 0.31 proc-macro 模式：lib.rs 顶层 `uniffi::setup_scaffolding!()` 一次设置 + `#[uniffi::export]` / `#[derive(uniffi::Record)]` / `#[derive(uniffi::Error)]` 注解；不需要 build.rs / .udl 文件
+- `[lib] crate-type = ["cdylib", "rlib"]`：cdylib 给 Android JVM dlopen，rlib 让桌面集成测试链得上；不要换 staticlib（uniffi 0.31 走 cdylib + JNA）
+- 交叉编译：`cargo ndk -t aarch64-linux-android -p 30 --output-dir mobile/android/app/src/main/jniLibs build --release --features android-app`，`-p 30` 对齐 minSdk
+- Kotlin 绑定：`uniffi-bindgen-cli generate --library <libtidymedia.so> --language kotlin --out-dir <dir>`，输出 `uniffi/<crate>/<crate>.kt`；Kotlin 端通过 JNA 自动 dlopen jniLibs/arm64-v8a
+- `src/mobile.rs` 无独立 use case：直接 `tidy_with(&DefaultBackendFactory, Commands::Copy {..})` 复用 CLI 路径（YAGNI）；feature off 时整模块 cfg 排除，default 覆盖率统计不参与
+- mobile.rs `tidy_with(...)?` 的 Err 边在 DefaultBackendFactory + Local 路径几乎不可触发，feature on 时 stable region 1 miss 可接受（default 编译不参与统计，TOTAL 不受影响）
+
 ## 工具链注意
 - nextest 每个测试独立进程，`set_var`/`remove_var`/`OnceLock` 不会跨测试污染（区别于 `cargo test`）
 - 仓库 baseline 已有 clippy errors（`io_other_error` 等），改动前先 `git stash` 跑 baseline 再对照
 - HashMap 并行 in-place 改 value：用 `self.files.par_iter_mut().for_each(|(k, v)| ...)`，避免"par_iter→Vec→再 get_mut Option None"的不可达分支
+- 调研第三方 crate：`cargo info <crate>` 看版本 / features / 传递依赖；查公开 API 用 `find ~/.cargo/registry/src -path '*/<crate>-<ver>/*' -name 'lib.rs'` 后 `grep ^pub`，比开 docs.rs 快
+- clippy `needless_borrows_for_generic_args` 对 `&dyn AsRef<T>` trait object 参数 false-positive：例如 adb_client `stat/list/pull/push` 需 `&path: &&str` 二级借用，直接传 `path: &str` 编译失败；用本地 `#[allow(clippy::needless_borrows_for_generic_args)]` 标方法或调用
