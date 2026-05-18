@@ -1,5 +1,8 @@
 # tidymedia 开发上下文
 
+## 工具链可用性
+- `fd`/`rg`/`eza` 在当前环境未安装，P0.5 优先工具不可用时 fallback：`find` > `fd`，`grep` > `rg`，`tree` > `eza`
+
 ## 系统依赖
 - 无外部进程依赖。EXIF/视频元数据走纯 Rust 库：`nom-exif`（图片+视频解析）+ `infer`（magic-bytes MIME）。
 - Fixture 生成（开发时一次性，不在运行期依赖）用了 `ffmpeg` + `exiftool`：`sample-with-exif.jpg`、`sample-no-dates.jpg`、`sample-with-track.mp4`、`sample-no-track-date.mkv` 已 commit 到 `tests/data/`。
@@ -8,6 +11,7 @@
 
 ## 测试与覆盖率
 - 入口：`cargo nextest run`；默认覆盖率：`cargo llvm-cov nextest --summary-only`（stable，~99.6% region）
+- `cargo nextest run` 无 `--quiet` flag；静默输出用 `2>&1 | tail -N` 或 nextest 自己的 `--status-level` / `--failure-output`
 - **严格 100% 覆盖率（行/region/fn）**：`RUSTFLAGS="--cfg=coverage_nightly" cargo +nightly llvm-cov nextest --summary-only`
   - 标了 `#[cfg_attr(coverage_nightly, coverage(off))]` 的函数会被 LLVM 跳过统计（不可稳定触发的 ? Err / expect panic / slice 边界伪 region）
   - `lib.rs` 和 `bin/tidymedia.rs` 顶部用 `#![cfg_attr(coverage_nightly, feature(coverage_attribute))]` 开启该 nightly feature
@@ -56,6 +60,7 @@
   - `adb://[serial]/abs/path` ⇒ `Location::Adb`；serial 为空（`adb:///sdcard/...`）让 client autodetect 唯一在线设备；path 始终是设备上绝对路径（以 `/` 开头）
   - 字段内空格 / 中文 / 路径分隔符走 `percent-encoding`，**不引 `url` crate**（`entities/uri.rs` 自实现解析）
 - SMB 凭据：`SMB_USER` 经配置 `backend.smb.default_user` 兜底；`SMB_PASSWORD` 由 `SmbTarget::password` 在 `build_target` 处读 env；Kerberos 走 `KRB5CCNAME`。`backend.smb.workgroup` 默认 `WORKGROUP`，pavao `SmbCredentials::workgroup` 必填。**密码永远不入 YAML**（CLAUDE.md P0.13）
+- Secret 环境变量占位文件：`.env.example`（值用 `changeme`），`.env` 入 `.gitignore`；新增 secret 时必须同步更新
 - ADB 走本机 `adb` daemon 协议（adb_client 3.2 通过 TCP 连接 `127.0.0.1:5037`）：运行前需 `adb start-server`、Android 设备开 USB 调试 + 文件传输模式；多设备时 URI 必须带 serial。`backend.adb.{server_host, server_port, timeout_secs}` 都在 YAML 中可调（host/port 默认 `127.0.0.1:5037`）；adb sync 协议无原生 unlink / mkdir，`RealAdbClient` 通过 `shell_command("rm -f ...")` / `shell_command("mkdir -p ...")` 补齐，shell 参数走 `adb::shell_quote` 单引号转义防注入
 - `lib.rs::BackendFactory` trait + `DefaultBackendFactory` 按 [`Location`] 装配 [`Backend`]：Local 直接给 `LocalBackend`；SMB / MTP / ADB 走 cfg-gated 分支：
   - `--features smb-backend` 启用：`RealSmbClient`（`smb_real.rs`，包 pavao + libsmbclient C 库；Mutex 串行化 + `unsafe impl Send+Sync`）；未启用时返 `Unsupported "smb backend not enabled; rebuild with --features smb-backend"`
