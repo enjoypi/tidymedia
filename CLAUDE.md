@@ -95,11 +95,17 @@
 
 ## Android / 移动端（feature `android-app`）
 - uniffi 0.31 proc-macro 模式：lib.rs 顶层 `uniffi::setup_scaffolding!()` 一次设置 + `#[uniffi::export]` / `#[derive(uniffi::Record)]` / `#[derive(uniffi::Error)]` 注解；不需要 build.rs / .udl 文件
+- **uniffi 0.31 已知坑：`#[derive(uniffi::Error)]` enum 变体字段名不能叫 `message`**——uniffi 生成 `class Generic(val message: String)`，与 `kotlin.Exception.message` 撞名编译失败；用 `text` / `detail` 替代。同类 Throwable getter 名（`cause` 等）也要避开
 - `[lib] crate-type = ["cdylib", "rlib"]`：cdylib 给 Android JVM dlopen，rlib 让桌面集成测试链得上；不要换 staticlib（uniffi 0.31 走 cdylib + JNA）
 - 交叉编译：`cargo ndk -t aarch64-linux-android -p 30 --output-dir mobile/android/app/src/main/jniLibs build --release --features android-app`，`-p 30` 对齐 minSdk
-- Kotlin 绑定：`uniffi-bindgen-cli generate --library <libtidymedia.so> --language kotlin --out-dir <dir>`，输出 `uniffi/<crate>/<crate>.kt`；Kotlin 端通过 JNA 自动 dlopen jniLibs/arm64-v8a
+- Kotlin 绑定：`uniffi-bindgen generate --library <libtidymedia.so> --language kotlin --out-dir <dir>`，输出 `uniffi/<crate>/<crate>.kt`；Kotlin 端通过 JNA 自动 dlopen jniLibs/arm64-v8a。**`uniffi --features cli` 装出的 binary 实际叫 `uniffi-bindgen`**（不是 `uniffi-bindgen-cli`，crates.io 没那个包）
 - `src/mobile.rs` 无独立 use case：直接 `tidy_with(&DefaultBackendFactory, Commands::Copy {..})` 复用 CLI 路径（YAGNI）；feature off 时整模块 cfg 排除，default 覆盖率统计不参与
 - mobile.rs `tidy_with(...)?` 的 Err 边在 DefaultBackendFactory + Local 路径几乎不可触发，feature on 时 stable region 1 miss 可接受（default 编译不参与统计，TOTAL 不受影响）
+- **实测可工作工具组合（2025-09 后）**：JDK 25 (Temurin) + Gradle 9.1 + AGP 8.10 + Kotlin 2.0.21 + NDK r26d + SDK android-35。AGP 8.7 不支持 JDK 25；要升级 AGP 一起改
+- **ANDROID_HOME ≠ ANDROID_NDK_HOME**：cargo-ndk 只读 NDK；Gradle build 还需 SDK（android.jar / aapt2 / build-tools），两个环境变量都要设
+- **Compose 项目的 XML theme**：不要用 `@style/Theme.Material3.DayNight`（属 Material Components 库），Compose 项目自定义继承 `android:Theme.Material.Light.NoActionBar` 即可，颜色 / 排版完全交给 Kotlin 端 `MaterialTheme {}`
+- **AGP 8.7+ / Kotlin 2.0+ 的 `android.kotlinOptions` 已 deprecated**：改用 `kotlin { compilerOptions { jvmTarget.set(JvmTarget.JVM_17) } }`，需 `import org.jetbrains.kotlin.gradle.dsl.JvmTarget`
+- 静态校验 APK 不需要模拟器：`$ANDROID_HOME/build-tools/35.0.0/aapt2 dump packagename app.apk` / `aapt2 dump xmltree --file AndroidManifest.xml app.apk` / `unzip -l app.apk | grep lib/`
 
 ## 工具链注意
 - nextest 每个测试独立进程，`set_var`/`remove_var`/`OnceLock` 不会跨测试污染（区别于 `cargo test`）
