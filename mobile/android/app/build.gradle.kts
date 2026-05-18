@@ -1,3 +1,5 @@
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+
 plugins {
     id("com.android.application")
     kotlin("android")
@@ -26,9 +28,8 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
-    kotlinOptions {
-        jvmTarget = "17"
-    }
+    // AGP 8.7+/Kotlin 2.0+：旧 `kotlinOptions` 已 deprecated，改走 Kotlin DSL `compilerOptions`
+    // 直接挂到 plugin 上（不在 android {} 块内）。见下方 kotlin {} 配置。
 
     buildFeatures {
         compose = true
@@ -51,6 +52,13 @@ android {
         getByName("debug") {
             isDebuggable = true
         }
+    }
+}
+
+// Kotlin 2.0+ 推荐：用 kotlin.compilerOptions 替代旧 android.kotlinOptions
+kotlin {
+    compilerOptions {
+        jvmTarget.set(JvmTarget.JVM_17)
     }
 }
 

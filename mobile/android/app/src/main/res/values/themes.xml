@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Compose 应用：XML theme 仅给 Activity 启动屏 / 系统 UI 用，颜色/排版完全由
+     Kotlin 端 MaterialTheme {} 控制；这里继承平台 Material.Light.NoActionBar，
+     不引 com.google.android.material 库（Compose 不需要）。 -->
+<resources>
+    <style name="Theme.Tidymedia" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:windowDrawsSystemBarBackgrounds">true</item>
+    </style>
+</resources>

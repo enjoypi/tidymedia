@@ -30,15 +30,17 @@ pub struct TidyStats {
 
 /// uniffi 暴露给 Kotlin 的统一错误。
 /// 将 [`crate::Error`] 收敛成单一变体携带文案；UI 仅展示文案不做结构化匹配。
+/// 字段名故意用 `text` 而非 `message`：uniffi 0.31 在 Kotlin 端把 `message`
+/// 字段渲染成 `val message: String`，会与 `kotlin.Exception.message` 撞名导致编译失败。
 #[derive(uniffi::Error, Debug, thiserror::Error)]
 pub enum TidyError {
-    #[error("{message}")]
-    Generic { message: String },
+    #[error("{text}")]
+    Generic { text: String },
 }
 
 impl From<Error> for TidyError {
     fn from(e: Error) -> Self {
-        Self::Generic { message: format!("{e}") }
+        Self::Generic { text: format!("{e}") }
     }
 }
 
@@ -123,8 +125,8 @@ mod tests {
     #[test]
     fn tidy_error_carries_underlying_message() {
         let err: TidyError = Error::Io(std::io::Error::other("boom")).into();
-        let TidyError::Generic { message } = err;
-        assert!(message.contains("boom"), "got: {message}");
+        let TidyError::Generic { text } = err;
+        assert!(text.contains("boom"), "got: {text}");
     }
 
     #[test]
