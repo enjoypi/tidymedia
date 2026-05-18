@@ -1,3 +1,12 @@
 .idea/
 .vscode/
 /target
+
+# build-android.sh 产物：cargo-ndk 输出的 .so + uniffi-bindgen 输出的 .kt
+/mobile/android/app/src/main/jniLibs/
+/mobile/uniffi-generated/
+# Android Gradle 中间产物
+/mobile/android/.gradle/
+/mobile/android/build/
+/mobile/android/app/build/
+/mobile/android/local.properties

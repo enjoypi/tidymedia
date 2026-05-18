@@ -4,8 +4,8 @@
 #
 # 先决条件：
 # - 安装 Android NDK r26+（设 ANDROID_NDK_HOME 或 ANDROID_NDK_ROOT）
-# - `cargo install cargo-ndk` （cargo-ndk 0.6+，自动检测 NDK）
-# - `cargo install uniffi-bindgen-cli`
+# - `cargo install cargo-ndk`（自动检测 NDK）
+# - `cargo install uniffi --features cli`（提供 `uniffi-bindgen` binary）
 #
 # 输出：
 # - mobile/android/app/src/main/jniLibs/arm64-v8a/libtidymedia.so
@@ -32,10 +32,10 @@ if [[ ! -f "$SO_PATH" ]]; then
     exit 1
 fi
 
-# 2. 用 uniffi-bindgen-cli 从 .so metadata 抽取生成 Kotlin 绑定
-echo ">>> [2/3] uniffi-bindgen-cli generate Kotlin"
+# 2. 用 uniffi-bindgen 从 .so metadata 抽取生成 Kotlin 绑定
+echo ">>> [2/3] uniffi-bindgen generate Kotlin"
 mkdir -p "$SCRIPT_DIR/uniffi-generated"
-uniffi-bindgen-cli generate \
+uniffi-bindgen generate \
     --library "$SO_PATH" \
     --language kotlin \
     --out-dir "$SCRIPT_DIR/uniffi-generated"

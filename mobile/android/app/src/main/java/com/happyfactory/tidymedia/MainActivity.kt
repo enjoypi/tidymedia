@@ -18,7 +18,7 @@ import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import uniffi.tidymedia.TidyError
+import uniffi.tidymedia.TidyException
 import uniffi.tidymedia.TidyStats
 import uniffi.tidymedia.tidyDryRun
 import uniffi.tidymedia.tidymediaVersion
@@ -75,7 +75,7 @@ private suspend fun runDryRun(): String = withContext(Dispatchers.IO) {
         val out = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS).absolutePath + "/tidymedia-out"
         val stats: TidyStats = tidyDryRun(src = src, output = out)
         "${stats.status} (scanned=${stats.totalScanned}, copied=${stats.copied})"
-    } catch (e: TidyError) {
+    } catch (e: TidyException) {
         "Error: ${e.message ?: "<no message>"}"
     } catch (e: Throwable) {
         "Crash: ${e::class.simpleName}: ${e.message ?: ""}"
