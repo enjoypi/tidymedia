@@ -65,23 +65,33 @@
 - 目录名是 `usecases`（无下划线），跨层导入用 `crate::usecases::...` / `crate::entities::...` / `crate::adapters::...` / `crate::frameworks::...`
 
 ## URI 与 Backend
+
+### URI 格式
 - CLI `sources` / `output` 接 `Location`（实现 `FromStr` 让 clap 自动 value_parser）：
   - 无 `://` 或 `local://` ⇒ `Location::Local`
   - `smb://[user@]host[:port]/share/path` ⇒ `Location::Smb`
   - `mtp://device/storage/path` ⇒ `Location::Mtp`
   - `adb://[serial]/abs/path` ⇒ `Location::Adb`；serial 为空（`adb:///sdcard/...`）让 client autodetect 唯一在线设备；path 始终是设备上绝对路径（以 `/` 开头）
   - 字段内空格 / 中文 / 路径分隔符走 `percent-encoding`，**不引 `url` crate**（`entities/uri.rs` 自实现解析）
-- SMB 凭据：`SMB_USER` 经配置 `backend.smb.default_user` 兜底；`SMB_PASSWORD` 由 `SmbTarget::password` 在 `build_target` 处读 env；Kerberos 走 `KRB5CCNAME`。`backend.smb.workgroup` 默认 `WORKGROUP`，pavao `SmbCredentials::workgroup` 必填。**密码永远不入 YAML**（CLAUDE.md P0.13）
+- 任意混合 sources 已支持：`copy smb://a /local/b mtp://c adb:///sdcard/d -o /x` 合法；[`Index`] 内部每条 `Info` 自带 `Arc<dyn Backend>`，`visit_location(&Location, Arc<dyn Backend>)` 显式接 backend 入参
+
+### 凭据
+- SMB：`SMB_USER` 经配置 `backend.smb.default_user` 兜底；`SMB_PASSWORD` 由 `SmbTarget::password` 在 `build_target` 处读 env；Kerberos 走 `KRB5CCNAME`。`backend.smb.workgroup` 默认 `WORKGROUP`，pavao `SmbCredentials::workgroup` 必填。**密码永远不入 YAML**（CLAUDE.md P0.13）
+- ADB：走本机 `adb` daemon 协议（adb_client 3.2 通过 TCP 连接 `127.0.0.1:5037`）；运行前需 `adb start-server`、Android 设备开 USB 调试 + 文件传输模式；多设备时 URI 必须带 serial。`backend.adb.{server_host, server_port, timeout_secs}` 都在 YAML 中可调（host/port 默认 `127.0.0.1:5037`）
 - Secret 环境变量占位文件：`.env.example`（值用 `changeme`），`.env` 入 `.gitignore`；新增 secret 时必须同步更新
-- ADB 走本机 `adb` daemon 协议（adb_client 3.2 通过 TCP 连接 `127.0.0.1:5037`）：运行前需 `adb start-server`、Android 设备开 USB 调试 + 文件传输模式；多设备时 URI 必须带 serial。`backend.adb.{server_host, server_port, timeout_secs}` 都在 YAML 中可调（host/port 默认 `127.0.0.1:5037`）；adb sync 协议无原生 unlink / mkdir，`RealAdbClient` 通过 `shell_command("rm -f ...")` / `shell_command("mkdir -p ...")` 补齐，shell 参数走 `adb::shell_quote` 单引号转义防注入
+
+### 工厂与注入
 - `adapters::backend::factory::BackendFactory` trait + `DefaultBackendFactory` 按 [`Location`] 装配 [`Backend`]：Local 直接给 `LocalBackend`；SMB / MTP / ADB 走 cfg-gated 分支：
   - `--features smb-backend` 启用：`RealSmbClient`（`smb_real.rs`，包 pavao + libsmbclient C 库；Mutex 串行化 + `unsafe impl Send+Sync`）；未启用时返 `Unsupported "smb backend not enabled; rebuild with --features smb-backend"`
   - `--features mtp-backend` 启用：`RealMtpClient` 当前是 stub（`mtp_real.rs`），运行期仍返 `Unsupported`，错误消息引导 future PR 选定 crate（libmtp-rs / gphoto2-rs / 自接 rusb-PTP，无现成跨平台 + Android NDK 友好方案）；未启用时返 `Unsupported "mtp backend not enabled; rebuild with --features mtp-backend"`
   - `--features adb-backend` 启用：`RealAdbClient`（`adb_real.rs`，包 adb_client 3.2；`Mutex<ADBServerDevice>` 串行化）；未启用时返 `Unsupported "adb backend not enabled; rebuild with --features adb-backend"`
 - 测试侧 `tidy_with(factory, command)` 接 `BackendFactory` 注入：集成测试通过 `FakeBackendFactory`（`HashMap<scheme, Arc<dyn Backend>>`）挂载 `FakeBackend` 验证跨 scheme 调度；`FakeBackend` / `FakeOp` 已 `#[doc(hidden)] pub use` 到 crate 根，integration test 可直接 import
-- 任意混合 sources 已支持：`copy smb://a /local/b mtp://c adb:///sdcard/d -o /x` 合法；[`Index`] 内部每条 `Info` 自带 `Arc<dyn Backend>`，`visit_location(&Location, Arc<dyn Backend>)` 显式接 backend 入参
 
-## 远端 backend 测试套路（SMB / MTP / ADB 通用）
+### ADB 特殊实现
+- adb sync 协议无原生 unlink / mkdir，`RealAdbClient` 通过 `shell_command("rm -f ...")` / `shell_command("mkdir -p ...")` 补齐，shell 参数走 `adb::shell_quote` 单引号转义防注入
+- adb_client `stat/list/pull/push` 接 `&dyn AsRef<str>` trait object，传 `&path: &&str` 是正确二级借用
+
+### 远端 backend 测试套路（SMB / MTP / ADB 通用）
 - **手写 FakeSmbClient / FakeMtpClient / FakeAdbClient**：state 用 `Arc<Mutex<HashMap<...>>>`；`inject(*Op::Read, path, ErrorKind::TimedOut)` 注入逐 op + 逐 path 的错误，无须 `mockall`
 - **错误文案映射**：
   - SMB `map_smb_error` 对 `io::Error::other` + 文案含 `"EACCES"` 转 `PermissionDenied`；FakeSmbClient 用同一文案触发
@@ -90,7 +100,7 @@
 - **真实 client 适配器**：
   - `RealSmbClient::{stat, list, read, write, unlink, mkdir}`（`smb_real.rs`，包 pavao）已接入，整模块标 `#![cfg_attr(coverage_nightly, coverage(off))]`（需 share 服务器才能稳定触发，CI 不可覆盖）
   - `RealMtpClient::new()` 是 stub 占位（`mtp_real.rs`），同样 coverage(off)
-  - `RealAdbClient::{stat, list, read, write, unlink, mkdir}`（`adb_real.rs`，包 adb_client 3.2）已接入，整模块 coverage(off)；unlink/mkdir 走 `shell_command("rm -f")` / `shell_command("mkdir -p")` + `shell_quote` 防注入。adb_client `stat/list/pull/push` 接 `&dyn AsRef<str>` trait object，传 `&path: &&str` 是正确二级借用；clippy `needless_borrows_for_generic_args` 在此 false-positive，本地 `#[allow]` 屏蔽
+  - `RealAdbClient::{stat, list, read, write, unlink, mkdir}`（`adb_real.rs`，包 adb_client 3.2）已接入，整模块 coverage(off)
   - 调度逻辑（`build_target` / `parent_target` / `map_*_error` / `*BufferedWriter` / `adapters::dispatch::tidy_with` 各分支）默认编译走 fake 注入 100% 覆盖。`adapters::backend::factory::build_smb_backend` / `build_mtp_backend` / `build_adb_backend` 在 feature 启用时也标 coverage(off)（构造 Real* 可能需服务器；feature off 时的 Unsupported Err 分支默认编译可覆盖）
 - **Backend trait 方法的 rejection 测试**：每个方法测三类输入——OK / client Err 注入 / 非自家 scheme 返回 `InvalidInput`
 - **"未启用 feature 返 Unsupported" 类集成测试**：`tidy_rejects_adb_uri_*` / `default_factory_adb_without_feature_*` 必须 `#[cfg(not(feature = "adb-backend"))]` gate，否则启用 feature 跑 nextest 会 fail（默认 factory 真去构造 Real* client，可能 Ok）；SMB 同类测试历史上未 gate，启用 `smb-backend` 跑会失败，属 baseline 缺陷
@@ -124,10 +134,7 @@
 - **AGP 8.7+ / Kotlin 2.0+ 的 `android.kotlinOptions` 已 deprecated**：改用 `kotlin { compilerOptions { jvmTarget.set(JvmTarget.JVM_17) } }`，需 `import org.jetbrains.kotlin.gradle.dsl.JvmTarget`
 - 静态校验 APK 不需要模拟器：`$ANDROID_HOME/build-tools/35.0.0/aapt2 dump packagename app.apk` / `aapt2 dump xmltree --file AndroidManifest.xml app.apk` / `unzip -l app.apk | grep lib/`
 
-## 工具链注意
+## 项目 Gotcha
 - nextest 每个测试独立进程，`set_var`/`remove_var`/`OnceLock` 不会跨测试污染（区别于 `cargo test`）
 - 仓库 baseline 已有 clippy errors（`io_other_error` 等），改动前先 `git stash` 跑 baseline 再对照
 - HashMap 并行 in-place 改 value：用 `self.files.par_iter_mut().for_each(|(k, v)| ...)`，避免"par_iter→Vec→再 get_mut Option None"的不可达分支
-- 调研第三方 crate：`cargo info <crate>` 看版本 / features / 传递依赖；查公开 API 用 `find ~/.cargo/registry/src -path '*/<crate>-<ver>/*' -name 'lib.rs'` 后 `grep ^pub`，比开 docs.rs 快
-- clippy `needless_borrows_for_generic_args` 对 `&dyn AsRef<T>` trait object 参数 false-positive：例如 adb_client `stat/list/pull/push` 需 `&path: &&str` 二级借用，直接传 `path: &str` 编译失败；用本地 `#[allow(clippy::needless_borrows_for_generic_args)]` 标方法或调用
-- 泛型函数从 `impl<A: Trait>` 块提取到模块级后，调用处必须 turbofish `func::<A>()` 显式标注类型参数；编译器无法从 `self.adapter` 反推
