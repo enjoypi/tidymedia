@@ -11,7 +11,7 @@ use camino::Utf8PathBuf;
 
 use super::remote::RemoteClient;
 use super::remote::RemoteTarget;
-use super::{Entry, EntryKind, Metadata};
+use crate::entities::backend::{Entry, EntryKind, Metadata};
 
 /// Client 操作的错误注入键。
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]

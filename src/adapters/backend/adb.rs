@@ -15,7 +15,7 @@ use std::sync::Arc;
 use camino::Utf8PathBuf;
 
 use super::remote::{RemoteAdapter, RemoteBackend, RemoteClient, RemoteTarget};
-use super::Backend;
+use crate::entities::backend::Backend;
 use crate::entities::uri::Location;
 
 /// ADB target 的最小可识别参数集。`AdbClient` 实现按此参数访问设备。

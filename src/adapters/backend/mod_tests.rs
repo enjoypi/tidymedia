@@ -4,7 +4,7 @@ use camino::Utf8PathBuf;
 use pretty_assertions::assert_eq;
 
 use super::fake::{FakeBackend, Op};
-use super::{Backend, Entry, EntryKind, Metadata};
+use crate::entities::backend::{Backend, Entry, EntryKind, Metadata};
 use crate::entities::uri::Location;
 
 fn smb(path: &str) -> Location {

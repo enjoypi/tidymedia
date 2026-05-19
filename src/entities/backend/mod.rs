@@ -7,17 +7,31 @@ use std::time::SystemTime;
 
 use super::uri::Location;
 
-pub mod adb;
-pub(crate) mod fake_remote;
-pub mod local;
-pub mod mtp;
-pub(crate) mod remote;
-pub mod smb;
+pub mod adb {
+    pub use crate::adapters::backend::adb::*;
+}
+pub(crate) mod fake_remote {
+    pub use crate::adapters::backend::fake_remote::*;
+}
+pub mod local {
+    pub use crate::adapters::backend::local::LocalBackend;
+}
+pub mod mtp {
+    pub use crate::adapters::backend::mtp::*;
+}
+pub(crate) mod remote {
+    pub use crate::adapters::backend::remote::*;
+}
+pub mod smb {
+    pub use crate::adapters::backend::smb::*;
+}
 
 // FakeBackend 是常驻编译的测试 helper：集成测试（`tests/`）需要在 `#[cfg(test)]`
 // 之外引用它来组装 FakeBackendFactory。`#[doc(hidden)]` 让它不出现在公开 docs。
 #[doc(hidden)]
-pub mod fake;
+pub mod fake {
+    pub use crate::adapters::backend::fake::*;
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum EntryKind {
@@ -80,7 +94,3 @@ pub trait Backend: Send + Sync {
         mkparents: bool,
     ) -> io::Result<u64>;
 }
-
-#[cfg(test)]
-#[path = "mod_tests.rs"]
-mod tests;

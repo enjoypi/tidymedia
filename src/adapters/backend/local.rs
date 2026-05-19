@@ -16,7 +16,7 @@ use camino::Utf8Path;
 use ignore::WalkBuilder;
 use memmap2::Mmap;
 
-use super::{Backend, Entry, EntryKind, MediaReader, MediaWriter, Metadata};
+use crate::entities::backend::{Backend, Entry, EntryKind, MediaReader, MediaWriter, Metadata};
 use crate::entities::uri::Location;
 
 #[derive(Debug, Default)]

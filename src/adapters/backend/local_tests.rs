@@ -10,7 +10,7 @@ use camino::Utf8PathBuf;
 use pretty_assertions::assert_eq;
 use tempfile::tempdir;
 
-use super::super::{Backend, EntryKind};
+use crate::entities::backend::{Backend, EntryKind};
 use super::LocalBackend;
 use crate::entities::uri::Location;
 

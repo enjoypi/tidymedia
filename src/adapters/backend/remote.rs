@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use camino::Utf8PathBuf;
 
-use super::{Backend, Entry, MediaReader, MediaWriter, Metadata};
+use crate::entities::backend::{Backend, Entry, MediaReader, MediaWriter, Metadata};
 use crate::entities::uri::Location;
 
 /// 远端存储目标的协议相关参数（host/path/凭据等）。

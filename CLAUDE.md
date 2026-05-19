@@ -43,14 +43,18 @@
 ## 文件组织
 - 单文件 > 512 行时拆测试：`#[cfg(test)] #[path = "X_tests.rs"] mod tests;`（保留 `super::` 路径关系）
 - `entities/test_common` 与 `entities/exif` 是 `pub(crate)`，跨模块测试可访问
+- CA 重构移动文件时：`pub use A::B` 只 re-export 类型不保留路径，`pub mod B { pub use A::B::*; }` 保留完整模块路径；配套测试的 `super::` 需改为 `crate::` 绝对路径
+- CA 依赖方向验证：`grep -rn "use crate::adapters\|use crate::frameworks" src/entities/ src/usecases/` 应仅返回 re-export 桥接，不含业务逻辑导入
 
 ## 项目分层（Clean Architecture）
-- 三层（自外向内）：`src/bin/tidymedia.rs`（Frameworks）→ `src/lib.rs`（Interface Adapter / CLI）→ `src/usecases/`（Use Cases）→ `src/entities/`（Entities）
-- `bin/tidymedia.rs` **只**调 `tidymedia::run_cli(env::args_os())`，零业务逻辑，所有可测代码上移到 `lib.rs`
-- `lib.rs` 持有 `Cli`/`Commands` 与 `tidy()` 调度；clap 解析、日志初始化、命令分发都在这层
-- `usecases/` 仅依赖 `entities/`，对外通过 `mod.rs` 用 `pub(super)` 暴露 `copy` / `find_duplicates`；不直接面向 CLI 参数结构
-- `entities/backend/` 是 Gateway 抽象：`trait Backend` + `Local / Smb / Mtp / Adb` 四实现 + 测试 `FakeBackend`；`file_info` / `file_index` / `exif` / `sidecar` 都 backend-aware（持 `Arc<dyn Backend>`，旧 `Info::from(&str)` / `Index::new()` / `Exif::from_path_with_offset` / `sidecar::discover` 均退化为 LocalBackend shim）
-- 目录名是 `usecases`（无下划线），跨层导入用 `crate::usecases::...` / `crate::entities::...`
+- 四层（自外向内）：`src/frameworks/`（Frameworks）→ `src/adapters/`（Interface Adapters）→ `src/usecases/`（Use Cases）→ `src/entities/`（Entities）
+- `bin/tidymedia.rs` **只**调 `tidymedia::run_cli(env::args_os())`，零业务逻辑
+- `lib.rs` 仅做模块声明 + re-export，不含业务逻辑
+- `adapters/` 持有 CLI 解析（`cli.rs`）、命令调度（`dispatch.rs`）、Gateway 实现（`backend/`：`local` / `remote` / `smb` / `adb` / `mtp` / `fake`）、Backend 工厂（`backend/factory.rs`）
+- `frameworks/` 持有配置加载 IO（`config.rs`：`OnceLock` + `config()` + `load()` + `expand_env()`）
+- `usecases/` 仅依赖 `entities/`，对外通过 `mod.rs` 用 `pub(super)` 暴露 `copy` / `find_duplicates`；配置结构体定义留在 `usecases/config.rs`，通过 re-export `pub use crate::frameworks::config::config;` 让 usecases 内部用 `super::config::config` 不直接依赖 frameworks
+- `entities/backend/` 是 Gateway 抽象：`trait Backend` + 值类型（`SmbTarget` / `AdbTarget` / `MtpTarget`）；具体实现通过 re-export 模块（`pub mod local { pub use crate::adapters::backend::local::LocalBackend; }` 等）保持原有路径；`file_info` / `file_index` / `exif` / `sidecar` 都 backend-aware（持 `Arc<dyn Backend>`）
+- 目录名是 `usecases`（无下划线），跨层导入用 `crate::usecases::...` / `crate::entities::...` / `crate::adapters::...` / `crate::frameworks::...`
 
 ## URI 与 Backend
 - CLI `sources` / `output` 接 `Location`（实现 `FromStr` 让 clap 自动 value_parser）：
@@ -62,7 +66,7 @@
 - SMB 凭据：`SMB_USER` 经配置 `backend.smb.default_user` 兜底；`SMB_PASSWORD` 由 `SmbTarget::password` 在 `build_target` 处读 env；Kerberos 走 `KRB5CCNAME`。`backend.smb.workgroup` 默认 `WORKGROUP`，pavao `SmbCredentials::workgroup` 必填。**密码永远不入 YAML**（CLAUDE.md P0.13）
 - Secret 环境变量占位文件：`.env.example`（值用 `changeme`），`.env` 入 `.gitignore`；新增 secret 时必须同步更新
 - ADB 走本机 `adb` daemon 协议（adb_client 3.2 通过 TCP 连接 `127.0.0.1:5037`）：运行前需 `adb start-server`、Android 设备开 USB 调试 + 文件传输模式；多设备时 URI 必须带 serial。`backend.adb.{server_host, server_port, timeout_secs}` 都在 YAML 中可调（host/port 默认 `127.0.0.1:5037`）；adb sync 协议无原生 unlink / mkdir，`RealAdbClient` 通过 `shell_command("rm -f ...")` / `shell_command("mkdir -p ...")` 补齐，shell 参数走 `adb::shell_quote` 单引号转义防注入
-- `lib.rs::BackendFactory` trait + `DefaultBackendFactory` 按 [`Location`] 装配 [`Backend`]：Local 直接给 `LocalBackend`；SMB / MTP / ADB 走 cfg-gated 分支：
+- `adapters::backend::factory::BackendFactory` trait + `DefaultBackendFactory` 按 [`Location`] 装配 [`Backend`]：Local 直接给 `LocalBackend`；SMB / MTP / ADB 走 cfg-gated 分支：
   - `--features smb-backend` 启用：`RealSmbClient`（`smb_real.rs`，包 pavao + libsmbclient C 库；Mutex 串行化 + `unsafe impl Send+Sync`）；未启用时返 `Unsupported "smb backend not enabled; rebuild with --features smb-backend"`
   - `--features mtp-backend` 启用：`RealMtpClient` 当前是 stub（`mtp_real.rs`），运行期仍返 `Unsupported`，错误消息引导 future PR 选定 crate（libmtp-rs / gphoto2-rs / 自接 rusb-PTP，无现成跨平台 + Android NDK 友好方案）；未启用时返 `Unsupported "mtp backend not enabled; rebuild with --features mtp-backend"`
   - `--features adb-backend` 启用：`RealAdbClient`（`adb_real.rs`，包 adb_client 3.2；`Mutex<ADBServerDevice>` 串行化）；未启用时返 `Unsupported "adb backend not enabled; rebuild with --features adb-backend"`
@@ -79,7 +83,7 @@
   - `RealSmbClient::{stat, list, read, write, unlink, mkdir}`（`smb_real.rs`，包 pavao）已接入，整模块标 `#![cfg_attr(coverage_nightly, coverage(off))]`（需 share 服务器才能稳定触发，CI 不可覆盖）
   - `RealMtpClient::new()` 是 stub 占位（`mtp_real.rs`），同样 coverage(off)
   - `RealAdbClient::{stat, list, read, write, unlink, mkdir}`（`adb_real.rs`，包 adb_client 3.2）已接入，整模块 coverage(off)；unlink/mkdir 走 `shell_command("rm -f")` / `shell_command("mkdir -p")` + `shell_quote` 防注入。adb_client `stat/list/pull/push` 接 `&dyn AsRef<str>` trait object，传 `&path: &&str` 是正确二级借用；clippy `needless_borrows_for_generic_args` 在此 false-positive，本地 `#[allow]` 屏蔽
-  - 调度逻辑（`build_target` / `parent_target` / `map_*_error` / `*BufferedWriter` / `lib.rs::tidy_with` 各分支）默认编译走 fake 注入 100% 覆盖。`lib.rs::build_smb_backend` / `build_mtp_backend` / `build_adb_backend` 在 feature 启用时也标 coverage(off)（构造 Real* 可能需服务器；feature off 时的 Unsupported Err 分支默认编译可覆盖）
+  - 调度逻辑（`build_target` / `parent_target` / `map_*_error` / `*BufferedWriter` / `adapters::dispatch::tidy_with` 各分支）默认编译走 fake 注入 100% 覆盖。`adapters::backend::factory::build_smb_backend` / `build_mtp_backend` / `build_adb_backend` 在 feature 启用时也标 coverage(off)（构造 Real* 可能需服务器；feature off 时的 Unsupported Err 分支默认编译可覆盖）
 - **Backend trait 方法的 rejection 测试**：每个方法测三类输入——OK / client Err 注入 / 非自家 scheme 返回 `InvalidInput`
 - **"未启用 feature 返 Unsupported" 类集成测试**：`tidy_rejects_adb_uri_*` / `default_factory_adb_without_feature_*` 必须 `#[cfg(not(feature = "adb-backend"))]` gate，否则启用 feature 跑 nextest 会 fail（默认 factory 真去构造 Real* client，可能 Ok）；SMB 同类测试历史上未 gate，启用 `smb-backend` 跑会失败，属 baseline 缺陷
 - **FakeBackend `inject_reader_error`**：让 `open_read` 成功但返回的 reader 在 `read` 时立即 Err，专门覆盖调用方在 stream hash / `sniff_mime` 等位置的 `?` Err 分支

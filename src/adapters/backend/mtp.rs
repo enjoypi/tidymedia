@@ -16,7 +16,7 @@ use std::sync::Arc;
 use camino::Utf8PathBuf;
 
 use super::remote::{RemoteAdapter, RemoteBackend, RemoteClient, RemoteTarget};
-use super::Backend;
+use crate::entities::backend::Backend;
 use crate::entities::uri::Location;
 
 /// 匹配策略：与真实 MTP client 一起决定如何把 URI 内的 device/storage 名字

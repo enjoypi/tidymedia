@@ -2,7 +2,7 @@
 //! RemoteBackend / RemoteBufferedWriter 的全部分支。
 
 use super::*;
-use super::super::{Entry, EntryKind, Metadata};
+use crate::entities::backend::{Entry, EntryKind, Metadata};
 use crate::entities::uri::Location;
 use camino::{Utf8Path, Utf8PathBuf};
 use std::io;

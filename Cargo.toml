@@ -35,7 +35,6 @@ uniffi = { version = "0.31", optional = true }
 camino = { version = "*", features = ["serde1"] }
 chrono = "*"
 clap = { version = "*", features = ["derive"] }
-fs_extra = "*"
 generic-array = "0"
 hex = "*"
 ignore = "*"

@@ -1,7 +1,7 @@
 //! FakeRemoteClient 自身的单元测试：用 DummyTarget 验证文件增删查改。
 
 use super::super::remote::{RemoteClient, RemoteTarget};
-use super::super::{EntryKind, Metadata};
+use crate::entities::backend::{EntryKind, Metadata};
 use super::*;
 use camino::{Utf8Path, Utf8PathBuf};
 use crate::entities::uri::Location;
