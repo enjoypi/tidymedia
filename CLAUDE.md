@@ -1,10 +1,17 @@
+@~/.claude/CLAUDE.md
+
+@~/.claude/rust.md
+
 # tidymedia 开发上下文
 
-## 工具链可用性
-- `fd`/`rg`/`eza` 在当前环境未安装，P0.5 优先工具不可用时 fallback：`find` > `fd`，`grep` > `rg`，`tree` > `eza`
+## Quick Start
+- 构建：`cargo build`；运行：`cargo run -- copy /source -o /output`；dry-run：`cargo run -- copy /source -o /output --dry-run`
+- 测试：`cargo nextest run`；覆盖率：`cargo llvm-cov nextest --summary-only`
+- lint：`cargo +nightly fmt && cargo clippy`
 
 ## 系统依赖
 - 无外部进程依赖。EXIF/视频元数据走纯 Rust 库：`nom-exif`（图片+视频解析）+ `infer`（magic-bytes MIME）。
+- `pavao/` 是 vendor 的 pavao + pavao-sys crate（SMB 客户端 C 绑定），`smb-backend` feature 启用时通过 `[patch]` 引用；未入库（`.gitignore`），本地开发用
 - Fixture 生成（开发时一次性，不在运行期依赖）用了 `ffmpeg` + `exiftool`：`sample-with-exif.jpg`、`sample-no-dates.jpg`、`sample-with-track.mp4`、`sample-no-track-date.mkv` 已 commit 到 `tests/data/`。
 - nom-exif 内部用 `tracing::info!("find")` / `tracing::warn!("GPSInfo not found")` 大量输出，`install_logging` 必须用 EnvFilter 把 `nom_exif=error` 默认压住，保留 `RUST_LOG` 覆盖
 - nom-exif 不 re-export chrono；测试构造 `EntryValue::DateTime/NaiveDateTime` 需把 `chrono` 加 dev-deps
@@ -50,10 +57,11 @@
 - 四层（自外向内）：`src/frameworks/`（Frameworks）→ `src/adapters/`（Interface Adapters）→ `src/usecases/`（Use Cases）→ `src/entities/`（Entities）
 - `bin/tidymedia.rs` **只**调 `tidymedia::run_cli(env::args_os())`，零业务逻辑
 - `lib.rs` 仅做模块声明 + re-export，不含业务逻辑
-- `adapters/` 持有 CLI 解析（`cli.rs`）、命令调度（`dispatch.rs`）、Gateway 实现（`backend/`：`local` / `remote` / `smb` / `adb` / `mtp` / `fake`）、Backend 工厂（`backend/factory.rs`）
+- `adapters/` 持有 CLI 解析（`cli.rs`）、命令调度（`dispatch.rs`）、Gateway 实现（`backend/`：`local.rs` / `remote.rs` / `smb.rs` / `adb.rs` / `mtp.rs` / `fake.rs` / `fake_remote.rs` + 对应 `*_real.rs` / `*_tests.rs`）、Backend 工厂（`backend/factory.rs`）
 - `frameworks/` 持有配置加载 IO（`config.rs`：`OnceLock` + `config()` + `load()` + `expand_env()`）
 - `usecases/` 仅依赖 `entities/`，对外通过 `mod.rs` 用 `pub(super)` 暴露 `copy` / `find_duplicates`；配置结构体定义留在 `usecases/config.rs`，通过 re-export `pub use crate::frameworks::config::config;` 让 usecases 内部用 `super::config::config` 不直接依赖 frameworks
-- `entities/backend/` 是 Gateway 抽象：`trait Backend` + 值类型（`SmbTarget` / `AdbTarget` / `MtpTarget`）；具体实现通过 re-export 模块（`pub mod local { pub use crate::adapters::backend::local::LocalBackend; }` 等）保持原有路径；`file_info` / `file_index` / `exif` / `sidecar` 都 backend-aware（持 `Arc<dyn Backend>`）
+- `entities/backend/` 是 Gateway 抽象：`trait Backend` + 值类型（`SmbTarget` / `AdbTarget` / `MtpTarget`）；具体实现通过 re-export 模块（`pub mod local { pub use crate::adapters::backend::local::LocalBackend; }` 等）保持原有路径；`file_info` / `file_index` / `exif` / `media_time::sidecar` 都 backend-aware（持 `Arc<dyn Backend>`）
+- `entities/common.rs` 是非测试用途的共享工具（`test_common.rs` 是测试专用）
 - 目录名是 `usecases`（无下划线），跨层导入用 `crate::usecases::...` / `crate::entities::...` / `crate::adapters::...` / `crate::frameworks::...`
 
 ## URI 与 Backend
