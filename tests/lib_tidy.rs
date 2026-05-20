@@ -464,6 +464,64 @@ fn tidy_with_move_local_to_fake_mtp_removes_src() {
     );
 }
 
+// duplicate + Move (remove=true) + dry_run=false：实际删除源。触发 L176:22
+// `!dry_run` 的 True 分支（在 lib_tidy 集成 binary instance 上同时覆盖 T 与 F）。
+#[test]
+fn tidy_move_with_duplicate_removes_src_when_not_dry_run() {
+    let src_dir = tempdir().unwrap();
+    let out_dir = tempdir().unwrap();
+    let payload = vec![0x77u8; 4096];
+    let src_file = src_dir.path().join("photo2.bin");
+    std::fs::write(&src_file, &payload).unwrap();
+    let mtime = filetime::FileTime::from_unix_time(1_704_067_200, 0);
+    filetime::set_file_mtime(&src_file, mtime).unwrap();
+    std::fs::write(out_dir.path().join("dup2.bin"), &payload).unwrap();
+
+    tidy(Commands::Move {
+        dry_run: false,
+        include_non_media: true,
+        sources: vec![local(src_dir.path().to_str().unwrap())],
+        output: local(out_dir.path().to_str().unwrap()),
+    })
+    .expect("move with duplicate should succeed");
+
+    assert!(
+        !src_file.exists(),
+        "real move must remove src when duplicate detected"
+    );
+}
+
+// 触发 `do_copy` 中 duplicate 检测 + remove + dry_run 的三态 branch：
+// `if remove && !dry_run` 的 `!dry_run` False 分支（即 dry_run=true 时不实际删源）。
+#[test]
+fn tidy_move_dry_run_with_duplicate_skips_actual_remove() {
+    let src_dir = tempdir().unwrap();
+    let out_dir = tempdir().unwrap();
+    // 同一内容写两份：source 与 output 各一个，SHA-512 相等 → duplicate 命中。
+    let payload = vec![0x42u8; 4096];
+    let src_file = src_dir.path().join("photo.bin");
+    std::fs::write(&src_file, &payload).unwrap();
+    // 固定 mtime 让 create_time 桶稳定，与 lib_tidy 其他用例一致。
+    let mtime = filetime::FileTime::from_unix_time(1_704_067_200, 0);
+    filetime::set_file_mtime(&src_file, mtime).unwrap();
+    // 把同样内容放到 output 任意位置，让 output_index 扫描时挂上同 hash 文件。
+    std::fs::write(out_dir.path().join("dup.bin"), &payload).unwrap();
+
+    tidy(Commands::Move {
+        dry_run: true,
+        include_non_media: true,
+        sources: vec![local(src_dir.path().to_str().unwrap())],
+        output: local(out_dir.path().to_str().unwrap()),
+    })
+    .expect("dry-run move with duplicate should succeed");
+
+    // dry_run=true 时即便检测到 duplicate 也不应删源。
+    assert!(
+        src_file.exists(),
+        "dry-run must not remove src when duplicate detected"
+    );
+}
+
 #[test]
 fn tidy_with_propagates_smb_open_read_error() {
     // FakeBackend 注入 OpenRead Err：visit_location 阶段 Info::open 内部就 fail，

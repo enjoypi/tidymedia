@@ -354,6 +354,58 @@ fn secure_hash_errors_when_file_deleted() {
     assert_eq!(err.kind(), std::io::ErrorKind::NotFound);
 }
 
+// 显式走 Info::open + LocalBackend，覆盖 L130 cache-hit True 分支。
+#[test]
+fn info_open_calc_full_hash_caches_on_second_call() {
+    use super::super::super::adapters::backend::local::LocalBackend;
+    use super::super::uri::Location;
+    use camino::Utf8PathBuf;
+    let path = Utf8PathBuf::from(common::DATA_LARGE);
+    let info = Info::open(&Location::Local(path), LocalBackend::arc()).unwrap();
+    let h1 = info.calc_full_hash().unwrap();
+    let h2 = info.calc_full_hash().unwrap();
+    assert_eq!(h1, h2);
+}
+
+// 显式走 Info::open + LocalBackend，覆盖 L147 cache-hit True 分支。
+#[test]
+fn info_open_secure_hash_caches_on_second_call() {
+    use super::super::super::adapters::backend::local::LocalBackend;
+    use super::super::uri::Location;
+    use camino::Utf8PathBuf;
+    let path = Utf8PathBuf::from(common::DATA_LARGE);
+    let info = Info::open(&Location::Local(path), LocalBackend::arc()).unwrap();
+    let s1 = info.secure_hash().unwrap();
+    let s2 = info.secure_hash().unwrap();
+    assert_eq!(s1, s2);
+}
+
+// 显式走 Info::open + LocalBackend，覆盖 L87 "is a directory" True 分支。
+#[test]
+fn info_open_rejects_directory_with_local_backend() {
+    use super::super::super::adapters::backend::local::LocalBackend;
+    use super::super::uri::Location;
+    use camino::Utf8PathBuf;
+    let err = Info::open(
+        &Location::Local(Utf8PathBuf::from(common::DATA_DIR)),
+        LocalBackend::arc(),
+    )
+    .unwrap_err();
+    assert!(err.to_string().contains("is a directory"), "got: {err}");
+}
+
+// 显式走 Info::open + LocalBackend，覆盖 L93 "is empty" True 分支。
+#[test]
+fn info_open_rejects_empty_file_with_local_backend() {
+    use super::super::super::adapters::backend::local::LocalBackend;
+    use super::super::uri::Location;
+    use camino::Utf8PathBuf;
+    let tmp = tempfile::NamedTempFile::new().unwrap();
+    let path = Utf8PathBuf::from_path_buf(tmp.path().to_path_buf()).unwrap();
+    let err = Info::open(&Location::Local(path), LocalBackend::arc()).unwrap_err();
+    assert!(err.to_string().contains("is empty"), "got: {err}");
+}
+
 use std::time::Duration;
 use std::time::SystemTime;
 

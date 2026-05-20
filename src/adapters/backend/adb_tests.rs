@@ -451,6 +451,18 @@ fn parent_target_returns_none_for_empty_path() {
 }
 
 #[test]
+fn parent_target_returns_none_when_parent_is_empty_string() {
+    // 单 component 相对路径：`Utf8Path::parent("file.txt") == Some("")`，
+    // 触发 L50 `parent.as_str().is_empty()` 的 True 分支（区别于 "" 直接走
+    // `?` 早返回，进不到 if-block）。
+    let t = AdbTarget {
+        serial: None,
+        path: Utf8PathBuf::from("file.txt"),
+    };
+    assert!(t.parent().is_none());
+}
+
+#[test]
 fn build_target_threads_serial_and_path() {
     let t = AdbTarget::from_location(&adb("/sdcard/a.bin"), &()).unwrap();
     assert_eq!(t.serial.as_deref(), Some("EMULATOR5554"));

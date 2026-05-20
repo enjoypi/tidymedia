@@ -143,6 +143,13 @@ mod tests {
         assert_eq!(expand_env("a$"), "a$");
     }
 
+    // 触发 `bytes[i + 1] == b'{'` 的 False 分支：`$` 后跟非 `{` 字符且不在末尾。
+    #[test]
+    fn expand_env_dollar_not_followed_by_brace_passes_through() {
+        assert_eq!(expand_env("$abc"), "$abc");
+        assert_eq!(expand_env("price: $9.99"), "price: $9.99");
+    }
+
     // 防御 UTF-8 字符被逐字节降级为 Latin-1（旧实现 `bytes[i] as char` 的 bug）。
     #[test]
     fn expand_env_preserves_multibyte_chars() {

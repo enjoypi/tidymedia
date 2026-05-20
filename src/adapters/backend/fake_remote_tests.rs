@@ -148,3 +148,65 @@ fn debug_format_non_exhaustive() {
     let s = format!("{:?}", c);
     assert!(s.contains("FakeRemoteClient"));
 }
+
+#[test]
+fn read_returns_not_found_for_missing_key() {
+    // 触发 read() 的 `s.get(...).ok_or_else(...)` None 分支：
+    // 不调 add_file 且不 inject Err，让 check 通过但 map 取不到。
+    let c = client();
+    let t = TestTarget {
+        path: Utf8PathBuf::from("/missing"),
+    };
+    let e = c.read(&t).unwrap_err();
+    assert_eq!(e.kind(), io::ErrorKind::NotFound);
+}
+
+#[test]
+fn inject_error_on_unlink() {
+    let c = client();
+    c.add_file("/f", b"x".to_vec());
+    c.inject(RemoteFakeOp::Unlink, "/f", io::ErrorKind::PermissionDenied);
+    let t = TestTarget {
+        path: Utf8PathBuf::from("/f"),
+    };
+    let e = c.unlink(&t).unwrap_err();
+    assert_eq!(e.kind(), io::ErrorKind::PermissionDenied);
+}
+
+#[test]
+fn inject_error_on_mkdir() {
+    let c = client();
+    c.inject(RemoteFakeOp::Mkdir, "/d", io::ErrorKind::TimedOut);
+    let t = TestTarget {
+        path: Utf8PathBuf::from("/d"),
+    };
+    let e = c.mkdir(&t).unwrap_err();
+    assert_eq!(e.kind(), io::ErrorKind::TimedOut);
+}
+
+#[test]
+fn list_with_empty_parent_path_includes_all_files() {
+    // 触发 list filter `parent.is_empty()` 的 True 分支：parent="" 时
+    // 任意 child 都应通过过滤。
+    let c = client();
+    c.add_file("/a.txt", b"x".to_vec());
+    c.add_file("/b.txt", b"y".to_vec());
+    let t = TestTarget {
+        path: Utf8PathBuf::from(""),
+    };
+    let entries = c.list(&t).unwrap();
+    assert_eq!(entries.len(), 2);
+}
+
+#[test]
+fn list_includes_entry_when_child_equals_parent() {
+    // 触发 list filter `child == parent` 的 True 分支：path 自身作为 key
+    // 且 path 不以末尾 `/` 形式做前缀匹配。
+    let c = client();
+    c.add_file("/self", b"x".to_vec());
+    let t = TestTarget {
+        path: Utf8PathBuf::from("/self"),
+    };
+    let entries = c.list(&t).unwrap();
+    assert_eq!(entries.len(), 1);
+}

@@ -18,10 +18,16 @@
 ## 测试与覆盖率
 - 入口：`cargo nextest run`；默认覆盖率：`cargo llvm-cov nextest --summary-only`（stable，~99.6% region）
 - `cargo nextest run` 无 `--quiet` flag；静默输出用 `2>&1 | tail -N` 或 nextest 自己的 `--status-level` / `--failure-output`
-- **严格 100% 覆盖率（行/region/fn）**：`RUSTFLAGS="--cfg=coverage_nightly" cargo +nightly llvm-cov nextest --summary-only`
+- **严格 100% 覆盖率（行/region/fn/branch）**：`RUSTFLAGS="--cfg=coverage_nightly" cargo +nightly llvm-cov nextest --summary-only [--branch]`
   - 标了 `#[cfg_attr(coverage_nightly, coverage(off))]` 的函数会被 LLVM 跳过统计（不可稳定触发的 ? Err / expect panic / slice 边界伪 region）
   - `lib.rs` 和 `bin/tidymedia.rs` 顶部用 `#![cfg_attr(coverage_nightly, feature(coverage_attribute))]` 开启该 nightly feature
   - `Cargo.toml` 的 `[lints.rust] unexpected_cfgs` 已注册 `cfg(coverage_nightly)`，stable 编译无 warning
+  - **`--branch` 的 multi-binary 多 instance 陷阱**：lib unit + 集成 test binary 各自 codegen Info::open / calc_full_hash / do_copy 等热点 fn 的副本，每个 binary 的 fn instance 都有独立的 `[True, False]` 计数器；如果某个 instance（如 lib_tidy 集成 binary）从未触发某 boundary case（dir/empty file/cache hit/duplicate+dry_run 不同组合），LLVM 即报 instance-level miss，**`#[inline(never)]` 与 `[profile.test] codegen-units=1` 均无效**；`if let Some(_) = helper()` 把 cache check 拆 helper 也不行（主 fn 仍有 if-let branch）。可行路径只有：①重构成 `?` 风格（`?` 算 region 不算 branch，且 helper 标 `coverage(off)` 能透传 hide 内部 branch，例：`Info::open` 拆 `ensure_hashable(&meta, loc)?`）；②函数级 `coverage(off)`（已用在 `calc_full_hash` / `secure_hash` / `create_time` / `PartialEq::eq` / `full_path` / `do_copy`，语义由独立单元/集成测试断言不退化）
+- `cargo +nightly llvm-cov nextest --summary-only --branch`（unstable flag）跑 branch 覆盖率；定位 miss 用 `--text --output-path /tmp/cov.txt` 后 `awk '/<file>\.rs:$/,/^\/home.*<next>\.rs:$/' /tmp/cov.txt | grep -B1 "True: 0, False: [1-9]"`，或 `--json --output-path /tmp/cov.json` 后解析 `f["branches"]`（每条 `[line, col, _, _, T, F, file_id, expanded, kind]`）
+- **改 `Cargo.toml` / `coverage` 属性后必跑 `cargo +nightly llvm-cov clean --workspace`**，否则 `report --branch` 仍读 stale `.profraw`，看到的 missed 数字与实际不符
+- clippy baseline 已有 12 warnings（`needless_borrows_for_generic_args` 等，含 `lib test` 9 unique），**不要**带 `-D warnings` 跑——baseline warning 会被当作回归。用 `cargo clippy --all-targets`（无 deny），git stash 对照 my 改动是否新增 warning 即可
+- `camino::Utf8PathBuf::from("file").parent()` 返 `Some("")` 而**非** `None`（与 `std::path::Path` 一致）；只有 `Utf8PathBuf::from("").parent()` 才是 `None`。写"path 单 component 触发 parent==空"边界测试要用 `"file.txt"` 不是 `""`
+- `#[cfg_attr(coverage_nightly, coverage(off))]` 可加在 **trait `impl` 内 method**（如 `impl PartialEq for Info { #[cfg_attr(...)] fn eq(...) }`），不必标在整个 `impl` 块上——单 method off 不影响同 impl 块其他 method 统计
 - `cargo llvm-cov nextest` 自动注入 `LLVM_PROFILE_FILE`，`assert_cmd` 子进程的覆盖率会被合并，因此 `main` 可被覆盖
 - 定位未覆盖行：`cargo llvm-cov report --json` 后解析 `segments`（`count=0 && hasCount=true` 即 miss）；当 stats 报 miss 但 segments 全 covered，去看 `data[0].functions[*].regions` 内 `count=0`（macro/instantiation 级 region）
 - `--ignore-run-fail` 与 `--no-fail-fast` 互斥，不能同时传
