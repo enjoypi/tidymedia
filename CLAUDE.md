@@ -11,7 +11,6 @@
 
 ## 系统依赖
 - 无外部进程依赖。EXIF/视频元数据走纯 Rust 库：`nom-exif`（图片+视频解析）+ `infer`（magic-bytes MIME）。
-- `pavao/` 是 vendor 的 pavao + pavao-sys crate（SMB 客户端 C 绑定），`smb-backend` feature 启用时通过 `[patch]` 引用；未入库（`.gitignore`），本地开发用
 - Fixture 生成（开发时一次性，不在运行期依赖）用了 `ffmpeg` + `exiftool`：`sample-with-exif.jpg`、`sample-no-dates.jpg`、`sample-with-track.mp4`、`sample-no-track-date.mkv` 已 commit 到 `tests/data/`。
 - nom-exif 内部用 `tracing::info!("find")` / `tracing::warn!("GPSInfo not found")` 大量输出，`install_logging` 必须用 EnvFilter 把 `nom_exif=error` 默认压住，保留 `RUST_LOG` 覆盖
 - nom-exif 不 re-export chrono；测试构造 `EntryValue::DateTime/NaiveDateTime` 需把 `chrono` 加 dev-deps
@@ -136,5 +135,7 @@
 
 ## 项目 Gotcha
 - nextest 每个测试独立进程，`set_var`/`remove_var`/`OnceLock` 不会跨测试污染（区别于 `cargo test`）
+- Cargo.toml 多数 dep 用 `"*"` 通配；`cargo update` 可能拉到不兼容主版本（已踩坑：sha2 0.10→0.11 把 `Digest::Output` 从 `GenericArray` 改成 `hybrid_array::Array`，导致 `SecureHash` 别名编译失败）
+- `SecureHash` 别名走 `sha2::digest::Output<Sha512>`（即 `hybrid_array::Array<u8, U64>`），不是 `generic_array::GenericArray`；从 `Vec<u8>` 构造必须用 `SecureHash::try_from(vec.as_slice())`，直接 `try_from(vec)` 类型推断不过
 - 仓库 baseline 已有 clippy errors（`io_other_error` 等），改动前先 `git stash` 跑 baseline 再对照
 - HashMap 并行 in-place 改 value：用 `self.files.par_iter_mut().for_each(|(k, v)| ...)`，避免"par_iter→Vec→再 get_mut Option None"的不可达分支
