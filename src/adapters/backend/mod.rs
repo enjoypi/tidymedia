@@ -2,6 +2,7 @@
 // trait 定义 + 值类型留在 entities::backend；本目录只放实现。
 pub mod adb;
 pub mod factory;
+#[cfg(test)]
 pub(crate) mod fake_remote;
 pub mod local;
 pub mod mtp;

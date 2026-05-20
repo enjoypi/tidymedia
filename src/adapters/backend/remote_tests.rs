@@ -53,12 +53,6 @@ impl DummyTarget {
             is_root: false,
         }
     }
-    fn root() -> Self {
-        Self {
-            path: Utf8PathBuf::from("/"),
-            is_root: true,
-        }
-    }
 }
 
 impl RemoteTarget for DummyTarget {
@@ -235,12 +229,6 @@ fn backend_with_from_loc_err(kind: io::ErrorKind) -> RemoteBackend<DummyAdapter>
     }
 }
 
-fn backend_with_client_and_root(c: DummyClient) -> RemoteBackend<DummyAdapter> {
-    RemoteBackend {
-        adapter: DummyAdapter::with_client(Arc::new(c)),
-    }
-}
-
 // ── 成功路径 ──────────────────────────────────────────────────
 
 #[test]
@@ -348,11 +336,7 @@ fn read_to_string_ok() {
 
 #[test]
 fn read_to_string_invalid_utf8() {
-    let mut c = DummyClient::default();
-    // 返回非 UTF-8 字节
-    c.read_err = None; // allow read to succeed, but override to return bad bytes
-    // 需要另一个 client 变体来返回非 UTF-8
-    // 用元组注入方式：这里用一个专门返回乱码的 client
+    // 用一个专门返回乱码字节的 client 触发 read_to_string 的 UTF-8 错误分支
     #[derive(Debug)]
     struct BadUtf8Client;
     impl RemoteClient<DummyTarget> for BadUtf8Client {

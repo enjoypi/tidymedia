@@ -2,11 +2,10 @@
 
 use super::super::remote::{RemoteClient, RemoteTarget};
 use super::*;
-use crate::entities::backend::{EntryKind, Metadata};
+use crate::entities::backend::EntryKind;
 use crate::entities::uri::Location;
 use camino::{Utf8Path, Utf8PathBuf};
 use std::io;
-use std::sync::Arc;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct TestTarget {

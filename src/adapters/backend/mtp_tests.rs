@@ -8,9 +8,8 @@ use std::sync::Arc;
 use camino::Utf8PathBuf;
 
 use super::super::fake_remote::{FakeRemoteClient, RemoteFakeOp};
-use super::super::remote::{RemoteAdapter, RemoteClient};
 use super::*;
-use crate::entities::backend::{Entry, EntryKind, Metadata};
+use crate::entities::backend::EntryKind;
 use crate::entities::uri::Location;
 
 // MTP 测试共用 FakeRemoteClient<MtpTarget>，默认 error_factory（不需文案注入）。

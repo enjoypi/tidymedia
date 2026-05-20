@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use crate::adapters::backend::factory::{BackendFactory, DefaultBackendFactory};
 use crate::adapters::cli::Commands;
 use crate::entities::common::Result;

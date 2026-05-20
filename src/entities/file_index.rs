@@ -11,6 +11,7 @@ use chrono::FixedOffset;
 use rayon::prelude::*;
 use tracing::warn;
 
+#[cfg(test)]
 use super::backend::local::LocalBackend;
 use super::backend::{Backend, EntryKind};
 use super::exif;
@@ -187,10 +188,11 @@ impl Index {
         self.add(info)
     }
 
-    /// 旧入口：本地路径字符串。`visit_location` 的 Local shim，让现有 use cases / 测试
-    /// 不必感知 [`Location`] 类型。
+    /// 旧入口：本地路径字符串。`visit_location` 的 Local shim，让测试
+    /// 不必感知 [`Location`] 类型。生产路径直接走 [`Self::visit_location`]。
     /// 相对路径先 canonicalize 成绝对路径，让 backend.walk 输出的 entry 与 Info 内
     /// `full_path` 字段保持"全路径"语义（旧 Info::from 的不变量）。
+    #[cfg(test)]
     #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn visit_dir(&mut self, path: &str) {
         // canonicalize 失败（路径不存在）回退到原字符串，让 walker 自身报 walker_error

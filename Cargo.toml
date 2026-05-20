@@ -68,3 +68,6 @@ rstest = "*"
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(coverage_nightly)'] }
+
+[profile.release]
+opt-level = 0

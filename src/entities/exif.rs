@@ -1,6 +1,7 @@
 use std::io;
 use std::sync::Arc;
 
+#[cfg(test)]
 use camino::Utf8Path;
 use chrono::FixedOffset;
 use nom_exif::EntryValue;
@@ -9,6 +10,7 @@ use nom_exif::MediaParser;
 use nom_exif::MediaSource;
 use nom_exif::TrackInfoTag;
 
+#[cfg(test)]
 use super::backend::local::LocalBackend;
 use super::backend::{Backend, MediaReader};
 use super::common;
@@ -44,6 +46,7 @@ impl Exif {
     /// 若 EXIF 内同时含 OffsetTimeOriginal 标签，nom-exif 自动合并为带时区的
     /// `EntryValue::DateTime`，本入口的 offset 对其无影响；否则落入 NaiveDateTime
     /// 分支时，调用方传入的 offset 当作相机本地时区参与 epoch 转换。
+    #[cfg(test)]
     pub fn from_path_with_offset(
         path: &Utf8Path,
         local_offset: FixedOffset,

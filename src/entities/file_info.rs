@@ -12,6 +12,7 @@ use sha2::Digest;
 use sha2::Sha512;
 
 use super::SecureHash;
+#[cfg(test)]
 use super::backend::local::LocalBackend;
 use super::backend::{Backend, EntryKind, MediaReader, Metadata as BackendMetadata};
 use super::exif;
@@ -71,7 +72,8 @@ impl std::fmt::Debug for Info {
 
 impl Info {
     /// 旧入口：根据本地路径字符串构造 Info。等价于以 [`LocalBackend`] 调用
-    /// [`Info::open`] 的 shim；调用方迁移到 backend-aware API 之前保留。
+    /// [`Info::open`] 的 shim；测试沿用此简短入口，生产路径走 [`Info::open`]。
+    #[cfg(test)]
     pub fn from(path: &str) -> io::Result<Self> {
         let fp = full_path(path)?;
         Self::open(&Location::Local(fp), LocalBackend::arc())

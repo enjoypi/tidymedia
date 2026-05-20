@@ -124,6 +124,7 @@
 - **uniffi 0.31 已知坑：`#[derive(uniffi::Error)]` enum 变体字段名不能叫 `message`**——uniffi 生成 `class Generic(val message: String)`，与 `kotlin.Exception.message` 撞名编译失败；用 `text` / `detail` 替代。同类 Throwable getter 名（`cause` 等）也要避开
 - `[lib] crate-type = ["cdylib", "rlib"]`：cdylib 给 Android JVM dlopen，rlib 让桌面集成测试链得上；不要换 staticlib（uniffi 0.31 走 cdylib + JNA）
 - 交叉编译：`cargo ndk -t aarch64-linux-android -p 30 --output-dir mobile/android/app/src/main/jniLibs build --release --features android-app`，`-p 30` 对齐 minSdk
+- APK 复用顶层 `[profile.release]`：改 `opt-level` / `debug` / `lto` 会同步影响 jniLibs `libtidymedia.so` 的体积与运行性能；想分流要新建 `[profile.release-android]` 并改 `build-android.sh` 加 `--profile release-android`
 - Kotlin 绑定：`uniffi-bindgen generate --library <libtidymedia.so> --language kotlin --out-dir <dir>`，输出 `uniffi/<crate>/<crate>.kt`；Kotlin 端通过 JNA 自动 dlopen jniLibs/arm64-v8a。**`uniffi --features cli` 装出的 binary 实际叫 `uniffi-bindgen`**（不是 `uniffi-bindgen-cli`，crates.io 没那个包）
 - `src/mobile.rs` 无独立 use case：直接 `tidy_with(&DefaultBackendFactory, Commands::Copy {..})` 复用 CLI 路径（YAGNI）；feature off 时整模块 cfg 排除，default 覆盖率统计不参与
 - mobile.rs `tidy_with(...)?` 的 Err 边在 DefaultBackendFactory + Local 路径几乎不可触发，feature on 时 stable region 1 miss 可接受（default 编译不参与统计，TOTAL 不受影响）
@@ -139,3 +140,5 @@
 - `SecureHash` 别名走 `sha2::digest::Output<Sha512>`（即 `hybrid_array::Array<u8, U64>`），不是 `generic_array::GenericArray`；从 `Vec<u8>` 构造必须用 `SecureHash::try_from(vec.as_slice())`，直接 `try_from(vec)` 类型推断不过
 - 仓库 baseline 已有 clippy errors（`io_other_error` 等），改动前先 `git stash` 跑 baseline 再对照
 - HashMap 并行 in-place 改 value：用 `self.files.par_iter_mut().for_each(|(k, v)| ...)`，避免"par_iter→Vec→再 get_mut Option None"的不可达分支
+- **测试 shim 必须 `#[cfg(test)]` gate**：`Info::from` / `Index::visit_dir` / `Exif::from_path_with_offset` 是包 backend-aware API 的旧入口（仅测试用，生产走 `*::open` / `visit_location`）；`adapters/backend/fake_remote` 整模块同理（`*_tests.rs` 专用，无生产消费）。未 gate 会让 release build 报 `dead_code`
+- **`#[cfg(test)]` 标在方法/import 上，不要标在 `impl Foo {}` 块上**：同块生产方法会被一起 gate 掉。清 warning 时 `cargo build --release` 与 `cargo build --tests` 是不同 cfg，两边都要跑

@@ -10,17 +10,11 @@ use super::uri::Location;
 pub mod adb {
     pub use crate::adapters::backend::adb::*;
 }
-pub(crate) mod fake_remote {
-    pub use crate::adapters::backend::fake_remote::*;
-}
 pub mod local {
     pub use crate::adapters::backend::local::LocalBackend;
 }
 pub mod mtp {
     pub use crate::adapters::backend::mtp::*;
-}
-pub(crate) mod remote {
-    pub use crate::adapters::backend::remote::*;
 }
 pub mod smb {
     pub use crate::adapters::backend::smb::*;
