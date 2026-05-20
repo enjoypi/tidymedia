@@ -129,11 +129,7 @@ impl<A: RemoteAdapter> Backend for RemoteBackend<A> {
         Ok(Box::new(std::io::Cursor::new(bytes)))
     }
 
-    fn open_write(
-        &self,
-        loc: &Location,
-        mkparents: bool,
-    ) -> io::Result<Box<dyn MediaWriter>> {
+    fn open_write(&self, loc: &Location, mkparents: bool) -> io::Result<Box<dyn MediaWriter>> {
         let target = self.build_target(loc)?;
         if mkparents {
             mkparent::<A>(&target, self.adapter.client());
@@ -160,22 +156,20 @@ impl<A: RemoteAdapter> Backend for RemoteBackend<A> {
             let target = self.build_target(loc)?;
             self.adapter.client().read(&target).map_err(A::map_error)?
         };
-        String::from_utf8(bytes)
-            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
+        String::from_utf8(bytes).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
     }
 
-    fn copy_file(
-        &self,
-        src: &Location,
-        dst: &Location,
-        mkparents: bool,
-    ) -> io::Result<u64> {
+    fn copy_file(&self, src: &Location, dst: &Location, mkparents: bool) -> io::Result<u64> {
         let src_target = self.build_target(src)?;
         let dst_target = self.build_target(dst)?;
         if mkparents {
             mkparent::<A>(&dst_target, self.adapter.client());
         }
-        let bytes = self.adapter.client().read(&src_target).map_err(A::map_error)?;
+        let bytes = self
+            .adapter
+            .client()
+            .read(&src_target)
+            .map_err(A::map_error)?;
         self.adapter
             .client()
             .write(&dst_target, &bytes)

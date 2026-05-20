@@ -1,10 +1,10 @@
 //! FakeRemoteClient 自身的单元测试：用 DummyTarget 验证文件增删查改。
 
 use super::super::remote::{RemoteClient, RemoteTarget};
-use crate::entities::backend::{EntryKind, Metadata};
 use super::*;
-use camino::{Utf8Path, Utf8PathBuf};
+use crate::entities::backend::{EntryKind, Metadata};
 use crate::entities::uri::Location;
+use camino::{Utf8Path, Utf8PathBuf};
 use std::io;
 use std::sync::Arc;
 
@@ -134,11 +134,7 @@ fn error_factory_transforms_kinds() {
         io::ErrorKind::PermissionDenied => io::Error::other("EACCES"),
         other => io::Error::from(other),
     });
-    c.inject(
-        RemoteFakeOp::Stat,
-        "/x",
-        io::ErrorKind::PermissionDenied,
-    );
+    c.inject(RemoteFakeOp::Stat, "/x", io::ErrorKind::PermissionDenied);
     let t = TestTarget {
         path: Utf8PathBuf::from("/x"),
     };

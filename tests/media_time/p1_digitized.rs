@@ -1,6 +1,6 @@
 // spec §2.P1：容器内"数字化/写入"——次权威。
 
-use tidymedia::media_time::{epoch_to_candidate, resolve, Priority, Source};
+use tidymedia::media_time::{Priority, Source, epoch_to_candidate, resolve};
 
 use super::common::{fixed_now, utc_offset};
 

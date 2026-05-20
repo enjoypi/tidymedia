@@ -66,8 +66,7 @@ impl Backend for LocalBackend {
             .ignore(false)
             .require_git(false)
             .build();
-        let entries: Vec<io::Result<Entry>> = walker.map(walk_entry_to_io).collect();
-        Box::new(entries.into_iter())
+        Box::new(walker.map(walk_entry_to_io))
     }
 
     fn open_read(&self, loc: &Location) -> io::Result<Box<dyn MediaReader>> {
@@ -76,11 +75,7 @@ impl Backend for LocalBackend {
         Ok(reader)
     }
 
-    fn open_write(
-        &self,
-        loc: &Location,
-        mkparents: bool,
-    ) -> io::Result<Box<dyn MediaWriter>> {
+    fn open_write(&self, loc: &Location, mkparents: bool) -> io::Result<Box<dyn MediaWriter>> {
         let path = local_path(loc)?;
         if mkparents {
             if let Some(parent) = path.parent() {
@@ -106,12 +101,7 @@ impl Backend for LocalBackend {
         fs::read_to_string(path.as_std_path())
     }
 
-    fn copy_file(
-        &self,
-        src: &Location,
-        dst: &Location,
-        mkparents: bool,
-    ) -> io::Result<u64> {
+    fn copy_file(&self, src: &Location, dst: &Location, mkparents: bool) -> io::Result<u64> {
         let src = local_path(src)?;
         let dst = local_path(dst)?;
         if mkparents {
@@ -147,9 +137,7 @@ fn to_metadata(m: &fs::Metadata) -> Metadata {
 /// ignore::WalkBuilder 的单条记录映射到 [`Entry`]。size 在 metadata 失败时
 /// 兜底为 0——下游消费者读 size=0 会在再次 stat / open_read 时自然报错，
 /// 不需要在 walk 阶段就硬失败。
-fn walk_entry_to_io(
-    e: Result<ignore::DirEntry, ignore::Error>,
-) -> io::Result<Entry> {
+fn walk_entry_to_io(e: Result<ignore::DirEntry, ignore::Error>) -> io::Result<Entry> {
     let entry = e.map_err(ignore_to_io)?;
     let path = entry.path().to_path_buf();
     let utf8 = camino::Utf8PathBuf::from_path_buf(path)
@@ -215,6 +203,8 @@ impl Seek for MmapReader {
 #[cfg_attr(coverage_nightly, coverage(off))]
 fn open_read_inner(path: &Path) -> io::Result<Box<dyn MediaReader>> {
     let file = fs::File::open(path)?;
+    // SAFETY: file 句柄刚由 fs::File::open 创建且仍持有；本进程不会并发 truncate
+    // 该文件；外部进程修改虽可能产生未定义内容但不会破坏内存安全（memmap2 文档保证）。
     let mmap = unsafe { Mmap::map(&file)? };
     Ok(Box::new(MmapReader::new(mmap)))
 }

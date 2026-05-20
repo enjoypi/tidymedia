@@ -7,17 +7,16 @@ use camino::Utf8Path;
 use camino::Utf8PathBuf;
 use chrono::FixedOffset;
 use chrono::Utc;
-use generic_array::GenericArray;
 use parking_lot::Mutex;
 use sha2::Digest;
 use sha2::Sha512;
 
+use super::SecureHash;
 use super::backend::local::LocalBackend;
 use super::backend::{Backend, EntryKind, MediaReader, Metadata as BackendMetadata};
 use super::exif;
 use super::media_time;
 use super::uri::Location;
-use super::SecureHash;
 
 // 栈数组要求编译期常量，保留为 const（性能边界例外）
 const FAST_READ_SIZE: usize = 4096;
@@ -40,7 +39,7 @@ impl Lazy {
             bytes_read,
             hash,
             full: false,
-            secure_hash: GenericArray::default(),
+            secure_hash: SecureHash::default(),
         }
     }
 }
@@ -84,7 +83,10 @@ impl Info {
     pub fn open(loc: &Location, backend: Arc<dyn Backend>) -> io::Result<Self> {
         let meta = backend.metadata(loc)?;
         if meta.kind != EntryKind::File {
-            return Err(io::Error::other(format!("{} is a directory", loc.display())));
+            return Err(io::Error::other(format!(
+                "{} is a directory",
+                loc.display()
+            )));
         }
         if meta.size == 0 {
             return Err(io::Error::other(format!("{} is empty", loc.display())));
@@ -140,7 +142,7 @@ impl Info {
 
     pub fn secure_hash(&self) -> io::Result<SecureHash> {
         let mut l = self.lazy.lock();
-        if l.secure_hash != GenericArray::default() {
+        if l.secure_hash != SecureHash::default() {
             return Ok(l.secure_hash);
         }
         let mut reader = self.backend.open_read(&self.location)?;
@@ -245,7 +247,11 @@ pub fn fast_hash_stream(r: &mut dyn MediaReader) -> io::Result<(usize, u64, u64)
     let mut buffer = [0u8; FAST_READ_SIZE];
     let n = read_fill(r, &mut buffer)?;
     let slice = &buffer[..n];
-    Ok((n, wyhash::wyhash(slice, 0), xxhash_rust::xxh3::xxh3_64(slice)))
+    Ok((
+        n,
+        wyhash::wyhash(slice, 0),
+        xxhash_rust::xxh3::xxh3_64(slice),
+    ))
 }
 
 /// 流式整文件 xxh3-64 哈希。返回 (`bytes_read`, xxh3-64)。
@@ -315,6 +321,7 @@ fn fast_hash(path: &str) -> io::Result<(usize, u64, u64)> {
 #[cfg_attr(coverage_nightly, coverage(off))]
 fn full_hash(path: &str) -> io::Result<(usize, u64)> {
     let file = std::fs::File::open(path)?;
+    // SAFETY: file 句柄仍持有；测试用辅助，运行期外部进程不会并发改写。
     let mmap = unsafe { memmap2::Mmap::map(&file)? };
     Ok((mmap.len(), xxhash_rust::xxh3::xxh3_64(&mmap)))
 }
@@ -323,6 +330,7 @@ fn full_hash(path: &str) -> io::Result<(usize, u64)> {
 #[cfg_attr(coverage_nightly, coverage(off))]
 fn secure_hash(path: &str) -> io::Result<(usize, SecureHash)> {
     let file = std::fs::File::open(path)?;
+    // SAFETY: file 句柄仍持有；测试用辅助，运行期外部进程不会并发改写。
     let mmap = unsafe { memmap2::Mmap::map(&file)? };
     Ok((mmap.len(), Sha512::digest(&mmap)))
 }

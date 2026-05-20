@@ -1,6 +1,8 @@
 // spec §七：判定结果应包含的字段。
 
-use tidymedia::media_time::{epoch_to_candidate, resolve, Confidence, ConflictKind, Priority, Source};
+use tidymedia::media_time::{
+    Confidence, ConflictKind, Priority, Source, epoch_to_candidate, resolve,
+};
 
 use super::common::{fixed_now, ts, utc_offset};
 
@@ -33,7 +35,10 @@ fn decision_carries_all_seven_fields() {
     // conflicts (含 GPS 超过 24h)
     assert_eq!(d.conflicts.len(), 1);
     assert_eq!(d.conflicts[0].kind, ConflictKind::GpsOver24h);
-    assert_eq!(d.conflicts[0].other_utc.timestamp(), 1_700_000_100 + 48 * 3600);
+    assert_eq!(
+        d.conflicts[0].other_utc.timestamp(),
+        1_700_000_100 + 48 * 3600
+    );
 }
 
 /// spec §7：confidence 字段反映置信度（High / Low），用于"是否需要人工复核"。
@@ -85,7 +90,10 @@ fn conflict_carries_other_source_when_internal() {
     .unwrap();
     let d = resolve(vec![p0, fname], None, fixed_now()).unwrap();
     assert_eq!(d.conflicts.len(), 1);
-    assert_eq!(d.conflicts[0].other_source, Some(Source::FilenameUnixMillis));
+    assert_eq!(
+        d.conflicts[0].other_source,
+        Some(Source::FilenameUnixMillis)
+    );
 }
 
 /// spec §7：GPS 冲突无 internal Source（GPS 不在 P0-P4 体系内）。

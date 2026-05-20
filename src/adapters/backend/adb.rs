@@ -92,8 +92,10 @@ impl RemoteAdapter for AdbAdapter {
             return e;
         }
         let msg = e.to_string().to_lowercase();
-        if msg.contains("no such file") || msg.contains("does not exist")
-            || msg.contains("device not found") || msg.contains("no devices")
+        if msg.contains("no such file")
+            || msg.contains("does not exist")
+            || msg.contains("device not found")
+            || msg.contains("no devices")
         {
             return io::Error::new(io::ErrorKind::NotFound, e.to_string());
         }

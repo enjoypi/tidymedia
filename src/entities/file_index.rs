@@ -157,7 +157,7 @@ impl Index {
         for same in map.iter() {
             for ((key, _), paths) in same {
                 if paths.len() > 1 {
-                    let mut v: Vec<_> = paths.clone().into_iter().collect();
+                    let mut v: Vec<_> = paths.iter().cloned().collect();
                     v.sort();
                     result.insert(*key, v);
                 }
@@ -168,17 +168,16 @@ impl Index {
     }
 
     pub fn add(&mut self, info: Info) -> std::io::Result<&Info> {
-        let file_existed = self.files.get(&info.full_path).is_some();
-
-        if file_existed {
-            Ok(&self.files[&info.full_path])
-        } else {
-            self.similar_files
-                .entry(info.fast_hash)
-                .or_default()
-                .insert(info.full_path.clone());
-
-            Ok(self.files.entry(info.full_path.clone()).or_insert(info))
+        use std::collections::hash_map::Entry;
+        match self.files.entry(info.full_path.clone()) {
+            Entry::Occupied(e) => Ok(e.into_mut()),
+            Entry::Vacant(slot) => {
+                self.similar_files
+                    .entry(info.fast_hash)
+                    .or_default()
+                    .insert(info.full_path.clone());
+                Ok(slot.insert(info))
+            }
         }
     }
 

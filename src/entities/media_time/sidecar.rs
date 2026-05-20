@@ -14,8 +14,8 @@ use serde_derive::Deserialize;
 
 use super::candidate::Candidate;
 use super::priority::Source;
-use crate::entities::backend::local::LocalBackend;
 use crate::entities::backend::Backend;
+use crate::entities::backend::local::LocalBackend;
 use crate::entities::uri::Location;
 
 const XMP_KEY: &str = "photoshop:DateCreated=\"";
@@ -29,10 +29,7 @@ pub fn discover(media_path: &Utf8Path) -> Vec<Candidate> {
 /// Backend Gateway 入口：以 [`Location`] + [`Backend`] 在 backend 上读 sibling sidecar。
 /// 当前 sibling 路径计算仅 Local 实现（[`with_extension`] / [`append_suffix`] 对非 Local
 /// 返回 None），SMB/MTP 接入时再扩展。
-pub fn discover_with_backend(
-    media_loc: &Location,
-    backend: &Arc<dyn Backend>,
-) -> Vec<Candidate> {
+pub fn discover_with_backend(media_loc: &Location, backend: &Arc<dyn Backend>) -> Vec<Candidate> {
     let mut out = Vec::new();
     if let Some(c) = try_xmp(media_loc, backend.as_ref()) {
         out.push(c);
@@ -184,11 +181,7 @@ mod tests {
         let media = dir.path().join("photo.jpg");
         std::fs::write(&media, b"jpg-bytes").unwrap();
         let json = dir.path().join("photo.jpg.json");
-        std::fs::write(
-            &json,
-            r#"{"photoTakenTime":{"timestamp":"1714576200"}}"#,
-        )
-        .unwrap();
+        std::fs::write(&json, r#"{"photoTakenTime":{"timestamp":"1714576200"}}"#).unwrap();
 
         let mp = camino::Utf8PathBuf::from_path_buf(media).unwrap();
         let cands = discover(&mp);

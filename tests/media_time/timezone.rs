@@ -1,7 +1,7 @@
 // spec §四：时区处理。
 
 use tidymedia::media_time::filename::parse_filename;
-use tidymedia::media_time::{epoch_to_candidate, resolve, Source};
+use tidymedia::media_time::{Source, epoch_to_candidate, resolve};
 
 use super::common::{east8, fixed_now, utc_offset};
 

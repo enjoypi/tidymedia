@@ -8,9 +8,9 @@ use std::sync::Arc;
 
 use camino::Utf8PathBuf;
 
-use super::*;
 use super::super::fake_remote::{FakeRemoteClient, RemoteFakeOp};
 use super::super::remote::{RemoteAdapter, RemoteClient};
+use super::*;
 use crate::entities::backend::{Entry, EntryKind, Metadata};
 use crate::entities::uri::Location;
 
@@ -100,7 +100,11 @@ fn exists_returns_true_then_false() {
 fn exists_propagates_non_notfound_error() {
     let client = fake_client();
     client.add_file("/sdcard/a.bin", vec![1]);
-    client.inject(RemoteFakeOp::Stat, "/sdcard/a.bin", io::ErrorKind::PermissionDenied);
+    client.inject(
+        RemoteFakeOp::Stat,
+        "/sdcard/a.bin",
+        io::ErrorKind::PermissionDenied,
+    );
     let backend = backend_with(client);
     let err = backend.exists(&adb("/sdcard/a.bin")).unwrap_err();
     assert_eq!(err.kind(), io::ErrorKind::PermissionDenied);
@@ -175,7 +179,9 @@ fn open_write_buffers_and_finish_commits() {
     use std::io::Write;
     let client = fake_client();
     let backend = backend_with(client.clone());
-    let mut w = backend.open_write(&adb("/sdcard/dir/out.bin"), true).unwrap();
+    let mut w = backend
+        .open_write(&adb("/sdcard/dir/out.bin"), true)
+        .unwrap();
     w.write_all(b"data-bytes").unwrap();
     w.finish().unwrap();
     let bytes = client.get_file("/sdcard/dir/out.bin");
@@ -195,7 +201,11 @@ fn open_write_rejects_non_adb_scheme() {
 fn open_write_finish_propagates_permission_denied() {
     use std::io::Write;
     let client = fake_client();
-    client.inject(RemoteFakeOp::Write, "/sdcard/x.bin", io::ErrorKind::PermissionDenied);
+    client.inject(
+        RemoteFakeOp::Write,
+        "/sdcard/x.bin",
+        io::ErrorKind::PermissionDenied,
+    );
     let backend = backend_with(client);
     let mut w = backend.open_write(&adb("/sdcard/x.bin"), false).unwrap();
     w.write_all(b"data").unwrap();
@@ -282,7 +292,11 @@ fn read_to_string_rejects_non_adb_scheme() {
 fn read_to_string_propagates_client_error() {
     let client = fake_client();
     client.add_file("/sdcard/a.txt", b"hello".to_vec());
-    client.inject(RemoteFakeOp::Read, "/sdcard/a.txt", io::ErrorKind::ConnectionReset);
+    client.inject(
+        RemoteFakeOp::Read,
+        "/sdcard/a.txt",
+        io::ErrorKind::ConnectionReset,
+    );
     let backend = backend_with(client);
     let err = backend.read_to_string(&adb("/sdcard/a.txt")).unwrap_err();
     assert_eq!(err.kind(), io::ErrorKind::ConnectionReset);
@@ -305,9 +319,13 @@ fn copy_file_reads_then_writes_with_mkparent() {
 fn copy_file_rejects_non_adb_scheme_on_either_side() {
     let backend = backend_with(fake_client());
     let local = Location::Local(Utf8PathBuf::from("/tmp/x"));
-    let err = backend.copy_file(&local, &adb("/sdcard/dst"), false).unwrap_err();
+    let err = backend
+        .copy_file(&local, &adb("/sdcard/dst"), false)
+        .unwrap_err();
     assert_eq!(err.kind(), io::ErrorKind::InvalidInput);
-    let err = backend.copy_file(&adb("/sdcard/src"), &local, false).unwrap_err();
+    let err = backend
+        .copy_file(&adb("/sdcard/src"), &local, false)
+        .unwrap_err();
     assert_eq!(err.kind(), io::ErrorKind::InvalidInput);
 }
 
@@ -315,7 +333,11 @@ fn copy_file_rejects_non_adb_scheme_on_either_side() {
 fn copy_file_propagates_read_error() {
     let client = fake_client();
     client.add_file("/sdcard/src.bin", b"x".to_vec());
-    client.inject(RemoteFakeOp::Read, "/sdcard/src.bin", io::ErrorKind::Interrupted);
+    client.inject(
+        RemoteFakeOp::Read,
+        "/sdcard/src.bin",
+        io::ErrorKind::Interrupted,
+    );
     let backend = backend_with(client);
     let err = backend
         .copy_file(&adb("/sdcard/src.bin"), &adb("/sdcard/dst.bin"), false)

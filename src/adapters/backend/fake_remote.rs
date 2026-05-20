@@ -43,6 +43,15 @@ struct FileEntry {
     meta: Metadata,
 }
 
+fn file_meta(size: u64) -> Metadata {
+    Metadata {
+        size,
+        kind: EntryKind::File,
+        modified: Some(SystemTime::UNIX_EPOCH),
+        created: Some(SystemTime::UNIX_EPOCH),
+    }
+}
+
 /// 统一远端 Fake Client。`error_factory` 允许 SMB 注入 EACCES 文案让
 /// `map_error` 识别；ADB / MTP 直接用默认 `|k| k.into()`。
 pub(crate) struct FakeRemoteClient<T: RemoteTarget> {
@@ -80,12 +89,7 @@ impl<T: RemoteTarget> FakeRemoteClient<T> {
             p,
             FileEntry {
                 data,
-                meta: Metadata {
-                    size,
-                    kind: EntryKind::File,
-                    modified: Some(SystemTime::UNIX_EPOCH),
-                    created: Some(SystemTime::UNIX_EPOCH),
-                },
+                meta: file_meta(size),
             },
         );
     }
@@ -178,12 +182,7 @@ impl<T: RemoteTarget> RemoteClient<T> for FakeRemoteClient<T> {
             target.path().to_path_buf(),
             FileEntry {
                 data: data.to_vec(),
-                meta: Metadata {
-                    size,
-                    kind: EntryKind::File,
-                    modified: Some(SystemTime::UNIX_EPOCH),
-                    created: Some(SystemTime::UNIX_EPOCH),
-                },
+                meta: file_meta(size),
             },
         );
         Ok(size)

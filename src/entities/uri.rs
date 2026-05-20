@@ -13,7 +13,7 @@
 use std::str::FromStr;
 
 use camino::{Utf8Path, Utf8PathBuf};
-use percent_encoding::{percent_decode_str, utf8_percent_encode, AsciiSet, CONTROLS};
+use percent_encoding::{AsciiSet, CONTROLS, percent_decode_str, utf8_percent_encode};
 use thiserror::Error;
 
 const SCHEME_LOCAL: &str = "local";
@@ -292,10 +292,7 @@ fn encode(s: &str) -> String {
 }
 
 fn encode_path(s: &str) -> String {
-    s.split('/')
-        .map(encode)
-        .collect::<Vec<_>>()
-        .join("/")
+    s.split('/').map(encode).collect::<Vec<_>>().join("/")
 }
 
 fn render_smb(

@@ -160,14 +160,14 @@ mod tests {
     use camino::Utf8PathBuf;
     use tempfile::tempdir;
 
-    use crate::entities::backend::local::LocalBackend;
-    use crate::entities::backend::Backend;
-    use crate::entities::test_common as tc;
-    use crate::entities::uri::Location;
     use super::comment;
     use super::find_duplicates;
     use super::render_script;
     use super::rm;
+    use crate::entities::backend::Backend;
+    use crate::entities::backend::local::LocalBackend;
+    use crate::entities::test_common as tc;
+    use crate::entities::uri::Location;
 
     fn local_data_dir() -> (Location, Arc<dyn Backend>) {
         (

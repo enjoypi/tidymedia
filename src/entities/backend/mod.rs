@@ -79,18 +79,9 @@ pub trait Backend: Send + Sync {
         root: &Location,
     ) -> Box<dyn Iterator<Item = io::Result<Entry>> + Send + 'a>;
     fn open_read(&self, loc: &Location) -> io::Result<Box<dyn MediaReader>>;
-    fn open_write(
-        &self,
-        loc: &Location,
-        mkparents: bool,
-    ) -> io::Result<Box<dyn MediaWriter>>;
+    fn open_write(&self, loc: &Location, mkparents: bool) -> io::Result<Box<dyn MediaWriter>>;
     fn remove_file(&self, loc: &Location) -> io::Result<()>;
     fn mkdir_p(&self, loc: &Location) -> io::Result<()>;
     fn read_to_string(&self, loc: &Location) -> io::Result<String>;
-    fn copy_file(
-        &self,
-        src: &Location,
-        dst: &Location,
-        mkparents: bool,
-    ) -> io::Result<u64>;
+    fn copy_file(&self, src: &Location, dst: &Location, mkparents: bool) -> io::Result<u64>;
 }

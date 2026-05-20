@@ -1,15 +1,15 @@
 //! SmbBackend 测试：FakeRemoteClient<SmbTarget> 注入 + 调度逻辑 100% 覆盖。
 //! 迁移到统一 FakeRemoteClient；协议特异断言通过 spy 读出。
 
+use super::super::fake_remote::{FakeRemoteClient, RemoteFakeOp};
 use std::io;
 use std::sync::{Arc, Mutex};
-use super::super::fake_remote::{FakeRemoteClient, RemoteFakeOp};
 use std::time::SystemTime;
 
 use camino::Utf8PathBuf;
 
-use super::*;
 use super::super::remote::RemoteClient;
+use super::*;
 use crate::entities::backend::{Entry, EntryKind, Metadata};
 use crate::entities::uri::Location;
 
@@ -23,7 +23,6 @@ fn fake_client() -> Arc<FakeClient> {
         other => io::Error::from(other),
     }))
 }
-
 
 fn smb(path: &str) -> Location {
     Location::Smb {
@@ -167,7 +166,11 @@ fn open_write_rejects_non_smb_scheme() {
 fn open_write_finish_propagates_eacces_to_permission_denied() {
     use std::io::Write;
     let client = fake_client();
-    client.inject(RemoteFakeOp::Write, "x.bin", io::ErrorKind::PermissionDenied);
+    client.inject(
+        RemoteFakeOp::Write,
+        "x.bin",
+        io::ErrorKind::PermissionDenied,
+    );
     let backend = backend_with(client);
     let mut w = backend.open_write(&smb("x.bin"), false).unwrap();
     w.write_all(b"data").unwrap();

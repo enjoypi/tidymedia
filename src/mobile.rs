@@ -15,7 +15,7 @@
 
 use camino::Utf8PathBuf;
 
-use crate::{tidy_with, Commands, DefaultBackendFactory, Error, Location};
+use crate::{Commands, DefaultBackendFactory, Error, Location, tidy_with};
 
 /// 一次 tidy 调用的简单计数，UI 仅需要这些字段。
 #[derive(uniffi::Record, Clone, Debug)]
@@ -40,7 +40,9 @@ pub enum TidyError {
 
 impl From<Error> for TidyError {
     fn from(e: Error) -> Self {
-        Self::Generic { text: format!("{e}") }
+        Self::Generic {
+            text: format!("{e}"),
+        }
     }
 }
 
@@ -64,11 +66,7 @@ pub fn tidymedia_version() -> String {
     env!("CARGO_PKG_VERSION").to_string()
 }
 
-fn run_internal(
-    src: String,
-    output: String,
-    dry_run: bool,
-) -> Result<TidyStats, TidyError> {
+fn run_internal(src: String, output: String, dry_run: bool) -> Result<TidyStats, TidyError> {
     let src_loc = Location::Local(Utf8PathBuf::from(src));
     let out_loc = Location::Local(Utf8PathBuf::from(output));
     let cmd = Commands::Copy {
@@ -83,7 +81,11 @@ fn run_internal(
     Ok(TidyStats {
         total_scanned: 0,
         copied: 0,
-        status: if dry_run { "dry-run ok".into() } else { "ok".into() },
+        status: if dry_run {
+            "dry-run ok".into()
+        } else {
+            "ok".into()
+        },
     })
 }
 

@@ -134,18 +134,10 @@ fn entry_value_to_epoch(v: &EntryValue, local_offset: FixedOffset) -> u64 {
             .unwrap_or(0),
         _ => return 0,
     };
-    if secs <= 0 {
-        0
-    } else {
-        secs as u64
-    }
+    if secs <= 0 { 0 } else { secs as u64 }
 }
 
-fn populate_image_dates(
-    reader: Box<dyn MediaReader>,
-    exif: &mut Exif,
-    local_offset: FixedOffset,
-) {
+fn populate_image_dates(reader: Box<dyn MediaReader>, exif: &mut Exif, local_offset: FixedOffset) {
     let Ok(ms) = MediaSource::seekable(reader) else {
         return;
     };
@@ -167,11 +159,7 @@ fn populate_image_dates(
 // 实务里不可稳定触发；整体标 coverage(off) 与 populate_image_dates 用 nom-exif 库的
 // 失败路径同源（image 路径下 PNG without EXIF 走 Some/None 分支已天然覆盖）。
 #[cfg_attr(coverage_nightly, coverage(off))]
-fn populate_video_dates(
-    reader: Box<dyn MediaReader>,
-    exif: &mut Exif,
-    local_offset: FixedOffset,
-) {
+fn populate_video_dates(reader: Box<dyn MediaReader>, exif: &mut Exif, local_offset: FixedOffset) {
     let Ok(ms) = MediaSource::seekable(reader) else {
         return;
     };

@@ -29,9 +29,7 @@ pub fn tidy_with(factory: &dyn BackendFactory, command: Commands) -> Result<()> 
             output,
         } => {
             let src_pairs = build_sources(factory, sources)?;
-            let out_pair = output
-                .map(|loc| build_source(factory, loc))
-                .transpose()?;
+            let out_pair = output.map(|loc| build_source(factory, loc)).transpose()?;
             crate::usecases::find_duplicates(secure, src_pairs, out_pair)
         }
         Commands::Move {
@@ -56,5 +54,7 @@ fn build_sources(
     factory: &dyn BackendFactory,
     locs: Vec<Location>,
 ) -> Result<Vec<crate::usecases::Source>> {
-    locs.into_iter().map(|loc| build_source(factory, loc)).collect()
+    locs.into_iter()
+        .map(|loc| build_source(factory, loc))
+        .collect()
 }

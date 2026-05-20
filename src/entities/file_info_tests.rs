@@ -1,644 +1,654 @@
-    use std::fs;
-    use std::io;
-    use std::io::Read;
-    use std::io::Seek;
+use std::fs;
+use std::io;
+use std::io::Read;
+use std::io::Seek;
 
-    use sha2::Digest;
-    use wyhash;
-    use xxhash_rust::xxh3;
+use sha2::Digest;
+use wyhash;
+use xxhash_rust::xxh3;
 
-    use super::super::test_common as common;
-    use super::Info;
+use super::super::test_common as common;
+use super::Info;
 
-    struct HashTest {
-        short_wyhash: u64,
-        short_xxhash: u64,
-        short_read: usize,
-        full: u64,
-        file_size: usize,
+struct HashTest {
+    short_wyhash: u64,
+    short_xxhash: u64,
+    short_read: usize,
+    full: u64,
+    file_size: usize,
 
-        secure: super::SecureHash,
-    }
+    secure: super::SecureHash,
+}
 
-    impl HashTest {
-        fn new(path: &str) -> io::Result<HashTest> {
-            let mut file = fs::File::open(path)?;
+impl HashTest {
+    fn new(path: &str) -> io::Result<HashTest> {
+        let mut file = fs::File::open(path)?;
 
-            let mut buffer = [0; super::FAST_READ_SIZE];
-            let short_read = file.read(&mut buffer)?;
-            if short_read == 0 {
-                return Err(io::Error::new(
-                    io::ErrorKind::UnexpectedEof,
-                    "File is empty",
-                ));
-            }
-
-            let short_wyhash = wyhash::wyhash(&(buffer[..short_read]), 0);
-            let short_xxhash = xxh3::xxh3_64(&(buffer[..short_read]));
-
-            let mut buffer = Vec::new();
-            file.seek(std::io::SeekFrom::Start(0))?;
-            let file_size = file.read_to_end(&mut buffer)?;
-            let full = xxh3::xxh3_64(buffer.as_slice());
-
-            let mut hasher = sha2::Sha512::new();
-            hasher.update(buffer.as_slice());
-            let secure = hasher.finalize();
-
-            Ok(HashTest {
-                short_wyhash,
-                short_xxhash,
-                short_read,
-                full,
-                file_size,
-                secure,
-            })
-        }
-    }
-
-    #[test]
-    fn small_file() {
-        let ct = HashTest::new(common::DATA_SMALL).unwrap();
-        assert_eq!(ct.short_wyhash, common::DATA_SMALL_WYHASH);
-        assert_eq!(ct.short_xxhash, common::DATA_SMALL_XXHASH);
-        assert!(ct.file_size <= super::FAST_READ_SIZE);
-        assert_eq!(ct.short_read, ct.file_size);
-        assert_eq!(ct.short_xxhash, ct.full);
-        assert_eq!(ct.secure, common::data_small_sha512());
-
-        let f = Info::from(common::DATA_SMALL).unwrap();
-        assert_eq!(f.fast_hash, ct.short_wyhash);
-        assert_eq!(f.full_hash(), ct.short_xxhash);
-        assert_eq!(f.size, ct.file_size as u64);
-        assert_eq!(f.calc_full_hash().unwrap(), ct.full);
-        assert_eq!(f.full_hash(), ct.full);
-        assert_eq!(f.secure_hash().unwrap(), common::data_small_sha512());
-        assert_eq!(f.secure_hash().unwrap(), common::data_small_sha512());
-    }
-
-    #[test]
-    fn large_file() {
-        let ct = HashTest::new(common::DATA_LARGE).unwrap();
-        assert_eq!(ct.short_wyhash, common::DATA_LARGE_WYHASH);
-        assert_ne!(ct.short_xxhash, common::DATA_LARGE_XXHASH);
-        assert_eq!(ct.short_read, super::FAST_READ_SIZE);
-        assert!(ct.short_read < ct.file_size);
-        assert_eq!(ct.full, common::DATA_LARGE_XXHASH);
-        assert_eq!(ct.secure, common::data_large_sha512());
-
-        let f = Info::from(common::DATA_LARGE).unwrap();
-        assert_eq!(f.fast_hash, ct.short_wyhash);
-        assert_eq!(f.full_hash(), ct.short_xxhash);
-        assert_eq!(f.size, ct.file_size as u64);
-        assert_eq!(f.calc_full_hash().unwrap(), ct.full);
-        assert_eq!(f.full_hash(), ct.full);
-        assert_eq!(f.secure_hash().unwrap(), common::data_large_sha512());
-        assert_eq!(f.secure_hash().unwrap(), common::data_large_sha512());
-    }
-
-    #[test]
-    fn bytes_read() {
-        let meta = fs::metadata(common::DATA_LARGE).unwrap();
-
-        {
-            let (bytes_read, _fast, _full) = super::fast_hash(common::DATA_LARGE).unwrap();
-            assert_eq!(bytes_read, super::FAST_READ_SIZE);
-
-            let (bytes_read, full) = super::full_hash(common::DATA_LARGE).unwrap();
-            assert_eq!(bytes_read as u64, meta.len());
-            assert_eq!(full, common::DATA_LARGE_XXHASH);
+        let mut buffer = [0; super::FAST_READ_SIZE];
+        let short_read = file.read(&mut buffer)?;
+        if short_read == 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::UnexpectedEof,
+                "File is empty",
+            ));
         }
 
-        let f = super::Info::from(common::DATA_LARGE).unwrap();
-        assert_eq!(f.bytes_read(), super::FAST_READ_SIZE as u64);
-        assert_eq!(f.calc_full_hash().unwrap(), common::DATA_LARGE_XXHASH);
-        assert_eq!(f.bytes_read(), super::FAST_READ_SIZE as u64 + meta.len());
-        // no read file when twice
-        assert_eq!(f.calc_full_hash().unwrap(), common::DATA_LARGE_XXHASH);
-        assert_eq!(f.bytes_read(), super::FAST_READ_SIZE as u64 + meta.len());
+        let short_wyhash = wyhash::wyhash(&(buffer[..short_read]), 0);
+        let short_xxhash = xxh3::xxh3_64(&(buffer[..short_read]));
 
-        assert_eq!(f.secure_hash().unwrap(), common::data_large_sha512());
-        assert_eq!(
-            f.bytes_read(),
-            super::FAST_READ_SIZE as u64 + meta.len() * 2
-        );
+        let mut buffer = Vec::new();
+        file.seek(std::io::SeekFrom::Start(0))?;
+        let file_size = file.read_to_end(&mut buffer)?;
+        let full = xxh3::xxh3_64(buffer.as_slice());
 
-        // no read file when twice
-        assert_eq!(f.secure_hash().unwrap(), common::data_large_sha512());
-        assert_eq!(
-            f.bytes_read(),
-            super::FAST_READ_SIZE as u64 + meta.len() * 2
-        );
+        let mut hasher = sha2::Sha512::new();
+        hasher.update(buffer.as_slice());
+        let secure = hasher.finalize();
+
+        Ok(HashTest {
+            short_wyhash,
+            short_xxhash,
+            short_read,
+            full,
+            file_size,
+            secure,
+        })
+    }
+}
+
+#[test]
+fn small_file() {
+    let ct = HashTest::new(common::DATA_SMALL).unwrap();
+    assert_eq!(ct.short_wyhash, common::DATA_SMALL_WYHASH);
+    assert_eq!(ct.short_xxhash, common::DATA_SMALL_XXHASH);
+    assert!(ct.file_size <= super::FAST_READ_SIZE);
+    assert_eq!(ct.short_read, ct.file_size);
+    assert_eq!(ct.short_xxhash, ct.full);
+    assert_eq!(ct.secure, common::data_small_sha512());
+
+    let f = Info::from(common::DATA_SMALL).unwrap();
+    assert_eq!(f.fast_hash, ct.short_wyhash);
+    assert_eq!(f.full_hash(), ct.short_xxhash);
+    assert_eq!(f.size, ct.file_size as u64);
+    assert_eq!(f.calc_full_hash().unwrap(), ct.full);
+    assert_eq!(f.full_hash(), ct.full);
+    assert_eq!(f.secure_hash().unwrap(), common::data_small_sha512());
+    assert_eq!(f.secure_hash().unwrap(), common::data_small_sha512());
+}
+
+#[test]
+fn large_file() {
+    let ct = HashTest::new(common::DATA_LARGE).unwrap();
+    assert_eq!(ct.short_wyhash, common::DATA_LARGE_WYHASH);
+    assert_ne!(ct.short_xxhash, common::DATA_LARGE_XXHASH);
+    assert_eq!(ct.short_read, super::FAST_READ_SIZE);
+    assert!(ct.short_read < ct.file_size);
+    assert_eq!(ct.full, common::DATA_LARGE_XXHASH);
+    assert_eq!(ct.secure, common::data_large_sha512());
+
+    let f = Info::from(common::DATA_LARGE).unwrap();
+    assert_eq!(f.fast_hash, ct.short_wyhash);
+    assert_eq!(f.full_hash(), ct.short_xxhash);
+    assert_eq!(f.size, ct.file_size as u64);
+    assert_eq!(f.calc_full_hash().unwrap(), ct.full);
+    assert_eq!(f.full_hash(), ct.full);
+    assert_eq!(f.secure_hash().unwrap(), common::data_large_sha512());
+    assert_eq!(f.secure_hash().unwrap(), common::data_large_sha512());
+}
+
+#[test]
+fn bytes_read() {
+    let meta = fs::metadata(common::DATA_LARGE).unwrap();
+
+    {
+        let (bytes_read, _fast, _full) = super::fast_hash(common::DATA_LARGE).unwrap();
+        assert_eq!(bytes_read, super::FAST_READ_SIZE);
+
+        let (bytes_read, full) = super::full_hash(common::DATA_LARGE).unwrap();
+        assert_eq!(bytes_read as u64, meta.len());
+        assert_eq!(full, common::DATA_LARGE_XXHASH);
     }
 
-    #[test]
-    fn same_small() {
-        let f1 = Info::from(common::DATA_SMALL).unwrap();
-        let f2 = Info::from(common::DATA_SMALL_COPY).unwrap();
+    let f = super::Info::from(common::DATA_LARGE).unwrap();
+    assert_eq!(f.bytes_read(), super::FAST_READ_SIZE as u64);
+    assert_eq!(f.calc_full_hash().unwrap(), common::DATA_LARGE_XXHASH);
+    assert_eq!(f.bytes_read(), super::FAST_READ_SIZE as u64 + meta.len());
+    // no read file when twice
+    assert_eq!(f.calc_full_hash().unwrap(), common::DATA_LARGE_XXHASH);
+    assert_eq!(f.bytes_read(), super::FAST_READ_SIZE as u64 + meta.len());
 
-        assert_eq!(f1, f2);
-        f1.calc_full_hash().unwrap();
+    assert_eq!(f.secure_hash().unwrap(), common::data_large_sha512());
+    assert_eq!(
+        f.bytes_read(),
+        super::FAST_READ_SIZE as u64 + meta.len() * 2
+    );
 
-        assert_eq!(f1, f2);
+    // no read file when twice
+    assert_eq!(f.secure_hash().unwrap(), common::data_large_sha512());
+    assert_eq!(
+        f.bytes_read(),
+        super::FAST_READ_SIZE as u64 + meta.len() * 2
+    );
+}
+
+#[test]
+fn same_small() {
+    let f1 = Info::from(common::DATA_SMALL).unwrap();
+    let f2 = Info::from(common::DATA_SMALL_COPY).unwrap();
+
+    assert_eq!(f1, f2);
+    f1.calc_full_hash().unwrap();
+
+    assert_eq!(f1, f2);
+}
+
+#[test]
+fn same_large() {
+    let f1 = Info::from(common::DATA_LARGE).unwrap();
+    let f2 = Info::from(common::DATA_LARGE_COPY).unwrap();
+
+    assert_eq!(f1, f2);
+    f1.calc_full_hash().unwrap();
+
+    assert_ne!(f1, f2);
+
+    f2.calc_full_hash().unwrap();
+    assert_eq!(f1, f2);
+}
+
+#[test]
+fn strip_windows_unc_removes_prefix_only_on_windows() {
+    let input = r"\\?\C:\Users\user\prj\tidymedia\tests\data\data_small";
+    let got = super::strip_windows_unc(input);
+    if cfg!(target_os = "windows") {
+        assert_eq!(got, r"C:\Users\user\prj\tidymedia\tests\data\data_small");
+    } else {
+        assert_eq!(got, input);
     }
+}
 
-    #[test]
-    fn same_large() {
-        let f1 = Info::from(common::DATA_LARGE).unwrap();
-        let f2 = Info::from(common::DATA_LARGE_COPY).unwrap();
+#[test]
+fn strip_windows_unc_passes_through_when_no_prefix() {
+    let input = "/home/ecs-user/tidymedia/tests/data/data_small";
+    assert_eq!(super::strip_windows_unc(input), input);
+}
 
-        assert_eq!(f1, f2);
-        f1.calc_full_hash().unwrap();
+#[test]
+fn full_path_absolute_passthrough() {
+    let abs = if cfg!(target_os = "windows") {
+        "C:\\windows\\path"
+    } else {
+        "/tmp"
+    };
+    let got = super::full_path(abs).unwrap();
+    assert_eq!(got.as_str(), abs);
+}
 
-        assert_ne!(f1, f2);
-
-        f2.calc_full_hash().unwrap();
-        assert_eq!(f1, f2);
-    }
-
-    #[test]
-    fn strip_windows_unc_removes_prefix_only_on_windows() {
-        let input = r"\\?\C:\Users\user\prj\tidymedia\tests\data\data_small";
-        let got = super::strip_windows_unc(input);
-        if cfg!(target_os = "windows") {
-            assert_eq!(got, r"C:\Users\user\prj\tidymedia\tests\data\data_small");
-        } else {
-            assert_eq!(got, input);
-        }
-    }
-
-    #[test]
-    fn strip_windows_unc_passes_through_when_no_prefix() {
-        let input = "/home/ecs-user/tidymedia/tests/data/data_small";
-        assert_eq!(super::strip_windows_unc(input), input);
-    }
-
-    #[test]
-    fn full_path_absolute_passthrough() {
-        let abs = if cfg!(target_os = "windows") {
-            "C:\\windows\\path"
-        } else {
-            "/tmp"
-        };
-        let got = super::full_path(abs).unwrap();
-        assert_eq!(got.as_str(), abs);
-    }
-
-    #[test]
-    fn full_path_relative_canonicalizes() {
-        let got = super::full_path(common::DATA_SMALL).unwrap();
-        assert!(got.is_absolute(), "expected absolute, got {got}");
-        assert!(got.as_str().ends_with("tests/data/data_small")
+#[test]
+fn full_path_relative_canonicalizes() {
+    let got = super::full_path(common::DATA_SMALL).unwrap();
+    assert!(got.is_absolute(), "expected absolute, got {got}");
+    assert!(
+        got.as_str().ends_with("tests/data/data_small")
             || got.as_str().ends_with(r"tests\data\data_small"),
-            "unexpected canonical path: {got}");
-    }
+        "unexpected canonical path: {got}"
+    );
+}
 
-    #[test]
-    fn full_path_missing_path_errors() {
-        let err = super::full_path("definitely-not-a-real-path-xyz123").unwrap_err();
-        assert_eq!(err.kind(), std::io::ErrorKind::NotFound);
-    }
+#[test]
+fn full_path_missing_path_errors() {
+    let err = super::full_path("definitely-not-a-real-path-xyz123").unwrap_err();
+    assert_eq!(err.kind(), std::io::ErrorKind::NotFound);
+}
 
-    #[test]
-    fn info_from_directory_errors() {
-        let err = Info::from(common::DATA_DIR).unwrap_err();
-        assert_eq!(err.kind(), std::io::ErrorKind::Other);
-        assert!(err.to_string().contains("is a directory"), "got: {err}");
-    }
+#[test]
+fn info_from_directory_errors() {
+    let err = Info::from(common::DATA_DIR).unwrap_err();
+    assert_eq!(err.kind(), std::io::ErrorKind::Other);
+    assert!(err.to_string().contains("is a directory"), "got: {err}");
+}
 
-    #[test]
-    fn info_from_empty_file_errors() {
-        let tmp = tempfile::NamedTempFile::new().unwrap();
-        let path = tmp.path().to_str().unwrap();
-        let err = Info::from(path).unwrap_err();
-        assert_eq!(err.kind(), std::io::ErrorKind::Other);
-        assert!(err.to_string().contains("is empty"), "got: {err}");
-    }
+#[test]
+fn info_from_empty_file_errors() {
+    let tmp = tempfile::NamedTempFile::new().unwrap();
+    let path = tmp.path().to_str().unwrap();
+    let err = Info::from(path).unwrap_err();
+    assert_eq!(err.kind(), std::io::ErrorKind::Other);
+    assert!(err.to_string().contains("is empty"), "got: {err}");
+}
 
-    #[test]
-    fn info_from_missing_path_errors() {
-        let err = Info::from("definitely-missing-path-zzz999").unwrap_err();
-        assert_eq!(err.kind(), std::io::ErrorKind::NotFound);
-    }
+#[test]
+fn info_from_missing_path_errors() {
+    let err = Info::from("definitely-missing-path-zzz999").unwrap_err();
+    assert_eq!(err.kind(), std::io::ErrorKind::NotFound);
+}
 
-    // 测试用阈值：2000-01-01T00:00:00Z（与配置默认值一致）。
-    const TEST_VALID_THRESHOLD_SECS: u64 = 946_684_800;
+// 测试用阈值：2000-01-01T00:00:00Z（与配置默认值一致）。
+const TEST_VALID_THRESHOLD_SECS: u64 = 946_684_800;
 
-    #[test]
-    fn create_time_no_exif_uses_meta() {
-        let info = Info::from(common::DATA_SMALL).unwrap();
-        let t = info.create_time(TEST_VALID_THRESHOLD_SECS);
-        let secs = t
-            .duration_since(std::time::UNIX_EPOCH)
+#[test]
+fn create_time_no_exif_uses_meta() {
+    let info = Info::from(common::DATA_SMALL).unwrap();
+    let t = info.create_time(TEST_VALID_THRESHOLD_SECS);
+    let secs = t.duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
+    assert!(secs > 0);
+}
+
+#[test]
+fn create_time_uses_exif_when_valid() {
+    let mut info = Info::from(common::DATA_SMALL).unwrap();
+    let exif =
+        super::super::exif::Exif::with_mime("image/png").with_date_time_original(1_700_000_000);
+    info.set_exif(exif);
+    let t = info.create_time(TEST_VALID_THRESHOLD_SECS);
+    let secs = t.duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
+    assert_eq!(secs, 1_700_000_000);
+}
+
+#[test]
+fn create_time_falls_back_when_exif_below_threshold() {
+    let mut info = Info::from(common::DATA_SMALL).unwrap();
+    let exif = super::super::exif::Exif::with_mime("image/png").with_date_time_original(100);
+    info.set_exif(exif);
+    let t = info.create_time(TEST_VALID_THRESHOLD_SECS);
+    let secs = t.duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
+    assert!(
+        secs > TEST_VALID_THRESHOLD_SECS,
+        "fallback should be > {TEST_VALID_THRESHOLD_SECS}; got {secs}"
+    );
+}
+
+#[test]
+fn create_time_uses_modify_when_smaller_than_create() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("ct.bin");
+    fs::write(&path, b"hello").unwrap();
+    let early = filetime::FileTime::from_unix_time(631_152_000, 0);
+    filetime::set_file_mtime(&path, early).unwrap();
+    let info = Info::from(path.to_str().unwrap()).unwrap();
+    let t = info.create_time(TEST_VALID_THRESHOLD_SECS);
+    let secs = t.duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
+    assert_eq!(secs, 631_152_000);
+}
+
+#[test]
+fn is_media_false_when_no_exif() {
+    let info = Info::from(common::DATA_SMALL).unwrap();
+    assert!(!info.is_media());
+}
+
+#[test]
+fn is_media_true_when_exif_present_and_media() {
+    let mut info = Info::from(common::DATA_SMALL).unwrap();
+    info.set_exif(super::super::exif::Exif::with_mime("image/jpeg"));
+    assert!(info.is_media());
+}
+
+#[test]
+fn partial_eq_differs_when_size_differs() {
+    let small = Info::from(common::DATA_SMALL).unwrap();
+    let large = Info::from(common::DATA_LARGE).unwrap();
+    assert_ne!(small, large);
+}
+
+#[test]
+fn info_debug_format_includes_fast_hash() {
+    let info = Info::from(common::DATA_SMALL).unwrap();
+    let dbg = format!("{:?}", info);
+    assert!(dbg.contains("fast_hash"));
+    assert!(dbg.contains("size"));
+}
+
+// 绝对路径直接跳过 canonicalize（full_path 内 is_absolute() 分支），随后 metadata() 失败。
+// 触发 file_info.rs L71 metadata()? 的 Err region。
+#[test]
+fn info_from_absolute_missing_path_errors() {
+    let err = Info::from("/definitely/missing/zzz_abs_path_xyz").unwrap_err();
+    assert_eq!(err.kind(), std::io::ErrorKind::NotFound);
+}
+
+// 文件 metadata 可读但 read 不可（chmod 000），让 fast_hash 内 File::open 失败。
+// 触发 file_info.rs L86 + L206/L209 的 Err region。
+// 注意：测试结束前需恢复权限，否则 tempdir 清理会失败。
+#[test]
+#[cfg(unix)]
+fn info_from_unreadable_file_errors() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("locked.bin");
+    fs::write(&path, b"non-empty content").unwrap();
+    let mut perms = fs::metadata(&path).unwrap().permissions();
+    perms.set_mode(0o000);
+    fs::set_permissions(&path, perms.clone()).unwrap();
+
+    let err = Info::from(path.to_str().unwrap()).unwrap_err();
+    assert_eq!(err.kind(), std::io::ErrorKind::PermissionDenied);
+
+    // 恢复权限，让 tempdir 在测试结束清理时能删除该文件
+    perms.set_mode(0o644);
+    fs::set_permissions(&path, perms).unwrap();
+}
+
+// Info 实例创建后立刻删除底层文件，再调 calc_full_hash → mmap 打开失败。
+// 触发 file_info.rs L112 + L218/L219 的 Err region。
+#[test]
+fn calc_full_hash_errors_when_file_deleted() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("vanishing.bin");
+    fs::write(&path, b"contents that will vanish").unwrap();
+    let info = Info::from(path.to_str().unwrap()).unwrap();
+    fs::remove_file(&path).unwrap();
+    let err = info.calc_full_hash().unwrap_err();
+    assert_eq!(err.kind(), std::io::ErrorKind::NotFound);
+}
+
+// 同上，但走 secure_hash 路径。触发 L130 + L225/L226 的 Err region。
+#[test]
+fn secure_hash_errors_when_file_deleted() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("vanishing2.bin");
+    fs::write(&path, b"contents that will vanish 2").unwrap();
+    let info = Info::from(path.to_str().unwrap()).unwrap();
+    fs::remove_file(&path).unwrap();
+    let err = info.secure_hash().unwrap_err();
+    assert_eq!(err.kind(), std::io::ErrorKind::NotFound);
+}
+
+use std::time::Duration;
+use std::time::SystemTime;
+
+/// pick_fs_fallback：modified < created（罕见但合法）→ 取 modified。
+#[test]
+fn pick_fs_fallback_modified_smaller_than_created() {
+    let m = SystemTime::UNIX_EPOCH + Duration::from_secs(100);
+    let c = SystemTime::UNIX_EPOCH + Duration::from_secs(200);
+    let got = super::pick_fs_fallback(Some(m), Some(c));
+    assert_eq!(
+        got.duration_since(SystemTime::UNIX_EPOCH)
             .unwrap()
-            .as_secs();
-        assert!(secs > 0);
-    }
+            .as_secs(),
+        100
+    );
+}
 
-    #[test]
-    fn create_time_uses_exif_when_valid() {
-        let mut info = Info::from(common::DATA_SMALL).unwrap();
-        let exif = super::super::exif::Exif::with_mime("image/png")
-            .with_date_time_original(1_700_000_000);
-        info.set_exif(exif);
-        let t = info.create_time(TEST_VALID_THRESHOLD_SECS);
-        let secs = t
-            .duration_since(std::time::UNIX_EPOCH)
+/// pick_fs_fallback：modified ≥ created → 取 created。
+#[test]
+fn pick_fs_fallback_modified_ge_created() {
+    let m = SystemTime::UNIX_EPOCH + Duration::from_secs(200);
+    let c = SystemTime::UNIX_EPOCH + Duration::from_secs(100);
+    let got = super::pick_fs_fallback(Some(m), Some(c));
+    assert_eq!(
+        got.duration_since(SystemTime::UNIX_EPOCH)
             .unwrap()
-            .as_secs();
-        assert_eq!(secs, 1_700_000_000);
-    }
+            .as_secs(),
+        100
+    );
+}
 
-    #[test]
-    fn create_time_falls_back_when_exif_below_threshold() {
-        let mut info = Info::from(common::DATA_SMALL).unwrap();
-        let exif = super::super::exif::Exif::with_mime("image/png").with_date_time_original(100);
-        info.set_exif(exif);
-        let t = info.create_time(TEST_VALID_THRESHOLD_SECS);
-        let secs = t
-            .duration_since(std::time::UNIX_EPOCH)
+/// pick_fs_fallback：created 不可用（btime 缺失），只看 modified。
+#[test]
+fn pick_fs_fallback_created_none() {
+    let m = SystemTime::UNIX_EPOCH + Duration::from_secs(50);
+    let got = super::pick_fs_fallback(Some(m), None);
+    assert_eq!(
+        got.duration_since(SystemTime::UNIX_EPOCH)
             .unwrap()
-            .as_secs();
-        assert!(
-            secs > TEST_VALID_THRESHOLD_SECS,
-            "fallback should be > {TEST_VALID_THRESHOLD_SECS}; got {secs}"
-        );
-    }
+            .as_secs(),
+        50
+    );
+}
 
-    #[test]
-    fn create_time_uses_modify_when_smaller_than_create() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("ct.bin");
-        fs::write(&path, b"hello").unwrap();
-        let early = filetime::FileTime::from_unix_time(631_152_000, 0);
-        filetime::set_file_mtime(&path, early).unwrap();
-        let info = Info::from(path.to_str().unwrap()).unwrap();
-        let t = info.create_time(TEST_VALID_THRESHOLD_SECS);
-        let secs = t
-            .duration_since(std::time::UNIX_EPOCH)
+/// pick_fs_fallback：modified 不可用（极端 fs），只看 created。
+#[test]
+fn pick_fs_fallback_modified_none() {
+    let c = SystemTime::UNIX_EPOCH + Duration::from_secs(75);
+    let got = super::pick_fs_fallback(None, Some(c));
+    assert_eq!(
+        got.duration_since(SystemTime::UNIX_EPOCH)
             .unwrap()
-            .as_secs();
-        assert_eq!(secs, 631_152_000);
+            .as_secs(),
+        75
+    );
+}
+
+/// pick_fs_fallback：两个时间都不可用 → UNIX_EPOCH 兜底。
+#[test]
+fn pick_fs_fallback_both_none() {
+    let got = super::pick_fs_fallback(None, None);
+    assert_eq!(got, SystemTime::UNIX_EPOCH);
+}
+
+use std::io::Cursor;
+
+/// 单次 read 限量到 32 字节的 reader，触发流式哈希的多次循环回边。
+#[derive(Debug)]
+struct ChunkedReader {
+    data: Vec<u8>,
+    pos: usize,
+}
+impl ChunkedReader {
+    fn new(data: Vec<u8>) -> Self {
+        Self { data, pos: 0 }
     }
-
-    #[test]
-    fn is_media_false_when_no_exif() {
-        let info = Info::from(common::DATA_SMALL).unwrap();
-        assert!(!info.is_media());
+}
+impl io::Read for ChunkedReader {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        let remaining = self.data.len() - self.pos;
+        let n = remaining.min(buf.len()).min(32);
+        buf[..n].copy_from_slice(&self.data[self.pos..self.pos + n]);
+        self.pos += n;
+        Ok(n)
     }
-
-    #[test]
-    fn is_media_true_when_exif_present_and_media() {
-        let mut info = Info::from(common::DATA_SMALL).unwrap();
-        info.set_exif(super::super::exif::Exif::with_mime("image/jpeg"));
-        assert!(info.is_media());
-    }
-
-    #[test]
-    fn partial_eq_differs_when_size_differs() {
-        let small = Info::from(common::DATA_SMALL).unwrap();
-        let large = Info::from(common::DATA_LARGE).unwrap();
-        assert_ne!(small, large);
-    }
-
-    #[test]
-    fn info_debug_format_includes_fast_hash() {
-        let info = Info::from(common::DATA_SMALL).unwrap();
-        let dbg = format!("{:?}", info);
-        assert!(dbg.contains("fast_hash"));
-        assert!(dbg.contains("size"));
-    }
-
-    // 绝对路径直接跳过 canonicalize（full_path 内 is_absolute() 分支），随后 metadata() 失败。
-    // 触发 file_info.rs L71 metadata()? 的 Err region。
-    #[test]
-    fn info_from_absolute_missing_path_errors() {
-        let err = Info::from("/definitely/missing/zzz_abs_path_xyz").unwrap_err();
-        assert_eq!(err.kind(), std::io::ErrorKind::NotFound);
-    }
-
-    // 文件 metadata 可读但 read 不可（chmod 000），让 fast_hash 内 File::open 失败。
-    // 触发 file_info.rs L86 + L206/L209 的 Err region。
-    // 注意：测试结束前需恢复权限，否则 tempdir 清理会失败。
-    #[test]
-    #[cfg(unix)]
-    fn info_from_unreadable_file_errors() {
-        use std::os::unix::fs::PermissionsExt;
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("locked.bin");
-        fs::write(&path, b"non-empty content").unwrap();
-        let mut perms = fs::metadata(&path).unwrap().permissions();
-        perms.set_mode(0o000);
-        fs::set_permissions(&path, perms.clone()).unwrap();
-
-        let err = Info::from(path.to_str().unwrap()).unwrap_err();
-        assert_eq!(err.kind(), std::io::ErrorKind::PermissionDenied);
-
-        // 恢复权限，让 tempdir 在测试结束清理时能删除该文件
-        perms.set_mode(0o644);
-        fs::set_permissions(&path, perms).unwrap();
-    }
-
-    // Info 实例创建后立刻删除底层文件，再调 calc_full_hash → mmap 打开失败。
-    // 触发 file_info.rs L112 + L218/L219 的 Err region。
-    #[test]
-    fn calc_full_hash_errors_when_file_deleted() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("vanishing.bin");
-        fs::write(&path, b"contents that will vanish").unwrap();
-        let info = Info::from(path.to_str().unwrap()).unwrap();
-        fs::remove_file(&path).unwrap();
-        let err = info.calc_full_hash().unwrap_err();
-        assert_eq!(err.kind(), std::io::ErrorKind::NotFound);
-    }
-
-    // 同上，但走 secure_hash 路径。触发 L130 + L225/L226 的 Err region。
-    #[test]
-    fn secure_hash_errors_when_file_deleted() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("vanishing2.bin");
-        fs::write(&path, b"contents that will vanish 2").unwrap();
-        let info = Info::from(path.to_str().unwrap()).unwrap();
-        fs::remove_file(&path).unwrap();
-        let err = info.secure_hash().unwrap_err();
-        assert_eq!(err.kind(), std::io::ErrorKind::NotFound);
-    }
-
-    use std::time::Duration;
-    use std::time::SystemTime;
-
-    /// pick_fs_fallback：modified < created（罕见但合法）→ 取 modified。
-    #[test]
-    fn pick_fs_fallback_modified_smaller_than_created() {
-        let m = SystemTime::UNIX_EPOCH + Duration::from_secs(100);
-        let c = SystemTime::UNIX_EPOCH + Duration::from_secs(200);
-        let got = super::pick_fs_fallback(Some(m), Some(c));
-        assert_eq!(got.duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs(), 100);
-    }
-
-    /// pick_fs_fallback：modified ≥ created → 取 created。
-    #[test]
-    fn pick_fs_fallback_modified_ge_created() {
-        let m = SystemTime::UNIX_EPOCH + Duration::from_secs(200);
-        let c = SystemTime::UNIX_EPOCH + Duration::from_secs(100);
-        let got = super::pick_fs_fallback(Some(m), Some(c));
-        assert_eq!(got.duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs(), 100);
-    }
-
-    /// pick_fs_fallback：created 不可用（btime 缺失），只看 modified。
-    #[test]
-    fn pick_fs_fallback_created_none() {
-        let m = SystemTime::UNIX_EPOCH + Duration::from_secs(50);
-        let got = super::pick_fs_fallback(Some(m), None);
-        assert_eq!(got.duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs(), 50);
-    }
-
-    /// pick_fs_fallback：modified 不可用（极端 fs），只看 created。
-    #[test]
-    fn pick_fs_fallback_modified_none() {
-        let c = SystemTime::UNIX_EPOCH + Duration::from_secs(75);
-        let got = super::pick_fs_fallback(None, Some(c));
-        assert_eq!(got.duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs(), 75);
-    }
-
-    /// pick_fs_fallback：两个时间都不可用 → UNIX_EPOCH 兜底。
-    #[test]
-    fn pick_fs_fallback_both_none() {
-        let got = super::pick_fs_fallback(None, None);
-        assert_eq!(got, SystemTime::UNIX_EPOCH);
-    }
-
-    use std::io::Cursor;
-
-    /// 单次 read 限量到 32 字节的 reader，触发流式哈希的多次循环回边。
-    #[derive(Debug)]
-    struct ChunkedReader {
-        data: Vec<u8>,
-        pos: usize,
-    }
-    impl ChunkedReader {
-        fn new(data: Vec<u8>) -> Self {
-            Self { data, pos: 0 }
-        }
-    }
-    impl io::Read for ChunkedReader {
-        fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-            let remaining = self.data.len() - self.pos;
-            let n = remaining.min(buf.len()).min(32);
-            buf[..n].copy_from_slice(&self.data[self.pos..self.pos + n]);
-            self.pos += n;
-            Ok(n)
-        }
-    }
-    impl io::Seek for ChunkedReader {
-        fn seek(&mut self, pos: io::SeekFrom) -> io::Result<u64> {
-            match pos {
-                io::SeekFrom::Start(p) => {
-                    self.pos = p as usize;
-                }
-                _ => return Err(io::Error::from(io::ErrorKind::Unsupported)),
+}
+impl io::Seek for ChunkedReader {
+    fn seek(&mut self, pos: io::SeekFrom) -> io::Result<u64> {
+        match pos {
+            io::SeekFrom::Start(p) => {
+                self.pos = p as usize;
             }
-            Ok(self.pos as u64)
+            _ => return Err(io::Error::from(io::ErrorKind::Unsupported)),
         }
+        Ok(self.pos as u64)
     }
+}
 
-    /// 始终返回 io::Error 的 reader，用于覆盖 read_fill / full / secure 的 `?` 错误分支。
-    #[derive(Debug)]
-    struct FailingReader;
-    impl io::Read for FailingReader {
-        fn read(&mut self, _buf: &mut [u8]) -> io::Result<usize> {
-            Err(io::Error::new(io::ErrorKind::PermissionDenied, "denied"))
-        }
+/// 始终返回 io::Error 的 reader，用于覆盖 read_fill / full / secure 的 `?` 错误分支。
+#[derive(Debug)]
+struct FailingReader;
+impl io::Read for FailingReader {
+    fn read(&mut self, _buf: &mut [u8]) -> io::Result<usize> {
+        Err(io::Error::new(io::ErrorKind::PermissionDenied, "denied"))
     }
-    impl io::Seek for FailingReader {
-        fn seek(&mut self, _pos: io::SeekFrom) -> io::Result<u64> {
-            Ok(0)
-        }
+}
+impl io::Seek for FailingReader {
+    fn seek(&mut self, _pos: io::SeekFrom) -> io::Result<u64> {
+        Ok(0)
     }
+}
 
-    fn whole_file_bytes(path: &str) -> Vec<u8> {
-        let mut f = fs::File::open(path).unwrap();
-        let mut buf = Vec::new();
-        f.read_to_end(&mut buf).unwrap();
-        buf
-    }
+fn whole_file_bytes(path: &str) -> Vec<u8> {
+    let mut f = fs::File::open(path).unwrap();
+    let mut buf = Vec::new();
+    f.read_to_end(&mut buf).unwrap();
+    buf
+}
 
-    #[test]
-    fn fast_hash_stream_matches_path_version_small() {
-        let bytes = whole_file_bytes(common::DATA_SMALL);
-        let (path_n, path_w, path_x) = super::fast_hash(common::DATA_SMALL).unwrap();
-        let mut r = Cursor::new(bytes.clone());
-        let (sn, sw, sx) = super::fast_hash_stream(&mut r).unwrap();
-        assert_eq!((sn, sw, sx), (path_n, path_w, path_x));
-    }
+#[test]
+fn fast_hash_stream_matches_path_version_small() {
+    let bytes = whole_file_bytes(common::DATA_SMALL);
+    let (path_n, path_w, path_x) = super::fast_hash(common::DATA_SMALL).unwrap();
+    let mut r = Cursor::new(bytes.clone());
+    let (sn, sw, sx) = super::fast_hash_stream(&mut r).unwrap();
+    assert_eq!((sn, sw, sx), (path_n, path_w, path_x));
+}
 
-    #[test]
-    fn fast_hash_stream_matches_path_version_large() {
-        let bytes = whole_file_bytes(common::DATA_LARGE);
-        let (path_n, path_w, path_x) = super::fast_hash(common::DATA_LARGE).unwrap();
-        let mut r = Cursor::new(bytes);
-        let (sn, sw, sx) = super::fast_hash_stream(&mut r).unwrap();
-        assert_eq!((sn, sw, sx), (path_n, path_w, path_x));
-    }
+#[test]
+fn fast_hash_stream_matches_path_version_large() {
+    let bytes = whole_file_bytes(common::DATA_LARGE);
+    let (path_n, path_w, path_x) = super::fast_hash(common::DATA_LARGE).unwrap();
+    let mut r = Cursor::new(bytes);
+    let (sn, sw, sx) = super::fast_hash_stream(&mut r).unwrap();
+    assert_eq!((sn, sw, sx), (path_n, path_w, path_x));
+}
 
-    #[test]
-    fn fast_hash_stream_handles_chunked_reader() {
-        // ChunkedReader 单次最多 32 字节：read_fill 必须循环多次填满 buffer
-        let bytes = whole_file_bytes(common::DATA_LARGE);
-        let (path_n, path_w, path_x) = super::fast_hash(common::DATA_LARGE).unwrap();
-        let mut r = ChunkedReader::new(bytes);
-        let (sn, sw, sx) = super::fast_hash_stream(&mut r).unwrap();
-        assert_eq!((sn, sw, sx), (path_n, path_w, path_x));
-    }
+#[test]
+fn fast_hash_stream_handles_chunked_reader() {
+    // ChunkedReader 单次最多 32 字节：read_fill 必须循环多次填满 buffer
+    let bytes = whole_file_bytes(common::DATA_LARGE);
+    let (path_n, path_w, path_x) = super::fast_hash(common::DATA_LARGE).unwrap();
+    let mut r = ChunkedReader::new(bytes);
+    let (sn, sw, sx) = super::fast_hash_stream(&mut r).unwrap();
+    assert_eq!((sn, sw, sx), (path_n, path_w, path_x));
+}
 
-    #[test]
-    fn fast_hash_stream_empty_reader() {
-        // 立即 EOF：read_fill 第一次 read 返回 0，break 退出
-        let mut r = Cursor::new(Vec::<u8>::new());
-        let (n, w, x) = super::fast_hash_stream(&mut r).unwrap();
-        assert_eq!(n, 0);
-        assert_eq!(w, wyhash::wyhash(&[], 0));
-        assert_eq!(x, xxh3::xxh3_64(&[]));
-    }
+#[test]
+fn fast_hash_stream_empty_reader() {
+    // 立即 EOF：read_fill 第一次 read 返回 0，break 退出
+    let mut r = Cursor::new(Vec::<u8>::new());
+    let (n, w, x) = super::fast_hash_stream(&mut r).unwrap();
+    assert_eq!(n, 0);
+    assert_eq!(w, wyhash::wyhash(&[], 0));
+    assert_eq!(x, xxh3::xxh3_64(&[]));
+}
 
-    #[test]
-    fn fast_hash_stream_io_error_propagates() {
-        let mut r = FailingReader;
-        let err = super::fast_hash_stream(&mut r).unwrap_err();
-        assert_eq!(err.kind(), io::ErrorKind::PermissionDenied);
-    }
+#[test]
+fn fast_hash_stream_io_error_propagates() {
+    let mut r = FailingReader;
+    let err = super::fast_hash_stream(&mut r).unwrap_err();
+    assert_eq!(err.kind(), io::ErrorKind::PermissionDenied);
+}
 
-    #[test]
-    fn full_hash_stream_matches_path_version() {
-        let bytes = whole_file_bytes(common::DATA_LARGE);
-        let (_, path_full) = super::full_hash(common::DATA_LARGE).unwrap();
-        let mut r = Cursor::new(bytes.clone());
-        let (sn, sh) = super::full_hash_stream(&mut r).unwrap();
-        assert_eq!(sh, path_full);
-        assert_eq!(sn, bytes.len() as u64);
-    }
+#[test]
+fn full_hash_stream_matches_path_version() {
+    let bytes = whole_file_bytes(common::DATA_LARGE);
+    let (_, path_full) = super::full_hash(common::DATA_LARGE).unwrap();
+    let mut r = Cursor::new(bytes.clone());
+    let (sn, sh) = super::full_hash_stream(&mut r).unwrap();
+    assert_eq!(sh, path_full);
+    assert_eq!(sn, bytes.len() as u64);
+}
 
-    #[test]
-    fn full_hash_stream_chunked_matches() {
-        let bytes = whole_file_bytes(common::DATA_LARGE);
-        let (_, path_full) = super::full_hash(common::DATA_LARGE).unwrap();
-        let mut r = ChunkedReader::new(bytes.clone());
-        let (sn, sh) = super::full_hash_stream(&mut r).unwrap();
-        assert_eq!(sh, path_full);
-        assert_eq!(sn, bytes.len() as u64);
-    }
+#[test]
+fn full_hash_stream_chunked_matches() {
+    let bytes = whole_file_bytes(common::DATA_LARGE);
+    let (_, path_full) = super::full_hash(common::DATA_LARGE).unwrap();
+    let mut r = ChunkedReader::new(bytes.clone());
+    let (sn, sh) = super::full_hash_stream(&mut r).unwrap();
+    assert_eq!(sh, path_full);
+    assert_eq!(sn, bytes.len() as u64);
+}
 
-    #[test]
-    fn full_hash_stream_empty_reader() {
-        let mut r = Cursor::new(Vec::<u8>::new());
-        let (n, h) = super::full_hash_stream(&mut r).unwrap();
-        assert_eq!(n, 0);
-        assert_eq!(h, xxh3::xxh3_64(&[]));
-    }
+#[test]
+fn full_hash_stream_empty_reader() {
+    let mut r = Cursor::new(Vec::<u8>::new());
+    let (n, h) = super::full_hash_stream(&mut r).unwrap();
+    assert_eq!(n, 0);
+    assert_eq!(h, xxh3::xxh3_64(&[]));
+}
 
-    #[test]
-    fn full_hash_stream_io_error_propagates() {
-        let mut r = FailingReader;
-        assert_eq!(
-            super::full_hash_stream(&mut r).unwrap_err().kind(),
-            io::ErrorKind::PermissionDenied
-        );
-    }
+#[test]
+fn full_hash_stream_io_error_propagates() {
+    let mut r = FailingReader;
+    assert_eq!(
+        super::full_hash_stream(&mut r).unwrap_err().kind(),
+        io::ErrorKind::PermissionDenied
+    );
+}
 
-    #[test]
-    fn secure_hash_stream_matches_path_version() {
-        let bytes = whole_file_bytes(common::DATA_LARGE);
-        let (_, path_secure) = super::secure_hash(common::DATA_LARGE).unwrap();
-        let mut r = Cursor::new(bytes);
-        let (_, sh) = super::secure_hash_stream(&mut r).unwrap();
-        assert_eq!(sh, path_secure);
-    }
+#[test]
+fn secure_hash_stream_matches_path_version() {
+    let bytes = whole_file_bytes(common::DATA_LARGE);
+    let (_, path_secure) = super::secure_hash(common::DATA_LARGE).unwrap();
+    let mut r = Cursor::new(bytes);
+    let (_, sh) = super::secure_hash_stream(&mut r).unwrap();
+    assert_eq!(sh, path_secure);
+}
 
-    #[test]
-    fn secure_hash_stream_empty_reader() {
-        let mut r = Cursor::new(Vec::<u8>::new());
-        let (n, h) = super::secure_hash_stream(&mut r).unwrap();
-        assert_eq!(n, 0);
-        let expected = sha2::Sha512::digest(b"");
-        assert_eq!(h, expected);
-    }
+#[test]
+fn secure_hash_stream_empty_reader() {
+    let mut r = Cursor::new(Vec::<u8>::new());
+    let (n, h) = super::secure_hash_stream(&mut r).unwrap();
+    assert_eq!(n, 0);
+    let expected = sha2::Sha512::digest(b"");
+    assert_eq!(h, expected);
+}
 
-    #[test]
-    fn secure_hash_stream_io_error_propagates() {
-        let mut r = FailingReader;
-        assert_eq!(
-            super::secure_hash_stream(&mut r).unwrap_err().kind(),
-            io::ErrorKind::PermissionDenied
-        );
-    }
+#[test]
+fn secure_hash_stream_io_error_propagates() {
+    let mut r = FailingReader;
+    assert_eq!(
+        super::secure_hash_stream(&mut r).unwrap_err().kind(),
+        io::ErrorKind::PermissionDenied
+    );
+}
 
-    // --- backend-aware Info::open 覆盖路径 ---
+// --- backend-aware Info::open 覆盖路径 ---
 
-    use super::super::backend::fake::FakeBackend;
-    use super::super::uri::Location;
-    use camino::Utf8PathBuf;
-    use std::sync::Arc;
+use super::super::backend::fake::FakeBackend;
+use super::super::uri::Location;
+use camino::Utf8PathBuf;
+use std::sync::Arc;
 
-    /// Info::open 走非 Local Location 时，full_path 从 [`Location::display`] 派生。
-    /// 顺带覆盖 calc_full_hash / secure_hash 的 FakeBackend 路径。
-    #[test]
-    fn info_open_smb_location_derives_full_path_from_display() {
-        let fake = Arc::new(FakeBackend::new("smb"));
-        let loc = Location::Smb {
-            user: Some("alice".into()),
-            host: "nas.local".into(),
-            port: None,
-            share: "photos".into(),
-            path: Utf8PathBuf::from("dir/x.bin"),
-        };
-        fake.add_file(loc.clone(), b"hello-smb-content".to_vec());
+/// Info::open 走非 Local Location 时，full_path 从 [`Location::display`] 派生。
+/// 顺带覆盖 calc_full_hash / secure_hash 的 FakeBackend 路径。
+#[test]
+fn info_open_smb_location_derives_full_path_from_display() {
+    let fake = Arc::new(FakeBackend::new("smb"));
+    let loc = Location::Smb {
+        user: Some("alice".into()),
+        host: "nas.local".into(),
+        port: None,
+        share: "photos".into(),
+        path: Utf8PathBuf::from("dir/x.bin"),
+    };
+    fake.add_file(loc.clone(), b"hello-smb-content".to_vec());
 
-        let info = super::Info::open(&loc, fake.clone()).unwrap();
-        assert_eq!(info.size, 17);
-        assert_eq!(info.full_path.as_str(), loc.display());
-        // calc_full_hash 与 secure_hash 也走 FakeBackend
-        let xxh = info.calc_full_hash().unwrap();
-        assert_eq!(xxh, xxhash_rust::xxh3::xxh3_64(b"hello-smb-content"));
-        let sha = info.secure_hash().unwrap();
-        assert_eq!(sha, sha2::Sha512::digest(b"hello-smb-content"));
-    }
+    let info = super::Info::open(&loc, fake.clone()).unwrap();
+    assert_eq!(info.size, 17);
+    assert_eq!(info.full_path.as_str(), loc.display());
+    // calc_full_hash 与 secure_hash 也走 FakeBackend
+    let xxh = info.calc_full_hash().unwrap();
+    assert_eq!(xxh, xxhash_rust::xxh3::xxh3_64(b"hello-smb-content"));
+    let sha = info.secure_hash().unwrap();
+    assert_eq!(sha, sha2::Sha512::digest(b"hello-smb-content"));
+}
 
-    /// FakeBackend::inject_reader_error 让 open_read 成功但 read Err → Info::open 内
-    /// fast_hash_stream(reader.as_mut())? 的 Err 分支被触发。
-    #[test]
-    fn info_open_propagates_reader_error_from_fast_hash() {
-        let fake = Arc::new(FakeBackend::new("fake"));
-        let loc = Location::Local(Utf8PathBuf::from("/in-memory/x.bin"));
-        fake.add_file(loc.clone(), vec![0u8; 64]);
-        fake.inject_reader_error(loc.clone(), io::ErrorKind::Interrupted);
+/// FakeBackend::inject_reader_error 让 open_read 成功但 read Err → Info::open 内
+/// fast_hash_stream(reader.as_mut())? 的 Err 分支被触发。
+#[test]
+fn info_open_propagates_reader_error_from_fast_hash() {
+    let fake = Arc::new(FakeBackend::new("fake"));
+    let loc = Location::Local(Utf8PathBuf::from("/in-memory/x.bin"));
+    fake.add_file(loc.clone(), vec![0u8; 64]);
+    fake.inject_reader_error(loc.clone(), io::ErrorKind::Interrupted);
 
-        let err = super::Info::open(&loc, fake).unwrap_err();
-        assert_eq!(err.kind(), io::ErrorKind::Interrupted);
-    }
+    let err = super::Info::open(&loc, fake).unwrap_err();
+    assert_eq!(err.kind(), io::ErrorKind::Interrupted);
+}
 
-    /// 用 FakeBackend 让 calc_full_hash 的 full_hash_stream `?` Err 分支被命中：
-    /// Info::open 走 add_file 的正常 reader 通过；之后注入 reader 错误，再调 calc_full_hash。
-    #[test]
-    fn calc_full_hash_propagates_reader_stream_error() {
-        let fake = Arc::new(FakeBackend::new("fake"));
-        let loc = Location::Local(Utf8PathBuf::from("/in-memory/y.bin"));
-        fake.add_file(loc.clone(), vec![1u8; 64]);
+/// 用 FakeBackend 让 calc_full_hash 的 full_hash_stream `?` Err 分支被命中：
+/// Info::open 走 add_file 的正常 reader 通过；之后注入 reader 错误，再调 calc_full_hash。
+#[test]
+fn calc_full_hash_propagates_reader_stream_error() {
+    let fake = Arc::new(FakeBackend::new("fake"));
+    let loc = Location::Local(Utf8PathBuf::from("/in-memory/y.bin"));
+    fake.add_file(loc.clone(), vec![1u8; 64]);
 
-        let info = super::Info::open(&loc, fake.clone()).unwrap();
-        fake.inject_reader_error(loc, io::ErrorKind::ConnectionReset);
-        let err = info.calc_full_hash().unwrap_err();
-        assert_eq!(err.kind(), io::ErrorKind::ConnectionReset);
-    }
+    let info = super::Info::open(&loc, fake.clone()).unwrap();
+    fake.inject_reader_error(loc, io::ErrorKind::ConnectionReset);
+    let err = info.calc_full_hash().unwrap_err();
+    assert_eq!(err.kind(), io::ErrorKind::ConnectionReset);
+}
 
-    /// 同上，覆盖 secure_hash 的 `?` Err 分支。
-    #[test]
-    fn secure_hash_propagates_reader_stream_error() {
-        let fake = Arc::new(FakeBackend::new("fake"));
-        let loc = Location::Local(Utf8PathBuf::from("/in-memory/z.bin"));
-        fake.add_file(loc.clone(), vec![2u8; 64]);
+/// 同上，覆盖 secure_hash 的 `?` Err 分支。
+#[test]
+fn secure_hash_propagates_reader_stream_error() {
+    let fake = Arc::new(FakeBackend::new("fake"));
+    let loc = Location::Local(Utf8PathBuf::from("/in-memory/z.bin"));
+    fake.add_file(loc.clone(), vec![2u8; 64]);
 
-        let info = super::Info::open(&loc, fake.clone()).unwrap();
-        fake.inject_reader_error(loc, io::ErrorKind::TimedOut);
-        let err = info.secure_hash().unwrap_err();
-        assert_eq!(err.kind(), io::ErrorKind::TimedOut);
-    }
+    let info = super::Info::open(&loc, fake.clone()).unwrap();
+    fake.inject_reader_error(loc, io::ErrorKind::TimedOut);
+    let err = info.secure_hash().unwrap_err();
+    assert_eq!(err.kind(), io::ErrorKind::TimedOut);
+}

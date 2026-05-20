@@ -1,6 +1,6 @@
 // spec §六：一致性校验。
 
-use tidymedia::media_time::{epoch_to_candidate, resolve, ConflictKind, Source};
+use tidymedia::media_time::{ConflictKind, Source, epoch_to_candidate, resolve};
 
 use super::common::{fixed_now, ts, utc_offset};
 
@@ -67,8 +67,8 @@ fn mtime_much_earlier_than_p0_only_hints() {
         false,
     )
     .unwrap();
-    let mtime = epoch_to_candidate(1_700_000_100 - 60 * 86_400, Source::FsMtime, None, false)
-        .unwrap();
+    let mtime =
+        epoch_to_candidate(1_700_000_100 - 60 * 86_400, Source::FsMtime, None, false).unwrap();
     let d = resolve(vec![p0, mtime], None, fixed_now()).unwrap();
     assert_eq!(d.conflicts.len(), 1);
     assert_eq!(d.conflicts[0].kind, ConflictKind::MtimeMuchEarlierThanP0);
@@ -84,8 +84,8 @@ fn mtime_later_than_p0_no_conflict() {
         false,
     )
     .unwrap();
-    let mtime = epoch_to_candidate(1_700_000_100 + 60 * 86_400, Source::FsMtime, None, false)
-        .unwrap();
+    let mtime =
+        epoch_to_candidate(1_700_000_100 + 60 * 86_400, Source::FsMtime, None, false).unwrap();
     let d = resolve(vec![p0, mtime], None, fixed_now()).unwrap();
     assert!(d.conflicts.is_empty());
 }
@@ -100,8 +100,8 @@ fn non_p0_best_skips_cross_validation() {
         true,
     )
     .unwrap();
-    let mtime = epoch_to_candidate(1_700_000_100 - 60 * 86_400, Source::FsMtime, None, false)
-        .unwrap();
+    let mtime =
+        epoch_to_candidate(1_700_000_100 - 60 * 86_400, Source::FsMtime, None, false).unwrap();
     let d = resolve(vec![p2, mtime], None, fixed_now()).unwrap();
     assert!(d.conflicts.is_empty());
 }

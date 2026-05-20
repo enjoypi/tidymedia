@@ -190,7 +190,9 @@ pub(crate) fn do_copy(
         return Ok(false);
     }
 
-    if let Some((target_dir_loc, target_loc)) = generate_unique_name(src, output_dir, output_backend) {
+    if let Some((target_dir_loc, target_loc)) =
+        generate_unique_name(src, output_dir, output_backend)
+    {
         if dry_run {
             println!("\"{}\"\t\"{}\"", src_display, target_loc.display());
             return Ok(true);
@@ -231,11 +233,7 @@ pub(crate) fn do_copy(
 /// 不可稳定的场景，整函数随 CLAUDE.md「不可稳定触发」套路标 coverage(off)；
 /// 剩余分支由 FakeBackend reader/writer error 注入的集成测试覆盖。
 #[cfg_attr(coverage_nightly, coverage(off))]
-fn stream_copy(
-    src: &Info,
-    target: &Location,
-    out_be: &dyn Backend,
-) -> common::Result<()> {
+fn stream_copy(src: &Info, target: &Location, out_be: &dyn Backend) -> common::Result<()> {
     let src_be = src.backend();
     let mut reader = src_be.open_read(src.location())?;
     let mut writer = out_be.open_write(target, false)?;
@@ -266,14 +264,9 @@ pub(crate) fn generate_unique_name(
 
     let valuable_name = extract_valuable_name(display_path);
 
-    let sub_dir_path = output_dir
-        .path()
-        .join(year)
-        .join(month)
-        .join(valuable_name);
+    let sub_dir_path = output_dir.path().join(year).join(month).join(valuable_name);
     let sub_dir_loc = output_dir.with_path(sub_dir_path.clone());
 
-    // generate unique name by adding a number suffix
     let max_attempts = config().copy.unique_name_max_attempts;
     for i in 0..max_attempts {
         let target_path = if i == 0 {
@@ -302,7 +295,6 @@ fn any_non_english(s: &str) -> bool {
 
 fn extract_valuable_name(full_path: &Utf8Path) -> String {
     let mut components: Vec<Utf8Component> = full_path.components().collect();
-    // pop the file name
     if components.len() > 1 {
         components.pop();
     }
@@ -316,7 +308,6 @@ fn extract_valuable_name(full_path: &Utf8Path) -> String {
     }
     "".to_string()
 }
-
 
 #[cfg(test)]
 #[path = "copy_tests.rs"]

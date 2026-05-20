@@ -31,7 +31,9 @@ pub struct ExifConfig {
 
 impl Default for ExifConfig {
     fn default() -> Self {
-        Self { valid_date_time_secs: 946_684_800 }
+        Self {
+            valid_date_time_secs: 946_684_800,
+        }
     }
 }
 

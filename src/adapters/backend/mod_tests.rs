@@ -248,7 +248,11 @@ fn fake_read_to_string_ok_missing_and_inject() {
         b.read_to_string(&missing).unwrap_err().kind(),
         io::ErrorKind::NotFound
     );
-    b.inject_error(loc.clone(), Op::ReadToString, io::ErrorKind::PermissionDenied);
+    b.inject_error(
+        loc.clone(),
+        Op::ReadToString,
+        io::ErrorKind::PermissionDenied,
+    );
     assert_eq!(
         b.read_to_string(&loc).unwrap_err().kind(),
         io::ErrorKind::PermissionDenied

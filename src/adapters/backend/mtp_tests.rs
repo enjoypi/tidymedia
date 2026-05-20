@@ -7,9 +7,9 @@ use std::sync::Arc;
 
 use camino::Utf8PathBuf;
 
-use super::*;
 use super::super::fake_remote::{FakeRemoteClient, RemoteFakeOp};
 use super::super::remote::{RemoteAdapter, RemoteClient};
+use super::*;
 use crate::entities::backend::{Entry, EntryKind, Metadata};
 use crate::entities::uri::Location;
 
@@ -209,7 +209,11 @@ fn open_write_no_mkparent_when_path_has_no_parent() {
 fn open_write_finish_propagates_client_error() {
     use std::io::Write;
     let client = fake_client();
-    client.inject(RemoteFakeOp::Write, "x.jpg", io::ErrorKind::ConnectionAborted);
+    client.inject(
+        RemoteFakeOp::Write,
+        "x.jpg",
+        io::ErrorKind::ConnectionAborted,
+    );
     let backend = fuzzy_backend(client);
     let mut w = backend.open_write(&mtp("x.jpg"), false).unwrap();
     w.write_all(b"data").unwrap();
@@ -426,8 +430,7 @@ fn mtp_buffered_writer_flush_ok() {
 #[test]
 fn arc_with_client_builds_dyn_backend() {
     let client: Arc<dyn MtpClient> = fake_client();
-    let backend =
-        MtpBackend::arc_with_client(client, MtpMatch::Fuzzy, MtpMatch::Exact);
+    let backend = MtpBackend::arc_with_client(client, MtpMatch::Fuzzy, MtpMatch::Exact);
     assert_eq!(backend.scheme(), "mtp");
 }
 

@@ -1,7 +1,7 @@
 // spec §2.P4 / §5.10：mtime 兜底；btime/ctime 不可用。
 
 use tidymedia::media_time::fs_time::from_modified;
-use tidymedia::media_time::{epoch_to_candidate, resolve, Priority, Source};
+use tidymedia::media_time::{Priority, Source, epoch_to_candidate, resolve};
 
 use super::common::{fixed_now, set_mtime, utc_offset};
 

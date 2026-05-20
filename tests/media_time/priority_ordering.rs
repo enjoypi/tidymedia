@@ -1,6 +1,6 @@
 // spec §三：优先级表 + 同优先级取较早。
 
-use tidymedia::media_time::{epoch_to_candidate, resolve, Priority, Source};
+use tidymedia::media_time::{Priority, Source, epoch_to_candidate, resolve};
 
 use super::common::{fixed_now, utc_offset};
 

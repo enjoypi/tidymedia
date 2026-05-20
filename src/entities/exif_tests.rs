@@ -68,7 +68,10 @@ fn entry_value_to_epoch_datetime_aware() {
     let dt = chrono::DateTime::parse_from_rfc3339("2024-01-01T12:00:00+00:00").unwrap();
     let v = nom_exif::EntryValue::DateTime(dt);
     // 带时区的 DateTime 不受 local_offset 影响
-    assert_eq!(super::entry_value_to_epoch(&v, FixedOffset::east_opt(8 * 3600).unwrap()), 1_704_110_400);
+    assert_eq!(
+        super::entry_value_to_epoch(&v, FixedOffset::east_opt(8 * 3600).unwrap()),
+        1_704_110_400
+    );
 }
 
 #[test]
@@ -91,7 +94,10 @@ fn entry_value_to_epoch_naive_datetime_uses_local_offset() {
     let v = nom_exif::EntryValue::NaiveDateTime(nd);
     let offset = FixedOffset::east_opt(8 * 3600).unwrap();
     // 12:00 +08:00 = 04:00 UTC = 1_704_110_400 - 28_800
-    assert_eq!(super::entry_value_to_epoch(&v, offset), 1_704_110_400 - 8 * 3600);
+    assert_eq!(
+        super::entry_value_to_epoch(&v, offset),
+        1_704_110_400 - 8 * 3600
+    );
 }
 
 #[test]
@@ -200,9 +206,9 @@ fn from_path_propagates_infer_io_error_when_unreadable() {
 /// 立即 read Err 的 reader：sniff_mime 内 `?` 把 Err 上抛到 open。
 #[test]
 fn open_propagates_sniff_mime_io_error() {
-    use std::sync::Arc;
     use super::super::backend::fake::FakeBackend;
     use super::super::uri::Location;
+    use std::sync::Arc;
 
     let fake = Arc::new(FakeBackend::new("fake"));
     let loc = Location::Local(camino::Utf8PathBuf::from("/in-mem/x.bin"));

@@ -73,8 +73,7 @@ fn smb_minimal_share_no_path() {
 
 #[test]
 fn smb_percent_decode_user_and_path() {
-    let loc = Location::parse("smb://al%20ice@nas/share/folder%20A/foto%20%E4%B8%AD.jpg")
-        .unwrap();
+    let loc = Location::parse("smb://al%20ice@nas/share/folder%20A/foto%20%E4%B8%AD.jpg").unwrap();
     if let Location::Smb {
         user, share, path, ..
     } = loc
@@ -171,10 +170,8 @@ fn mtp_percent_decode_invalid_in_storage_with_path() {
 
 #[test]
 fn mtp_full_with_path() {
-    let loc = Location::parse(
-        "mtp://Pixel%208%20Pro/Internal%20shared%20storage/DCIM/Camera",
-    )
-    .unwrap();
+    let loc =
+        Location::parse("mtp://Pixel%208%20Pro/Internal%20shared%20storage/DCIM/Camera").unwrap();
     assert_eq!(
         loc,
         Location::Mtp {
@@ -265,11 +262,13 @@ fn adb_autodetect_empty_serial() {
 #[test]
 fn adb_percent_decode_serial_and_path() {
     let loc =
-        Location::parse("adb://Pixel%208/storage/emulated/0/DCIM/foto%20%E4%B8%AD.jpg")
-            .unwrap();
+        Location::parse("adb://Pixel%208/storage/emulated/0/DCIM/foto%20%E4%B8%AD.jpg").unwrap();
     if let Location::Adb { serial, path } = loc {
         assert_eq!(serial, Some("Pixel 8".into()));
-        assert_eq!(path, Utf8PathBuf::from("/storage/emulated/0/DCIM/foto 中.jpg"));
+        assert_eq!(
+            path,
+            Utf8PathBuf::from("/storage/emulated/0/DCIM/foto 中.jpg")
+        );
     } else {
         panic!("expected Adb variant");
     }
@@ -333,18 +332,9 @@ fn from_str_dispatches_to_parse() {
 #[test]
 fn scheme_each_variant() {
     assert_eq!(Location::Local(Utf8PathBuf::new()).scheme(), "local");
-    assert_eq!(
-        Location::parse("smb://h/s").unwrap().scheme(),
-        "smb"
-    );
-    assert_eq!(
-        Location::parse("mtp://d/s").unwrap().scheme(),
-        "mtp"
-    );
-    assert_eq!(
-        Location::parse("adb://s/p").unwrap().scheme(),
-        "adb"
-    );
+    assert_eq!(Location::parse("smb://h/s").unwrap().scheme(), "smb");
+    assert_eq!(Location::parse("mtp://d/s").unwrap().scheme(), "mtp");
+    assert_eq!(Location::parse("adb://s/p").unwrap().scheme(), "adb");
 }
 
 #[test]
@@ -372,9 +362,7 @@ fn display_smb_no_user_no_port_no_path() {
 
 #[test]
 fn display_mtp_round_trip_full() {
-    let loc =
-        Location::parse("mtp://Pixel%208/Internal%20shared%20storage/DCIM/Camera")
-            .unwrap();
+    let loc = Location::parse("mtp://Pixel%208/Internal%20shared%20storage/DCIM/Camera").unwrap();
     let displayed = loc.display();
     let back = Location::parse(&displayed).unwrap();
     assert_eq!(back, loc);
@@ -464,33 +452,44 @@ fn with_path_preserves_scheme_and_connection_fields() {
 
     let adb_auto = Location::parse("adb:///sdcard/DCIM").unwrap();
     let new_auto = adb_auto.with_path(Utf8PathBuf::from("/sdcard/Movies"));
-    assert!(matches!(
-        new_auto,
-        Location::Adb { serial: None, .. }
-    ));
+    assert!(matches!(new_auto, Location::Adb { serial: None, .. }));
 }
 
 #[test]
 fn parse_error_display_each_variant() {
-    assert!(ParseError::MissingHost("x".into())
-        .to_string()
-        .contains("missing host"));
-    assert!(ParseError::MissingShare("x".into())
-        .to_string()
-        .contains("missing share"));
-    assert!(ParseError::MissingStorage("x".into())
-        .to_string()
-        .contains("missing storage"));
-    assert!(ParseError::MissingPath("x".into())
-        .to_string()
-        .contains("missing path"));
-    assert!(ParseError::PercentDecode("x".into())
-        .to_string()
-        .contains("invalid percent"));
-    assert!(ParseError::UnsupportedScheme("x".into())
-        .to_string()
-        .contains("unsupported scheme"));
-    assert!(ParseError::InvalidPort("x".into())
-        .to_string()
-        .contains("invalid port"));
+    assert!(
+        ParseError::MissingHost("x".into())
+            .to_string()
+            .contains("missing host")
+    );
+    assert!(
+        ParseError::MissingShare("x".into())
+            .to_string()
+            .contains("missing share")
+    );
+    assert!(
+        ParseError::MissingStorage("x".into())
+            .to_string()
+            .contains("missing storage")
+    );
+    assert!(
+        ParseError::MissingPath("x".into())
+            .to_string()
+            .contains("missing path")
+    );
+    assert!(
+        ParseError::PercentDecode("x".into())
+            .to_string()
+            .contains("invalid percent")
+    );
+    assert!(
+        ParseError::UnsupportedScheme("x".into())
+            .to_string()
+            .contains("unsupported scheme")
+    );
+    assert!(
+        ParseError::InvalidPort("x".into())
+            .to_string()
+            .contains("invalid port")
+    );
 }

@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
-use crate::entities::backend::local::LocalBackend;
 use crate::entities::backend::Backend;
+use crate::entities::backend::local::LocalBackend;
 use crate::entities::common::Error;
 use crate::entities::common::Result;
 use crate::entities::uri::Location;
@@ -46,9 +46,16 @@ fn unsupported_backend(loc: &Location, feature: &str) -> Error {
 #[cfg_attr(coverage_nightly, coverage(off))]
 fn build_smb_backend(loc: &Location) -> Result<Arc<dyn Backend>> {
     use crate::adapters::backend::smb::SmbBackend;
-    use crate::entities::backend::smb::real::RealSmbClient;
     use crate::entities::backend::smb::SmbTarget;
-    let Location::Smb { user, host, port, share, .. } = loc else {
+    use crate::entities::backend::smb::real::RealSmbClient;
+    let Location::Smb {
+        user,
+        host,
+        port,
+        share,
+        ..
+    } = loc
+    else {
         unreachable!("DefaultBackendFactory routes only Location::Smb here")
     };
     let target = SmbTarget {
@@ -61,8 +68,8 @@ fn build_smb_backend(loc: &Location) -> Result<Arc<dyn Backend>> {
         krb5_ccname: std::env::var("KRB5CCNAME").ok(),
     };
     let cfg = &crate::frameworks::config::config().backend.smb;
-    let client = RealSmbClient::new(&target, &cfg.default_user, &cfg.workgroup)
-        .map_err(Error::Io)?;
+    let client =
+        RealSmbClient::new(&target, &cfg.default_user, &cfg.workgroup).map_err(Error::Io)?;
     Ok(SmbBackend::arc_with_client(Arc::new(client)))
 }
 

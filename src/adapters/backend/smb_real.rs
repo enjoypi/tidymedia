@@ -28,9 +28,9 @@ use pavao::{
     SmbClient as PavaoClient, SmbCredentials, SmbDirentType, SmbMode, SmbOpenOptions, SmbOptions,
 };
 
-use super::{SmbTarget};
 use super::super::remote::RemoteClient;
 use super::super::{Entry, EntryKind, Metadata};
+use super::SmbTarget;
 use crate::entities::uri::Location;
 
 pub struct RealSmbClient {
@@ -65,10 +65,7 @@ impl RealSmbClient {
         let server = format!(
             "smb://{}{}",
             target.host,
-            target
-                .port
-                .map(|p| format!(":{p}"))
-                .unwrap_or_default()
+            target.port.map(|p| format!(":{p}")).unwrap_or_default()
         );
         let user = target
             .user

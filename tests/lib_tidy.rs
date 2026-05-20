@@ -4,8 +4,8 @@ use std::sync::Arc;
 use camino::Utf8PathBuf;
 use tempfile::tempdir;
 use tidymedia::{
-    run_cli, tidy, tidy_with, Backend, BackendFactory, Commands, Error, FakeBackend, FakeOp,
-    LocalBackend, Location, Result,
+    Backend, BackendFactory, Commands, Error, FakeBackend, FakeOp, LocalBackend, Location, Result,
+    run_cli, tidy, tidy_with,
 };
 
 const DATA_DIR: &str = "tests/data";
@@ -416,7 +416,11 @@ fn tidy_with_find_mixed_local_smb_mtp_sources() {
         &factory,
         Commands::Find {
             secure: false,
-            sources: vec![smb_root, mtp_root, local(local_src.path().to_str().unwrap())],
+            sources: vec![
+                smb_root,
+                mtp_root,
+                local(local_src.path().to_str().unwrap()),
+            ],
             output: None,
         },
     )
@@ -469,7 +473,11 @@ fn tidy_with_propagates_smb_open_read_error() {
     let fake_smb = Arc::new(FakeBackend::new("smb"));
     fake_smb.add_dir(smb_root.clone());
     fake_smb.add_file(smb_file.clone(), vec![1; 1024]);
-    fake_smb.inject_error(smb_file, FakeOp::OpenRead, std::io::ErrorKind::PermissionDenied);
+    fake_smb.inject_error(
+        smb_file,
+        FakeOp::OpenRead,
+        std::io::ErrorKind::PermissionDenied,
+    );
 
     let out_dir = tempdir().unwrap();
     let mut factory = FakeBackendFactory::new();
@@ -498,7 +506,11 @@ fn tidy_with_propagates_smb_walk_error() {
     let smb_root = smb_loc("");
     let fake_smb = Arc::new(FakeBackend::new("smb"));
     fake_smb.add_dir(smb_root.clone());
-    fake_smb.inject_error(smb_root.clone(), FakeOp::Walk, std::io::ErrorKind::PermissionDenied);
+    fake_smb.inject_error(
+        smb_root.clone(),
+        FakeOp::Walk,
+        std::io::ErrorKind::PermissionDenied,
+    );
 
     let out_dir = tempdir().unwrap();
     let mut factory = FakeBackendFactory::new();
@@ -602,7 +614,11 @@ fn tidy_with_find_mixed_local_smb_adb_sources() {
         &factory,
         Commands::Find {
             secure: false,
-            sources: vec![smb_root, adb_root, local(local_src.path().to_str().unwrap())],
+            sources: vec![
+                smb_root,
+                adb_root,
+                local(local_src.path().to_str().unwrap()),
+            ],
             output: None,
         },
     )

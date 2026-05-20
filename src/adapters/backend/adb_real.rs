@@ -36,9 +36,9 @@ use adb_client::server_device::ADBServerDevice;
 use adb_client::{ADBDeviceExt, ADBListItemType};
 use parking_lot::Mutex;
 
-use super::{shell_quote, AdbTarget};
 use super::super::remote::RemoteClient;
 use super::super::{Entry, EntryKind, Metadata};
+use super::{AdbTarget, shell_quote};
 use crate::entities::uri::Location;
 
 pub struct RealAdbClient {
@@ -60,14 +60,10 @@ impl std::fmt::Debug for RealAdbClient {
 impl RealAdbClient {
     /// 按 serial（或 autodetect）+ adb-server 地址构造一个长连设备句柄。
     /// `server_host` / `server_port` 由 lib.rs 装配层从 `config()` 读取传入。
-    pub fn new(
-        serial: Option<String>,
-        server_host: &str,
-        server_port: u16,
-    ) -> io::Result<Self> {
-        let host: Ipv4Addr = server_host.parse().map_err(|e| {
-            io::Error::other(format!("adb server_host parse: {e}"))
-        })?;
+    pub fn new(serial: Option<String>, server_host: &str, server_port: u16) -> io::Result<Self> {
+        let host: Ipv4Addr = server_host
+            .parse()
+            .map_err(|e| io::Error::other(format!("adb server_host parse: {e}")))?;
         let addr = SocketAddrV4::new(host, server_port);
         let device = match &serial {
             Some(s) => ADBServerDevice::new(s.clone(), Some(addr)),
@@ -85,7 +81,10 @@ impl RemoteClient<AdbTarget> for RealAdbClient {
         let path = target.path.as_str();
         // adb_client `stat` 接 `&dyn AsRef<str>` trait object，必须 `&&str` 二级借用；
         // clippy needless_borrow 在此 false-positive。
-        #[allow(clippy::needless_borrows_for_generic_args)]
+        #[expect(
+            clippy::needless_borrows_for_generic_args,
+            reason = "adb_client API takes `&dyn AsRef<str>`; clippy false-positive on the required double borrow"
+        )]
         let r = self
             .device
             .lock()
@@ -101,7 +100,10 @@ impl RemoteClient<AdbTarget> for RealAdbClient {
 
     fn list(&self, target: &AdbTarget) -> io::Result<Vec<Entry>> {
         let path = target.path.as_str();
-        #[allow(clippy::needless_borrows_for_generic_args)]
+        #[expect(
+            clippy::needless_borrows_for_generic_args,
+            reason = "adb_client API takes `&dyn AsRef<str>`; clippy false-positive on the required double borrow"
+        )]
         let items = self
             .device
             .lock()
@@ -135,7 +137,10 @@ impl RemoteClient<AdbTarget> for RealAdbClient {
         Ok(out)
     }
 
-    #[allow(clippy::needless_borrows_for_generic_args)]
+    #[expect(
+        clippy::needless_borrows_for_generic_args,
+        reason = "adb_client API takes `&dyn AsRef<str>`; clippy false-positive on the required double borrow"
+    )]
     fn read(&self, target: &AdbTarget) -> io::Result<Vec<u8>> {
         let path = target.path.as_str();
         let mut buf: Vec<u8> = Vec::new();
@@ -146,7 +151,10 @@ impl RemoteClient<AdbTarget> for RealAdbClient {
         Ok(buf)
     }
 
-    #[allow(clippy::needless_borrows_for_generic_args)]
+    #[expect(
+        clippy::needless_borrows_for_generic_args,
+        reason = "adb_client API takes `&dyn AsRef<str>`; clippy false-positive on the required double borrow"
+    )]
     fn write(&self, target: &AdbTarget, data: &[u8]) -> io::Result<u64> {
         let path = target.path.as_str();
         let mut reader = Cursor::new(data);

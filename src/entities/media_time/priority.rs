@@ -34,9 +34,9 @@ pub enum Source {
 impl Source {
     pub fn priority(self) -> Priority {
         match self {
-            Source::ExifDateTimeOriginal
-            | Source::QuickTimeCreationDate
-            | Source::MkvDateUtc => Priority::P0,
+            Source::ExifDateTimeOriginal | Source::QuickTimeCreationDate | Source::MkvDateUtc => {
+                Priority::P0
+            }
             Source::ExifCreateDate | Source::QuickTimeCreateDate => Priority::P1,
             Source::FilenameCamera
             | Source::FilenamePhone

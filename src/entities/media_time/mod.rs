@@ -118,8 +118,7 @@ mod tests {
 
     #[test]
     fn exif_with_all_three_fields_produces_three_candidates() {
-        let exif = Exif::with_mime("image/jpeg")
-            .with_date_time_original(1_700_000_100);
+        let exif = Exif::with_mime("image/jpeg").with_date_time_original(1_700_000_100);
         let cands = candidates_from_exif(&exif, utc());
         assert_eq!(cands.len(), 1);
         assert_eq!(cands[0].source, Source::ExifDateTimeOriginal);

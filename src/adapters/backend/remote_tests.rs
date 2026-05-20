@@ -193,10 +193,7 @@ impl DummyAdapter {
             ctx: DummyCtx::ok(),
         }
     }
-    fn with_client_and_ctx(
-        client: Arc<dyn RemoteClient<DummyTarget>>,
-        ctx: DummyCtx,
-    ) -> Self {
+    fn with_client_and_ctx(client: Arc<dyn RemoteClient<DummyTarget>>, ctx: DummyCtx) -> Self {
         Self { client, ctx }
     }
 }
@@ -216,7 +213,9 @@ impl RemoteAdapter for DummyAdapter {
 
 fn backend() -> RemoteBackend<DummyAdapter> {
     let client: Arc<dyn RemoteClient<DummyTarget>> = Arc::new(DummyClient::default());
-    RemoteBackend { adapter: DummyAdapter::with_client(client) }
+    RemoteBackend {
+        adapter: DummyAdapter::with_client(client),
+    }
 }
 
 fn loc() -> Location {
@@ -224,23 +223,22 @@ fn loc() -> Location {
 }
 
 fn backend_with_client(c: DummyClient) -> RemoteBackend<DummyAdapter> {
-    RemoteBackend { adapter: DummyAdapter::with_client(Arc::new(c)) }
+    RemoteBackend {
+        adapter: DummyAdapter::with_client(Arc::new(c)),
+    }
 }
 
 fn backend_with_from_loc_err(kind: io::ErrorKind) -> RemoteBackend<DummyAdapter> {
     let client: Arc<dyn RemoteClient<DummyTarget>> = Arc::new(DummyClient::default());
     RemoteBackend {
-        adapter: DummyAdapter::with_client_and_ctx(
-            client,
-            DummyCtx::with_err(kind),
-        ),
+        adapter: DummyAdapter::with_client_and_ctx(client, DummyCtx::with_err(kind)),
     }
 }
 
-fn backend_with_client_and_root(
-    c: DummyClient,
-) -> RemoteBackend<DummyAdapter> {
-    RemoteBackend { adapter: DummyAdapter::with_client(Arc::new(c)) }
+fn backend_with_client_and_root(c: DummyClient) -> RemoteBackend<DummyAdapter> {
+    RemoteBackend {
+        adapter: DummyAdapter::with_client(Arc::new(c)),
+    }
 }
 
 // ── 成功路径 ──────────────────────────────────────────────────
@@ -377,7 +375,9 @@ fn read_to_string_invalid_utf8() {
             unreachable!()
         }
     }
-    let b = RemoteBackend { adapter: DummyAdapter::with_client(Arc::new(BadUtf8Client)) };
+    let b = RemoteBackend {
+        adapter: DummyAdapter::with_client(Arc::new(BadUtf8Client)),
+    };
     let e = b.read_to_string(&loc()).unwrap_err();
     assert_eq!(e.kind(), io::ErrorKind::InvalidData);
 }
@@ -529,10 +529,7 @@ fn copy_file_src_from_location_err_propagates() {
 fn backend_with_root_ctx() -> RemoteBackend<DummyAdapter> {
     let client: Arc<dyn RemoteClient<DummyTarget>> = Arc::new(DummyClient::default());
     RemoteBackend {
-        adapter: DummyAdapter::with_client_and_ctx(
-            client,
-            DummyCtx::with_root_path(),
-        ),
+        adapter: DummyAdapter::with_client_and_ctx(client, DummyCtx::with_root_path()),
     }
 }
 

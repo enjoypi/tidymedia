@@ -10,8 +10,8 @@ use camino::Utf8PathBuf;
 use pretty_assertions::assert_eq;
 use tempfile::tempdir;
 
-use crate::entities::backend::{Backend, EntryKind};
 use super::LocalBackend;
+use crate::entities::backend::{Backend, EntryKind};
 use crate::entities::uri::Location;
 
 fn local(p: impl AsRef<std::path::Path>) -> Location {
@@ -255,10 +255,7 @@ fn read_to_string_ok_and_missing() {
     assert_eq!(backend.read_to_string(&local(&path)).unwrap(), "hello");
     let missing = dir.path().join("missing");
     assert_eq!(
-        backend
-            .read_to_string(&local(&missing))
-            .unwrap_err()
-            .kind(),
+        backend.read_to_string(&local(&missing)).unwrap_err().kind(),
         io::ErrorKind::NotFound
     );
 }

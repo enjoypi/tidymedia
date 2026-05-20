@@ -3,8 +3,8 @@ use std::ffi::OsString;
 use clap::Parser;
 use clap::Subcommand;
 use tracing::debug;
-use tracing_subscriber::fmt;
 use tracing_subscriber::EnvFilter;
+use tracing_subscriber::fmt;
 
 use crate::adapters::dispatch::tidy;
 use crate::entities::common::Error;
@@ -98,8 +98,7 @@ where
         Err(e)
             if matches!(
                 e.kind(),
-                clap::error::ErrorKind::DisplayHelp
-                    | clap::error::ErrorKind::DisplayVersion
+                clap::error::ErrorKind::DisplayHelp | clap::error::ErrorKind::DisplayVersion
             ) =>
         {
             let _ = e.print();
@@ -134,7 +133,11 @@ fn install_logging(cli: &Cli) {
         .compact();
 
     let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| {
-        EnvFilter::new(format!("{}={},nom_exif=error", env!("CARGO_PKG_NAME"), cli.log_level))
+        EnvFilter::new(format!(
+            "{}={},nom_exif=error",
+            env!("CARGO_PKG_NAME"),
+            cli.log_level
+        ))
     });
 
     let _ = tracing_subscriber::fmt()

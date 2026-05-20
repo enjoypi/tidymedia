@@ -1,14 +1,17 @@
 // spec §五：常见陷阱。
 
-use tidymedia::media_time::filter::{classify, quicktime_epoch, Validity};
-use tidymedia::media_time::{epoch_to_candidate, resolve, Confidence, Priority, Source};
+use tidymedia::media_time::filter::{Validity, classify, quicktime_epoch};
+use tidymedia::media_time::{Confidence, Priority, Source, epoch_to_candidate, resolve};
 
 use super::common::{fixed_now, ts, utc_offset};
 
 /// spec §5.1：MP4 未写 creation_time 时 nom-exif 返回 1904-01-01，必须剔除。
 #[test]
 fn epoch_1904_rejected() {
-    assert_eq!(classify(quicktime_epoch(), fixed_now()), Validity::RejectEpoch1904);
+    assert_eq!(
+        classify(quicktime_epoch(), fixed_now()),
+        Validity::RejectEpoch1904
+    );
 }
 
 /// spec §5.1：1904 候选与有效 P0 同时存在 → 1904 被剔除，P0 胜出。

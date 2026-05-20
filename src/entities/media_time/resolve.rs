@@ -58,10 +58,7 @@ pub fn resolve(
     })
 }
 
-fn apply_filters(
-    candidates: Vec<Candidate>,
-    now: DateTime<Utc>,
-) -> Vec<(Candidate, Validity)> {
+fn apply_filters(candidates: Vec<Candidate>, now: DateTime<Utc>) -> Vec<(Candidate, Validity)> {
     candidates
         .into_iter()
         .filter_map(|c| match filter::classify(c.utc, now) {

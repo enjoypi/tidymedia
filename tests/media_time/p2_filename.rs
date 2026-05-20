@@ -1,7 +1,7 @@
 // spec §2.P2：文件名启发式——根据来源识别四类模板。
 
-use tidymedia::media_time::filename::parse_filename;
 use tidymedia::media_time::Source;
+use tidymedia::media_time::filename::parse_filename;
 
 use super::common::{east8, utc_offset};
 

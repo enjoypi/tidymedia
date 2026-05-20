@@ -17,8 +17,7 @@ pub fn config() -> &'static Config {
 }
 
 fn load() -> Config {
-    let path = env::var("TIDYMEDIA_CONFIG")
-        .unwrap_or_else(|_| "config.yaml".to_string());
+    let path = env::var("TIDYMEDIA_CONFIG").unwrap_or_else(|_| "config.yaml".to_string());
 
     let raw = match fs::read_to_string(&path) {
         Ok(s) => s,
@@ -61,22 +60,29 @@ fn load() -> Config {
 }
 
 /// 把 `${VAR:-default}` 替换为环境变量值或默认值。
+//
+// `$` `{` `}` 都是 ASCII，UTF-8 多字节字符的字节绝不会撞上 ASCII 范围；
+// 因此按字节扫描 placeholder 边界，剩余段以 `&input[..]` 切片整段 push，
+// 保留原 UTF-8 编码不被逐字节降级为 Latin-1。
 fn expand_env(input: &str) -> String {
     let mut out = String::with_capacity(input.len());
     let bytes = input.as_bytes();
     let mut i = 0;
-    while i < bytes.len() {
-        if i + 1 < bytes.len() && bytes[i] == b'$' && bytes[i + 1] == b'{' {
-            if let Some(end) = find_close_brace(bytes, i + 2) {
-                let body = &input[i + 2..end];
-                out.push_str(&resolve_var(body));
-                i = end + 1;
-                continue;
-            }
+    let mut last = 0;
+    while i + 1 < bytes.len() {
+        if bytes[i] == b'$'
+            && bytes[i + 1] == b'{'
+            && let Some(end) = find_close_brace(bytes, i + 2)
+        {
+            out.push_str(&input[last..i]);
+            out.push_str(&resolve_var(&input[i + 2..end]));
+            i = end + 1;
+            last = i;
+            continue;
         }
-        out.push(bytes[i] as char);
         i += 1;
     }
+    out.push_str(&input[last..]);
     out
 }
 
@@ -101,25 +107,25 @@ mod tests {
 
     #[test]
     fn expand_env_substitutes_default_when_var_missing() {
-        std::env::remove_var("TIDYMEDIA_TEST_MISSING_VAR_X");
+        unsafe { std::env::remove_var("TIDYMEDIA_TEST_MISSING_VAR_X") };
         let s = expand_env("a: ${TIDYMEDIA_TEST_MISSING_VAR_X:-7}");
         assert_eq!(s, "a: 7");
     }
 
     #[test]
     fn expand_env_uses_env_value_when_set() {
-        std::env::set_var("TIDYMEDIA_TEST_SET_VAR_Y", "42");
+        unsafe { std::env::set_var("TIDYMEDIA_TEST_SET_VAR_Y", "42") };
         let s = expand_env("a: ${TIDYMEDIA_TEST_SET_VAR_Y:-0}");
         assert_eq!(s, "a: 42");
-        std::env::remove_var("TIDYMEDIA_TEST_SET_VAR_Y");
+        unsafe { std::env::remove_var("TIDYMEDIA_TEST_SET_VAR_Y") };
     }
 
     #[test]
     fn expand_env_resolves_bare_name_without_default() {
-        std::env::set_var("TIDYMEDIA_TEST_BARE_Z", "hi");
+        unsafe { std::env::set_var("TIDYMEDIA_TEST_BARE_Z", "hi") };
         let s = expand_env("k: ${TIDYMEDIA_TEST_BARE_Z}");
         assert_eq!(s, "k: hi");
-        std::env::remove_var("TIDYMEDIA_TEST_BARE_Z");
+        unsafe { std::env::remove_var("TIDYMEDIA_TEST_BARE_Z") };
     }
 
     #[test]
@@ -137,9 +143,25 @@ mod tests {
         assert_eq!(expand_env("a$"), "a$");
     }
 
+    // 防御 UTF-8 字符被逐字节降级为 Latin-1（旧实现 `bytes[i] as char` 的 bug）。
+    #[test]
+    fn expand_env_preserves_multibyte_chars() {
+        unsafe { std::env::set_var("TIDYMEDIA_TEST_UTF8_K", "值") };
+        let s = expand_env("# 目标文件 \nk: ${TIDYMEDIA_TEST_UTF8_K:-默认}");
+        assert_eq!(s, "# 目标文件 \nk: 值");
+        unsafe { std::env::remove_var("TIDYMEDIA_TEST_UTF8_K") };
+    }
+
+    #[test]
+    fn expand_env_preserves_multibyte_default() {
+        unsafe { std::env::remove_var("TIDYMEDIA_TEST_UTF8_MISS") };
+        let s = expand_env("k: ${TIDYMEDIA_TEST_UTF8_MISS:-默认值}");
+        assert_eq!(s, "k: 默认值");
+    }
+
     #[test]
     fn resolve_var_missing_no_default_returns_empty() {
-        std::env::remove_var("TIDYMEDIA_TEST_NO_DEFAULT_W");
+        unsafe { std::env::remove_var("TIDYMEDIA_TEST_NO_DEFAULT_W") };
         assert_eq!(resolve_var("TIDYMEDIA_TEST_NO_DEFAULT_W"), "");
     }
 
@@ -152,7 +174,7 @@ mod tests {
             "backend:\n  smb:\n    default_user: alice\n    workgroup: HOME\n    timeout_secs: 60\n  mtp:\n    device_match: exact\n    storage_match: exact\n  adb:\n    server_host: 10.0.0.5\n    server_port: 15037\n    timeout_secs: 90\n",
         )
         .unwrap();
-        std::env::set_var("TIDYMEDIA_CONFIG", path.to_str().unwrap());
+        unsafe { std::env::set_var("TIDYMEDIA_CONFIG", path.to_str().unwrap()) };
         let cfg = load();
         assert_eq!(cfg.backend.smb.default_user, "alice");
         assert_eq!(cfg.backend.smb.workgroup, "HOME");
@@ -162,15 +184,15 @@ mod tests {
         assert_eq!(cfg.backend.adb.server_host, "10.0.0.5");
         assert_eq!(cfg.backend.adb.server_port, 15037);
         assert_eq!(cfg.backend.adb.timeout_secs, 90);
-        std::env::remove_var("TIDYMEDIA_CONFIG");
+        unsafe { std::env::remove_var("TIDYMEDIA_CONFIG") };
     }
 
     #[test]
     fn load_falls_back_when_file_missing() {
-        std::env::set_var("TIDYMEDIA_CONFIG", "/no/such/file/xyz.yaml");
+        unsafe { std::env::set_var("TIDYMEDIA_CONFIG", "/no/such/file/xyz.yaml") };
         let cfg = load();
         assert_eq!(cfg.copy.timezone_offset_hours, 8);
-        std::env::remove_var("TIDYMEDIA_CONFIG");
+        unsafe { std::env::remove_var("TIDYMEDIA_CONFIG") };
     }
 
     #[test]
@@ -178,10 +200,10 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("bad.yaml");
         std::fs::write(&path, "::: not yaml :::").unwrap();
-        std::env::set_var("TIDYMEDIA_CONFIG", path.to_str().unwrap());
+        unsafe { std::env::set_var("TIDYMEDIA_CONFIG", path.to_str().unwrap()) };
         let cfg = load();
         assert_eq!(cfg.copy.unique_name_max_attempts, 10);
-        std::env::remove_var("TIDYMEDIA_CONFIG");
+        unsafe { std::env::remove_var("TIDYMEDIA_CONFIG") };
     }
 
     #[test]
@@ -193,12 +215,12 @@ mod tests {
             "copy:\n  timezone_offset_hours: 0\n  unique_name_max_attempts: 5\nexif:\n  valid_date_time_secs: 100\n",
         )
         .unwrap();
-        std::env::set_var("TIDYMEDIA_CONFIG", path.to_str().unwrap());
+        unsafe { std::env::set_var("TIDYMEDIA_CONFIG", path.to_str().unwrap()) };
         let cfg = load();
         assert_eq!(cfg.copy.timezone_offset_hours, 0);
         assert_eq!(cfg.copy.unique_name_max_attempts, 5);
         assert_eq!(cfg.exif.valid_date_time_secs, 100);
-        std::env::remove_var("TIDYMEDIA_CONFIG");
+        unsafe { std::env::remove_var("TIDYMEDIA_CONFIG") };
     }
 
     #[test]

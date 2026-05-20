@@ -1,6 +1,6 @@
 // spec §2.P0：容器内"拍摄时刻"——最权威来源。
 
-use tidymedia::media_time::{epoch_to_candidate, resolve, Priority, Source};
+use tidymedia::media_time::{Priority, Source, epoch_to_candidate, resolve};
 
 use super::common::{fixed_now, utc_offset};
 

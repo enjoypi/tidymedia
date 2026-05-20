@@ -44,6 +44,15 @@ pub struct FakeBackend {
     state: Arc<Mutex<State>>,
 }
 
+fn file_meta(size: u64) -> Metadata {
+    Metadata {
+        size,
+        kind: EntryKind::File,
+        modified: Some(SystemTime::UNIX_EPOCH),
+        created: Some(SystemTime::UNIX_EPOCH),
+    }
+}
+
 impl FakeBackend {
     pub fn new(scheme: &'static str) -> Self {
         Self {
@@ -56,15 +65,7 @@ impl FakeBackend {
         let mut s = self.state.lock().unwrap();
         let size = data.len() as u64;
         s.files.insert(loc.clone(), data);
-        s.metas.insert(
-            loc,
-            Metadata {
-                size,
-                kind: EntryKind::File,
-                modified: Some(SystemTime::UNIX_EPOCH),
-                created: Some(SystemTime::UNIX_EPOCH),
-            },
-        );
+        s.metas.insert(loc, file_meta(size));
     }
 
     pub fn add_dir(&self, loc: Location) {
@@ -159,11 +160,7 @@ impl Backend for FakeBackend {
         Ok(Box::new(Cursor::new(bytes)))
     }
 
-    fn open_write(
-        &self,
-        loc: &Location,
-        _mkparents: bool,
-    ) -> io::Result<Box<dyn MediaWriter>> {
+    fn open_write(&self, loc: &Location, _mkparents: bool) -> io::Result<Box<dyn MediaWriter>> {
         self.check_error(loc, Op::OpenWrite)?;
         Ok(Box::new(FakeWriter {
             target: loc.clone(),
@@ -204,12 +201,7 @@ impl Backend for FakeBackend {
         String::from_utf8(bytes.clone()).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
     }
 
-    fn copy_file(
-        &self,
-        src: &Location,
-        dst: &Location,
-        _mkparents: bool,
-    ) -> io::Result<u64> {
+    fn copy_file(&self, src: &Location, dst: &Location, _mkparents: bool) -> io::Result<u64> {
         self.check_error(src, Op::CopyFile)?;
         let mut s = self.state.lock().unwrap();
         let bytes = s
@@ -219,15 +211,7 @@ impl Backend for FakeBackend {
             .ok_or_else(|| io::Error::from(io::ErrorKind::NotFound))?;
         let size = bytes.len() as u64;
         s.files.insert(dst.clone(), bytes);
-        s.metas.insert(
-            dst.clone(),
-            Metadata {
-                size,
-                kind: EntryKind::File,
-                modified: Some(SystemTime::UNIX_EPOCH),
-                created: Some(SystemTime::UNIX_EPOCH),
-            },
-        );
+        s.metas.insert(dst.clone(), file_meta(size));
         Ok(size)
     }
 }
@@ -272,15 +256,7 @@ impl MediaWriter for FakeWriter {
         let mut s = self.state.lock().unwrap();
         let size = self.buffer.len() as u64;
         s.files.insert(self.target.clone(), self.buffer);
-        s.metas.insert(
-            self.target,
-            Metadata {
-                size,
-                kind: EntryKind::File,
-                modified: Some(SystemTime::UNIX_EPOCH),
-                created: Some(SystemTime::UNIX_EPOCH),
-            },
-        );
+        s.metas.insert(self.target, file_meta(size));
         Ok(())
     }
 }
@@ -293,6 +269,5 @@ fn loc_is_under(child: &Location, root: &Location) -> bool {
     }
     let child_s = child.display();
     let root_s = root.display();
-    child_s == root_s
-        || child_s.starts_with(&format!("{root_s}/"))
+    child_s == root_s || child_s.starts_with(&format!("{root_s}/"))
 }
