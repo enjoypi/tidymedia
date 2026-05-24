@@ -1,31 +1,30 @@
-@~/.claude/CLAUDE.md
+@~/.claude/rust-p0.md
 
-@~/.claude/rust.md
+@~/.claude/rust-p1.md
 
 # tidymedia 开发上下文
 
 ## Quick Start
 - 构建：`cargo build`；运行：`cargo run -- copy /source -o /output`；dry-run：`cargo run -- copy /source -o /output --dry-run`
-- 测试：`cargo nextest run`；覆盖率：`cargo llvm-cov nextest --summary-only`
-- lint：`cargo +nightly fmt && cargo clippy`
+- 测试：`cargo nextest run --release`；覆盖率：`cargo +nightly llvm-cov --release nextest --summary-only`
+- lint：`cargo +nightly fmt && cargo clippy --all-targets --all-features --locked -- -D warnings`（baseline 仍有少量 warnings，需逐步清零；见 rust-p0 §1）
 
 ## 系统依赖
-- 无外部进程依赖。EXIF/视频元数据走纯 Rust 库：`nom-exif`（图片+视频解析）+ `infer`（magic-bytes MIME）。
+- 无外部进程依赖。EXIF/视频元数据走纯 Rust 库：`nom-exif`（图片 + 视频解析）+ `infer`（magic-bytes MIME）。
 - Fixture 生成（开发时一次性，不在运行期依赖）用了 `ffmpeg` + `exiftool`：`sample-with-exif.jpg`、`sample-no-dates.jpg`、`sample-with-track.mp4`、`sample-no-track-date.mkv` 已 commit 到 `tests/data/`。
 - nom-exif 内部用 `tracing::info!("find")` / `tracing::warn!("GPSInfo not found")` 大量输出，`install_logging` 必须用 EnvFilter 把 `nom_exif=error` 默认压住，保留 `RUST_LOG` 覆盖
 - nom-exif 不 re-export chrono；测试构造 `EntryValue::DateTime/NaiveDateTime` 需把 `chrono` 加 dev-deps
 
 ## 测试与覆盖率
-- 入口：`cargo nextest run`；默认覆盖率：`cargo llvm-cov nextest --summary-only`（stable，~99.6% region）
+- 入口：`cargo nextest run --release`；默认覆盖率：`cargo +nightly llvm-cov --release nextest --summary-only`（stable，~99.6% region）
 - `cargo nextest run` 无 `--quiet` flag；静默输出用 `2>&1 | tail -N` 或 nextest 自己的 `--status-level` / `--failure-output`
-- **严格 100% 覆盖率（行/region/fn/branch）**：`RUSTFLAGS="--cfg=coverage_nightly" cargo +nightly llvm-cov nextest --summary-only [--branch]`
+- **严格 100% 覆盖率（行/region/fn/branch）**：`RUSTFLAGS="--cfg=coverage_nightly" cargo +nightly llvm-cov --release nextest --summary-only [--branch]`
   - 标了 `#[cfg_attr(coverage_nightly, coverage(off))]` 的函数会被 LLVM 跳过统计（不可稳定触发的 ? Err / expect panic / slice 边界伪 region）
   - `lib.rs` 和 `bin/tidymedia.rs` 顶部用 `#![cfg_attr(coverage_nightly, feature(coverage_attribute))]` 开启该 nightly feature
   - `Cargo.toml` 的 `[lints.rust] unexpected_cfgs` 已注册 `cfg(coverage_nightly)`，stable 编译无 warning
   - **`--branch` 的 multi-binary 多 instance 陷阱**：lib unit + 集成 test binary 各自 codegen Info::open / calc_full_hash / do_copy 等热点 fn 的副本，每个 binary 的 fn instance 都有独立的 `[True, False]` 计数器；如果某个 instance（如 lib_tidy 集成 binary）从未触发某 boundary case（dir/empty file/cache hit/duplicate+dry_run 不同组合），LLVM 即报 instance-level miss，**`#[inline(never)]` 与 `[profile.test] codegen-units=1` 均无效**；`if let Some(_) = helper()` 把 cache check 拆 helper 也不行（主 fn 仍有 if-let branch）。可行路径只有：①重构成 `?` 风格（`?` 算 region 不算 branch，且 helper 标 `coverage(off)` 能透传 hide 内部 branch，例：`Info::open` 拆 `ensure_hashable(&meta, loc)?`）；②函数级 `coverage(off)`（已用在 `calc_full_hash` / `secure_hash` / `create_time` / `PartialEq::eq` / `full_path` / `do_copy`，语义由独立单元/集成测试断言不退化）
 - `cargo +nightly llvm-cov nextest --summary-only --branch`（unstable flag）跑 branch 覆盖率；定位 miss 用 `--text --output-path /tmp/cov.txt` 后 `awk '/<file>\.rs:$/,/^\/home.*<next>\.rs:$/' /tmp/cov.txt | grep -B1 "True: 0, False: [1-9]"`，或 `--json --output-path /tmp/cov.json` 后解析 `f["branches"]`（每条 `[line, col, _, _, T, F, file_id, expanded, kind]`）
 - **改 `Cargo.toml` / `coverage` 属性后必跑 `cargo +nightly llvm-cov clean --workspace`**，否则 `report --branch` 仍读 stale `.profraw`，看到的 missed 数字与实际不符
-- clippy baseline 已有 12 warnings（`needless_borrows_for_generic_args` 等，含 `lib test` 9 unique），**不要**带 `-D warnings` 跑——baseline warning 会被当作回归。用 `cargo clippy --all-targets`（无 deny），git stash 对照 my 改动是否新增 warning 即可
 - `camino::Utf8PathBuf::from("file").parent()` 返 `Some("")` 而**非** `None`（与 `std::path::Path` 一致）；只有 `Utf8PathBuf::from("").parent()` 才是 `None`。写"path 单 component 触发 parent==空"边界测试要用 `"file.txt"` 不是 `""`
 - `#[cfg_attr(coverage_nightly, coverage(off))]` 可加在 **trait `impl` 内 method**（如 `impl PartialEq for Info { #[cfg_attr(...)] fn eq(...) }`），不必标在整个 `impl` 块上——单 method off 不影响同 impl 块其他 method 统计
 - `cargo llvm-cov nextest` 自动注入 `LLVM_PROFILE_FILE`，`assert_cmd` 子进程的覆盖率会被合并，因此 `main` 可被覆盖
@@ -113,8 +112,6 @@
 
 ## 配置与日志
 
-> `${VAR:-default}` 通用语义见 `~/.claude/rust.md`「配置加载」节；本项目偏差点：自实现 `expand_env`，不引 dotenvy。
-
 - 运行时配置：`config.yaml`（项目根）+ `src/usecases/config.rs`，`config()` 返回 `&'static Config`（`OnceLock`）
 - 切换配置：`TIDYMEDIA_CONFIG=/path/to.yaml`；语法 `${VAR:-default}` 由 `expand_env` 自实现（不引 dotenv）
 - `FAST_READ_SIZE` 因 `[0; FAST_READ_SIZE]` 栈数组要求编译期常量，**不外置**（R1 合理例外）
@@ -147,7 +144,6 @@
 - nextest 每个测试独立进程，`set_var`/`remove_var`/`OnceLock` 不会跨测试污染（区别于 `cargo test`）
 - Cargo.toml 多数 dep 用 `"*"` 通配；`cargo update` 可能拉到不兼容主版本（已踩坑：sha2 0.10→0.11 把 `Digest::Output` 从 `GenericArray` 改成 `hybrid_array::Array`，导致 `SecureHash` 别名编译失败）
 - `SecureHash` 别名走 `sha2::digest::Output<Sha512>`（即 `hybrid_array::Array<u8, U64>`），不是 `generic_array::GenericArray`；从 `Vec<u8>` 构造必须用 `SecureHash::try_from(vec.as_slice())`，直接 `try_from(vec)` 类型推断不过
-- 仓库 baseline 已有 clippy errors（`io_other_error` 等），改动前先 `git stash` 跑 baseline 再对照
 - HashMap 并行 in-place 改 value：用 `self.files.par_iter_mut().for_each(|(k, v)| ...)`，避免"par_iter→Vec→再 get_mut Option None"的不可达分支
 - **测试 shim 必须 `#[cfg(test)]` gate**：`Info::from` / `Index::visit_dir` / `Exif::from_path_with_offset` 是包 backend-aware API 的旧入口（仅测试用，生产走 `*::open` / `visit_location`）；`adapters/backend/fake_remote` 整模块同理（`*_tests.rs` 专用，无生产消费）。未 gate 会让 release build 报 `dead_code`
 - **`#[cfg(test)]` 标在方法/import 上，不要标在 `impl Foo {}` 块上**：同块生产方法会被一起 gate 掉。清 warning 时 `cargo build --release` 与 `cargo build --tests` 是不同 cfg，两边都要跑
