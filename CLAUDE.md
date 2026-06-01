@@ -4,6 +4,8 @@
 
 # tidymedia 开发上下文
 
+按「拍摄时间」去重并整理照片/视频的多后端 CLI：扫描 sources（local/smb/adb/mtp 可混合）→ SHA-512 去重 → 按解析出的拍摄时间归档到 `output/年/月`。核心算法 = 拍摄时间判定（P0–P4 优先级），spec 见 `docs/media-time-detection.md`（代码内「spec §X」均指该文件）。Clean Architecture 四层 + Android app（feature `android-app`）。
+
 ## Quick Start
 - 构建：`cargo build`；运行：`cargo run -- copy /source -o /output`；dry-run：`cargo run -- copy /source -o /output --dry-run`
 - 测试：`cargo nextest run --release`；覆盖率：`cargo +nightly llvm-cov --release nextest --summary-only`
@@ -57,6 +59,14 @@
 - CA 重构移动文件时：`pub use A::B` 只 re-export 类型不保留路径，`pub mod B { pub use A::B::*; }` 保留完整模块路径；配套测试的 `super::` 需改为 `crate::` 绝对路径
 - CA 依赖方向验证：`grep -rn "use crate::adapters\|use crate::frameworks" src/entities/ src/usecases/` 应仅返回 re-export 桥接，不含业务逻辑导入
 
+## 同步检查点（改 X → MUST 同步 Y）
+> 字面默认值变更先 `rg <旧值>` 兜底改全。
+- **新增 `Location` variant / backend scheme** → `entities/uri.rs` 的 `FromStr` 解析 + `adapters/backend/factory.rs`（cfg-gated 分支 + Unsupported 兜底）+ 对应 `Backend` 实现 + `adapters/dispatch.rs` 调度 + 本文「URI 格式」节
+- **新增 `Backend` trait 方法**（`entities/backend/mod.rs`）→ 全部 7 个实现同步加默认或 override：`local`/`remote`/`smb`/`adb`/`mtp`/`fake`/`fake_remote`；并按「远端 backend 测试套路」补 OK / client Err 注入 / 非自家 scheme 三类测试
+- **新增配置字段** → `usecases/config.rs` 结构体 + `config.yaml` + `validate_*` 校验或被消费（守门，见「Use Case config 字段守门」精神）；若为 secret 再加 `.env.example`（值 `changeme`）+ 确认 `.env` 已 gitignore
+- **新增 `media_time` 候选来源 / 调整 P0–P4** → 先改 `docs/media-time-detection.md` spec（代码注释引 §号）→ `priority.rs` 枚举 → 对应解析模块 → `resolve`/`decision` 裁决 → 补 fixture
+- **改 `tests/data/` fixture 或新增** → 时间相关测试 MUST 用 `filetime::set_file_mtime` 固定 mtime（`git checkout` 会重置）
+
 ## 项目分层（Clean Architecture）
 - 四层（自外向内）：`src/frameworks/`（Frameworks）→ `src/adapters/`（Interface Adapters）→ `src/usecases/`（Use Cases）→ `src/entities/`（Entities）
 - `bin/tidymedia.rs` **只**调 `tidymedia::run_cli(env::args_os())`，零业务逻辑
@@ -67,6 +77,18 @@
 - `entities/backend/` 是 Gateway 抽象：`trait Backend` + 值类型（`SmbTarget` / `AdbTarget` / `MtpTarget`）；具体实现通过 re-export 模块（`pub mod local { pub use crate::adapters::backend::local::LocalBackend; }` 等）保持原有路径；`file_info` / `file_index` / `exif` / `media_time::sidecar` 都 backend-aware（持 `Arc<dyn Backend>`）
 - `entities/common.rs` 是非测试用途的共享工具（`test_common.rs` 是测试专用）
 - 目录名是 `usecases`（无下划线），跨层导入用 `crate::usecases::...` / `crate::entities::...` / `crate::adapters::...` / `crate::frameworks::...`
+
+## 核心算法：media_time（拍摄时间判定）
+- spec：`docs/media-time-detection.md`（§3 来源等级 P0–P4，§6 mtime 提示性冲突阈值）。代码内所有「spec §X」均指此文件。
+- `entities/media_time/` 8 个子模块各司一职（单一职责）：
+  - `priority.rs` — `Priority` 枚举 P0–P4：P0 容器内拍摄时刻 / P1 容器内数字化写入 / P2 文件名启发式 / P3 mtime / P4 兜底
+  - `candidate.rs` — `Candidate` 构造（`epoch_to_candidate` 把 epoch 秒转候选；secs==0 视为未填返 None，集成测试经此构造任意优先级候选，免触 Exif 内部类型）
+  - `filename.rs` — 文件名启发式解析 P2（`IMG_`/`DSC_`/`Screenshot_` 前缀 + 13 位毫秒 Unix 戳；无时区当 UTC）
+  - `filter.rs` — 合理性过滤 + 算法常量（`EPOCH_1904` QuickTime 零点 / `SOFT_THRESHOLD_1995` 数码摄影下限 / `FUTURE_TOLERANCE_SECS` 未来宽容）
+  - `resolve.rs` + `decision.rs` — 多候选裁决（§6：mtime 比 P0 早超 30 天作提示性冲突）
+  - `fs_time.rs` — 文件系统时间 → P3/P4 候选
+  - `sidecar.rs` — XMP 旁车文件发现（backend-aware，持 `Arc<dyn Backend>`；sibling 路径计算当前仅 Local 实现）
+- `media_time::mod` 的 Exif→候选入口是 `pub(crate)`；集成测试走 `epoch_to_candidate` / `filename::parse_filename` / `sidecar::discover` 等公开入口
 
 ## URI 与 Backend
 
