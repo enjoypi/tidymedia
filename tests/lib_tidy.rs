@@ -78,6 +78,7 @@ fn tidy_dispatches_find_fast_on_data_dir() {
         secure: false,
         sources: vec![local(DATA_DIR)],
         output: None,
+        report: None,
     })
     .expect("find fast should succeed");
 }
@@ -88,6 +89,7 @@ fn tidy_dispatches_find_secure_on_data_dir() {
         secure: true,
         sources: vec![local(DATA_DIR)],
         output: None,
+        report: None,
     })
     .expect("find secure should succeed");
 }
@@ -99,6 +101,7 @@ fn tidy_dispatches_find_with_output_directory() {
         secure: false,
         sources: vec![local(DATA_DIR)],
         output: Some(local(out.path().to_str().unwrap())),
+        report: None,
     })
     .expect("find with output should succeed");
 }
@@ -111,6 +114,8 @@ fn tidy_dispatches_copy_dry_run_on_data_dir() {
         include_non_media: false,
         sources: vec![local(DATA_DIR)],
         output: local(out.path().to_str().unwrap()),
+        archive_template: None,
+        report: None,
     })
     .expect("copy dry run should succeed");
 }
@@ -124,6 +129,8 @@ fn tidy_dispatches_move_dry_run_on_empty_source() {
         include_non_media: false,
         sources: vec![local(src.path().to_str().unwrap())],
         output: local(out.path().to_str().unwrap()),
+        archive_template: None,
+        report: None,
     })
     .expect("move dry run should succeed");
 }
@@ -143,6 +150,7 @@ fn tidy_rejects_smb_uri_with_clear_error() {
             path: Utf8PathBuf::new(),
         }],
         output: None,
+        report: None,
     });
     let err = res.unwrap_err();
     let msg = format!("{err}");
@@ -161,6 +169,8 @@ fn tidy_rejects_mtp_output_with_clear_error() {
             storage: "Internal".into(),
             path: Utf8PathBuf::new(),
         },
+        archive_template: None,
+        report: None,
     });
     let err = res.unwrap_err();
     let msg = format!("{err}");
@@ -174,6 +184,7 @@ fn tidy_rejects_adb_uri_with_clear_error() {
         secure: false,
         sources: vec![adb_loc("/sdcard/DCIM")],
         output: None,
+        report: None,
     });
     let err = res.unwrap_err();
     let msg = format!("{err}");
@@ -188,6 +199,8 @@ fn tidy_rejects_adb_output_with_clear_error() {
         include_non_media: false,
         sources: vec![local(DATA_DIR)],
         output: adb_loc("/sdcard/Out"),
+        archive_template: None,
+        report: None,
     });
     let err = res.unwrap_err();
     let msg = format!("{err}");
@@ -210,6 +223,8 @@ fn tidy_rejects_copy_smb_source() {
             path: Utf8PathBuf::new(),
         }],
         output: local(out.path().to_str().unwrap()),
+        archive_template: None,
+        report: None,
     });
     assert!(format!("{}", res.unwrap_err()).contains("smb backend not enabled"));
 }
@@ -226,6 +241,7 @@ fn tidy_rejects_find_mtp_output() {
             storage: "s".into(),
             path: Utf8PathBuf::new(),
         }),
+        report: None,
     });
     assert!(format!("{}", res.unwrap_err()).contains("mtp backend not enabled"));
 }
@@ -246,6 +262,8 @@ fn tidy_rejects_move_smb_source() {
             path: Utf8PathBuf::new(),
         }],
         output: local(out.path().to_str().unwrap()),
+        archive_template: None,
+        report: None,
     });
     assert!(format!("{}", res.unwrap_err()).contains("smb backend not enabled"));
 }
@@ -264,6 +282,8 @@ fn tidy_rejects_move_mtp_output() {
             storage: "s".into(),
             path: Utf8PathBuf::new(),
         },
+        archive_template: None,
+        report: None,
     });
     assert!(format!("{}", res.unwrap_err()).contains("mtp backend not enabled"));
 }
@@ -388,6 +408,8 @@ fn tidy_with_copy_fake_smb_to_local_writes_file() {
             include_non_media: true,
             sources: vec![smb_root],
             output: out_loc,
+            archive_template: None,
+            report: None,
         },
     )
     .expect("cross-backend copy smb->local should succeed");
@@ -429,6 +451,7 @@ fn tidy_with_find_mixed_local_smb_mtp_sources() {
                 local(local_src.path().to_str().unwrap()),
             ],
             output: None,
+            report: None,
         },
     )
     .expect("find across mixed schemes should succeed");
@@ -458,6 +481,8 @@ fn tidy_with_move_local_to_fake_mtp_removes_src() {
             include_non_media: true,
             sources: vec![local(src_dir.path().to_str().unwrap())],
             output: mtp_root,
+            archive_template: None,
+            report: None,
         },
     )
     .expect("local -> mtp move should succeed");
@@ -489,6 +514,8 @@ fn tidy_move_with_duplicate_removes_src_when_not_dry_run() {
         include_non_media: true,
         sources: vec![local(src_dir.path().to_str().unwrap())],
         output: local(out_dir.path().to_str().unwrap()),
+        archive_template: None,
+        report: None,
     })
     .expect("move with duplicate should succeed");
 
@@ -519,6 +546,8 @@ fn tidy_move_dry_run_with_duplicate_skips_actual_remove() {
         include_non_media: true,
         sources: vec![local(src_dir.path().to_str().unwrap())],
         output: local(out_dir.path().to_str().unwrap()),
+        archive_template: None,
+        report: None,
     })
     .expect("dry-run move with duplicate should succeed");
 
@@ -555,6 +584,8 @@ fn tidy_with_propagates_smb_open_read_error() {
             include_non_media: true,
             sources: vec![smb_root],
             output: local(out_dir.path().to_str().unwrap()),
+            archive_template: None,
+            report: None,
         },
     )
     .expect("copy should still return Ok with skipped_unreadable stat");
@@ -587,6 +618,7 @@ fn tidy_with_propagates_smb_walk_error() {
             secure: true,
             sources: vec![smb_root],
             output: Some(local(out_dir.path().to_str().unwrap())),
+            report: None,
         },
     )
     .expect("find should swallow walker error and finalize Ok");
@@ -600,6 +632,7 @@ fn default_factory_smb_without_feature_returns_unsupported() {
         secure: false,
         sources: vec![smb_loc("photos")],
         output: None,
+        report: None,
     });
     let err = res.unwrap_err();
     assert!(
@@ -615,6 +648,7 @@ fn default_factory_adb_without_feature_returns_unsupported() {
         secure: false,
         sources: vec![adb_loc("/sdcard/DCIM")],
         output: None,
+        report: None,
     });
     let err = res.unwrap_err();
     assert!(
@@ -646,6 +680,8 @@ fn tidy_with_copy_fake_adb_to_local_writes_file() {
             include_non_media: true,
             sources: vec![adb_root],
             output: out_loc,
+            archive_template: None,
+            report: None,
         },
     )
     .expect("adb -> local copy should succeed");
@@ -686,6 +722,7 @@ fn tidy_with_find_mixed_local_smb_adb_sources() {
                 local(local_src.path().to_str().unwrap()),
             ],
             output: None,
+            report: None,
         },
     )
     .expect("find across smb/adb/local should succeed");
@@ -713,6 +750,8 @@ fn tidy_with_move_local_to_fake_adb_removes_src() {
             include_non_media: true,
             sources: vec![local(src_dir.path().to_str().unwrap())],
             output: adb_root,
+            archive_template: None,
+            report: None,
         },
     )
     .expect("local -> adb move should succeed");
@@ -722,5 +761,132 @@ fn tidy_with_move_local_to_fake_adb_removes_src() {
     assert!(
         fake_adb.read_bytes(&dst_loc).is_some(),
         "expected fake adb to hold copied file at /sdcard/Inbox/2024/01/photo.bin"
+    );
+}
+
+// ===== dispatch.rs 覆盖率补充：--report / --archive-template 路径 =====
+
+// Find + report：触发 dispatch.rs L56 `if let Some(path)` True 分支（find report 写盘）。
+#[test]
+fn tidy_dispatches_find_with_report_writes_json() {
+    let report_dir = tempdir().unwrap();
+    let report_path = report_dir.path().join("find_report.json");
+    tidy(Commands::Find {
+        secure: false,
+        sources: vec![local(DATA_DIR)],
+        output: None,
+        report: Some(report_path.to_str().unwrap().to_string()),
+    })
+    .expect("find with report should succeed");
+    // 报告文件存在且是合法 JSON。
+    let content = std::fs::read_to_string(&report_path).unwrap();
+    let parsed: serde_json::Value = serde_json::from_str(&content).unwrap();
+    assert!(parsed["scanned"].as_u64().is_some());
+}
+
+// Copy + archive_template：触发 dispatch.rs L103 validate_template_arg Some 分支。
+#[test]
+fn tidy_dispatches_copy_with_archive_template_validates() {
+    let out = tempdir().unwrap();
+    tidy(Commands::Copy {
+        dry_run: true,
+        include_non_media: false,
+        sources: vec![local(DATA_DIR)],
+        output: local(out.path().to_str().unwrap()),
+        archive_template: Some("{year}/{month}/{day}".to_string()),
+        report: None,
+    })
+    .expect("copy with valid archive_template should succeed");
+}
+
+// Move + archive_template：同样覆盖 Move 分支的 validate_template_arg Some path。
+#[test]
+fn tidy_dispatches_move_with_archive_template_validates() {
+    let src = tempdir().unwrap();
+    let out = tempdir().unwrap();
+    tidy(Commands::Move {
+        dry_run: true,
+        include_non_media: false,
+        sources: vec![local(src.path().to_str().unwrap())],
+        output: local(out.path().to_str().unwrap()),
+        archive_template: Some("{year}/{month}".to_string()),
+        report: None,
+    })
+    .expect("move with valid archive_template should succeed");
+}
+
+// Copy + 非法 archive_template → dispatch 返 Err（validate_template_arg 的 `?` Err 分支）。
+#[test]
+fn tidy_rejects_copy_with_invalid_archive_template() {
+    let out = tempdir().unwrap();
+    let err = tidy(Commands::Copy {
+        dry_run: true,
+        include_non_media: false,
+        sources: vec![local(DATA_DIR)],
+        output: local(out.path().to_str().unwrap()),
+        archive_template: Some("{year/{month}".to_string()), // unbalanced brace
+        report: None,
+    })
+    .unwrap_err();
+    let msg = format!("{err}");
+    assert!(msg.contains("invalid --archive-template"), "got: {msg}");
+}
+
+// Move + 非法 archive_template → dispatch 返 Err（Move 分支 validate_template_arg `?`）。
+#[test]
+fn tidy_rejects_move_with_invalid_archive_template() {
+    let src = tempdir().unwrap();
+    let out = tempdir().unwrap();
+    let err = tidy(Commands::Move {
+        dry_run: true,
+        include_non_media: false,
+        sources: vec![local(src.path().to_str().unwrap())],
+        output: local(out.path().to_str().unwrap()),
+        archive_template: Some("year}".to_string()), // extra closing brace
+        report: None,
+    })
+    .unwrap_err();
+    let msg = format!("{err}");
+    assert!(msg.contains("invalid --archive-template"), "got: {msg}");
+}
+
+// ===== 阶段 5：跨 backend e2e — ADB→SMB =====
+
+/// ADB source → SMB output：手机照片直接归档到 NAS，全程走 `FakeBackend` 不需真实设备/服务器。
+#[test]
+fn tidy_with_copy_adb_source_to_smb_output() {
+    let adb_root = adb_loc("/sdcard/DCIM");
+    let adb_file = adb_loc("/sdcard/DCIM/shot.jpg");
+
+    let fake_adb = Arc::new(FakeBackend::new("adb"));
+    fake_adb.add_dir(adb_root.clone());
+    fake_adb.add_file(adb_file, b"RAW-PHOTO-ADB".to_vec());
+
+    let smb_root = smb_loc("Inbox");
+    let fake_smb = Arc::new(FakeBackend::new("smb"));
+    fake_smb.add_dir(smb_root.clone());
+
+    let mut factory = FakeBackendFactory::new();
+    factory.insert("adb", Arc::clone(&fake_adb) as Arc<dyn Backend>);
+    factory.insert("smb", Arc::clone(&fake_smb) as Arc<dyn Backend>);
+
+    tidy_with(
+        &factory,
+        Commands::Copy {
+            dry_run: false,
+            include_non_media: true,
+            sources: vec![adb_root],
+            output: smb_root,
+            archive_template: None,
+            report: None,
+        },
+    )
+    .expect("adb -> smb copy should succeed");
+
+    // FakeBackend metadata 给 UNIX_EPOCH → 1970/01 桶。
+    let dst_loc = smb_loc("Inbox/1970/01/shot.jpg");
+    assert!(
+        fake_smb.read_bytes(&dst_loc).is_some(),
+        "expected smb to hold copied file at Inbox/1970/01/shot.jpg"
     );
 }

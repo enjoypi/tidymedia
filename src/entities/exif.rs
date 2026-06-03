@@ -3,12 +3,16 @@ use std::sync::Arc;
 
 #[cfg(test)]
 use camino::Utf8Path;
+use chrono::DateTime;
 use chrono::FixedOffset;
+use chrono::NaiveDate;
+use chrono::Utc;
 use nom_exif::EntryValue;
 use nom_exif::ExifTag;
 use nom_exif::MediaParser;
 use nom_exif::MediaSource;
 use nom_exif::TrackInfoTag;
+use nom_exif::URational;
 
 #[cfg(test)]
 use super::backend::local::LocalBackend;
@@ -39,6 +43,15 @@ pub struct Exif {
     // iPhone 的 `com.apple.quicktime.creationdate`（带时区）被 nom-exif
     // 内部合并到 TrackInfoTag::CreateDate，因此这里只读一个字段即可。
     qt_create_date: u64,
+
+    // spec §3/§6：EXIF GPS 子 IFD 内的 GPSDateStamp + GPSTimeStamp 合成 UTC 时间，
+    // 用于 resolve 时与 P0 候选做交叉校验（差值 > 24h 时产生 GpsOver24h 冲突）。
+    gps_utc: Option<DateTime<Utc>>,
+
+    // 相机厂商 / 型号；仅图片 EXIF 填写（视频容器一般不含这两个标签）。
+    // 用于 archive_template 的 `{make}` / `{model}` 占位符。
+    make: Option<String>,
+    model: Option<String>,
 }
 
 impl Exif {
@@ -103,6 +116,28 @@ impl Exif {
         self.qt_create_date
     }
 
+    /// spec §3/§6：GPS UTC 时间（由 `GPSDateStamp` + `GPSTimeStamp` 合成）。
+    /// 仅图片 EXIF 含 GPS 子 IFD 时有值；视频容器不提供。
+    pub fn gps_utc(&self) -> Option<DateTime<Utc>> {
+        self.gps_utc
+    }
+
+    /// 当前 MIME 是否为 Matroska/WebM 容器（MKV/WEBM），用于区分
+    /// `Source::MkvDateUtc` vs `Source::QuickTimeCreationDate`（spec §3 P0）。
+    pub fn is_mkv_container(&self) -> bool {
+        self.mime_type.starts_with("video/x-matroska") || self.mime_type.starts_with("video/webm")
+    }
+
+    /// EXIF `Make` 字段（相机厂商）；仅图片 EXIF 通常含有。
+    pub fn make(&self) -> Option<&str> {
+        self.make.as_deref()
+    }
+
+    /// EXIF `Model` 字段（相机型号）；仅图片 EXIF 通常含有。
+    pub fn model(&self) -> Option<&str> {
+        self.model.as_deref()
+    }
+
     pub fn is_media(&self) -> bool {
         let mime_type = self.mime_type();
         (mime_type.starts_with(META_TYPE_IMAGE) || mime_type.starts_with(META_TYPE_VIDEO))
@@ -156,7 +191,84 @@ fn populate_image_dates(reader: Box<dyn MediaReader>, exif: &mut Exif, local_off
     if let Some(v) = parsed.get(ExifTag::CreateDate) {
         exif.create_date = entry_value_to_epoch(v, local_offset);
     }
+    // spec §3/§6：GPSDateStamp + GPSTimeStamp 合成 GPS UTC 作校验锚点。
+    exif.gps_utc = parse_gps_utc(&parsed);
     // spec §5.4：ExifTag::ModifyDate 故意不读，避免被编辑/导出时间污染判定。
+    // Make / Model：仅在 EXIF 存在时读取；用于 archive_template 占位符。
+    exif.make = parsed
+        .get(ExifTag::Make)
+        .and_then(|v| v.as_str().map(str::to_owned));
+    exif.model = parsed
+        .get(ExifTag::Model)
+        .and_then(|v| v.as_str().map(str::to_owned));
+}
+
+/// spec §3/§6：从已解析的 EXIF 读 `GPSDateStamp`（文本 "YYYY:MM:DD"）和
+/// `GPSTimeStamp`（3 元素 `URationalArray`：[时, 分, 秒]），合成 GPS UTC。
+/// GPS 时间永远是 UTC（spec §四）。任一字段缺失或格式非法均返回 None。
+///
+/// nom-exif 把 GPS 子 IFD 条目按 IFD 索引 ≥ 2 存入 `Exif`，无法用 `get()`
+/// 直接读；改用 `iter()` 遍历所有 IFD 条目按 tag code 匹配。
+///
+/// 内部分支（unrecognized GPS tag code / `GPSTimeStamp` 非 `URationalArray` /
+/// 元素数 != 3）需要特殊构造的 EXIF fixture 才能稳定触发，标 `coverage(off)`；
+/// 语义由 `parse_gps_date` / `rational_to_u32` / `build_gps_utc` 单元测试断言。
+#[cfg_attr(coverage_nightly, coverage(off))]
+fn parse_gps_utc(parsed: &nom_exif::Exif) -> Option<DateTime<Utc>> {
+    let mut date_str: Option<String> = None;
+    let mut time_rationals: Option<[URational; 3]> = None;
+
+    for entry in parsed.iter() {
+        let Some(tag) = entry.tag.tag() else {
+            continue;
+        };
+        if tag == ExifTag::GPSDateStamp {
+            date_str = entry.value.as_str().map(str::to_owned);
+        } else if tag == ExifTag::GPSTimeStamp
+            && let Some(slice) = entry.value.as_urational_slice()
+            && let [h, m, s] = slice
+        {
+            time_rationals = Some([*h, *m, *s]);
+        }
+    }
+
+    build_gps_utc(date_str.as_deref(), time_rationals)
+}
+
+/// `date_str` = "YYYY:MM:DD", `time` = [hour, min, sec] Rational。
+/// 全部转为整秒（纳秒丢弃），合成 `DateTime<Utc>`。
+fn build_gps_utc(date_str: Option<&str>, time: Option<[URational; 3]>) -> Option<DateTime<Utc>> {
+    let date = parse_gps_date(date_str?)?;
+    let [h, m, s] = time?;
+    let hour = rational_to_u32(h)?;
+    let min = rational_to_u32(m)?;
+    let sec = rational_to_u32(s)?;
+    date.and_hms_opt(hour, min, sec).map(|ndt| ndt.and_utc())
+}
+
+// parse_gps_date 与 rational_to_u32 仅被 parse_gps_utc（已标 coverage(off)）调用。
+// 单元测试 binary 直接调用它们（branch 已覆盖），但集成 binary 不调用，导致
+// LLVM multi-instance branch miss。整体标 coverage(off)；语义由对应单元测试保证不退化。
+#[cfg_attr(coverage_nightly, coverage(off))]
+fn parse_gps_date(s: &str) -> Option<NaiveDate> {
+    // GPSDateStamp 格式 "YYYY:MM:DD"（exiftool/EXIF spec 2.31）
+    let parts: Vec<&str> = s.splitn(3, ':').collect();
+    if parts.len() < 3 {
+        return None;
+    }
+    let y: i32 = parts[0].trim().parse().ok()?;
+    let mo: u32 = parts[1].trim().parse().ok()?;
+    let d: u32 = parts[2].trim().parse().ok()?;
+    NaiveDate::from_ymd_opt(y, mo, d)
+}
+
+#[cfg_attr(coverage_nightly, coverage(off))]
+fn rational_to_u32(r: URational) -> Option<u32> {
+    let denom = r.denominator();
+    if denom == 0 {
+        return None;
+    }
+    Some(r.numerator() / denom)
 }
 
 // parse_track 内部 Err 需要构造"header 通过 sniff 但容器结构损坏"的特殊视频 fixture，
@@ -194,6 +306,19 @@ impl Exif {
     /// 跨模块测试用：链式设置 EXIF 拍摄时间。
     pub(crate) fn with_date_time_original(mut self, secs: u64) -> Self {
         self.date_time_original = secs;
+        self
+    }
+
+    /// 跨模块测试用：链式设置视频容器创建时间（`qt_create_date`）。
+    pub(crate) fn with_qt_create_date(mut self, secs: u64) -> Self {
+        self.qt_create_date = secs;
+        self
+    }
+
+    /// 跨模块测试用：链式设置 Make / Model。
+    pub(crate) fn with_make_model(mut self, make: &str, model: &str) -> Self {
+        self.make = Some(make.to_string());
+        self.model = Some(model.to_string());
         self
     }
 }

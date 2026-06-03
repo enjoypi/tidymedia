@@ -34,9 +34,22 @@ use super::exif::Exif;
 /// 把 Exif（已解析的 EXIF/视频容器字段）转成 P0/P1 候选列表。
 /// `inferred_offset` 由调用方语义决定：本入口不读 `OffsetTime` 标签，只接受外部 offset。
 ///
+/// 视频容器区分：MKV/WebM 的 `DateUTC` 标 `Source::MkvDateUtc`（P0）；
+/// QuickTime/MP4/MOV 的 `creationdate` 标 `Source::QuickTimeCreationDate`（P0）。
+/// spec §3 P0 来源分流。
+///
 /// 仅 crate 内部使用——Exif 是 pub(crate) 类型，集成测试请用 `epoch_to_candidate`
 /// 直接构造或经由 `filename::parse_filename` / `sidecar::discover` 等公开入口。
 pub(crate) fn candidates_from_exif(exif: &Exif, default_offset: FixedOffset) -> Vec<Candidate> {
+    // MKV/WebM 的 DateUTC 是纯 UTC（无时区推断），offset 设 None、inferred=false；
+    // QuickTime/MP4 可能含时区（iPhone com.apple.quicktime.creationdate），
+    // 或 mvhd 1904-epoch（nom-exif 转成 FixedOffset UTC），均传 default_offset 作推断。
+    let (video_source, video_offset, video_inferred) = if exif.is_mkv_container() {
+        (Source::MkvDateUtc, None, false)
+    } else {
+        (Source::QuickTimeCreationDate, Some(default_offset), true)
+    };
+
     let mut out = Vec::new();
     push_epoch(
         &mut out,
@@ -48,9 +61,9 @@ pub(crate) fn candidates_from_exif(exif: &Exif, default_offset: FixedOffset) -> 
     push_epoch(
         &mut out,
         exif.qt_create_date(),
-        Source::QuickTimeCreationDate,
-        Some(default_offset),
-        true,
+        video_source,
+        video_offset,
+        video_inferred,
     );
     push_epoch(
         &mut out,
@@ -166,5 +179,36 @@ mod tests {
         push_epoch(&mut v, 100, Source::ExifDateTimeOriginal, None, false);
         assert_eq!(v.len(), 1);
         assert_eq!(v[0].utc.timestamp(), 100);
+    }
+
+    /// MKV MIME → `qt_create_date` 候选用 `Source::MkvDateUtc`，offset=None，inferred=false（spec §3 P0）。
+    #[test]
+    fn mkv_mime_produces_mkv_date_utc_source() {
+        let exif = Exif::with_mime("video/x-matroska").with_qt_create_date(1_686_825_000);
+        let cands = candidates_from_exif(&exif, utc());
+        assert_eq!(cands.len(), 1);
+        assert_eq!(cands[0].source, Source::MkvDateUtc);
+        assert_eq!(cands[0].offset, None);
+        assert!(!cands[0].inferred_offset);
+    }
+
+    /// `video/webm` MIME → 同 MKV 路径，用 `Source::MkvDateUtc`。
+    #[test]
+    fn webm_mime_produces_mkv_date_utc_source() {
+        let exif = Exif::with_mime("video/webm").with_qt_create_date(1_686_825_000);
+        let cands = candidates_from_exif(&exif, utc());
+        assert_eq!(cands.len(), 1);
+        assert_eq!(cands[0].source, Source::MkvDateUtc);
+    }
+
+    /// MP4 MIME → `qt_create_date` 用 `Source::QuickTimeCreationDate`（P0）。
+    #[test]
+    fn mp4_mime_produces_quicktime_creation_date_source() {
+        let exif = Exif::with_mime("video/mp4").with_qt_create_date(1_700_000_100);
+        let cands = candidates_from_exif(&exif, utc());
+        assert_eq!(cands.len(), 1);
+        assert_eq!(cands[0].source, Source::QuickTimeCreationDate);
+        assert_eq!(cands[0].offset, Some(utc()));
+        assert!(cands[0].inferred_offset);
     }
 }

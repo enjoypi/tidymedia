@@ -682,6 +682,147 @@ fn info_open_propagates_reader_error_from_fast_hash() {
     assert_eq!(err.kind(), io::ErrorKind::Interrupted);
 }
 
+/// spec §6：mtime 比 P0 早 > 30 天时 `create_time` 应发出 tracing warn 冲突告警。
+///
+/// 场景：给文件设置 mtime=2022-01-01，EXIF `DateTimeOriginal`=2024-01-01。
+/// resolve 发现差距 > 30 天，push `MtimeMuchEarlierThanP0` 冲突，
+/// `create_time` 内 `warn!` 被触发。
+#[test]
+fn create_time_emits_warn_when_mtime_much_earlier_than_p0() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use tracing::field::Visit;
+    use tracing_subscriber::Layer;
+    use tracing_subscriber::prelude::__tracing_subscriber_SubscriberExt;
+
+    // local helper types.
+    struct ConflictDetector;
+    struct FieldVisitor(bool);
+    impl Visit for FieldVisitor {
+        fn record_debug(&mut self, _field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
+            if format!("{value:?}").contains("MtimeMuchEarlierThanP0") {
+                self.0 = true;
+            }
+        }
+        fn record_str(&mut self, _field: &tracing::field::Field, value: &str) {
+            if value.contains("MtimeMuchEarlierThanP0") {
+                self.0 = true;
+            }
+        }
+    }
+    impl<S: tracing::Subscriber> Layer<S> for ConflictDetector {
+        fn on_event(
+            &self,
+            event: &tracing::Event<'_>,
+            _ctx: tracing_subscriber::layer::Context<'_, S>,
+        ) {
+            if *event.metadata().level() <= tracing::Level::WARN {
+                let mut v = FieldVisitor(false);
+                event.record(&mut v);
+                if v.0 {
+                    FIRED.store(true, Ordering::SeqCst);
+                }
+            }
+        }
+    }
+
+    // 2022-01-01T00:00:00Z
+    const MTIME_EARLY: i64 = 1_640_995_200;
+    // 2024-01-01T12:00:00Z — 差值 730 天 >> 30 天阈值
+    const P0_SECS: u64 = 1_704_110_400;
+    // AtomicBool 避免 Mutex，同时 'static 和 Send+Sync。
+    static FIRED: AtomicBool = AtomicBool::new(false);
+    FIRED.store(false, Ordering::SeqCst);
+
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("conflict.bin");
+    fs::write(&path, b"conflict-test-content").unwrap();
+    let ft = filetime::FileTime::from_unix_time(MTIME_EARLY, 0);
+    filetime::set_file_mtime(&path, ft).unwrap();
+
+    let mut info = super::Info::from(path.to_str().unwrap()).unwrap();
+    info.set_exif(
+        super::super::exif::Exif::with_mime("image/jpeg").with_date_time_original(P0_SECS),
+    );
+
+    let subscriber = tracing_subscriber::registry().with(ConflictDetector);
+    tracing::subscriber::with_default(subscriber, || {
+        let _ = info.create_time(946_684_800);
+    });
+
+    assert!(
+        FIRED.load(Ordering::SeqCst),
+        "expected warn with MtimeMuchEarlierThanP0 conflict"
+    );
+}
+
+/// spec §6：mtime 与 P0 差距小于阈值时不产生冲突告警。
+#[test]
+fn create_time_no_warn_when_mtime_close_to_p0() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use tracing::field::Visit;
+    use tracing_subscriber::Layer;
+    use tracing_subscriber::prelude::__tracing_subscriber_SubscriberExt;
+
+    // local helper types.
+    struct ConflictDetector2;
+    struct FieldVisitor2(bool);
+    impl Visit for FieldVisitor2 {
+        fn record_debug(&mut self, _field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
+            if format!("{value:?}").contains("MtimeMuchEarlierThanP0") {
+                self.0 = true;
+            }
+        }
+        fn record_str(&mut self, _field: &tracing::field::Field, value: &str) {
+            if value.contains("MtimeMuchEarlierThanP0") {
+                self.0 = true;
+            }
+        }
+    }
+    impl<S: tracing::Subscriber> Layer<S> for ConflictDetector2 {
+        fn on_event(
+            &self,
+            event: &tracing::Event<'_>,
+            _ctx: tracing_subscriber::layer::Context<'_, S>,
+        ) {
+            if *event.metadata().level() <= tracing::Level::WARN {
+                let mut v = FieldVisitor2(false);
+                event.record(&mut v);
+                if v.0 {
+                    FIRED.store(true, Ordering::SeqCst);
+                }
+            }
+        }
+    }
+
+    // P0 和 mtime 相差 1 天（< 30 天），不触发冲突
+    const P0_SECS: u64 = 1_704_110_400;
+    // 1704110400 - 86400 = 1704024000
+    const MTIME_SECS: i64 = 1_704_024_000;
+    static FIRED: AtomicBool = AtomicBool::new(false);
+    FIRED.store(false, Ordering::SeqCst);
+
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("noconflict.bin");
+    fs::write(&path, b"no-conflict-content").unwrap();
+    let ft = filetime::FileTime::from_unix_time(MTIME_SECS, 0);
+    filetime::set_file_mtime(&path, ft).unwrap();
+
+    let mut info = super::Info::from(path.to_str().unwrap()).unwrap();
+    info.set_exif(
+        super::super::exif::Exif::with_mime("image/jpeg").with_date_time_original(P0_SECS),
+    );
+
+    let subscriber = tracing_subscriber::registry().with(ConflictDetector2);
+    tracing::subscriber::with_default(subscriber, || {
+        let _ = info.create_time(946_684_800);
+    });
+
+    assert!(
+        !FIRED.load(Ordering::SeqCst),
+        "expected no MtimeMuchEarlierThanP0 conflict warn for 1-day diff"
+    );
+}
+
 /// 用 `FakeBackend` 让 `calc_full_hash` 的 `full_hash_stream` `?` Err 分支被命中：
 /// `Info::open` 走 `add_file` 的正常 reader 通过；之后注入 reader 错误，再调 `calc_full_hash`。
 #[test]

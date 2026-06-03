@@ -51,6 +51,14 @@ pub enum Commands {
         /// The output directory (URI or local path)
         #[arg(short, long)]
         output: Location,
+
+        /// Archive directory template; placeholders: `{year}` `{month}` `{day}` `{make}` `{model}` `{valuable_name}`
+        #[arg(long)]
+        archive_template: Option<String>,
+
+        /// Write a JSON operation report to this path
+        #[arg(long)]
+        report: Option<String>,
     },
 
     /// Find duplicate files under the sources and print a shell script (batch syntax on Windows) that deletes the duplicates. Default uses a fast non-cryptographic hash (xxh3-64); pass --secure to use SHA-512 instead. If --output is given, deletions for files under that directory are commented out.
@@ -66,6 +74,10 @@ pub enum Commands {
         /// The output directory; deletions for files under it are commented out
         #[arg(short, long)]
         output: Option<Location>,
+
+        /// Write a JSON operation report to this path
+        #[arg(long)]
+        report: Option<String>,
     },
 
     /// Move non-duplicate media files from sources into the output directory. Sources that duplicate something already in output are physically deleted; duplicate detection uses SHA-512. Pass --include-non-media to also move everything else.
@@ -85,6 +97,14 @@ pub enum Commands {
         /// The output directory (URI or local path)
         #[arg(short, long)]
         output: Location,
+
+        /// Archive directory template; placeholders: `{year}` `{month}` `{day}` `{make}` `{model}` `{valuable_name}`
+        #[arg(long)]
+        archive_template: Option<String>,
+
+        /// Write a JSON operation report to this path
+        #[arg(long)]
+        report: Option<String>,
     },
 }
 

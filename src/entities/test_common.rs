@@ -42,6 +42,14 @@ pub const DATA_JPEG_NO_DATES: &str = "tests/data/sample-no-dates.jpg";
 pub const DATA_MP4_WITH_TRACK: &str = "tests/data/sample-with-track.mp4";
 /// Matroska 视频，track 但无 `CreateDate` —— 用于覆盖 `populate_video_dates` 的 None 分支。
 pub const DATA_MKV_NO_TRACK_DATE: &str = "tests/data/sample-no-track-date.mkv";
+/// MKV 含 `DateUTC = 2023-06-15T10:30:00Z` —— 验证 `MkvDateUtc` 候选路径（spec §3 P0）。
+pub const DATA_MKV_WITH_DATE: &str = "tests/data/sample-with-mkv-date.mkv";
+/// JPEG 含 `GPSDateStamp=2023-06-15` / `GPSTimeStamp=10:30:00` / `DateTimeOriginal=18:30:00` 同天。
+/// 用于验证 `gps_utc()` 解析以及 `create_time` 的 GPS 冲突告警路径（spec §3/§6）。
+pub const DATA_JPEG_WITH_GPS: &str = "tests/data/sample-with-gps.jpg";
+/// JPEG 同时含 `Make=TestCam` 和 `Model=TestModel`（由 `exiftool` 写入 sample-with-exif.jpg 生成）。
+/// 用于覆盖 `populate_image_dates` 中 `ExifTag::Model` 的 `and_then` 分支。
+pub const DATA_JPEG_WITH_MAKE_MODEL: &str = "tests/data/sample-with-make-model.jpg";
 
 // docs/media-time-detection.md spec contract fixture：tests/fixtures/gen.sh 生成，
 // tests/media_time_spec.rs 集成测试通过 tests/media_time/common.rs 内的等价常量引用

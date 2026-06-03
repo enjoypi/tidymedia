@@ -122,8 +122,13 @@ fn is_filename_source(s: Source) -> bool {
         s,
         Source::FilenameCamera
             | Source::FilenamePhone
+            | Source::FilenameVideoPhone
             | Source::FilenameScreenshot
             | Source::FilenameUnixMillis
+            | Source::FilenamePixel
+            | Source::FilenameBareYyyymmdd
+            | Source::FilenameWeChatExport
+            | Source::FilenameWhatsApp
     )
 }
 

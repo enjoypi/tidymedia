@@ -418,6 +418,80 @@ fn walk_socket_entry_kind_other() {
     assert!(any_other);
 }
 
+// ===== rename =====
+#[test]
+fn rename_same_dir_moves_file_atomically() {
+    let dir = tempdir().unwrap();
+    let src = dir.path().join("a.bin");
+    let dst = dir.path().join("b.bin");
+    fs::write(&src, b"move-me").unwrap();
+    LocalBackend::new()
+        .rename(&local(&src), &local(&dst), false)
+        .unwrap();
+    assert!(!src.exists(), "src must be gone after rename");
+    assert_eq!(fs::read(&dst).unwrap(), b"move-me");
+}
+
+#[test]
+fn rename_mkparents_creates_dir() {
+    let dir = tempdir().unwrap();
+    let src = dir.path().join("src.bin");
+    let dst = dir.path().join("sub/dst.bin");
+    fs::write(&src, b"x").unwrap();
+    LocalBackend::new()
+        .rename(&local(&src), &local(&dst), true)
+        .unwrap();
+    assert!(!src.exists());
+    assert_eq!(fs::read(&dst).unwrap(), b"x");
+}
+
+#[test]
+fn rename_missing_source_returns_not_found() {
+    let dir = tempdir().unwrap();
+    let err = LocalBackend::new()
+        .rename(
+            &local(dir.path().join("missing.bin")),
+            &local(dir.path().join("dst.bin")),
+            false,
+        )
+        .unwrap_err();
+    assert_eq!(err.kind(), io::ErrorKind::NotFound);
+}
+
+#[test]
+fn rename_rejects_non_local_from_scheme() {
+    let dir = tempdir().unwrap();
+    let dst = dir.path().join("dst.bin");
+    let err = LocalBackend::new()
+        .rename(&smb_uri(), &local(&dst), false)
+        .unwrap_err();
+    assert_eq!(err.kind(), io::ErrorKind::InvalidInput);
+}
+
+#[test]
+fn rename_rejects_non_local_to_scheme() {
+    let dir = tempdir().unwrap();
+    let src = dir.path().join("src.bin");
+    fs::write(&src, b"x").unwrap();
+    let err = LocalBackend::new()
+        .rename(&local(&src), &smb_uri(), false)
+        .unwrap_err();
+    assert_eq!(err.kind(), io::ErrorKind::InvalidInput);
+}
+
+#[test]
+fn rename_mkparents_root_path_no_parent() {
+    // to=`/`，parent() 返 None，走 if-let 的 None 分支
+    let dir = tempdir().unwrap();
+    let src = dir.path().join("src.bin");
+    fs::write(&src, b"x").unwrap();
+    let root = Location::Local(Utf8PathBuf::from("/"));
+    let err = LocalBackend::new()
+        .rename(&local(&src), &root, true)
+        .unwrap_err();
+    assert!(!matches!(err.kind(), io::ErrorKind::Unsupported));
+}
+
 #[test]
 fn open_read_chmod_000_permission_denied() {
     let dir = tempdir().unwrap();

@@ -22,8 +22,13 @@ pub enum Source {
     // P2 — 文件名启发式
     FilenameCamera,
     FilenamePhone,
+    FilenameVideoPhone,
     FilenameScreenshot,
     FilenameUnixMillis,
+    FilenamePixel,
+    FilenameBareYyyymmdd,
+    FilenameWeChatExport,
+    FilenameWhatsApp,
     // P3 — 旁路 sidecar
     XmpSidecar,
     GoogleTakeoutJson,
@@ -41,8 +46,13 @@ impl Source {
             Source::ExifCreateDate | Source::QuickTimeCreateDate => Priority::P1,
             Source::FilenameCamera
             | Source::FilenamePhone
+            | Source::FilenameVideoPhone
             | Source::FilenameScreenshot
-            | Source::FilenameUnixMillis => Priority::P2,
+            | Source::FilenameUnixMillis
+            | Source::FilenamePixel
+            | Source::FilenameBareYyyymmdd
+            | Source::FilenameWeChatExport
+            | Source::FilenameWhatsApp => Priority::P2,
             Source::XmpSidecar | Source::GoogleTakeoutJson => Priority::P3,
             Source::FsMtime => Priority::P4,
         }

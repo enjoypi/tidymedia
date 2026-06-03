@@ -20,6 +20,8 @@
 - Fixture 生成（开发时一次性，不在运行期依赖）用了 `ffmpeg` + `exiftool`：`sample-with-exif.jpg`、`sample-no-dates.jpg`、`sample-with-track.mp4`、`sample-no-track-date.mkv` 已 commit 到 `tests/data/`。
 - nom-exif 内部用 `tracing::info!("find")` / `tracing::warn!("GPSInfo not found")` 大量输出，`install_logging` 必须用 EnvFilter 把 `nom_exif=error` 默认压住，保留 `RUST_LOG` 覆盖
 - nom-exif 不 re-export chrono；测试构造 `EntryValue::DateTime/NaiveDateTime` 需把 `chrono` 加 dev-deps
+- nom-exif 3.5 把 MKV `DateUTC` 合并到 `TrackInfoTag::CreateDate`（无独立 tag），区分 MP4/MOV vs MKV/WebM 容器须用 MIME 嗅探（`video/x-matroska` / `video/webm`）分流 `Source::MkvDateUtc` vs `QuickTimeCreateDate`
+- nom-exif `Exif::get(tag)` 仅读 IFD0/MAIN；GPS 子 IFD 标签（`GPSDateStamp`/`GPSTimeStamp` 等）必须用 `Exif::iter()` 遍历所有条目按 tag code 匹配
 
 ## 测试与覆盖率
 - 入口：`cargo nextest run --release`；默认覆盖率：`cargo +nightly llvm-cov --release nextest --summary-only`（stable，~99.6% region）
@@ -53,6 +55,10 @@
 
 ## Fixture
 - `tests/data/` 下文件的 mtime 每次 `git checkout` 都会被重置，EXIF / 时间相关测试必须用 `filetime::set_file_mtime` 固定
+- 实测可用的 fixture 生成命令（一次性 commit 到 `tests/data/`）：
+  - MKV + DateUTC：`ffmpeg -y -f lavfi -i color=c=black:s=8x8:d=1 -metadata creation_time="2023-06-15T10:30:00Z" -c:v libx264 -t 1 sample-with-mkv-date.mkv`
+  - JPEG + GPS：`exiftool -GPSDateStamp="2023:06:15" -GPSTimeStamp="10:30:00" -GPSLatitude=23.0 -GPSLongitude=113.0 -DateTimeOriginal="2023:06:15 18:30:00" -overwrite_original sample-with-gps.jpg`
+  - JPEG + Make/Model：`exiftool -Make=TestCam -Model=TestModel -overwrite_original sample-with-make-model.jpg`
 - 已封装：`entities/test_common::copy_png_to(dir, name)` 复制 PNG 并把 mtime 固定到 `FIXED_MEDIA_MTIME`（2024-01-01 12:00:00 UTC）
 - `camino::Utf8Path` 在 Linux 上**不**把 `\` 当分隔符，原有 Windows 反斜杠路径测试在 Linux 上行为不同
 - ffmpeg 生成实测：`color=s=0x0` 无效（用 `8x8`）；MP4 不传 `-metadata creation_time=` 时 nom-exif 返回 `Some(1904-01-01)`（QuickTime epoch），要 None 用 MKV
@@ -68,6 +74,7 @@
 - **新增 `Location` variant / backend scheme** → `entities/uri.rs` 的 `FromStr` 解析 + `adapters/backend/factory.rs`（cfg-gated 分支 + Unsupported 兜底）+ 对应 `Backend` 实现 + `adapters/dispatch.rs` 调度 + 本文「URI 格式」节
 - **新增 `Backend` trait 方法**（`entities/backend/mod.rs`）→ 全部 7 个实现同步加默认或 override：`local`/`remote`/`smb`/`adb`/`mtp`/`fake`/`fake_remote`；并按「远端 backend 测试套路」补 OK / client Err 注入 / 非自家 scheme 三类测试
 - **新增配置字段** → `usecases/config.rs` 结构体 + `config.yaml` + `validate_*` 校验或被消费（新增字段 MUST 被校验或被读取，杜绝哑配置）；若为 secret 再加 `.env.example`（值 `changeme`）+ 确认 `.env` 已 gitignore
+- **新增 CLI flag**（`adapters/cli.rs`）→ `adapters/dispatch.rs` 调度透传 + **每个子命令路径（copy/move/find）独立 e2e 触发 Some/None 两边**；否则 dispatch 的 `if let Some(x) = flag` 仅一条路径触发，另一条 instance 报 LLVM branch miss
 - **新增 `media_time` 候选来源 / 调整 P0–P4** → 先改 `docs/media-time-detection.md` spec（代码注释引 §号）→ `priority.rs` 枚举 → 对应解析模块 → `resolve`/`decision` 裁决 → 补 fixture
 - **改 `tests/data/` fixture 或新增** → 时间相关测试 MUST 用 `filetime::set_file_mtime` 固定 mtime（`git checkout` 会重置）
 
@@ -144,7 +151,7 @@
 - `FAST_READ_SIZE` 因 `[0; FAST_READ_SIZE]` 栈数组要求编译期常量，**不外置**（R1 合理例外）
 - 结构化日志字段约定：`feature` / `operation` / `result`（CLI 工具无 request_id/user_id）
 - `UtcOffset::from_whole_seconds` 范围 ±25:59:59，越界返回 `None`，用 `.unwrap_or(UtcOffset::UTC)` 兜底
-- **R1 外置范围**：`copy.timezone_offset_hours` / `copy.unique_name_max_attempts` / `exif.valid_date_time_secs` + `backend.smb.{default_user,workgroup,timeout_secs}` / `backend.mtp.{device_match,storage_match}` / `backend.adb.{server_host,server_port,timeout_secs}` 需运维可调。其余 const 属 R1 边界例外**不外置**：
+- **R1 外置范围**：`copy.timezone_offset_hours` / `copy.unique_name_max_attempts` / `copy.archive_template` / `exif.valid_date_time_secs` + `backend.smb.{default_user,workgroup,timeout_secs}` / `backend.mtp.{device_match,storage_match}` / `backend.adb.{server_host,server_port,timeout_secs}` 需运维可调。其余 const 属 R1 边界例外**不外置**：
   - **spec §X 算法常量**：`EPOCH_1904` / `SOFT_THRESHOLD_1995` / `FUTURE_TOLERANCE_SECS` / `MTIME_VS_P0_HINT_SECS`（filter/resolve）
   - **协议字面量**：`PHONE_PREFIX="IMG_"` / `CAMERA_PREFIX="DSC_"` / `SCREENSHOT_PREFIX="Screenshot_"` / `XMP_KEY` / `META_TYPE_IMAGE` / `META_TYPE_VIDEO`
   - **日志维度名**：`FEATURE_CLI` / `FEATURE_COPY` / `FEATURE_FIND` / `FEATURE_INDEX`

@@ -16,8 +16,14 @@ const FEATURE_FIND: &str = "find";
 
 // info!/error! 宏在不同 instantiation 间会产生重复的内部 region；用例入口本身的逻辑
 // 已经被各种集成测试覆盖。整体标 coverage(off) 让严格覆盖率统计稳定。
+//
+// 返回值：duplicate 组 map（key=size，value=路径列表），供 dispatch 层生成 JSON 报告用。
 #[cfg_attr(coverage_nightly, coverage(off))]
-pub(crate) fn find_duplicates(secure: bool, sources: Vec<Source>, output: Option<&Source>) {
+pub(crate) fn find_duplicates(
+    secure: bool,
+    sources: Vec<Source>,
+    output: Option<&Source>,
+) -> BTreeMap<u64, Vec<Utf8PathBuf>> {
     let mut index = file_index::Index::new();
 
     if let Some((loc, backend)) = output {
@@ -32,7 +38,7 @@ pub(crate) fn find_duplicates(secure: bool, sources: Vec<Source>, output: Option
                 output = %loc.display(),
                 "output path is not a directory"
             );
-            return;
+            return BTreeMap::new();
         }
     }
 
@@ -86,6 +92,8 @@ pub(crate) fn find_duplicates(secure: bool, sources: Vec<Source>, output: Option
         bytes_read = index.bytes_read(),
         "find_duplicates done"
     );
+
+    same
 }
 
 // 上方 is_dir 断言已经过滤掉非目录；到这里 output 必然是 (Location, Backend) 形态。

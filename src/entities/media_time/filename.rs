@@ -1,5 +1,5 @@
 // docs/media-time-detection.md §二.P2：文件名启发式。
-// 支持四类常见模板；未匹配返回 None。
+// 支持多类常见模板；未匹配返回 None。
 // 文件名提取的时间通常无时区，调用方传入的 default_offset 当本地时区参与解释，
 // 并把 `inferred_offset` 标为 true（spec §四）。
 
@@ -15,19 +15,38 @@ use super::priority::Source;
 
 const PHONE_PREFIX: &str = "IMG_";
 const CAMERA_PREFIX: &str = "DSC_";
+const VIDEO_PHONE_PREFIX: &str = "VID_";
+const PIXEL_PREFIX: &str = "PXL_";
 const SCREENSHOT_PREFIX: &str = "Screenshot_";
+// 微信导出：mmexport<13-digit-ms>.jpg
+const MMEXPORT_PREFIX: &str = "mmexport";
+// WhatsApp: "WhatsApp Image YYYY-MM-DD at HH.MM.SS" / "WhatsApp Video …"
+const WHATSAPP_IMAGE_PREFIX: &str = "WhatsApp Image ";
+const WHATSAPP_VIDEO_PREFIX: &str = "WhatsApp Video ";
 
 /// 解析 `path.file_name()`（不含目录），匹配则返回 P2 候选。
 #[must_use]
 pub fn parse_filename(name: &str, default_offset: FixedOffset) -> Option<Candidate> {
     let stem = stem_without_ext(name);
-    if let Some(c) = parse_camera_or_phone(stem, default_offset) {
+    if let Some(c) = try_camera_or_phone(stem, default_offset) {
         return Some(c);
     }
-    if let Some(c) = parse_screenshot(stem, default_offset) {
+    if let Some(c) = try_pixel(stem, default_offset) {
         return Some(c);
     }
-    if let Some(c) = parse_unix_millis(stem) {
+    if let Some(c) = try_screenshot(stem, default_offset) {
+        return Some(c);
+    }
+    if let Some(c) = try_mmexport(stem) {
+        return Some(c);
+    }
+    if let Some(c) = try_whatsapp(name, default_offset) {
+        return Some(c);
+    }
+    if let Some(c) = try_bare_yyyymmdd(stem, default_offset) {
+        return Some(c);
+    }
+    if let Some(c) = try_unix_millis(stem) {
         return Some(c);
     }
     None
@@ -37,11 +56,13 @@ fn stem_without_ext(name: &str) -> &str {
     name.rsplit_once('.').map_or(name, |(s, _)| s)
 }
 
-fn parse_camera_or_phone(stem: &str, default_offset: FixedOffset) -> Option<Candidate> {
+fn try_camera_or_phone(stem: &str, default_offset: FixedOffset) -> Option<Candidate> {
     let (rest, source) = if let Some(r) = stem.strip_prefix(PHONE_PREFIX) {
         (r, Source::FilenamePhone)
     } else if let Some(r) = stem.strip_prefix(CAMERA_PREFIX) {
         (r, Source::FilenameCamera)
+    } else if let Some(r) = stem.strip_prefix(VIDEO_PHONE_PREFIX) {
+        (r, Source::FilenameVideoPhone)
     } else {
         return None;
     };
@@ -53,7 +74,23 @@ fn parse_camera_or_phone(stem: &str, default_offset: FixedOffset) -> Option<Cand
     Some(naive_to_candidate(naive, default_offset, source))
 }
 
-fn parse_screenshot(stem: &str, default_offset: FixedOffset) -> Option<Candidate> {
+/// Google Pixel：`PXL_yyyymmdd_HHMMSSmmm[.MP][.PORTRAIT]…`。
+/// 时间部分 = `yyyymmdd_HHMMSS`（前 15 chars），尾部毫秒和后缀丢弃。
+fn try_pixel(stem: &str, default_offset: FixedOffset) -> Option<Candidate> {
+    let rest = stem.strip_prefix(PIXEL_PREFIX)?;
+    // 至少 15 chars（日期+时间），后面可以有毫秒或其他标记
+    if rest.len() < 15 {
+        return None;
+    }
+    let naive = NaiveDateTime::parse_from_str(&rest[..15], "%Y%m%d_%H%M%S").ok()?;
+    Some(naive_to_candidate(
+        naive,
+        default_offset,
+        Source::FilenamePixel,
+    ))
+}
+
+fn try_screenshot(stem: &str, default_offset: FixedOffset) -> Option<Candidate> {
     let rest = stem.strip_prefix(SCREENSHOT_PREFIX)?;
     // 期望格式：yyyy-mm-dd-HH-mm-ss（19 chars）
     if rest.len() != 19 {
@@ -67,21 +104,69 @@ fn parse_screenshot(stem: &str, default_offset: FixedOffset) -> Option<Candidate
     ))
 }
 
-/// 13 位毫秒 Unix 时间戳（IM/网盘命名）。无时区语义，直接当 UTC。
-fn parse_unix_millis(stem: &str) -> Option<Candidate> {
+/// 微信导出：`mmexport<13-digit-ms>`；直接当 UTC（无时区语义）。
+fn try_mmexport(stem: &str) -> Option<Candidate> {
+    let rest = stem.strip_prefix(MMEXPORT_PREFIX)?;
+    millis_str_to_candidate(rest, Source::FilenameWeChatExport)
+}
+
+/// `WhatsApp`：`WhatsApp {Image|Video} YYYY-MM-DD at HH.MM.SS[ (N)]`（含扩展名）。
+/// 时区：`WhatsApp` 写设备本地时间，用 `default_offset` 推断。
+fn try_whatsapp(name: &str, default_offset: FixedOffset) -> Option<Candidate> {
+    // 先剥扩展名再解析
+    let stem = stem_without_ext(name);
+    let rest = stem
+        .strip_prefix(WHATSAPP_IMAGE_PREFIX)
+        .or_else(|| stem.strip_prefix(WHATSAPP_VIDEO_PREFIX))?;
+    // rest = "YYYY-MM-DD at HH.MM.SS[ (N)]"，取前 19 chars 为日期时间
+    // 格式：yyyy-mm-dd at HH.MM.SS → %Y-%m-%d at %H.%M.%S = 22 chars
+    if rest.len() < 22 {
+        return None;
+    }
+    let naive = NaiveDateTime::parse_from_str(&rest[..22], "%Y-%m-%d at %H.%M.%S").ok()?;
+    Some(naive_to_candidate(
+        naive,
+        default_offset,
+        Source::FilenameWhatsApp,
+    ))
+}
+
+/// 裸格式：`YYYYMMDD_HHMMSS`（无前缀，15 chars stem）。
+fn try_bare_yyyymmdd(stem: &str, default_offset: FixedOffset) -> Option<Candidate> {
+    if stem.len() != 15 {
+        return None;
+    }
+    let naive = NaiveDateTime::parse_from_str(stem, "%Y%m%d_%H%M%S").ok()?;
+    Some(naive_to_candidate(
+        naive,
+        default_offset,
+        Source::FilenameBareYyyymmdd,
+    ))
+}
+
+/// 纯 13 位毫秒 Unix 时间戳（`IM_/网盘/通用命名`）。无时区语义，直接当 UTC。
+fn try_unix_millis(stem: &str) -> Option<Candidate> {
     if stem.len() != 13 || !stem.bytes().all(|b| b.is_ascii_digit()) {
         return None;
     }
-    // 13 个 ASCII 数字 ≤ 10^13 < i64::MAX，手卷求和避免 .parse() 的不可达 Err 分支。
+    millis_str_to_candidate(stem, Source::FilenameUnixMillis)
+}
+
+/// 把 13 位纯数字毫秒字符串转成 UTC Candidate。
+/// 手卷累加避免 `.parse::<i64>()` 的不可达 Err region。
+fn millis_str_to_candidate(digits: &str, source: Source) -> Option<Candidate> {
+    if digits.len() != 13 || !digits.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
     let mut millis: i64 = 0;
-    for b in stem.bytes() {
+    for b in digits.bytes() {
         millis = millis * 10 + i64::from(b - b'0');
     }
     let utc = DateTime::<Utc>::UNIX_EPOCH + TimeDelta::milliseconds(millis);
     Some(Candidate {
         utc,
         offset: None,
-        source: Source::FilenameUnixMillis,
+        source,
         inferred_offset: false,
     })
 }
@@ -104,103 +189,5 @@ fn naive_to_candidate(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use chrono::TimeZone;
-
-    fn east8() -> FixedOffset {
-        FixedOffset::east_opt(8 * 3600).unwrap()
-    }
-
-    fn utc() -> FixedOffset {
-        FixedOffset::east_opt(0).unwrap()
-    }
-
-    #[test]
-    fn img_prefix_phone_pattern_parsed() {
-        // spec §2.P2 手机命名
-        let c = parse_filename("IMG_20240501_143000.jpg", east8()).unwrap();
-        assert_eq!(c.source, Source::FilenamePhone);
-        assert_eq!(c.offset, Some(east8()));
-        assert!(c.inferred_offset);
-        // 本地 14:30 +08:00 = UTC 06:30
-        assert_eq!(c.utc.timestamp(), 1_714_545_000);
-    }
-
-    #[test]
-    fn dsc_prefix_camera_pattern_parsed() {
-        let c = parse_filename("DSC_20240501_143000.jpg", utc()).unwrap();
-        assert_eq!(c.source, Source::FilenameCamera);
-        assert_eq!(c.utc.timestamp(), 1_714_573_800);
-    }
-
-    #[test]
-    fn screenshot_pattern_parsed() {
-        let c = parse_filename("Screenshot_2024-05-17-12-00-00.jpg", utc()).unwrap();
-        assert_eq!(c.source, Source::FilenameScreenshot);
-        assert_eq!(c.utc.timestamp(), 1_715_947_200);
-    }
-
-    #[test]
-    fn unix_millis_13_digits_parsed() {
-        let c = parse_filename("1715961600000.jpg", utc()).unwrap();
-        assert_eq!(c.source, Source::FilenameUnixMillis);
-        assert_eq!(c.offset, None);
-        assert!(!c.inferred_offset);
-        assert_eq!(c.utc.timestamp(), 1_715_961_600);
-    }
-
-    #[test]
-    fn no_extension_uses_full_name_as_stem() {
-        // 13 位无扩展名仍可解析
-        let c = parse_filename("1715961600000", utc()).unwrap();
-        assert_eq!(c.source, Source::FilenameUnixMillis);
-    }
-
-    #[test]
-    fn img_wrong_length_returns_none() {
-        // 长度不足 15
-        assert!(parse_filename("IMG_2024050_143000.jpg", utc()).is_none());
-    }
-
-    #[test]
-    fn img_invalid_date_value_returns_none() {
-        // 13 月不合法
-        assert!(parse_filename("IMG_20241332_143000.jpg", utc()).is_none());
-    }
-
-    #[test]
-    fn screenshot_wrong_length_returns_none() {
-        assert!(parse_filename("Screenshot_2024-05-17.jpg", utc()).is_none());
-    }
-
-    #[test]
-    fn screenshot_invalid_value_returns_none() {
-        assert!(parse_filename("Screenshot_2024-13-32-25-99-99.jpg", utc()).is_none());
-    }
-
-    #[test]
-    fn unix_millis_wrong_length_returns_none() {
-        // 12 位 → 不匹配 13 位规则
-        assert!(parse_filename("171596160000.jpg", utc()).is_none());
-    }
-
-    #[test]
-    fn unix_millis_non_digit_returns_none() {
-        // 13 字符但含字母 → 不匹配
-        assert!(parse_filename("171596160000a.jpg", utc()).is_none());
-    }
-
-    #[test]
-    fn no_known_pattern_returns_none() {
-        assert!(parse_filename("random.jpg", utc()).is_none());
-    }
-
-    #[test]
-    fn east8_local_offset_applied_to_camera() {
-        let c = parse_filename("DSC_20240501_143000.jpg", east8()).unwrap();
-        // 本地 14:30 +08:00 = UTC 06:30
-        let expected = Utc.with_ymd_and_hms(2024, 5, 1, 6, 30, 0).unwrap();
-        assert_eq!(c.utc, expected);
-    }
-}
+#[path = "filename_tests.rs"]
+mod tests;

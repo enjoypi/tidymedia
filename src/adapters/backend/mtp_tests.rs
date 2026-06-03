@@ -464,3 +464,42 @@ fn mtp_target_path_returns_inner_path() {
     };
     assert_eq!(t.path().as_str(), "DCIM/photo.jpg");
 }
+
+// ===== rename（default impl: copy_file + remove_file）=====
+
+#[test]
+fn rename_default_moves_file_via_copy_remove() {
+    let client = fake_client();
+    client.add_file("DCIM/a.jpg", b"photo".to_vec());
+    let backend = fuzzy_backend(client.clone());
+    backend
+        .rename(&mtp("DCIM/a.jpg"), &mtp("Inbox/a.jpg"), false)
+        .unwrap();
+    assert!(client.get_file("DCIM/a.jpg").is_none(), "src must be gone");
+    assert_eq!(
+        client.get_file("Inbox/a.jpg").as_deref(),
+        Some(b"photo".as_ref())
+    );
+}
+
+#[test]
+fn rename_propagates_copy_error_and_leaves_src() {
+    let client = fake_client();
+    client.add_file("src.bin", b"x".to_vec());
+    client.inject(RemoteFakeOp::Read, "src.bin", io::ErrorKind::TimedOut);
+    let backend = fuzzy_backend(client.clone());
+    let err = backend
+        .rename(&mtp("src.bin"), &mtp("dst.bin"), false)
+        .unwrap_err();
+    assert_eq!(err.kind(), io::ErrorKind::TimedOut);
+    // copy 失败，src 应仍存在
+    assert!(client.get_file("src.bin").is_some(), "src must remain");
+}
+
+#[test]
+fn rename_rejects_non_mtp_scheme() {
+    let backend = fuzzy_backend(fake_client());
+    let local = Location::Local(Utf8PathBuf::from("/tmp/x"));
+    let err = backend.rename(&local, &mtp("dst.bin"), false).unwrap_err();
+    assert_eq!(err.kind(), io::ErrorKind::InvalidInput);
+}

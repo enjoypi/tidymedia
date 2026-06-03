@@ -10,6 +10,7 @@ use chrono::Utc;
 use parking_lot::Mutex;
 use sha2::Digest;
 use sha2::Sha512;
+use tracing::warn;
 
 use super::SecureHash;
 #[cfg(test)]
@@ -160,6 +161,13 @@ impl Info {
     pub fn exif(&self) -> Option<&exif::Exif> {
         self.exif.as_ref()
     }
+
+    /// 返回当前文件的 EXIF 数据引用（生产 + 测试均可用）。
+    /// 仅在 `parse_exif` 已被调用后有值；否则为 `None`。
+    pub fn exif_ref(&self) -> Option<&exif::Exif> {
+        self.exif.as_ref()
+    }
+
     pub fn set_exif(&mut self, exif: exif::Exif) {
         self.exif = Some(exif);
     }
@@ -188,14 +196,27 @@ impl Info {
         // 已用 from_path_with_offset 把 EXIF 转 epoch 了，这里的 offset 仅作 P2 推断用，
         // 但本入口未喂入 filename/sidecar 候选，因此 offset 实际不被消费。
         let utc_offset = FixedOffset::east_opt(0).expect("0 offset is valid");
+        let gps_utc = exif.gps_utc();
         let mut candidates = media_time::candidates_from_exif(exif, utc_offset);
         // Option<Candidate> 实现 IntoIterator → extend 不引入 if-let 分支。
         candidates.extend(media_time::fs_time::from_modified(modified));
 
         // resolve 返回 None（候选全部被过滤）与"低于阈值"走同一条 fallback 路径，
         // 避免在 create_time 里多一条不可稳定触发的分支。
-        let secs =
-            media_time::resolve(candidates, None, Utc::now()).map_or(0, |d| d.utc.timestamp());
+        let decision = media_time::resolve(candidates, gps_utc, Utc::now());
+        // spec §6：冲突优先告警，不静默修正。
+        if let Some(ref d) = decision
+            && !d.conflicts.is_empty()
+        {
+            warn!(
+                feature = "file_info",
+                operation = "resolve_time",
+                file = %self.full_path,
+                conflicts = ?d.conflicts,
+                "mtime vs primary candidate conflict"
+            );
+        }
+        let secs = decision.map_or(0, |d| d.utc.timestamp());
         if secs > 0 && secs.cast_unsigned() >= valid_threshold_secs {
             SystemTime::UNIX_EPOCH + Duration::from_secs(secs.cast_unsigned())
         } else {

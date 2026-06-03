@@ -54,10 +54,17 @@
 
 许多设备 / 应用以拍摄时间作为文件名的一部分，可靠性高但**格式不统一**，需要按设备来源识别：
 
-- 主流相机命名：年月日 + 时分秒 / 序号。
-- 主流手机命名：年月日 + 时分秒（前缀因厂商而异）。
-- 截图命名：通常含完整年月日时分秒。
-- 即时通信 / 网盘命名：常仅保留毫秒级 Unix 时间戳，**经常缺时分秒或时区**。
+| 格式名 | 示例 | 说明 |
+|---|---|---|
+| `IMG_yyyymmdd_HHMMSS` | `IMG_20240115_103045.jpg` | 安卓相机图片（`Source::FilenamePhone`） |
+| `VID_yyyymmdd_HHMMSS` | `VID_20230615_103000.mp4` | 安卓相机视频（`Source::FilenameVideoPhone`） |
+| `DSC_yyyymmdd_HHMMSS` | `DSC_20240115_103045.jpg` | 卡片相机（`Source::FilenameCamera`） |
+| `PXL_yyyymmdd_HHMMSSmmm[.MP][.PORTRAIT]` | `PXL_20240115_103045123.MP.jpg` | Google Pixel；尾部毫秒 / `.MP` / `.PORTRAIT` 后缀丢弃（`Source::FilenamePixel`） |
+| `Screenshot_yyyy-mm-dd-HH-mm-ss` | `Screenshot_2024-01-15-10-30-45.jpg` | 安卓截图（`Source::FilenameScreenshot`） |
+| `mmexport<13-digit-ms>` | `mmexport1686824625000.jpg` | 微信导出；13 位毫秒 Unix 时间戳，直接当 UTC（`Source::FilenameWeChatExport`） |
+| `WhatsApp {Image\|Video} YYYY-MM-DD at HH.MM.SS[ (N)]` | `WhatsApp Image 2023-06-15 at 10.30.45 (1).jpeg` | `WhatsApp` 导出；可选序号后缀 ` (N)`，使用设备本地时间（`Source::FilenameWhatsApp`） |
+| `YYYYMMDD_HHMMSS` | `20230615_103000.jpg` | 无前缀裸格式；部分相机 / 转码工具命名（`Source::FilenameBareYyyymmdd`） |
+| 纯 13 位毫秒 Unix 时间戳 | `1715961600000.jpg` | 通用即时通信 / 网盘命名（`Source::FilenameUnixMillis`） |
 
 注意：从文件名提取的时间**没有时区信息**，需要根据来源（如 Pixel 写 UTC、iPhone 写本地时间）做经验性判断。
 
@@ -85,7 +92,7 @@
 |---|---|---|---|---|
 | P0 | 容器内"拍摄时刻" | EXIF DateTimeOriginal、QuickTime creationdate、MKV DateUTC | 视字段 | 首选 |
 | P1 | 容器内"数字化/写入" | EXIF CreateDate、MP4 atom CreateDate | UTC 或本地 | 注意 1904 占位 |
-| P2 | 文件名解析 | 设备命名规则匹配 | 通常无 | 需按来源经验判断 |
+| P2 | 文件名解析 | `IMG_`/`VID_`/`DSC_`/`PXL_`/`Screenshot_`/`mmexport`/`WhatsApp`/裸 `YYYYMMDD_HHMMSS`/13-digit Unix ms | 通常无 | 需按来源经验判断 |
 | P3 | 旁路边信息 | XMP / Google Takeout JSON | 视来源 | 仅特定流程 |
 | P4 | 文件系统时间 | mtime / birthtime | 本地 | 兜底 |
 

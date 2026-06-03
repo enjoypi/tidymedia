@@ -109,6 +109,17 @@ impl Backend for LocalBackend {
         }
         fs::copy(src.as_std_path(), dst.as_std_path())
     }
+
+    /// `std::fs::rename` 在同一文件系统时是原子操作。跨设备（`ErrorKind::CrossesDevices`）
+    /// 时 std 返回 Err，fallback 走 trait default 的 `copy_file` + `remove_file` 两步。
+    fn rename(&self, from: &Location, to: &Location, mkparents: bool) -> io::Result<()> {
+        let from_path = local_path(from)?;
+        let to_path = local_path(to)?;
+        if mkparents && let Some(parent) = to_path.parent() {
+            fs::create_dir_all(parent.as_std_path())?;
+        }
+        rename_or_fallback(from_path.as_std_path(), to_path.as_std_path())
+    }
 }
 
 /// 把 [`Location`] 缩成 Local 路径；非 Local scheme 报 `InvalidInput`。
@@ -119,6 +130,21 @@ fn local_path(loc: &Location) -> io::Result<&Utf8Path> {
             io::ErrorKind::InvalidInput,
             format!("LocalBackend cannot handle scheme {:?}", other.scheme()),
         )),
+    }
+}
+
+/// 尝试 `fs::rename`；跨设备（`CrossesDevices`）时 fallback 到 copy + remove 两步。
+/// `CrossesDevices` 需要真实跨设备挂载点才能触发，在单测 tempdir 里不可稳定复现，
+/// 整函数标 `coverage(off)`，语义由 `rename_same_dir_moves_file_atomically` 等断言不退化。
+#[cfg_attr(coverage_nightly, coverage(off))]
+fn rename_or_fallback(from: &std::path::Path, to: &std::path::Path) -> io::Result<()> {
+    match fs::rename(from, to) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == io::ErrorKind::CrossesDevices => {
+            fs::copy(from, to)?;
+            fs::remove_file(from)
+        }
+        Err(e) => Err(e),
     }
 }
 

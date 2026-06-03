@@ -132,4 +132,18 @@ pub trait Backend: Send + Sync {
     ///
     /// 当 scheme 不匹配、源不存在、父目录创建失败或底层复制失败时返回 `Err`。
     fn copy_file(&self, src: &Location, dst: &Location, mkparents: bool) -> io::Result<u64>;
+
+    /// 在同一 backend 内原子重命名/移动文件；`mkparents` 为 `true` 时自动创建目标父目录。
+    ///
+    /// Local 实现用 `std::fs::rename`（同一文件系统时原子，跨设备 fallback 到 copy + remove）。
+    /// 远端 backend（SMB / ADB / MTP）吃 default 实现：`copy_file` + `remove_file`（非原子 fallback）。
+    ///
+    /// # Errors
+    ///
+    /// 当 scheme 不匹配、源不存在、父目录创建失败或底层操作失败时返回 `Err`。
+    fn rename(&self, from: &Location, to: &Location, mkparents: bool) -> io::Result<()> {
+        // 跨设备 fallback：先 copy 再 remove；copy 返字节数，统一丢弃。
+        self.copy_file(from, to, mkparents)?;
+        self.remove_file(from)
+    }
 }

@@ -5,5 +5,7 @@ pub(super) use find::find_duplicates;
 
 pub(crate) mod config;
 
+mod archive_template;
 mod copy;
 mod find;
+pub(crate) mod report;

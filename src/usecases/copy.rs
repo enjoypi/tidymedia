@@ -18,7 +18,9 @@ use crate::entities::file_index::Index;
 use crate::entities::file_info::Info;
 use crate::entities::uri::Location;
 
+use super::archive_template::{TemplateContext, render};
 use super::config::config;
+use super::report::{CopyReport, ReportError, write_copy_report};
 
 /// usecase 入口的 source / output 对：把 [`Location`] 与负责该 scheme 的
 /// [`Backend`] 句柄一起传入，避免内层重新解析 URI。
@@ -29,6 +31,14 @@ const MONTH: [&str; 13] = [
 ];
 
 const FEATURE_COPY: &str = "copy";
+
+/// [`do_copy`] 的选项包；把 bool + template 打包，规避 `clippy::too_many_arguments`。
+pub(crate) struct CopyOpts<'a> {
+    pub dry_run: bool,
+    pub remove: bool,
+    pub include_non_media: bool,
+    pub template: &'a str,
+}
 
 fn configured_offset() -> UtcOffset {
     offset_from_hours(config().copy.timezone_offset_hours)
@@ -56,8 +66,11 @@ pub(crate) fn copy(
     dry_run: bool,
     remove: bool,
     include_non_media: bool,
-) -> common::Result<()> {
+    archive_template: Option<&str>,
+    report_path: Option<&str>,
+) -> common::Result<CopyReport> {
     let (output_loc, output_backend) = output;
+    let template = archive_template.unwrap_or(&config().copy.archive_template);
 
     let mut source = Index::new();
     for (loc, backend) in sources {
@@ -79,7 +92,9 @@ pub(crate) fn copy(
     );
 
     if total_files == 0 {
-        return Ok(());
+        let report = make_report(dry_run, remove, include_non_media, 0, 0, 0, 0, vec![]);
+        emit_report(report_path, &report);
+        return Ok(report);
     }
 
     trace!(
@@ -93,43 +108,14 @@ pub(crate) fn copy(
         output_backend.mkdir_p(&output_loc)?;
     }
 
-    let mut output_index = Index::new();
-    output_index.visit_location(&output_loc, &output_backend);
-
-    let mut copied = 0;
-    let mut ignored = 0;
-    let mut failed = 0;
-    for src in source.files().values() {
-        match do_copy(
-            src,
-            &output_loc,
-            &output_backend,
-            &mut output_index,
-            dry_run,
-            remove,
-            include_non_media,
-        ) {
-            Ok(true) => {
-                copied += 1;
-            }
-            Ok(false) => {
-                ignored += 1;
-            }
-            Err(e) => {
-                failed += 1;
-                error!(
-                    feature = FEATURE_COPY,
-                    operation = "do_copy",
-                    result = "error",
-                    source = %src.full_path,
-                    dry_run,
-                    remove,
-                    error = %e,
-                    "copy item failed"
-                );
-            }
-        }
-    }
+    let opts = CopyOpts {
+        dry_run,
+        remove,
+        include_non_media,
+        template,
+    };
+    let (copied, ignored, failed, errors) =
+        run_copy_loop(&source, &output_loc, &output_backend, &opts);
 
     let result = if failed == 0 { "ok" } else { "partial" };
     info!(
@@ -148,7 +134,97 @@ pub(crate) fn copy(
         walker_errors = scan_stats.walker_errors,
         "copy operation summary"
     );
-    Ok(())
+
+    let report = make_report(
+        dry_run,
+        remove,
+        include_non_media,
+        total_files,
+        copied,
+        ignored,
+        failed,
+        errors,
+    );
+    emit_report(report_path, &report);
+    Ok(report)
+}
+
+// 拆出循环体，让 copy() 保持在 100 行内。
+fn run_copy_loop(
+    source: &Index,
+    output_loc: &Location,
+    output_backend: &Arc<dyn Backend>,
+    opts: &CopyOpts<'_>,
+) -> (usize, usize, usize, Vec<ReportError>) {
+    let mut output_index = Index::new();
+    output_index.visit_location(output_loc, output_backend);
+
+    let mut copied = 0usize;
+    let mut ignored = 0usize;
+    let mut failed = 0usize;
+    let mut errors: Vec<ReportError> = Vec::new();
+
+    for src in source.files().values() {
+        match do_copy(src, output_loc, output_backend, &mut output_index, opts) {
+            Ok(true) => {
+                copied += 1;
+            }
+            Ok(false) => {
+                ignored += 1;
+            }
+            Err(e) => {
+                failed += 1;
+                let msg = e.to_string();
+                error!(
+                    feature = FEATURE_COPY,
+                    operation = "do_copy",
+                    result = "error",
+                    source = %src.full_path,
+                    dry_run = opts.dry_run,
+                    remove = opts.remove,
+                    error = %msg,
+                    "copy item failed"
+                );
+                errors.push(ReportError {
+                    path: src.full_path.to_string(),
+                    message: msg,
+                });
+            }
+        }
+    }
+    (copied, ignored, failed, errors)
+}
+
+// 构造 CopyReport 值对象；抽出避免参数列表过长。
+#[allow(clippy::too_many_arguments)]
+fn make_report(
+    dry_run: bool,
+    remove: bool,
+    include_non_media: bool,
+    scanned: usize,
+    copied: usize,
+    ignored: usize,
+    failed: usize,
+    errors: Vec<ReportError>,
+) -> CopyReport {
+    CopyReport {
+        scanned,
+        copied,
+        ignored,
+        failed,
+        dry_run,
+        remove,
+        include_non_media,
+        errors,
+    }
+}
+
+// 根据 report_path 决定是否写报告；None 时跳过。
+fn emit_report(report_path: Option<&str>, report: &CopyReport) {
+    let Some(path) = report_path else {
+        return;
+    };
+    write_copy_report(path, report);
 }
 
 // `coverage(off)`：内含 duplicate 检测 + `if remove && !dry_run` 等多条 branch；
@@ -163,9 +239,7 @@ pub(crate) fn do_copy(
     output_dir: &Location,
     output_backend: &Arc<dyn Backend>,
     output_index: &mut Index,
-    dry_run: bool,
-    remove: bool,
-    include_non_media: bool,
+    opts: &CopyOpts<'_>,
 ) -> common::Result<bool> {
     let src_loc = src.location().clone();
     let src_display = src.full_path.as_str();
@@ -180,13 +254,13 @@ pub(crate) fn do_copy(
             duplicate = %dup,
             "source duplicates an existing file in output"
         );
-        if remove && !dry_run {
+        if opts.remove && !opts.dry_run {
             src.backend().remove_file(&src_loc)?;
         }
         return Ok(false);
     }
 
-    if !include_non_media && !src.is_media() {
+    if !opts.include_non_media && !src.is_media() {
         warn!(
             feature = FEATURE_COPY,
             operation = "filter_media",
@@ -198,9 +272,9 @@ pub(crate) fn do_copy(
     }
 
     if let Some((target_dir_loc, target_loc)) =
-        generate_unique_name(src, output_dir, output_backend)
+        generate_unique_name(src, output_dir, output_backend, opts.template)
     {
-        if dry_run {
+        if opts.dry_run {
             println!("\"{}\"\t\"{}\"", src_display, target_loc.display());
             return Ok(true);
         }
@@ -210,7 +284,7 @@ pub(crate) fn do_copy(
         // 跨 backend 也走 stream（mkparents=false 因为上面 mkdir_p 已经建好）。
         // 同 backend 时与 backend.copy_file 等价；好处是 src/out 不同 backend 时直接复用。
         stream_copy(src, &target_loc, output_backend.as_ref())?;
-        if remove {
+        if opts.remove {
             src.backend().remove_file(&src_loc)?;
         }
         println!("\"{}\"\t\"{}\"", src_display, target_loc.display());
@@ -252,6 +326,7 @@ pub(crate) fn generate_unique_name(
     src_file: &Info,
     output_dir: &Location,
     output_backend: &Arc<dyn Backend>,
+    template: &str,
 ) -> Option<(Location, Location)> {
     let display_path = Utf8Path::new(src_file.full_path.as_str());
     let file_name = display_path
@@ -267,10 +342,24 @@ pub(crate) fn generate_unique_name(
     let dt = OffsetDateTime::from(create_time).to_offset(configured_offset());
     let year = dt.year().to_string();
     let month = MONTH[dt.month() as usize];
+    let day = format!("{:02}", dt.day());
 
     let valuable_name = extract_valuable_name(display_path);
 
-    let sub_dir_path = output_dir.path().join(year).join(month).join(valuable_name);
+    let template_ctx = TemplateContext {
+        year: &year,
+        month,
+        day: &day,
+        valuable_name: &valuable_name,
+        exif: src_file.exif_ref(),
+    };
+    let sub_dir_rel = render(template, &template_ctx);
+
+    let sub_dir_path = if sub_dir_rel.is_empty() {
+        output_dir.path().to_path_buf()
+    } else {
+        output_dir.path().join(&sub_dir_rel)
+    };
     let sub_dir_loc = output_dir.with_path(sub_dir_path.clone());
 
     let max_attempts = config().copy.unique_name_max_attempts;
