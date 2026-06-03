@@ -1,4 +1,4 @@
-//! SmbBackend 测试：FakeRemoteClient<SmbTarget> 注入 + 调度逻辑 100% 覆盖。
+//! `SmbBackend` 测试：FakeRemoteClient<SmbTarget> 注入 + 调度逻辑 100% 覆盖。
 //! 迁移到统一 FakeRemoteClient；协议特异断言通过 spy 读出。
 
 use super::super::fake_remote::{FakeRemoteClient, RemoteFakeOp};

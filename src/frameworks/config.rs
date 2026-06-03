@@ -19,18 +19,15 @@ pub fn config() -> &'static Config {
 fn load() -> Config {
     let path = env::var("TIDYMEDIA_CONFIG").unwrap_or_else(|_| "config.yaml".to_string());
 
-    let raw = match fs::read_to_string(&path) {
-        Ok(s) => s,
-        Err(_) => {
-            debug!(
-                feature = "config",
-                operation = "load",
-                result = "fallback_default",
-                path = %path,
-                "config file missing, using defaults"
-            );
-            return Config::default();
-        }
+    let Ok(raw) = fs::read_to_string(&path) else {
+        debug!(
+            feature = "config",
+            operation = "load",
+            result = "fallback_default",
+            path = %path,
+            "config file missing, using defaults"
+        );
+        return Config::default();
     };
 
     let expanded = expand_env(&raw);

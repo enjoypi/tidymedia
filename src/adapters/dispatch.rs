@@ -4,11 +4,19 @@ use crate::entities::common::Result;
 use crate::entities::uri::Location;
 
 /// 用默认 backend factory 跑命令；旧入口，等价于 `tidy_with(&DefaultBackendFactory, ...)`。
+///
+/// # Errors
+///
+/// 当命令执行过程中发生 IO 错误、backend 构造失败或业务逻辑出错时返回 `Err`。
 pub fn tidy(command: Commands) -> Result<()> {
     tidy_with(&DefaultBackendFactory, command)
 }
 
 /// 注入版入口：调用方提供 [`BackendFactory`]，常用于集成测试用 fake 装配混合 scheme。
+///
+/// # Errors
+///
+/// 当 backend 构造失败、IO 操作出错或业务逻辑出错时返回 `Err`。
 pub fn tidy_with(factory: &dyn BackendFactory, command: Commands) -> Result<()> {
     match command {
         Commands::Copy {
@@ -19,7 +27,7 @@ pub fn tidy_with(factory: &dyn BackendFactory, command: Commands) -> Result<()> 
         } => {
             let src_pairs = build_sources(factory, sources)?;
             let out_pair = build_source(factory, output)?;
-            crate::usecases::copy(src_pairs, out_pair, dry_run, false, include_non_media)
+            crate::usecases::copy(&src_pairs, out_pair, dry_run, false, include_non_media)
         }
         Commands::Find {
             secure,
@@ -28,7 +36,8 @@ pub fn tidy_with(factory: &dyn BackendFactory, command: Commands) -> Result<()> 
         } => {
             let src_pairs = build_sources(factory, sources)?;
             let out_pair = output.map(|loc| build_source(factory, loc)).transpose()?;
-            crate::usecases::find_duplicates(secure, src_pairs, out_pair)
+            crate::usecases::find_duplicates(secure, src_pairs, out_pair.as_ref());
+            Ok(())
         }
         Commands::Move {
             dry_run,
@@ -38,7 +47,7 @@ pub fn tidy_with(factory: &dyn BackendFactory, command: Commands) -> Result<()> 
         } => {
             let src_pairs = build_sources(factory, sources)?;
             let out_pair = build_source(factory, output)?;
-            crate::usecases::copy(src_pairs, out_pair, dry_run, true, include_non_media)
+            crate::usecases::copy(&src_pairs, out_pair, dry_run, true, include_non_media)
         }
     }
 }

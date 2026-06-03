@@ -18,6 +18,7 @@ const CAMERA_PREFIX: &str = "DSC_";
 const SCREENSHOT_PREFIX: &str = "Screenshot_";
 
 /// 解析 `path.file_name()`（不含目录），匹配则返回 P2 候选。
+#[must_use]
 pub fn parse_filename(name: &str, default_offset: FixedOffset) -> Option<Candidate> {
     let stem = stem_without_ext(name);
     if let Some(c) = parse_camera_or_phone(stem, default_offset) {

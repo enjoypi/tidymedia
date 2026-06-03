@@ -21,6 +21,7 @@ use crate::entities::uri::Location;
 const XMP_KEY: &str = "photoshop:DateCreated=\"";
 
 /// 旧入口：本地路径 → Local backend shim。便于现有测试与 use case 不引入 backend 类型。
+#[must_use]
 pub fn discover(media_path: &Utf8Path) -> Vec<Candidate> {
     let backend = LocalBackend::arc();
     discover_with_backend(&Location::Local(media_path.to_path_buf()), &backend)
@@ -136,11 +137,11 @@ mod tests {
         assert!(parse_xmp_date(r#"photoshop:DateCreated="not a date""#).is_none());
     }
 
-    /// content 恰好以 KEY 结尾 → start == content.len() → rest 为空字符串
+    /// content 恰好以 KEY 结尾 → start == `content.len()` → rest 为空字符串
     /// → find('"') None → 整体 None。
     #[test]
     fn parse_xmp_date_key_at_end_returns_none() {
-        let s = format!("aaa{}", XMP_KEY);
+        let s = format!("aaa{XMP_KEY}");
         assert!(parse_xmp_date(&s).is_none());
     }
 
@@ -199,7 +200,7 @@ mod tests {
         assert!(discover(&mp).is_empty());
     }
 
-    /// xmp 文件存在但内容无法解析 → parse_xmp_date None → try_xmp None
+    /// xmp 文件存在但内容无法解析 → `parse_xmp_date` None → `try_xmp` None
     #[test]
     fn try_xmp_unparseable_returns_none() {
         let dir = tempfile::tempdir().unwrap();
@@ -212,7 +213,7 @@ mod tests {
         assert!(try_xmp(&Location::Local(mp), backend.as_ref()).is_none());
     }
 
-    /// json 文件存在但内容不符合 schema → try_takeout None
+    /// json 文件存在但内容不符合 schema → `try_takeout` None
     #[test]
     fn try_takeout_unparseable_returns_none() {
         let dir = tempfile::tempdir().unwrap();
@@ -225,8 +226,8 @@ mod tests {
         assert!(try_takeout(&Location::Local(mp), backend.as_ref()).is_none());
     }
 
-    /// 非 Local backend：with_extension / append_suffix 都返回 None →
-    /// discover_with_backend 直接返回空 Vec（SMB/MTP 暂未支持 sibling 探测）。
+    /// 非 Local `backend：with_extension` / `append_suffix` 都返回 None →
+    /// `discover_with_backend` 直接返回空 Vec（SMB/MTP 暂未支持 sibling 探测）。
     #[test]
     fn discover_with_backend_smb_returns_empty() {
         let smb_loc = Location::Smb {
@@ -240,8 +241,8 @@ mod tests {
         assert!(discover_with_backend(&smb_loc, &backend).is_empty());
     }
 
-    /// FakeBackend 用 Local Location 喂入：read_to_string 走 fake 数据，验证 backend 调度
-    /// 与 LocalBackend 同语义。
+    /// `FakeBackend` 用 Local Location `喂入：read_to_string` 走 fake 数据，验证 backend 调度
+    /// 与 `LocalBackend` 同语义。
     #[test]
     fn discover_with_fake_backend_finds_xmp() {
         use crate::entities::backend::fake::FakeBackend;

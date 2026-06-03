@@ -32,7 +32,7 @@ use chrono::Utc;
 use super::exif::Exif;
 
 /// 把 Exif（已解析的 EXIF/视频容器字段）转成 P0/P1 候选列表。
-/// inferred_offset 由调用方语义决定：本入口不读 OffsetTime 标签，只接受外部 offset。
+/// `inferred_offset` 由调用方语义决定：本入口不读 `OffsetTime` 标签，只接受外部 offset。
 ///
 /// 仅 crate 内部使用——Exif 是 pub(crate) 类型，集成测试请用 `epoch_to_candidate`
 /// 直接构造或经由 `filename::parse_filename` / `sidecar::discover` 等公开入口。
@@ -63,6 +63,7 @@ pub(crate) fn candidates_from_exif(exif: &Exif, default_offset: FixedOffset) -> 
 }
 
 /// 从路径反推文件名（不依赖 fs 调用），解析 P2 候选。
+#[must_use]
 pub fn candidates_from_filename(path: &Utf8Path, default_offset: FixedOffset) -> Vec<Candidate> {
     let Some(name) = path.file_name() else {
         return Vec::new();
@@ -86,6 +87,7 @@ fn push_epoch(
 
 /// 把 epoch 秒值转成 Candidate；secs == 0 时认为字段未填，返回 None。
 /// 集成测试可借此构造任意来源/优先级的 P0/P1/P3/P4 候选，无需触达 Exif 内部类型。
+#[must_use]
 pub fn epoch_to_candidate(
     secs: u64,
     source: Source,
@@ -95,7 +97,7 @@ pub fn epoch_to_candidate(
     if secs == 0 {
         return None;
     }
-    let utc = DateTime::<Utc>::UNIX_EPOCH + TimeDelta::seconds(secs as i64);
+    let utc = DateTime::<Utc>::UNIX_EPOCH + TimeDelta::seconds(secs.cast_signed());
     Some(Candidate {
         utc,
         offset,

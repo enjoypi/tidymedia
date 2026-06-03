@@ -87,7 +87,7 @@ fn exists_handles_fast_hash_collision_with_different_content() {
     fs::write(&a_path, &a).unwrap();
 
     let b_path = dir.path().join("b.bin");
-    let mut b = prefix.clone();
+    let mut b = prefix;
     b.push(b'B');
     fs::write(&b_path, &b).unwrap();
 
@@ -127,9 +127,9 @@ fn add_idempotent_on_same_path() {
     let mut index = Index::new();
     let first = Info::from(common::DATA_SMALL).unwrap();
     let key = first.full_path.clone();
-    index.add(first).unwrap();
+    index.add(first);
     let again = Info::from(common::DATA_SMALL).unwrap();
-    index.add(again).unwrap();
+    index.add(again);
     assert_eq!(index.files().len(), 1);
     assert!(index.files().contains_key(&key));
 }
@@ -150,7 +150,11 @@ fn bytes_read_sums_individual() {
     let mut index = Index::new();
     index.insert(common::DATA_SMALL).unwrap();
     index.insert(common::DATA_LARGE).unwrap();
-    let total: u64 = index.files().values().map(|f| f.bytes_read()).sum();
+    let total: u64 = index
+        .files()
+        .values()
+        .map(super::super::file_info::Info::bytes_read)
+        .sum();
     assert_eq!(index.bytes_read(), total);
 }
 
@@ -161,8 +165,8 @@ fn parse_exif_empty_index_ok() {
     assert_eq!(index.files().len(), 0);
 }
 
-/// 文件在 visit_dir 之后被删除 → Exif::from_path 返回 Err →
-/// parse_exif 内 `if let Ok` 的 Err 分支被覆盖，对应 entry 保留无 exif。
+/// 文件在 `visit_dir` 之后被删除 → `Exif::from_path` 返回 Err →
+/// `parse_exif` 内 `if let Ok` 的 Err 分支被覆盖，对应 entry 保留无 exif。
 #[test]
 fn parse_exif_skips_files_deleted_between_visit_and_parse() {
     let dir = tempdir().unwrap();
@@ -189,7 +193,7 @@ fn fast_search_same_matches_search_same() {
 fn index_debug_format_renders_files() {
     let mut index = Index::new();
     index.insert(common::DATA_SMALL).unwrap();
-    let dbg = format!("{:?}", index);
+    let dbg = format!("{index:?}");
     assert!(dbg.contains("data_small"));
 }
 
@@ -206,7 +210,7 @@ impl fmt::Write for FailingWriter {
 fn debug_fmt_propagates_writer_error() {
     let mut index = Index::new();
     index.insert(common::DATA_SMALL).unwrap();
-    let res = fmt::write(&mut FailingWriter, format_args!("{:?}", index));
+    let res = fmt::write(&mut FailingWriter, format_args!("{index:?}"));
     assert!(res.is_err());
 }
 
@@ -223,7 +227,7 @@ fn exists_propagates_calc_hash_error_when_src_deleted() {
     fs::write(&a_path, &a).unwrap();
 
     let b_path = dir.path().join("b.bin");
-    let mut b = prefix.clone();
+    let mut b = prefix;
     b.push(b'B');
     fs::write(&b_path, &b).unwrap();
 
@@ -249,7 +253,7 @@ fn exists_propagates_calc_hash_error_when_file_deleted() {
     fs::write(&a_path, &a).unwrap();
 
     let b_path = dir.path().join("b.bin");
-    let mut b = prefix.clone();
+    let mut b = prefix;
     b.push(b'B');
     fs::write(&b_path, &b).unwrap();
 
@@ -285,7 +289,7 @@ fn calc_same_skips_files_with_calc_error_and_singletons() {
     fs::write(&a_path, &a).unwrap();
 
     let b_path = dir.path().join("b.bin");
-    let mut b = prefix.clone();
+    let mut b = prefix;
     b.push(b'B');
     fs::write(&b_path, &b).unwrap();
 
@@ -344,7 +348,7 @@ fn exists_size_mismatch_skipped_even_with_fast_hash_collision() {
     fs::write(&a_path, &a).unwrap();
 
     let b_path = dir.path().join("b.bin");
-    let mut b = prefix.clone();
+    let mut b = prefix;
     b.extend_from_slice(&[b'B'; 100]);
     fs::write(&b_path, &b).unwrap();
 
@@ -371,7 +375,7 @@ fn exists_secure_propagates_calc_hash_error_when_file_deleted() {
     fs::write(&a_path, &a).unwrap();
 
     let b_path = dir.path().join("b.bin");
-    let mut b = prefix.clone();
+    let mut b = prefix;
     b.push(b'B');
     fs::write(&b_path, &b).unwrap();
 
@@ -396,7 +400,7 @@ fn exists_secure_propagates_calc_hash_error_when_src_deleted() {
     fs::write(&a_path, &a).unwrap();
 
     let b_path = dir.path().join("b.bin");
-    let mut b = prefix.clone();
+    let mut b = prefix;
     b.push(b'B');
     fs::write(&b_path, &b).unwrap();
 
@@ -422,7 +426,7 @@ fn visit_dir_ignores_gitignore_rules() {
     let names: Vec<String> = index
         .files()
         .keys()
-        .filter_map(|p| p.file_name().map(|s| s.to_string()))
+        .filter_map(|p| p.file_name().map(std::string::ToString::to_string))
         .collect();
     assert!(
         names.iter().any(|n| n == "ignored.bin"),
@@ -500,7 +504,7 @@ fn visit_stats_default_is_zero() {
 
 #[test]
 fn default_constructs_zero_state_index() {
-    let index: Index = Default::default();
+    let index = Index::default();
     assert!(index.files().is_empty());
     assert_eq!(index.stats(), super::VisitStats::default());
 }
@@ -553,8 +557,10 @@ fn visit_location_accepts_multiple_backends_in_one_index() {
     mtp.add_file(mtp_file.clone(), vec![0x55; 1024]);
 
     let mut index = Index::new();
-    index.visit_location(&smb_root, Arc::clone(&smb) as Arc<dyn Backend>);
-    index.visit_location(&mtp_root, Arc::clone(&mtp) as Arc<dyn Backend>);
+    let smb_backend = Arc::clone(&smb) as Arc<dyn Backend>;
+    let mtp_backend = Arc::clone(&mtp) as Arc<dyn Backend>;
+    index.visit_location(&smb_root, &smb_backend);
+    index.visit_location(&mtp_root, &mtp_backend);
 
     let files = index.files();
     assert_eq!(files.len(), 2, "both backends contributed one file each");

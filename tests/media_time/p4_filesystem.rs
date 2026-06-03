@@ -5,7 +5,7 @@ use tidymedia::media_time::{Priority, Source, epoch_to_candidate, resolve};
 
 use super::common::{fixed_now, set_mtime, utc_offset};
 
-/// spec §2.P4：from_modified 把 mtime 转 P4 候选。
+/// spec §`2.P4：from_modified` 把 mtime 转 P4 候选。
 #[test]
 fn mtime_yields_p4() {
     let dir = tempfile::tempdir().unwrap();
@@ -44,7 +44,7 @@ fn mtime_only_picked_when_nothing_else() {
     assert_eq!(d.utc.timestamp(), 1_714_545_000);
 }
 
-/// spec §2.P4：metadata.modified() 不可用时返回 None，resolve 不应崩。
+/// spec §`2.P4：metadata.modified()` 不可用时返回 None，resolve 不应崩。
 #[test]
 fn from_modified_none_returns_none() {
     assert!(from_modified(None).is_none());

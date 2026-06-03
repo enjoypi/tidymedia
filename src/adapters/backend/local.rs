@@ -1,7 +1,7 @@
 //! Local Backend：`std::fs` + [`ignore::WalkBuilder`] + [`memmap2::Mmap`] 实现。
 //!
 //! 关键边界：
-//! - mmap unsafe / WalkBuilder 闭包 / fs::File::open 的 IO Err 在 stable 测试里
+//! - mmap unsafe / `WalkBuilder` 闭包 / `fs::File::open` 的 IO Err 在 stable 测试里
 //!   也能稳定触发（见 CLAUDE.md「IO Err 分支测试套路」），无需 `coverage(off)`。
 //! - 唯一 `coverage(off)` 是 `MmapReader` 上 `Read for Cursor<Mmap>` 的 blanket 实现
 //!   被 LLVM 误算的内部 panic 边——通过包一层 [`Cursor`] 接 `memmap2::Mmap` 的 `Deref<Target=[u8]>`
@@ -23,11 +23,13 @@ use crate::entities::uri::Location;
 pub struct LocalBackend;
 
 impl LocalBackend {
+    #[must_use]
     pub fn new() -> Self {
         Self
     }
 
-    /// Arc<dyn Backend> 工厂：方便在 Info::open 等单元里替换。
+    /// Arc<dyn Backend> 工厂：方便在 `Info::open` 等单元里替换。
+    #[must_use]
     pub fn arc() -> Arc<dyn Backend> {
         Arc::new(Self)
     }
@@ -77,10 +79,8 @@ impl Backend for LocalBackend {
 
     fn open_write(&self, loc: &Location, mkparents: bool) -> io::Result<Box<dyn MediaWriter>> {
         let path = local_path(loc)?;
-        if mkparents {
-            if let Some(parent) = path.parent() {
-                fs::create_dir_all(parent.as_std_path())?;
-            }
+        if mkparents && let Some(parent) = path.parent() {
+            fs::create_dir_all(parent.as_std_path())?;
         }
         let file = fs::File::create(path.as_std_path())?;
         Ok(Box::new(LocalWriter { file }))
@@ -104,16 +104,14 @@ impl Backend for LocalBackend {
     fn copy_file(&self, src: &Location, dst: &Location, mkparents: bool) -> io::Result<u64> {
         let src = local_path(src)?;
         let dst = local_path(dst)?;
-        if mkparents {
-            if let Some(parent) = dst.parent() {
-                fs::create_dir_all(parent.as_std_path())?;
-            }
+        if mkparents && let Some(parent) = dst.parent() {
+            fs::create_dir_all(parent.as_std_path())?;
         }
         fs::copy(src.as_std_path(), dst.as_std_path())
     }
 }
 
-/// 把 [`Location`] 缩成 Local 路径；非 Local scheme 报 InvalidInput。
+/// 把 [`Location`] 缩成 Local 路径；非 Local scheme 报 `InvalidInput`。
 fn local_path(loc: &Location) -> io::Result<&Utf8Path> {
     match loc {
         Location::Local(p) => Ok(p.as_path()),
@@ -124,7 +122,7 @@ fn local_path(loc: &Location) -> io::Result<&Utf8Path> {
     }
 }
 
-/// fs::Metadata → 我们的 [`Metadata`]。
+/// `fs::Metadata` → 我们的 [`Metadata`]。
 fn to_metadata(m: &fs::Metadata) -> Metadata {
     Metadata {
         size: m.len(),
@@ -134,15 +132,15 @@ fn to_metadata(m: &fs::Metadata) -> Metadata {
     }
 }
 
-/// ignore::WalkBuilder 的单条记录映射到 [`Entry`]。size 在 metadata 失败时
-/// 兜底为 0——下游消费者读 size=0 会在再次 stat / open_read 时自然报错，
+/// `ignore::WalkBuilder` 的单条记录映射到 [`Entry`]。size 在 metadata 失败时
+/// 兜底为 0——下游消费者读 size=0 会在再次 stat / `open_read` 时自然报错，
 /// 不需要在 walk 阶段就硬失败。
 fn walk_entry_to_io(e: Result<ignore::DirEntry, ignore::Error>) -> io::Result<Entry> {
-    let entry = e.map_err(ignore_to_io)?;
+    let entry = e.map_err(|e| ignore_to_io(&e))?;
     let path = entry.path().to_path_buf();
     let utf8 = camino::Utf8PathBuf::from_path_buf(path)
         .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "non-UTF8 path"))?;
-    let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
+    let size = entry.metadata().map_or(0, |m| m.len());
     Ok(Entry {
         location: Location::Local(utf8),
         size,
@@ -150,7 +148,7 @@ fn walk_entry_to_io(e: Result<ignore::DirEntry, ignore::Error>) -> io::Result<En
     })
 }
 
-/// std::fs::FileType → [`EntryKind`]。socket/fifo/symlink 等归为 Other。
+/// `std::fs::FileType` → [`EntryKind`]。socket/fifo/symlink 等归为 Other。
 fn kind_from_file_type(t: Option<std::fs::FileType>) -> EntryKind {
     match t {
         Some(ft) if ft.is_file() => EntryKind::File,
@@ -159,11 +157,11 @@ fn kind_from_file_type(t: Option<std::fs::FileType>) -> EntryKind {
     }
 }
 
-/// ignore::Error → io::Error。`io_error()` 返回 None 的分支（如 ignore 自身
-/// 的 GitIgnore 解析错误、symlink 循环）需要构造复杂场景才能稳定触发，
+/// `ignore::Error` → `io::Error`。`io_error()` 返回 None 的分支（如 ignore 自身
+/// 的 `GitIgnore` 解析错误、symlink 循环）需要构造复杂场景才能稳定触发，
 /// 整函数走 coverage(off)。
 #[cfg_attr(coverage_nightly, coverage(off))]
-fn ignore_to_io(e: ignore::Error) -> io::Error {
+fn ignore_to_io(e: &ignore::Error) -> io::Error {
     if let Some(io) = e.io_error() {
         io::Error::new(io.kind(), e.to_string())
     } else {

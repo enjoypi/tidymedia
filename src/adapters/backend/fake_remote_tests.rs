@@ -1,4 +1,4 @@
-//! FakeRemoteClient 自身的单元测试：用 DummyTarget 验证文件增删查改。
+//! `FakeRemoteClient` 自身的单元测试：用 `DummyTarget` 验证文件增删查改。
 
 use super::super::remote::{RemoteClient, RemoteTarget};
 use super::*;
@@ -23,7 +23,7 @@ impl RemoteTarget for TestTarget {
         None
     }
     fn entry_location(&self, p: Utf8PathBuf) -> Location {
-        Location::Local(p.into())
+        Location::Local(p)
     }
     fn path(&self) -> &Utf8Path {
         &self.path
@@ -145,7 +145,7 @@ fn error_factory_transforms_kinds() {
 #[test]
 fn debug_format_non_exhaustive() {
     let c = client();
-    let s = format!("{:?}", c);
+    let s = format!("{c:?}");
     assert!(s.contains("FakeRemoteClient"));
 }
 

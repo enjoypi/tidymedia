@@ -71,7 +71,7 @@ impl<T: RemoteTarget> FakeRemoteClient<T> {
         }
     }
 
-    /// 设置自定义 error 工厂。SMB 用它把 PermissionDenied 转成含 "EACCES" 文案
+    /// 设置自定义 error 工厂。SMB 用它把 `PermissionDenied` 转成含 "EACCES" 文案
     /// 的 Other error，从而触发 `map_error`。
     pub fn with_error_factory(f: fn(io::ErrorKind) -> io::Error) -> Self {
         Self {
@@ -94,7 +94,7 @@ impl<T: RemoteTarget> FakeRemoteClient<T> {
         );
     }
 
-    /// 注入错误：下次调用 `op` 且 path 匹配时返回对应 ErrorKind。
+    /// 注入错误：下次调用 `op` 且 path 匹配时返回对应 `ErrorKind`。
     pub fn inject(&self, op: RemoteFakeOp, path: &str, kind: io::ErrorKind) {
         self.op_errors
             .lock()

@@ -32,6 +32,7 @@ pub enum Source {
 }
 
 impl Source {
+    #[must_use]
     pub fn priority(self) -> Priority {
         match self {
             Source::ExifDateTimeOriginal | Source::QuickTimeCreationDate | Source::MkvDateUtc => {

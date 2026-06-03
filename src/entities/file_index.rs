@@ -23,9 +23,9 @@ const FEATURE_INDEX: &str = "index";
 /// 扫描目录时累计的非致命跳过/错误计数。
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct VisitStats {
-    /// 0 字节文件（Info::from 拒收）
+    /// 0 `字节文件（Info::from` 拒收）
     pub skipped_empty: u64,
-    /// 走到了文件但 Info::from 失败（权限/IO/symlink target 失效等）
+    /// 走到了文件但 `Info::from` 失败（权限/IO/symlink target 失效等）
     pub skipped_unreadable: u64,
     /// walker 自身报错的 entry（包括非 UTF-8 路径、metadata 失败）
     pub walker_errors: u64,
@@ -83,16 +83,16 @@ impl Index {
 
     pub fn bytes_read(&self) -> u64 {
         let mut bytes_read = 0;
-        for (_, info) in self.files.iter() {
+        for info in self.files.values() {
             bytes_read += info.bytes_read();
         }
 
         bytes_read
     }
 
-    /// 判等流程：先用 fast_hash 找 bucket，size 必须相同，再按 `secure` 选择 hash：
+    /// 判等流程：先用 `fast_hash` 找 bucket，size 必须相同，再按 `secure` 选择 hash：
     /// `true` → SHA-512（用于 copy/move 这种涉及物理修改的判等，杜绝碰撞）
-    /// `false` → xxh3_64（用于 find 默认快速模式）
+    /// `false` → `xxh3_64（用于` find 默认快速模式）
     pub fn exists(&self, src_file: &Info, secure: bool) -> io::Result<Option<Utf8PathBuf>> {
         let Some(paths) = self.similar_files.get(&src_file.fast_hash) else {
             return Ok(None);
@@ -127,7 +127,7 @@ impl Index {
             .filter(|(_, paths)| paths.len() > 1)
             .map(|(_, paths)| {
                 let mut same = HashMap::new();
-                for path in paths.iter() {
+                for path in paths {
                     let info = self.files.get(path).unwrap();
                     if let Ok(key) = calc(info) {
                         same.entry((info.size, key))
@@ -141,12 +141,12 @@ impl Index {
     }
 
     pub fn search_same(&self) -> BTreeMap<u64, Vec<Utf8PathBuf>> {
-        let results: Vec<_> = self.calc_same(|info| info.secure_hash());
+        let results: Vec<_> = self.calc_same(super::file_info::Info::secure_hash);
         Self::filter_and_sort(&results)
     }
 
     pub fn fast_search_same(&self) -> BTreeMap<u64, Vec<Utf8PathBuf>> {
-        let results: Vec<_> = self.calc_same(|info| info.calc_full_hash());
+        let results: Vec<_> = self.calc_same(super::file_info::Info::calc_full_hash);
         Self::filter_and_sort(&results)
     }
 
@@ -155,7 +155,7 @@ impl Index {
     ) -> BTreeMap<u64, Vec<Utf8PathBuf>> {
         let mut result = BTreeMap::new();
 
-        for same in map.iter() {
+        for same in map {
             for ((key, _), paths) in same {
                 if paths.len() > 1 {
                     let mut v: Vec<_> = paths.iter().cloned().collect();
@@ -168,16 +168,16 @@ impl Index {
         result
     }
 
-    pub fn add(&mut self, info: Info) -> std::io::Result<&Info> {
+    pub fn add(&mut self, info: Info) -> &Info {
         use std::collections::hash_map::Entry;
         match self.files.entry(info.full_path.clone()) {
-            Entry::Occupied(e) => Ok(e.into_mut()),
+            Entry::Occupied(e) => e.into_mut(),
             Entry::Vacant(slot) => {
                 self.similar_files
                     .entry(info.fast_hash)
                     .or_default()
                     .insert(info.full_path.clone());
-                Ok(slot.insert(info))
+                slot.insert(info)
             }
         }
     }
@@ -185,19 +185,20 @@ impl Index {
     #[cfg(test)]
     pub fn insert(&mut self, path: &str) -> std::io::Result<&Info> {
         let info = Info::from(path)?;
-        self.add(info)
+        Ok(self.add(info))
     }
 
     /// 旧入口：本地路径字符串。`visit_location` 的 Local shim，让测试
     /// 不必感知 [`Location`] 类型。生产路径直接走 [`Self::visit_location`]。
     /// 相对路径先 canonicalize 成绝对路径，让 backend.walk 输出的 entry 与 Info 内
-    /// `full_path` 字段保持"全路径"语义（旧 Info::from 的不变量）。
+    /// `full_path` 字段保持"全路径"语义（旧 `Info::from` 的不变量）。
     #[cfg(test)]
     #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn visit_dir(&mut self, path: &str) {
         // canonicalize 失败（路径不存在）回退到原字符串，让 walker 自身报 walker_error
         let root = super::file_info::full_path(path).unwrap_or_else(|_| Utf8PathBuf::from(path));
-        self.visit_location(&Location::Local(root), LocalBackend::arc());
+        let backend = LocalBackend::arc();
+        self.visit_location(&Location::Local(root), &backend);
     }
 
     /// Backend Gateway 入口：扫描 `root` 下所有文件并入索引。`backend` 显式入参，
@@ -208,12 +209,12 @@ impl Index {
     /// 错误处理与原 `visit_dir` 等价：
     /// - walker 自身 Err（缺路径、非 UTF-8、权限）→ `walker_errors += 1`
     /// - 0 字节文件 → `skipped_empty += 1`
-    /// - Info::open 失败（chmod 000 / 中途删除等）→ `skipped_unreadable += 1`
+    /// - `Info::open` 失败（chmod 000 / 中途删除等）→ `skipped_unreadable += 1`
     ///
     /// 函数体内分支多数依赖文件系统状态构造，且 `warn!` 字段表达式要求安装
-    /// subscriber 才被求值。整体标 coverage(off)，沿用旧 visit_dir 的覆盖率策略。
+    /// subscriber 才被求值。整体标 coverage(off)，沿用旧 `visit_dir` 的覆盖率策略。
     #[cfg_attr(coverage_nightly, coverage(off))]
-    pub fn visit_location(&mut self, root: &Location, backend: Arc<dyn Backend>) {
+    pub fn visit_location(&mut self, root: &Location, backend: &Arc<dyn Backend>) {
         let mut locs: Vec<Location> = Vec::new();
         for entry_res in backend.walk(root) {
             let entry = match entry_res {
@@ -250,7 +251,7 @@ impl Index {
 
         let infos: Vec<_> = locs
             .par_iter()
-            .map(|loc| Info::open(loc, Arc::clone(&backend)))
+            .map(|loc| Info::open(loc, Arc::clone(backend)))
             .collect();
         for (loc, result) in locs.iter().zip(infos) {
             match result {

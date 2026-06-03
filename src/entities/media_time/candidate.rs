@@ -18,6 +18,7 @@ pub struct Candidate {
 }
 
 impl Candidate {
+    #[must_use]
     pub fn priority(&self) -> Priority {
         self.source.priority()
     }

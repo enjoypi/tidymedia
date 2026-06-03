@@ -66,6 +66,12 @@ pub enum ParseError {
 }
 
 impl Location {
+    /// 将字符串解析为 `Location`，自动识别 scheme（本地 / SMB / MTP / ADB）。
+    ///
+    /// # Errors
+    ///
+    /// 当 URI 格式不合法（缺少 host、share、path，percent-encoding 错误，端口非数字，
+    /// 或使用了不支持的 scheme）时返回 [`ParseError`]。
     pub fn parse(s: &str) -> Result<Self, ParseError> {
         let Some((scheme, rest)) = s.split_once(SEP) else {
             return Ok(Self::Local(Utf8PathBuf::from(s)));
@@ -148,6 +154,7 @@ impl Location {
         })
     }
 
+    #[must_use]
     pub fn scheme(&self) -> &'static str {
         match self {
             Self::Local(_) => SCHEME_LOCAL,
@@ -159,18 +166,20 @@ impl Location {
 
     /// 返回内部 path 字段（所有 variant 都持 path：Local 是绝对路径，
     /// Smb 是 share 内相对路径，Mtp 是 storage 内相对路径，Adb 是设备上绝对路径）。
+    #[must_use]
     pub fn path(&self) -> &Utf8Path {
         match self {
             Self::Local(p) => p.as_path(),
-            Self::Smb { path, .. } => path.as_path(),
-            Self::Mtp { path, .. } => path.as_path(),
-            Self::Adb { path, .. } => path.as_path(),
+            Self::Smb { path, .. } | Self::Mtp { path, .. } | Self::Adb { path, .. } => {
+                path.as_path()
+            }
         }
     }
 
     /// 保留 scheme + 连接参数（user/host/share / device/storage / serial），
     /// 覆写 path 字段。用于在远端 backend 下 join 子目录
     /// （如 `output.with_path(year/month/file)`）。
+    #[must_use]
     pub fn with_path(&self, new_path: Utf8PathBuf) -> Self {
         match self {
             Self::Local(_) => Self::Local(new_path),
@@ -201,6 +210,7 @@ impl Location {
         }
     }
 
+    #[must_use]
     pub fn display(&self) -> String {
         match self {
             Self::Local(p) => p.to_string(),
@@ -264,7 +274,7 @@ fn split_first_segment(tail: &str) -> Result<(String, String), ParseError> {
 fn decode(s: &str) -> Result<String, ParseError> {
     percent_decode_str(s)
         .decode_utf8()
-        .map(|c| c.into_owned())
+        .map(std::borrow::Cow::into_owned)
         .map_err(|_| ParseError::PercentDecode(s.to_string()))
 }
 

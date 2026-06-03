@@ -4,7 +4,7 @@ use tidymedia::media_time::{Priority, Source, epoch_to_candidate, resolve};
 
 use super::common::{fixed_now, utc_offset};
 
-/// spec §2.P0 图片：EXIF DateTimeOriginal 是拍摄时刻。
+/// spec §2.P0 图片：EXIF `DateTimeOriginal` 是拍摄时刻。
 #[test]
 fn exif_datetimeoriginal_yields_p0() {
     let c = epoch_to_candidate(

@@ -1,4 +1,4 @@
-//! MtpBackend 单测：FakeRemoteClient<MtpTarget> 注入 + Fuzzy/Exact 匹配语义 100% 覆盖。
+//! `MtpBackend` 单测：FakeRemoteClient<MtpTarget> 注入 + Fuzzy/Exact 匹配语义 100% 覆盖。
 //! 真实 mtp-rs 适配器留作后续 PR，本测试不依赖 USB / libmtp。
 //! 迁移到统一 FakeRemoteClient；协议特异断言通过 spy 读出。
 

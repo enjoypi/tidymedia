@@ -51,7 +51,7 @@ fn chrono_offset_from_hours(hours: i8) -> FixedOffset {
 }
 
 pub(crate) fn copy(
-    sources: Vec<Source>,
+    sources: &[Source],
     output: Source,
     dry_run: bool,
     remove: bool,
@@ -60,9 +60,9 @@ pub(crate) fn copy(
     let (output_loc, output_backend) = output;
 
     let mut source = Index::new();
-    sources.iter().for_each(|(loc, backend)| {
-        source.visit_location(loc, Arc::clone(backend));
-    });
+    for (loc, backend) in sources {
+        source.visit_location(loc, backend);
+    }
     source.parse_exif(configured_chrono_offset());
 
     let total_files = source.files().len();
@@ -94,12 +94,12 @@ pub(crate) fn copy(
     }
 
     let mut output_index = Index::new();
-    output_index.visit_location(&output_loc, Arc::clone(&output_backend));
+    output_index.visit_location(&output_loc, &output_backend);
 
     let mut copied = 0;
     let mut ignored = 0;
     let mut failed = 0;
-    source.files().iter().for_each(|(_, src)| {
+    for src in source.files().values() {
         match do_copy(
             src,
             &output_loc,
@@ -129,7 +129,7 @@ pub(crate) fn copy(
                 );
             }
         }
-    });
+    }
 
     let result = if failed == 0 { "ok" } else { "partial" };
     info!(
@@ -224,21 +224,20 @@ pub(crate) fn do_copy(
 
         Ok(true)
     } else {
-        Err(common::Error::Io(std::io::Error::new(
-            std::io::ErrorKind::Other,
-            format!("无法为\"{}\"生成目标目录的文件名", src_display),
-        )))
+        Err(common::Error::Io(std::io::Error::other(format!(
+            "无法为\"{src_display}\"生成目标目录的文件名"
+        ))))
     }
 }
 
 /// 用源 Info 的 backend 读 + 输出 backend 写。两个 backend 同一实例时与 `copy_file`
 /// 等价；不同实例（跨 scheme）时仍工作。
 ///
-/// 内部 4 个 `?` Err 分支（open_read / open_write / io::copy / writer.finish）中，
-/// open_read Err 已被 `do_copy_file_copy_fails_when_source_unreadable` 稳定覆盖；
-/// 后三者在 LocalBackend 下要构造 disk-full / 父目录在 mkdir_p 后被外部抢删等
+/// 内部 4 个 `?` Err `分支（open_read` / `open_write` / `io::copy` / writer.finish）中，
+/// `open_read` Err 已被 `do_copy_file_copy_fails_when_source_unreadable` 稳定覆盖；
+/// 后三者在 `LocalBackend` 下要构造 disk-full / 父目录在 `mkdir_p` 后被外部抢删等
 /// 不可稳定的场景，整函数随 CLAUDE.md「不可稳定触发」套路标 coverage(off)；
-/// 剩余分支由 FakeBackend reader/writer error 注入的集成测试覆盖。
+/// 剩余分支由 `FakeBackend` reader/writer error 注入的集成测试覆盖。
 #[cfg_attr(coverage_nightly, coverage(off))]
 fn stream_copy(src: &Info, target: &Location, out_be: &dyn Backend) -> common::Result<()> {
     let src_be = src.backend();
@@ -279,7 +278,7 @@ pub(crate) fn generate_unique_name(
         let target_path = if i == 0 {
             sub_dir_path.join(file_name)
         } else {
-            let mut name = file_stem.to_string();
+            let mut name = file_stem.clone();
             name.push('_');
             name.push_str(i.to_string().as_str());
             name.push('.');
@@ -290,7 +289,7 @@ pub(crate) fn generate_unique_name(
 
         // 对远端 backend 也通过 backend.exists 检测；同 backend 实例对 Local 等价。
         if !output_backend.exists(&target_loc).unwrap_or(false) {
-            return Some((sub_dir_loc.clone(), target_loc));
+            return Some((sub_dir_loc, target_loc));
         }
     }
     None
@@ -307,13 +306,13 @@ fn extract_valuable_name(full_path: &Utf8Path) -> String {
     }
 
     for c in components.into_iter().rev() {
-        if let Utf8Component::Normal(s) = c {
-            if any_non_english(s) {
-                return s.to_string();
-            }
+        if let Utf8Component::Normal(s) = c
+            && any_non_english(s)
+        {
+            return s.to_string();
         }
     }
-    "".to_string()
+    String::new()
 }
 
 #[cfg(test)]

@@ -1,13 +1,11 @@
 use std::collections::BTreeMap;
 use std::io::Write;
-use std::sync::Arc;
 
 use camino::Utf8PathBuf;
 use tracing::error;
 use tracing::info;
 
 use crate::entities::backend::EntryKind;
-use crate::entities::common;
 use crate::entities::file_index;
 use crate::entities::file_info;
 use crate::entities::uri::Location;
@@ -19,18 +17,13 @@ const FEATURE_FIND: &str = "find";
 // info!/error! 宏在不同 instantiation 间会产生重复的内部 region；用例入口本身的逻辑
 // 已经被各种集成测试覆盖。整体标 coverage(off) 让严格覆盖率统计稳定。
 #[cfg_attr(coverage_nightly, coverage(off))]
-pub(crate) fn find_duplicates(
-    secure: bool,
-    sources: Vec<Source>,
-    output: Option<Source>,
-) -> common::Result<()> {
+pub(crate) fn find_duplicates(secure: bool, sources: Vec<Source>, output: Option<&Source>) {
     let mut index = file_index::Index::new();
 
-    if let Some((loc, backend)) = output.as_ref() {
+    if let Some((loc, backend)) = output {
         let is_dir = backend
             .metadata(loc)
-            .map(|m| m.kind == EntryKind::Dir)
-            .unwrap_or(false);
+            .is_ok_and(|m| m.kind == EntryKind::Dir);
         if !is_dir {
             error!(
                 feature = FEATURE_FIND,
@@ -39,12 +32,12 @@ pub(crate) fn find_duplicates(
                 output = %loc.display(),
                 "output path is not a directory"
             );
-            return Ok(());
+            return;
         }
     }
 
     for (loc, backend) in sources {
-        index.visit_location(&loc, Arc::clone(&backend));
+        index.visit_location(&loc, &backend);
     }
 
     let scan_stats = index.stats();
@@ -76,7 +69,7 @@ pub(crate) fn find_duplicates(
         "duplicate groups discovered"
     );
 
-    let prefix_owned = compute_output_prefix(output.as_ref());
+    let prefix_owned = compute_output_prefix(output);
 
     render_script(
         &same,
@@ -93,7 +86,6 @@ pub(crate) fn find_duplicates(
         bytes_read = index.bytes_read(),
         "find_duplicates done"
     );
-    Ok(())
 }
 
 // 上方 is_dir 断言已经过滤掉非目录；到这里 output 必然是 (Location, Backend) 形态。
@@ -118,14 +110,14 @@ pub(crate) fn render_script(
     sink: &mut impl Write,
 ) {
     for (size, paths) in same.iter().rev() {
-        let _ = writeln!(sink, "{}SIZE {}\r", comment_token, size);
-        for path in paths.iter() {
+        let _ = writeln!(sink, "{comment_token}SIZE {size}\r");
+        for path in paths {
             let path_str = path.as_str();
             let starts = output_prefix.is_some_and(|p| path_str.starts_with(p));
             if output_prefix.is_some() && !starts {
-                let _ = writeln!(sink, "{} \"{}\"\r", rm_token, path);
+                let _ = writeln!(sink, "{rm_token} \"{path}\"\r");
             } else {
-                let _ = writeln!(sink, "{}{} \"{}\"\r", comment_token, rm_token, path);
+                let _ = writeln!(sink, "{comment_token}{rm_token} \"{path}\"\r");
             }
         }
         let _ = writeln!(sink);
@@ -295,22 +287,19 @@ mod tests {
     fn find_duplicates_invalid_output_returns_ok() {
         let tmp = tempfile::NamedTempFile::new().unwrap();
         let out_loc = Location::Local(Utf8PathBuf::from(tmp.path().to_str().unwrap()));
-        find_duplicates(
-            true,
-            vec![local_data_dir()],
-            Some((out_loc, LocalBackend::arc())),
-        )
-        .unwrap();
+        let out_pair = (out_loc, LocalBackend::arc());
+        find_duplicates(true, vec![local_data_dir()], Some(&out_pair));
     }
 
     #[test]
     fn find_duplicates_no_output_branch_runs() {
-        find_duplicates(true, vec![local_data_dir()], None).unwrap();
+        find_duplicates(true, vec![local_data_dir()], None);
     }
 
     #[test]
     fn find_duplicates_with_output_branch_runs() {
         let dir = tempdir().unwrap();
-        find_duplicates(false, vec![local_data_dir()], Some(local_dir(dir.path()))).unwrap();
+        let out_pair = local_dir(dir.path());
+        find_duplicates(false, vec![local_data_dir()], Some(&out_pair));
     }
 }

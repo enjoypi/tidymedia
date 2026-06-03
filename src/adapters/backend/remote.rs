@@ -51,7 +51,7 @@ pub trait RemoteAdapter: Send + Sync + 'static {
     /// Backend scheme 字符串（`"smb"` / `"adb"` / `"mtp"`）。
     fn scheme() -> &'static str;
 
-    /// 协议级错误映射。默认透传；SMB/ADB 覆写以识别 EACCES / NotFound 等文案。
+    /// 协议级错误映射。默认透传；SMB/ADB 覆写以识别 EACCES / `NotFound` 等文案。
     #[allow(unused_variables)]
     fn map_error(e: io::Error) -> io::Error {
         e
@@ -86,7 +86,8 @@ impl<A: RemoteAdapter> std::fmt::Debug for RemoteBackend<A> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("RemoteBackend")
             .field("scheme", &A::scheme())
-            .finish()
+            // adapter 含 Arc<dyn Client>，不 impl Debug，故用 finish_non_exhaustive
+            .finish_non_exhaustive()
     }
 }
 
@@ -188,7 +189,8 @@ impl<A: RemoteAdapter> std::fmt::Debug for RemoteBufferedWriter<A> {
         f.debug_struct("RemoteBufferedWriter")
             .field("target", &self.target)
             .field("buffered_bytes", &self.buffer.len())
-            .finish()
+            // client 是 Arc<dyn RemoteClient<_>>，不 impl Debug，故用 finish_non_exhaustive
+            .finish_non_exhaustive()
     }
 }
 

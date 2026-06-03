@@ -2,7 +2,7 @@
 //!
 //! 仅在 `--features smb-backend` 启用时编译。**整模块标 `#[cfg_attr(coverage_nightly,
 //! coverage(off))]`**：真实 SMB 调用需要 share 服务器才能稳定触发，CI 无法覆盖。
-//! 调度层的 OK / Err 分支由 [`super::SmbBackend::with_client`] + FakeSmbClient 覆盖。
+//! 调度层的 OK / Err 分支由 [`super::SmbBackend::with_client`] + `FakeSmbClient` 覆盖。
 //!
 //! ## 线程安全
 //!
@@ -21,7 +21,6 @@
 #![cfg_attr(coverage_nightly, coverage(off))]
 
 use std::io;
-use std::time::SystemTime;
 
 use parking_lot::Mutex;
 use pavao::{
@@ -29,13 +28,13 @@ use pavao::{
 };
 
 use super::super::remote::RemoteClient;
-use super::super::{Entry, EntryKind, Metadata};
 use super::SmbTarget;
+use crate::entities::backend::{Entry, EntryKind, Metadata};
 use crate::entities::uri::Location;
 
 pub struct RealSmbClient {
     inner: Mutex<PavaoClient>,
-    /// `smb://[host][:port]/share`，url_for 在末尾拼 path。
+    /// `smb://[host][:port]/share`，`url_for` 在末尾拼 path。
     share_url: String,
     user: Option<String>,
     host: String,
@@ -53,14 +52,14 @@ impl std::fmt::Debug for RealSmbClient {
         f.debug_struct("RealSmbClient")
             .field("share_url", &self.share_url)
             .field("user", &self.user)
-            .finish()
+            .finish_non_exhaustive()
     }
 }
 
 impl RealSmbClient {
     /// 从 [`SmbTarget`] 模板构造：host/port/share + env 凭据 + 配置项（外部传入）。
-    /// `default_user` / `workgroup` 由 lib.rs 装配层从 config() 读取并传入，避免
-    /// entities 层反向依赖 usecases::config（Clean Architecture 内层无依赖原则）。
+    /// `default_user` / `workgroup` 由 lib.rs 装配层从 `config()` 读取并传入，避免
+    /// entities 层反向依赖 `usecases::config（Clean` Architecture 内层无依赖原则）。
     pub fn new(target: &SmbTarget, default_user: &str, workgroup: &str) -> io::Result<Self> {
         let server = format!(
             "smb://{}{}",
@@ -76,7 +75,7 @@ impl RealSmbClient {
         let creds = SmbCredentials::default()
             .server(&server)
             .share(format!("/{}", target.share))
-            .username(user.clone())
+            .username(user)
             .password(password)
             .workgroup(workgroup);
         let opts = SmbOptions::default()
@@ -146,7 +145,7 @@ impl RemoteClient<SmbTarget> for RealSmbClient {
             let child = self.child_target(target, name);
             // list_dir 不带 size：file 时再 stat 一次；目录给 0（visit_location 只对 file 看 size）。
             let size = if matches!(kind, EntryKind::File) {
-                self.stat(&child).map(|m| m.size).unwrap_or(0)
+                self.stat(&child).map_or(0, |m| m.size)
             } else {
                 0
             };
@@ -204,6 +203,12 @@ impl RemoteClient<SmbTarget> for RealSmbClient {
     }
 }
 
+// 用作 `.map_err(map_smb_err)` 回调，签名必须接收 owned error（map_err 传 owned），
+// 故 needless_pass_by_value 在此不可消除。
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "用作 map_err 回调，必须接收 owned pavao::SmbError"
+)]
 fn map_smb_err(e: pavao::SmbError) -> io::Error {
     io::Error::other(format!("pavao: {e}"))
 }

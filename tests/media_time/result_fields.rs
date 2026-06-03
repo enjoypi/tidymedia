@@ -6,7 +6,7 @@ use tidymedia::media_time::{
 
 use super::common::{fixed_now, ts, utc_offset};
 
-/// spec §7：MediaTimeDecision 包含 utc / offset / priority / source / inferred_offset
+/// spec §7：MediaTimeDecision 包含 utc / offset / priority / source / `inferred_offset`
 /// / confidence / conflicts 七个字段。
 #[test]
 fn decision_carries_all_seven_fields() {
@@ -71,7 +71,7 @@ fn conflicts_can_carry_multiple_entries() {
     assert_eq!(d.conflicts.len(), 2);
 }
 
-/// spec §7：other_source 字段标记冲突来源（用于人工复核理解上下文）。
+/// spec §`7：other_source` 字段标记冲突来源（用于人工复核理解上下文）。
 #[test]
 fn conflict_carries_other_source_when_internal() {
     let p0 = epoch_to_candidate(

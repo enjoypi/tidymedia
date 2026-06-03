@@ -7,7 +7,7 @@
 //! 设计哲学（与 [CLI 入口] 对齐）：
 //! - Kotlin 端把 SAF 选到的目录翻成本地 file path（Android 11+ 可用 `/storage/emulated/0/...`
 //!   或 `MediaStore` 投影），传 `String` 给 Rust；Rust 端走与 CLI 完全一致的
-//!   [`crate::tidy_with`]：[`DefaultBackendFactory`] + [`Commands::Copy`] dry_run=true/false
+//!   [`crate::tidy_with`]：[`DefaultBackendFactory`] + [`Commands::Copy`] `dry_run=true/false`
 //! - 没有专门的 mobile Use Case；保留 Single Responsibility（mobile 只做 FFI 适配）
 //! - 返回 [`TidyStats`]：扫到的文件总数 + 已成功复制的字节数，让 UI 显示一个数字即可
 //!
@@ -22,9 +22,9 @@ use crate::{Commands, DefaultBackendFactory, Error, Location, tidy_with};
 pub struct TidyStats {
     /// 扫到的源端文件总数（含被识别为非媒体而跳过的）
     pub total_scanned: u32,
-    /// 实际写入目标端的文件数（dry_run=true 时永远为 0）
+    /// `实际写入目标端的文件数（dry_run=true` 时永远为 0）
     pub copied: u32,
-    /// dry_run / run 模式回执给 UI；正常完成 = "ok"，被 Err 截断 = error 文案
+    /// `dry_run` / run 模式回执给 UI；正常完成 = "ok"，被 Err 截断 = error 文案
     pub status: String,
 }
 
@@ -49,12 +49,20 @@ impl From<Error> for TidyError {
 /// Dry-run：扫源 / 找重复，但不写目标，不删源。
 /// Kotlin 调用约定：传 `src` 是设备上绝对路径（如 `/storage/emulated/0/DCIM`），
 /// `output` 同样是本地路径但 dry-run 下不实际写。
+///
+/// # Errors
+///
+/// 当扫描源、解析路径或底层 `tidy_with` 执行失败时返回 `TidyError`。
 #[uniffi::export]
 pub fn tidy_dry_run(src: String, output: String) -> Result<TidyStats, TidyError> {
     run_internal(src, output, /* dry_run = */ true)
 }
 
 /// 真实跑：扫源 → 复制非重复媒体到 output，不删源（move 模式不在 P1 范围）。
+///
+/// # Errors
+///
+/// 当扫描源、解析路径或底层 `tidy_with` 执行失败时返回 `TidyError`。
 #[uniffi::export]
 pub fn tidy_run(src: String, output: String) -> Result<TidyStats, TidyError> {
     run_internal(src, output, /* dry_run = */ false)
@@ -62,6 +70,7 @@ pub fn tidy_run(src: String, output: String) -> Result<TidyStats, TidyError> {
 
 /// 版本号给 UI 显示用，便于排查"App 里 Rust core 哪个版本"。
 #[uniffi::export]
+#[must_use]
 pub fn tidymedia_version() -> String {
     env!("CARGO_PKG_VERSION").to_string()
 }

@@ -26,13 +26,13 @@ const MIME_SNIFF_BYTES: usize = 256;
 
 /// 容器内自带时间字段。文件系统 mtime / btime 不在此结构体里——
 /// Clean Architecture 的边界让 Exif 只持有 EXIF/视频容器数据；
-/// 文件系统时间由 `entities::media_time::fs_time` 直接从 fs::Metadata 取。
-/// spec §5.4：EXIF ModifyDate 故意不解析，避免编辑/导出时间污染判定。
+/// 文件系统时间由 `entities::media_time::fs_time` 直接从 `fs::Metadata` 取。
+/// spec §5.4：EXIF `ModifyDate` 故意不解析，避免编辑/导出时间污染判定。
 #[derive(Clone, Debug, Default)]
 pub struct Exif {
     mime_type: String,
 
-    exif_create_date: u64,
+    create_date: u64,
     date_time_original: u64,
 
     // 视频容器（QuickTime / MP4 / MKV）创建时间。
@@ -43,8 +43,8 @@ pub struct Exif {
 
 impl Exif {
     /// EXIF DateTimeOriginal/CreateDate/ModifyDate 标准定义为相机本地时间、无时区。
-    /// 若 EXIF 内同时含 OffsetTimeOriginal 标签，nom-exif 自动合并为带时区的
-    /// `EntryValue::DateTime`，本入口的 offset 对其无影响；否则落入 NaiveDateTime
+    /// 若 EXIF 内同时含 `OffsetTimeOriginal` 标签，nom-exif 自动合并为带时区的
+    /// `EntryValue::DateTime`，本入口的 offset 对其无影响；否则落入 `NaiveDateTime`
     /// 分支时，调用方传入的 offset 当作相机本地时区参与 epoch 转换。
     #[cfg(test)]
     pub fn from_path_with_offset(
@@ -56,8 +56,8 @@ impl Exif {
     }
 
     /// Backend Gateway 入口：从 [`Location`] 用 backend 打开 reader，
-    /// sniff_mime 在原 reader 上 seek(0) 之后把句柄交给 [`Self::from_reader`] 解析。
-    /// 单次 open_read 减少远端 backend 的往返次数。
+    /// `sniff_mime` 在原 reader 上 seek(0) 之后把句柄交给 [`Self::from_reader`] 解析。
+    /// 单次 `open_read` 减少远端 backend 的往返次数。
     pub fn open(
         loc: &Location,
         backend: &Arc<dyn Backend>,
@@ -65,7 +65,7 @@ impl Exif {
     ) -> common::Result<Self> {
         let mut reader = backend.open_read(loc)?;
         let mime_type = sniff_mime(reader.as_mut())?;
-        Self::from_reader(reader, &mime_type, local_offset)
+        Ok(Self::from_reader(reader, &mime_type, local_offset))
     }
 
     /// 用调用方已 sniff 好的 MIME + 已 seek 到起点的 reader 解析容器内时间。
@@ -74,7 +74,7 @@ impl Exif {
         reader: Box<dyn MediaReader>,
         mime_type: &str,
         local_offset: FixedOffset,
-    ) -> common::Result<Self> {
+    ) -> Self {
         let mut exif = Exif {
             mime_type: mime_type.to_string(),
             ..Default::default()
@@ -84,7 +84,7 @@ impl Exif {
         } else if mime_type.starts_with(META_TYPE_VIDEO) {
             populate_video_dates(reader, &mut exif, local_offset);
         }
-        Ok(exif)
+        exif
     }
 
     pub fn mime_type(&self) -> &str {
@@ -92,7 +92,7 @@ impl Exif {
     }
 
     pub fn exif_create_date(&self) -> u64 {
-        self.exif_create_date
+        self.create_date
     }
 
     pub fn date_time_original(&self) -> u64 {
@@ -106,15 +106,17 @@ impl Exif {
     pub fn is_media(&self) -> bool {
         let mime_type = self.mime_type();
         (mime_type.starts_with(META_TYPE_IMAGE) || mime_type.starts_with(META_TYPE_VIDEO))
-            && !mime_type.ends_with(".fpx")
+            && !camino::Utf8Path::new(mime_type)
+                .extension()
+                .is_some_and(|ext| ext.eq_ignore_ascii_case("fpx"))
     }
 }
 
 /// 读首 [`MIME_SNIFF_BYTES`] 字节交给 `infer::get` 推断 MIME；之后 seek 回起点。
 /// 调用方需保证 reader 一开始已位于 0；这里 seek(0) 仅作"完成消费后还原"的保险。
 ///
-/// 内部 read / seek 的 `?` Err 分支在 LocalBackend 下不可稳定触发，整体标 coverage(off)
-/// 沿用 file_info 旧 path-only 哈希函数的策略；Backend 调度逻辑由 [`Exif::open`] 单测兜底。
+/// 内部 read / seek 的 `?` Err 分支在 `LocalBackend` 下不可稳定触发，整体标 coverage(off)
+/// 沿用 `file_info` 旧 path-only 哈希函数的策略；Backend 调度逻辑由 [`Exif::open`] 单测兜底。
 #[cfg_attr(coverage_nightly, coverage(off))]
 fn sniff_mime(reader: &mut dyn MediaReader) -> io::Result<String> {
     let mut buf = [0u8; MIME_SNIFF_BYTES];
@@ -133,11 +135,10 @@ fn entry_value_to_epoch(v: &EntryValue, local_offset: FixedOffset) -> u64 {
         EntryValue::NaiveDateTime(nd) => nd
             .and_local_timezone(local_offset)
             .single()
-            .map(|x| x.timestamp())
-            .unwrap_or(0),
+            .map_or(0, |x| x.timestamp()),
         _ => return 0,
     };
-    if secs <= 0 { 0 } else { secs as u64 }
+    if secs <= 0 { 0 } else { secs.cast_unsigned() }
 }
 
 fn populate_image_dates(reader: Box<dyn MediaReader>, exif: &mut Exif, local_offset: FixedOffset) {
@@ -153,7 +154,7 @@ fn populate_image_dates(reader: Box<dyn MediaReader>, exif: &mut Exif, local_off
         exif.date_time_original = entry_value_to_epoch(v, local_offset);
     }
     if let Some(v) = parsed.get(ExifTag::CreateDate) {
-        exif.exif_create_date = entry_value_to_epoch(v, local_offset);
+        exif.create_date = entry_value_to_epoch(v, local_offset);
     }
     // spec §5.4：ExifTag::ModifyDate 故意不读，避免被编辑/导出时间污染判定。
 }
@@ -182,7 +183,7 @@ impl Exif {
         Self::from_path_with_offset(path, FixedOffset::east_opt(0).expect("UTC offset is valid"))
     }
 
-    /// 跨模块测试用：根据 MIME 构造一个除 mime_type 外全部为 0 的 Exif。
+    /// 跨模块测试用：根据 MIME 构造一个除 `mime_type` 外全部为 0 的 Exif。
     pub(crate) fn with_mime(mime_type: &str) -> Self {
         Self {
             mime_type: mime_type.to_string(),

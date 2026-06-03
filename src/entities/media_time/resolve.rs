@@ -19,6 +19,7 @@ use super::priority::Source;
 /// spec §6："mtime < P0 但差距较大" 中的"较大"采用 30 天，超过即作为提示性冲突。
 const MTIME_VS_P0_HINT_SECS: i64 = 30 * 86_400;
 
+#[must_use]
 pub fn resolve(
     candidates: Vec<Candidate>,
     gps_utc: Option<DateTime<Utc>>,
@@ -87,7 +88,7 @@ fn detect_conflicts(
         }
     }
 
-    for (cand, _) in others.iter() {
+    for (cand, _) in others {
         if is_filename_source(cand.source) {
             let diff = (best.utc - cand.utc).num_seconds();
             if diff.abs() > 86_400 {

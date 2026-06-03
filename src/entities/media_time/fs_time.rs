@@ -16,9 +16,10 @@ use chrono::Utc;
 use super::candidate::Candidate;
 use super::priority::Source;
 
+#[must_use]
 pub fn from_modified(modified: Option<SystemTime>) -> Option<Candidate> {
     let t = modified?;
-    let secs = t.duration_since(UNIX_EPOCH).ok()?.as_secs() as i64;
+    let secs = t.duration_since(UNIX_EPOCH).ok()?.as_secs().cast_signed();
     Some(Candidate {
         utc: DateTime::<Utc>::UNIX_EPOCH + TimeDelta::seconds(secs),
         offset: None,
@@ -54,7 +55,7 @@ mod tests {
 
     #[test]
     fn future_systemtime_is_kept() {
-        let t = UNIX_EPOCH + Duration::from_secs(1_704_110_400);
+        let t = UNIX_EPOCH + Duration::from_hours(473_364);
         let c = from_modified(Some(t)).unwrap();
         assert_eq!(c.utc.timestamp(), 1_704_110_400);
     }

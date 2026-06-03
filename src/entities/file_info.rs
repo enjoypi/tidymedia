@@ -194,11 +194,10 @@ impl Info {
 
         // resolve 返回 None（候选全部被过滤）与"低于阈值"走同一条 fallback 路径，
         // 避免在 create_time 里多一条不可稳定触发的分支。
-        let secs = media_time::resolve(candidates, None, Utc::now())
-            .map(|d| d.utc.timestamp())
-            .unwrap_or(0);
-        if secs > 0 && (secs as u64) >= valid_threshold_secs {
-            SystemTime::UNIX_EPOCH + Duration::from_secs(secs as u64)
+        let secs =
+            media_time::resolve(candidates, None, Utc::now()).map_or(0, |d| d.utc.timestamp());
+        if secs > 0 && secs.cast_unsigned() >= valid_threshold_secs {
+            SystemTime::UNIX_EPOCH + Duration::from_secs(secs.cast_unsigned())
         } else {
             fs_fallback
         }
@@ -228,15 +227,15 @@ fn ensure_hashable(meta: &crate::entities::backend::Metadata, loc: &Location) ->
     Ok(())
 }
 
-/// fs 兜底：取 mtime 与 btime 的较早值；任一缺失就用另一方；都缺失退到 UNIX_EPOCH。
+/// fs 兜底：取 mtime 与 btime 的较早值；任一缺失就用另一方；都缺失退到 `UNIX_EPOCH`。
 /// 这是 P4 内部决策（spec §2.P4：mtime 兜底）——选较早值是因为 btime 在某些
 /// 文件系统上 == ctime，受 inode 变更影响，比 mtime 更不稳定。
 fn pick_fs_fallback(modified: Option<SystemTime>, created: Option<SystemTime>) -> SystemTime {
     match (modified, created) {
         (Some(m), Some(c)) if m < c => m,
-        (Some(_), Some(c)) => c,
+        // m >= c、或 m 缺失：优先用 c；两者都缺失退到 EPOCH
+        (_, Some(c)) => c,
         (Some(m), None) => m,
-        (None, Some(c)) => c,
         (None, None) => SystemTime::UNIX_EPOCH,
     }
 }

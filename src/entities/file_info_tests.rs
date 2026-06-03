@@ -294,7 +294,7 @@ fn partial_eq_differs_when_size_differs() {
 #[test]
 fn info_debug_format_includes_fast_hash() {
     let info = Info::from(common::DATA_SMALL).unwrap();
-    let dbg = format!("{:?}", info);
+    let dbg = format!("{info:?}");
     assert!(dbg.contains("fast_hash"));
     assert!(dbg.contains("size"));
 }
@@ -409,7 +409,7 @@ fn info_open_rejects_empty_file_with_local_backend() {
 use std::time::Duration;
 use std::time::SystemTime;
 
-/// pick_fs_fallback：modified < created（罕见但合法）→ 取 modified。
+/// `pick_fs_fallback：modified` < created（罕见但合法）→ 取 modified。
 #[test]
 fn pick_fs_fallback_modified_smaller_than_created() {
     let m = SystemTime::UNIX_EPOCH + Duration::from_secs(100);
@@ -423,7 +423,7 @@ fn pick_fs_fallback_modified_smaller_than_created() {
     );
 }
 
-/// pick_fs_fallback：modified ≥ created → 取 created。
+/// `pick_fs_fallback：modified` ≥ created → 取 created。
 #[test]
 fn pick_fs_fallback_modified_ge_created() {
     let m = SystemTime::UNIX_EPOCH + Duration::from_secs(200);
@@ -437,7 +437,7 @@ fn pick_fs_fallback_modified_ge_created() {
     );
 }
 
-/// pick_fs_fallback：created 不可用（btime 缺失），只看 modified。
+/// `pick_fs_fallback：created` 不可用（btime 缺失），只看 modified。
 #[test]
 fn pick_fs_fallback_created_none() {
     let m = SystemTime::UNIX_EPOCH + Duration::from_secs(50);
@@ -450,7 +450,7 @@ fn pick_fs_fallback_created_none() {
     );
 }
 
-/// pick_fs_fallback：modified 不可用（极端 fs），只看 created。
+/// `pick_fs_fallback：modified` 不可用（极端 fs），只看 created。
 #[test]
 fn pick_fs_fallback_modified_none() {
     let c = SystemTime::UNIX_EPOCH + Duration::from_secs(75);
@@ -463,7 +463,7 @@ fn pick_fs_fallback_modified_none() {
     );
 }
 
-/// pick_fs_fallback：两个时间都不可用 → UNIX_EPOCH 兜底。
+/// `pick_fs_fallback：两个时间都不可用` → `UNIX_EPOCH` 兜底。
 #[test]
 fn pick_fs_fallback_both_none() {
     let got = super::pick_fs_fallback(None, None);
@@ -493,6 +493,10 @@ impl io::Read for ChunkedReader {
     }
 }
 impl io::Seek for ChunkedReader {
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "测试用小缓冲区，偏移量始终在 usize 范围内"
+    )]
     fn seek(&mut self, pos: io::SeekFrom) -> io::Result<u64> {
         match pos {
             io::SeekFrom::Start(p) => {
@@ -504,7 +508,7 @@ impl io::Seek for ChunkedReader {
     }
 }
 
-/// 始终返回 io::Error 的 reader，用于覆盖 read_fill / full / secure 的 `?` 错误分支。
+/// 始终返回 `io::Error` 的 reader，用于覆盖 `read_fill` / full / secure 的 `?` 错误分支。
 #[derive(Debug)]
 struct FailingReader;
 impl io::Read for FailingReader {
@@ -529,7 +533,7 @@ fn whole_file_bytes(path: &str) -> Vec<u8> {
 fn fast_hash_stream_matches_path_version_small() {
     let bytes = whole_file_bytes(common::DATA_SMALL);
     let (path_n, path_w, path_x) = super::fast_hash(common::DATA_SMALL).unwrap();
-    let mut r = Cursor::new(bytes.clone());
+    let mut r = Cursor::new(bytes);
     let (sn, sw, sx) = super::fast_hash_stream(&mut r).unwrap();
     assert_eq!((sn, sw, sx), (path_n, path_w, path_x));
 }
@@ -641,8 +645,8 @@ use super::super::uri::Location;
 use camino::Utf8PathBuf;
 use std::sync::Arc;
 
-/// Info::open 走非 Local Location 时，full_path 从 [`Location::display`] 派生。
-/// 顺带覆盖 calc_full_hash / secure_hash 的 FakeBackend 路径。
+/// `Info::open` 走非 Local Location `时，full_path` 从 [`Location::display`] 派生。
+/// 顺带覆盖 `calc_full_hash` / `secure_hash` 的 `FakeBackend` 路径。
 #[test]
 fn info_open_smb_location_derives_full_path_from_display() {
     let fake = Arc::new(FakeBackend::new("smb"));
@@ -655,7 +659,7 @@ fn info_open_smb_location_derives_full_path_from_display() {
     };
     fake.add_file(loc.clone(), b"hello-smb-content".to_vec());
 
-    let info = super::Info::open(&loc, fake.clone()).unwrap();
+    let info = super::Info::open(&loc, fake).unwrap();
     assert_eq!(info.size, 17);
     assert_eq!(info.full_path.as_str(), loc.display());
     // calc_full_hash 与 secure_hash 也走 FakeBackend
@@ -665,8 +669,8 @@ fn info_open_smb_location_derives_full_path_from_display() {
     assert_eq!(sha, sha2::Sha512::digest(b"hello-smb-content"));
 }
 
-/// FakeBackend::inject_reader_error 让 open_read 成功但 read Err → Info::open 内
-/// fast_hash_stream(reader.as_mut())? 的 Err 分支被触发。
+/// `FakeBackend::inject_reader_error` 让 `open_read` 成功但 read Err → `Info::open` 内
+/// `fast_hash_stream(reader.as_mut())`? 的 Err 分支被触发。
 #[test]
 fn info_open_propagates_reader_error_from_fast_hash() {
     let fake = Arc::new(FakeBackend::new("fake"));
@@ -678,8 +682,8 @@ fn info_open_propagates_reader_error_from_fast_hash() {
     assert_eq!(err.kind(), io::ErrorKind::Interrupted);
 }
 
-/// 用 FakeBackend 让 calc_full_hash 的 full_hash_stream `?` Err 分支被命中：
-/// Info::open 走 add_file 的正常 reader 通过；之后注入 reader 错误，再调 calc_full_hash。
+/// 用 `FakeBackend` 让 `calc_full_hash` 的 `full_hash_stream` `?` Err 分支被命中：
+/// `Info::open` 走 `add_file` 的正常 reader 通过；之后注入 reader 错误，再调 `calc_full_hash`。
 #[test]
 fn calc_full_hash_propagates_reader_stream_error() {
     let fake = Arc::new(FakeBackend::new("fake"));
@@ -692,7 +696,7 @@ fn calc_full_hash_propagates_reader_stream_error() {
     assert_eq!(err.kind(), io::ErrorKind::ConnectionReset);
 }
 
-/// 同上，覆盖 secure_hash 的 `?` Err 分支。
+/// 同上，覆盖 `secure_hash` 的 `?` Err 分支。
 #[test]
 fn secure_hash_propagates_reader_stream_error() {
     let fake = Arc::new(FakeBackend::new("fake"));

@@ -54,6 +54,7 @@ fn file_meta(size: u64) -> Metadata {
 }
 
 impl FakeBackend {
+    #[must_use]
     pub fn new(scheme: &'static str) -> Self {
         Self {
             scheme,
@@ -86,7 +87,7 @@ impl FakeBackend {
     }
 
     /// 让针对 `loc` 的 `open_read` 返回一个 reader：调用 `read` 时立即抛 `kind`。
-    /// 覆盖 "open_read 成功但 stream 阶段失败" 这类只在远端 backend 真实出现的失败模式。
+    /// 覆盖 "`open_read` 成功但 stream 阶段失败" 这类只在远端 backend 真实出现的失败模式。
     pub fn inject_reader_error(&self, loc: Location, kind: io::ErrorKind) {
         self.state.lock().unwrap().reader_errors.insert(loc, kind);
     }
@@ -99,6 +100,7 @@ impl FakeBackend {
         Ok(())
     }
 
+    #[must_use]
     pub fn read_bytes(&self, loc: &Location) -> Option<Vec<u8>> {
         self.state.lock().unwrap().files.get(loc).cloned()
     }

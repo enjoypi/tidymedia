@@ -88,6 +88,11 @@ pub enum Commands {
     },
 }
 
+/// 解析命令行参数并执行对应子命令。
+///
+/// # Errors
+///
+/// 当参数解析失败（无效输入）或子命令执行过程中发生 IO 错误时返回 `Err`。
 pub fn run_cli<I, T>(args: I) -> Result<()>
 where
     I: IntoIterator<Item = T>,

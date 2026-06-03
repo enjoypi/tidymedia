@@ -12,6 +12,11 @@ use crate::entities::uri::Location;
 /// 在未启用对应 feature 时报 `Unsupported`。测试用 fake 实现注入
 /// 覆盖跨 scheme 调度（见 `tests/lib_tidy.rs`）。
 pub trait BackendFactory: Send + Sync {
+    /// 根据 `loc` 的 scheme 构造并返回对应的 [`Backend`] 实现。
+    ///
+    /// # Errors
+    ///
+    /// 当对应 backend feature 未启用，或 backend 初始化（连接 / 认证）失败时返回 `Err`。
     fn for_location(&self, loc: &Location) -> Result<Arc<dyn Backend>>;
 }
 
@@ -31,6 +36,17 @@ impl BackendFactory for DefaultBackendFactory {
     }
 }
 
+// 仅被各 `#[cfg(not(feature = "*-backend"))]` 分支调用；三个 backend feature 全开时
+// 没有任何 not(feature) 分支编译，此 helper 即 dead。跨 feature 组合差异 → 用 allow
+// 而非 expect（未触发的 feature 组合会让 expect 报 unfulfilled，见 rust-p0 §1）。
+#[cfg_attr(
+    all(
+        feature = "smb-backend",
+        feature = "mtp-backend",
+        feature = "adb-backend"
+    ),
+    allow(dead_code)
+)]
 fn unsupported_backend(loc: &Location, feature: &str) -> Error {
     Error::Io(std::io::Error::new(
         std::io::ErrorKind::Unsupported,
@@ -63,7 +79,7 @@ fn build_smb_backend(loc: &Location) -> Result<Arc<dyn Backend>> {
         host: host.clone(),
         port: *port,
         share: share.clone(),
-        path: Default::default(),
+        path: camino::Utf8PathBuf::default(),
         password: std::env::var("SMB_PASSWORD").ok(),
         krb5_ccname: std::env::var("KRB5CCNAME").ok(),
     };

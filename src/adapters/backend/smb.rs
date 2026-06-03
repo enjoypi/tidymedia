@@ -105,7 +105,7 @@ impl RemoteAdapter for SmbAdapter {
         "smb"
     }
 
-    /// EACCES → PermissionDenied；其他 ErrorKind 透传。
+    /// EACCES → PermissionDenied；其他 `ErrorKind` 透传。
     fn map_error(e: io::Error) -> io::Error {
         if e.kind() == io::ErrorKind::Other && e.to_string().contains("EACCES") {
             return io::Error::new(io::ErrorKind::PermissionDenied, e.to_string());

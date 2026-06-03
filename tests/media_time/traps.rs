@@ -5,7 +5,7 @@ use tidymedia::media_time::{Confidence, Priority, Source, epoch_to_candidate, re
 
 use super::common::{fixed_now, ts, utc_offset};
 
-/// spec §5.1：MP4 未写 creation_time 时 nom-exif 返回 1904-01-01，必须剔除。
+/// spec §5.1：MP4 未写 `creation_time` 时 nom-exif 返回 1904-01-01，必须剔除。
 #[test]
 fn epoch_1904_rejected() {
     assert_eq!(
@@ -17,8 +17,10 @@ fn epoch_1904_rejected() {
 /// spec §5.1：1904 候选与有效 P0 同时存在 → 1904 被剔除，P0 胜出。
 #[test]
 fn epoch_1904_filtered_during_resolve() {
+    use chrono::DateTime;
+
     let bogus = epoch_to_candidate(
-        quicktime_epoch().timestamp().max(0) as u64,
+        quicktime_epoch().timestamp().max(0).cast_unsigned(),
         Source::QuickTimeCreateDate,
         None,
         false,
@@ -27,7 +29,6 @@ fn epoch_1904_filtered_during_resolve() {
     // 因此 bogus 必然是 None；我们手工塞一个等价的 candidate 进 resolve。
     assert!(bogus.is_none());
 
-    use chrono::DateTime;
     let qt_epoch = quicktime_epoch();
     let cand = tidymedia::media_time::Candidate {
         utc: qt_epoch,
@@ -57,7 +58,7 @@ fn future_above_now_plus_one_day_rejected() {
 /// spec §5.2：未来 P0 候选被剔除，回退到合法的 P1。
 #[test]
 fn future_p0_falls_to_valid_p1() {
-    let future = (fixed_now().timestamp() + 100 * 86_400) as u64;
+    let future = (fixed_now().timestamp() + 100 * 86_400).cast_unsigned();
     let bogus = epoch_to_candidate(future, Source::ExifDateTimeOriginal, None, false).unwrap();
     let good = epoch_to_candidate(1_700_000_100, Source::ExifCreateDate, None, false).unwrap();
     let d = resolve(vec![bogus, good], None, fixed_now()).unwrap();
@@ -73,9 +74,9 @@ fn pre_1995_kept_but_low_confidence() {
     assert_eq!(d.confidence, Confidence::Low);
 }
 
-/// spec §5.4：P0 缺失时**不**回退到 ModifyDate（只有 Source::Exif* 与 QuickTime*
+/// spec §5.4：P0 缺失时**不**回退到 ModifyDate（只有 `Source::Exif`* 与 `QuickTime`*
 /// 是允许的 P0/P1，ModifyDate 不在枚举里）。这里通过缺席验证：
-/// Source 枚举里没有 ExifModifyDate 变体，因此 ModifyDate 物理上无法成为候选。
+/// Source 枚举里没有 `ExifModifyDate` 变体，因此 `ModifyDate` 物理上无法成为候选。
 #[test]
 fn modifydate_has_no_source_variant() {
     // 枚举穷举式断言：列出所有合法 Source，确认没有 ExifModifyDate / ModifyDate*
@@ -94,7 +95,7 @@ fn modifydate_has_no_source_variant() {
         Source::FsMtime,
     ];
     for s in all {
-        let name = format!("{:?}", s);
+        let name = format!("{s:?}");
         assert!(
             !name.contains("Modify"),
             "Source {name} 含 Modify — spec §5.4 不允许"

@@ -86,7 +86,7 @@ impl RemoteAdapter for AdbAdapter {
         "adb"
     }
 
-    /// 把 adb_client 报错文案中的常见特征字符串映射成 [`io::ErrorKind`]。
+    /// 把 `adb_client` 报错文案中的常见特征字符串映射成 [`io::ErrorKind`]。
     fn map_error(e: io::Error) -> io::Error {
         if e.kind() != io::ErrorKind::Other {
             return e;
@@ -144,7 +144,7 @@ impl AdbBackend {
 /// 单引号封装一段字符串，让 adb shell 把它当成单参数；内部 `'` 通过 `'\''` 续接。
 /// 用于在 [`real::RealAdbClient`] 的 `shell_command("rm -f ...")` 等调用上防注入。
 /// `pub(crate)` 让 `adb_real.rs` 可见；feature off 时仅单元测试使用，故 cfg gate
-/// 避免 dead_code 警告。
+/// 避免 `dead_code` 警告。
 #[cfg(any(feature = "adb-backend", test))]
 pub(crate) fn shell_quote(s: &str) -> String {
     let mut out = String::with_capacity(s.len() + 2);

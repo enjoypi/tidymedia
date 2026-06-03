@@ -130,6 +130,7 @@ fn tidy_dispatches_move_dry_run_on_empty_source() {
 
 /// SMB/MTP URI 当前未启用真实 client：CLI 解析成功（URI 语法正确）但 tidy
 /// adapter 拒收，给出清晰 Unsupported 错误。
+#[cfg(not(feature = "smb-backend"))]
 #[test]
 fn tidy_rejects_smb_uri_with_clear_error() {
     let res = tidy(Commands::Find {
@@ -148,6 +149,7 @@ fn tidy_rejects_smb_uri_with_clear_error() {
     assert!(msg.contains("smb backend not enabled"), "got: {msg}");
 }
 
+#[cfg(not(feature = "mtp-backend"))]
 #[test]
 fn tidy_rejects_mtp_output_with_clear_error() {
     let res = tidy(Commands::Copy {
@@ -192,7 +194,8 @@ fn tidy_rejects_adb_output_with_clear_error() {
     assert!(msg.contains("adb backend not enabled"), "got: {msg}");
 }
 
-/// Copy 分支：sources 含非 Local Location → require_local_paths ? Err
+/// Copy 分支：sources 含非 Local Location → `require_local_paths` ? Err
+#[cfg(not(feature = "smb-backend"))]
 #[test]
 fn tidy_rejects_copy_smb_source() {
     let out = tempdir().unwrap();
@@ -212,6 +215,7 @@ fn tidy_rejects_copy_smb_source() {
 }
 
 /// Find 分支：output 是非 Local Location → option.map.transpose ? Err
+#[cfg(not(feature = "mtp-backend"))]
 #[test]
 fn tidy_rejects_find_mtp_output() {
     let res = tidy(Commands::Find {
@@ -226,7 +230,8 @@ fn tidy_rejects_find_mtp_output() {
     assert!(format!("{}", res.unwrap_err()).contains("mtp backend not enabled"));
 }
 
-/// Move 分支：sources 非 Local → require_local_paths ? Err
+/// Move 分支：sources 非 Local → `require_local_paths` ? Err
+#[cfg(not(feature = "smb-backend"))]
 #[test]
 fn tidy_rejects_move_smb_source() {
     let out = tempdir().unwrap();
@@ -245,7 +250,8 @@ fn tidy_rejects_move_smb_source() {
     assert!(format!("{}", res.unwrap_err()).contains("smb backend not enabled"));
 }
 
-/// Move 分支：output 非 Local → require_local_path ? Err
+/// Move 分支：output 非 Local → `require_local_path` ? Err
+#[cfg(not(feature = "mtp-backend"))]
 #[test]
 fn tidy_rejects_move_mtp_output() {
     let src = tempdir().unwrap();
@@ -262,6 +268,7 @@ fn tidy_rejects_move_mtp_output() {
     assert!(format!("{}", res.unwrap_err()).contains("mtp backend not enabled"));
 }
 
+#[cfg(not(feature = "smb-backend"))]
 #[test]
 fn run_cli_accepts_uri_form_smb_and_reports_unsupported() {
     let r = run_cli(["tidymedia", "find", "smb://nas/photos"]);
@@ -366,7 +373,7 @@ fn tidy_with_copy_fake_smb_to_local_writes_file() {
 
     let fake_smb = Arc::new(FakeBackend::new("smb"));
     fake_smb.add_dir(smb_root.clone());
-    fake_smb.add_file(smb_file.clone(), b"FAKE-MEDIA-BYTES".to_vec());
+    fake_smb.add_file(smb_file, b"FAKE-MEDIA-BYTES".to_vec());
 
     let out_dir = tempdir().unwrap();
     let out_loc = local(out_dir.path().to_str().unwrap());
@@ -585,6 +592,7 @@ fn tidy_with_propagates_smb_walk_error() {
     .expect("find should swallow walker error and finalize Ok");
 }
 
+#[cfg(not(feature = "smb-backend"))]
 #[test]
 fn default_factory_smb_without_feature_returns_unsupported() {
     // 默认 BackendFactory 在未启用 smb-backend feature 时拒收 SMB Location。

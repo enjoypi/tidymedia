@@ -4,7 +4,7 @@ use tidymedia::media_time::{Priority, Source, epoch_to_candidate, resolve};
 
 use super::common::{fixed_now, utc_offset};
 
-/// spec §2.P1：EXIF CreateDate / DateTimeDigitized 在 P0 缺失时被采纳。
+/// spec §2.P1：EXIF `CreateDate` / `DateTimeDigitized` 在 P0 缺失时被采纳。
 #[test]
 fn exif_create_date_picked_when_no_p0() {
     let c = epoch_to_candidate(

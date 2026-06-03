@@ -11,6 +11,10 @@
 - 测试：`cargo nextest run --release`；覆盖率：`cargo +nightly llvm-cov --release nextest --summary-only`
 - lint：`cargo +nightly fmt && cargo clippy --all-targets --all-features --locked -- -D warnings`（baseline 仍有少量 warnings，需逐步清零；见 rust-p0 §1）
 
+### Lint 配置与偏差
+- **`[lints.clippy]` 已集中配置**（rust-p0 §1 + rust-p1 §1 模板）：`[lints.rust]` = `future-incompatible`(warn, priority -2) / `nonstandard_style`(deny, priority -1) / `unexpected_cfgs`；`[lints.clippy]` = `all`(deny, priority -2) / `pedantic`(warn, priority -1) / `redundant_clone`(deny)。**所有 group 必须用严格递增的负 priority**，否则报 `lint_groups_priority`（group 与具体 lint 同 priority=0 即 fail，具体 lint 须高于 group）。默认 features 与 `--all-features` 的 `cargo clippy --all-targets -- -D warnings` 均 0 warning
+- **`assert_cmd`（dev-dep）**：集成测试 spawn binary 用了 `assert_cmd`，rust-p1 §5 建议改 `env!("CARGO_BIN_EXE_tidymedia")` 免依赖（SHOULD，未迁移）
+
 ## 系统依赖
 - 无外部进程依赖。EXIF/视频元数据走纯 Rust 库：`nom-exif`（图片 + 视频解析）+ `infer`（magic-bytes MIME）。
 - Fixture 生成（开发时一次性，不在运行期依赖）用了 `ffmpeg` + `exiftool`：`sample-with-exif.jpg`、`sample-no-dates.jpg`、`sample-with-track.mp4`、`sample-no-track-date.mkv` 已 commit 到 `tests/data/`。
@@ -45,7 +49,7 @@
   - **`open_read` 成功但 stream Err** → `FakeBackend::inject_reader_error(loc, kind)` 注入 read 立即 Err 的 reader，专门触发 `fast_hash_stream` / `sniff_mime` 等调用点的 `?` Err（替代原 `fast_hash`/`full_hash`/`secure_hash` 的 path 版 `coverage(off)`，stream 版默认 100% 覆盖）
 - **expect/unwrap 的 panic 边永远算 region miss**：不可通过测试 cover，要么抽 helper 单独标 `coverage(off)`，要么直接接受
 - 消除生产代码 `?` Err 不可触发分支的优先级：①改 `unwrap_or` 兜底 → ②返 `Option` 替代 `Result`（小重构）→ ③才考虑 `#[cfg_attr(coverage_nightly, coverage(off))]`。前两者让 stable 默认就 100%
-- `std::env::set_var` 在 Rust 1.75+ 必须包 `unsafe { }`（与 edition 无关）；nextest 进程隔离让其可安全用于单测
+- `std::env::set_var` 在 edition 2024 是 unsafe（rust-p0 §13；本项目即 edition 2024），必须包 `unsafe { }`；nextest 每测试独立进程让其可安全用于单测（按 §13 应每 unsafe 块加 `// SAFETY: nextest 每测试独立进程`，现状缺注释，补时逐处加）
 
 ## Fixture
 - `tests/data/` 下文件的 mtime 每次 `git checkout` 都会被重置，EXIF / 时间相关测试必须用 `filetime::set_file_mtime` 固定
@@ -63,7 +67,7 @@
 > 字面默认值变更先 `rg <旧值>` 兜底改全。
 - **新增 `Location` variant / backend scheme** → `entities/uri.rs` 的 `FromStr` 解析 + `adapters/backend/factory.rs`（cfg-gated 分支 + Unsupported 兜底）+ 对应 `Backend` 实现 + `adapters/dispatch.rs` 调度 + 本文「URI 格式」节
 - **新增 `Backend` trait 方法**（`entities/backend/mod.rs`）→ 全部 7 个实现同步加默认或 override：`local`/`remote`/`smb`/`adb`/`mtp`/`fake`/`fake_remote`；并按「远端 backend 测试套路」补 OK / client Err 注入 / 非自家 scheme 三类测试
-- **新增配置字段** → `usecases/config.rs` 结构体 + `config.yaml` + `validate_*` 校验或被消费（守门，见「Use Case config 字段守门」精神）；若为 secret 再加 `.env.example`（值 `changeme`）+ 确认 `.env` 已 gitignore
+- **新增配置字段** → `usecases/config.rs` 结构体 + `config.yaml` + `validate_*` 校验或被消费（新增字段 MUST 被校验或被读取，杜绝哑配置）；若为 secret 再加 `.env.example`（值 `changeme`）+ 确认 `.env` 已 gitignore
 - **新增 `media_time` 候选来源 / 调整 P0–P4** → 先改 `docs/media-time-detection.md` spec（代码注释引 §号）→ `priority.rs` 枚举 → 对应解析模块 → `resolve`/`decision` 裁决 → 补 fixture
 - **改 `tests/data/` fixture 或新增** → 时间相关测试 MUST 用 `filetime::set_file_mtime` 固定 mtime（`git checkout` 会重置）
 
@@ -122,14 +126,15 @@
 - **错误文案映射**：
   - SMB `map_smb_error` 对 `io::Error::other` + 文案含 `"EACCES"` 转 `PermissionDenied`；FakeSmbClient 用同一文案触发
   - ADB `map_adb_error` 对 `io::Error::other` + 文案含 `"no such file"` / `"does not exist"` / `"device not found"` / `"no devices"` 转 `NotFound`，`"permission"` 转 `PermissionDenied`；FakeAdbClient 用特征文案触发
-- **env 凭据传递**：`build_target` 读 `SMB_PASSWORD` / `KRB5CCNAME`；测试用 `unsafe { std::env::set_var(...) }` + nextest 进程隔离让其安全（与 `OnceLock` / `expand_env` 测试同套路，见 P0.4 与 CLAUDE.md「工具链注意」）
+- **env 凭据传递**：`build_target` 读 `SMB_PASSWORD` / `KRB5CCNAME`；测试用 `unsafe { std::env::set_var(...) }` + nextest 进程隔离让其安全（与 `OnceLock` / `expand_env` 测试同套路，见 rust-p0 §13 与本文「测试与覆盖率」节末 set_var 条）
 - **真实 client 适配器**：
   - `RealSmbClient::{stat, list, read, write, unlink, mkdir}`（`smb_real.rs`，包 pavao）已接入，整模块标 `#![cfg_attr(coverage_nightly, coverage(off))]`（需 share 服务器才能稳定触发，CI 不可覆盖）
   - `RealMtpClient::new()` 是 stub 占位（`mtp_real.rs`），同样 coverage(off)
   - `RealAdbClient::{stat, list, read, write, unlink, mkdir}`（`adb_real.rs`，包 adb_client 3.2）已接入，整模块 coverage(off)
   - 调度逻辑（`build_target` / `parent_target` / `map_*_error` / `*BufferedWriter` / `adapters::dispatch::tidy_with` 各分支）默认编译走 fake 注入 100% 覆盖。`adapters::backend::factory::build_smb_backend` / `build_mtp_backend` / `build_adb_backend` 在 feature 启用时也标 coverage(off)（构造 Real* 可能需服务器；feature off 时的 Unsupported Err 分支默认编译可覆盖）
 - **Backend trait 方法的 rejection 测试**：每个方法测三类输入——OK / client Err 注入 / 非自家 scheme 返回 `InvalidInput`
-- **"未启用 feature 返 Unsupported" 类集成测试**：`tidy_rejects_adb_uri_*` / `default_factory_adb_without_feature_*` 必须 `#[cfg(not(feature = "adb-backend"))]` gate，否则启用 feature 跑 nextest 会 fail（默认 factory 真去构造 Real* client，可能 Ok）；SMB 同类测试历史上未 gate，启用 `smb-backend` 跑会失败，属 baseline 缺陷
+- **"未启用 feature 返 Unsupported" 类集成测试**：`tidy_rejects_*` / `default_factory_*_without_feature_*` / `run_cli_accepts_uri_form_*` 必须按 backend `#[cfg(not(feature = "adb-backend"))]` / `not(feature = "smb-backend")` / `not(feature = "mtp-backend")` gate，否则启用对应 feature 跑 nextest 会 fail（默认 factory 真去构造 Real* client，连不上服务器返 Io 而非 Unsupported）。ADB/SMB/MTP 三套（含 8 个 SMB+MTP 测试）均已补 gate，`--all-features` nextest 全过
+- **`*_real.rs` 的 `Entry`/`EntryKind`/`Metadata` 从 `crate::entities::backend` import**（不是 `super::super::`，后者解析到 `adapters::backend` 无此类型）：曾因此误用致 `--all-features` E0432，默认编译不覆盖这俩 feature-gated 文件故长期未暴露，已修
 - **FakeBackend `inject_reader_error`**：让 `open_read` 成功但返回的 reader 在 `read` 时立即 Err，专门覆盖调用方在 stream hash / `sniff_mime` 等位置的 `?` Err 分支
 
 ## 配置与日志

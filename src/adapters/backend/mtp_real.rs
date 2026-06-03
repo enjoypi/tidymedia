@@ -8,13 +8,13 @@
 //!    打包 libusb + udev 规则。维护活跃但跨平台体验欠佳。
 //! 2. **`gphoto2-rs`** — 包 libgphoto2。桌面平台覆盖好，Android 上更复杂。
 //! 3. **自接 `rusb` 走 PTP/MTP 协议** — 跨平台 + Android NDK 友好（rusb 支持
-//!    Android），但需自实现 ~30 个 OperationCode（GetStorageIDs / GetObjectHandles
-//!    / GetObjectInfo / GetObject / SendObjectInfo / SendObject / DeleteObject ...）。
+//!    Android），但需自实现 ~30 个 OperationCode（GetStorageIDs / `GetObjectHandles`
+//!    / `GetObjectInfo` / `GetObject` / `SendObjectInfo` / `SendObject` / `DeleteObject` ...）。
 //!    工作量约 1500 行 + 协议状态机测试。
 //!
 //! ## 调度边界
 //!
-//! 调度层（[`super::MtpBackend::with_client`]）已经在测试中通过 FakeMtpClient
+//! 调度层（[`super::MtpBackend::with_client`]）已经在测试中通过 `FakeMtpClient`
 //! 完整验证；本 stub 仅占位 lib.rs `DefaultBackendFactory::for_location` 的
 //! feature-gated 分支语义对称。
 

@@ -37,12 +37,12 @@ use adb_client::{ADBDeviceExt, ADBListItemType};
 use parking_lot::Mutex;
 
 use super::super::remote::RemoteClient;
-use super::super::{Entry, EntryKind, Metadata};
 use super::{AdbTarget, shell_quote};
+use crate::entities::backend::{Entry, EntryKind, Metadata};
 use crate::entities::uri::Location;
 
 pub struct RealAdbClient {
-    /// adb_client 的设备句柄。每次调用前 lock；adb sync 协议本身是串行的，
+    /// `adb_client` 的设备句柄。每次调用前 lock；adb sync 协议本身是串行的，
     /// 不存在丢锁后并发的语义。
     device: Mutex<ADBServerDevice>,
     /// `Some` 表示构造时带 serial；`None` 表示交给 client autodetect 唯一设备
@@ -53,7 +53,7 @@ impl std::fmt::Debug for RealAdbClient {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("RealAdbClient")
             .field("serial", &self.serial)
-            .finish()
+            .finish_non_exhaustive()
     }
 }
 
@@ -137,10 +137,10 @@ impl RemoteClient<AdbTarget> for RealAdbClient {
         Ok(out)
     }
 
-    #[expect(
-        clippy::needless_borrows_for_generic_args,
-        reason = "adb_client API takes `&dyn AsRef<str>`; clippy false-positive on the required double borrow"
-    )]
+    // adb_client API 接 `&dyn AsRef<str>`，必须 `&path`（&&str）二级借用；clippy
+    // needless_borrows 在此 false-positive，且在 lib / lib-test 单态化下触发不一致，
+    // 故用 allow 而非 expect（避免 unfulfilled_lint_expectations，见 rust-p0 §1）。
+    #[allow(clippy::needless_borrows_for_generic_args)]
     fn read(&self, target: &AdbTarget) -> io::Result<Vec<u8>> {
         let path = target.path.as_str();
         let mut buf: Vec<u8> = Vec::new();
@@ -151,10 +151,8 @@ impl RemoteClient<AdbTarget> for RealAdbClient {
         Ok(buf)
     }
 
-    #[expect(
-        clippy::needless_borrows_for_generic_args,
-        reason = "adb_client API takes `&dyn AsRef<str>`; clippy false-positive on the required double borrow"
-    )]
+    // 同 read：`&path` 二级借用必需，触发不稳定，用 allow 避免 unfulfilled expect。
+    #[allow(clippy::needless_borrows_for_generic_args)]
     fn write(&self, target: &AdbTarget, data: &[u8]) -> io::Result<u64> {
         let path = target.path.as_str();
         let mut reader = Cursor::new(data);
@@ -189,7 +187,7 @@ impl RemoteClient<AdbTarget> for RealAdbClient {
     }
 }
 
-/// stat 返回的 unix mode 高位包含文件类型（S_IFMT 段）。
+/// stat 返回的 unix mode `高位包含文件类型（S_IFMT` 段）。
 /// 与 adb 协议 `ADBListItemType::from_mode_and_entry` 同套位运算。
 fn kind_from_mode(mode: u32) -> EntryKind {
     match ((mode >> 13) & 0b111) as u8 {
@@ -203,14 +201,14 @@ fn unix_secs(secs: u32) -> SystemTime {
     SystemTime::UNIX_EPOCH + Duration::from_secs(u64::from(secs))
 }
 
-/// 在已知绝对路径下拼接子项名。Utf8Path::join 默认会在父末尾补 `/`；
+/// `在已知绝对路径下拼接子项名。Utf8Path::join` 默认会在父末尾补 `/`；
 /// 这里直接构造字符串避免 windows 风格分隔符渗入测试断言。
 fn join_abs(parent: &camino::Utf8Path, name: &str) -> camino::Utf8PathBuf {
     let p = parent.as_str().trim_end_matches('/');
     camino::Utf8PathBuf::from(format!("{p}/{name}"))
 }
 
-/// shell 命令的 exit code 检查：非 0 退出转成 io::Error::other 携带 stderr。
+/// shell 命令的 exit code 检查：非 0 退出转成 `io::Error::other` 携带 stderr。
 fn check_shell_exit(code: Option<u8>, stderr: &[u8], op: &str) -> io::Result<()> {
     let exit = code.unwrap_or(0);
     if exit == 0 {

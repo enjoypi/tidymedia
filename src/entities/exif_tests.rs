@@ -84,7 +84,7 @@ fn entry_value_to_epoch_naive_datetime_uses_utc() {
     assert_eq!(super::entry_value_to_epoch(&v, utc()), 1_704_110_400);
 }
 
-/// NaiveDateTime 用 +08:00 解释：本地 12:00 = UTC 04:00，epoch 比 UTC 解释小 8h。
+/// `NaiveDateTime` 用 +08:00 解释：本地 12:00 = UTC 04:00，epoch 比 UTC 解释小 8h。
 #[test]
 fn entry_value_to_epoch_naive_datetime_uses_local_offset() {
     let nd = chrono::NaiveDate::from_ymd_opt(2024, 1, 1)
@@ -144,7 +144,7 @@ fn from_path_reads_jpeg_with_exif() {
     assert_eq!(exif.exif_create_date(), 1_704_196_800);
 }
 
-/// 同一张 JPEG，传入 +08:00 时区 → NaiveDateTime 按 +08:00 解释，epoch 早 8h。
+/// 同一张 JPEG，传入 +08:00 时区 → `NaiveDateTime` 按 +08:00 解释，epoch 早 8h。
 #[test]
 fn from_path_with_offset_applies_local_timezone() {
     let exif = Exif::from_path_with_offset(
@@ -173,7 +173,7 @@ fn from_path_reads_jpeg_with_exif_but_no_dates() {
     assert_eq!(exif.exif_create_date(), 0);
 }
 
-/// MKV 有 track 但无 CreateDate → populate_video_dates 的 if let None 分支。
+/// MKV 有 track 但无 `CreateDate` → `populate_video_dates` 的 if let None 分支。
 #[test]
 fn from_path_reads_mkv_without_track_date() {
     let exif = Exif::from_path(Utf8Path::new(common::DATA_MKV_NO_TRACK_DATE)).unwrap();
@@ -181,8 +181,8 @@ fn from_path_reads_mkv_without_track_date() {
     assert_eq!(exif.qt_create_date(), 0);
 }
 
-/// chmod 000 让 infer::get_from_path 失败（fs::metadata 仍可工作），
-/// 覆盖 from_path 第二个 `?` Err 分支。
+/// chmod 000 让 `infer::get_from_path` `失败（fs::metadata` 仍可工作），
+/// 覆盖 `from_path` 第二个 `?` Err 分支。
 #[cfg(unix)]
 #[test]
 fn from_path_propagates_infer_io_error_when_unreadable() {
@@ -202,8 +202,8 @@ fn from_path_propagates_infer_io_error_when_unreadable() {
     std::fs::set_permissions(&path, orig).unwrap();
 }
 
-/// Exif::open 内 sniff_mime 失败 → `?` Err 分支。FakeBackend 让 open_read 返回
-/// 立即 read Err 的 reader：sniff_mime 内 `?` 把 Err 上抛到 open。
+/// `Exif::open` 内 `sniff_mime` 失败 → `?` Err 分支。FakeBackend 让 `open_read` 返回
+/// 立即 read Err 的 `reader：sniff_mime` 内 `?` 把 Err 上抛到 open。
 #[test]
 fn open_propagates_sniff_mime_io_error() {
     use super::super::backend::fake::FakeBackend;

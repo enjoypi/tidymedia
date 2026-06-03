@@ -8,8 +8,8 @@ fn str_to_secure(input_str: &str) -> SecureHash {
 pub const DATA_DIR: &str = "tests/data";
 pub const DATA_SMALL: &str = "tests/data/data_small";
 pub const DATA_SMALL_LEN: u64 = 3057;
-pub const DATA_SMALL_WYHASH: u64 = 13333046383594682858;
-pub const DATA_SMALL_XXHASH: u64 = 0x1a5efdfdbd01a44c;
+pub const DATA_SMALL_WYHASH: u64 = 13_333_046_383_594_682_858;
+pub const DATA_SMALL_XXHASH: u64 = 0x1a5e_fdfd_bd01_a44c;
 
 pub fn data_small_sha512() -> SecureHash {
     str_to_secure(
@@ -21,8 +21,8 @@ pub const DATA_SMALL_COPY: &str = "tests/data/data_small_copy";
 
 pub const DATA_LARGE: &str = "tests/data/data_large";
 pub const DATA_LARGE_LEN: u64 = 7133;
-pub const DATA_LARGE_WYHASH: u64 = 2034553491748707037;
-pub const DATA_LARGE_XXHASH: u64 = 0x9dba53c59ea968e9;
+pub const DATA_LARGE_WYHASH: u64 = 2_034_553_491_748_707_037;
+pub const DATA_LARGE_XXHASH: u64 = 0x9dba_53c5_9ea9_68e9;
 
 pub fn data_large_sha512() -> SecureHash {
     str_to_secure(
@@ -38,9 +38,9 @@ pub const DATA_DNS_BENCHMARK: &str = "tests/data/DNSBenchmark.png";
 pub const DATA_JPEG_WITH_EXIF: &str = "tests/data/sample-with-exif.jpg";
 /// 有 EXIF block（仅 Make 标签），三个日期字段全无 —— 用于覆盖 if let Some 的 None 分支。
 pub const DATA_JPEG_NO_DATES: &str = "tests/data/sample-no-dates.jpg";
-/// 含 QuickTime track CreateDate 的小 MP4，ffmpeg 生成。
+/// 含 `QuickTime` track `CreateDate` 的小 MP4，ffmpeg 生成。
 pub const DATA_MP4_WITH_TRACK: &str = "tests/data/sample-with-track.mp4";
-/// Matroska 视频，track 但无 CreateDate —— 用于覆盖 populate_video_dates 的 None 分支。
+/// Matroska 视频，track 但无 `CreateDate` —— 用于覆盖 `populate_video_dates` 的 None 分支。
 pub const DATA_MKV_NO_TRACK_DATE: &str = "tests/data/sample-no-track-date.mkv";
 
 // docs/media-time-detection.md spec contract fixture：tests/fixtures/gen.sh 生成，

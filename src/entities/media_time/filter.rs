@@ -27,6 +27,7 @@ pub enum Validity {
     RejectFuture,
 }
 
+#[must_use]
 pub fn classify(utc: DateTime<Utc>, now: DateTime<Utc>) -> Validity {
     let ts = utc.timestamp();
     if ts == EPOCH_1904 {
@@ -41,7 +42,8 @@ pub fn classify(utc: DateTime<Utc>, now: DateTime<Utc>) -> Validity {
     Validity::Valid
 }
 
-/// QuickTime epoch 占位时间，用于内部识别与测试断言。
+/// `QuickTime` epoch 占位时间，用于内部识别与测试断言。
+#[must_use]
 pub fn quicktime_epoch() -> DateTime<Utc> {
     Utc.timestamp_opt(EPOCH_1904, 0)
         .single()

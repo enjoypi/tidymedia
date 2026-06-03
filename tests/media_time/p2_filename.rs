@@ -5,7 +5,7 @@ use tidymedia::media_time::filename::parse_filename;
 
 use super::common::{east8, utc_offset};
 
-/// spec §2.P2 主流相机：DSC_yyyymmdd_hhmmss。
+/// spec §2.P2 `主流相机：DSC_yyyymmdd_hhmmss`。
 #[test]
 fn camera_dsc_pattern() {
     let c = parse_filename("DSC_20240501_143000.jpg", utc_offset()).unwrap();
@@ -15,7 +15,7 @@ fn camera_dsc_pattern() {
     assert!(c.inferred_offset, "spec §四：文件名无时区，offset 必为推断");
 }
 
-/// spec §2.P2 主流手机：IMG_yyyymmdd_hhmmss。
+/// spec §2.P2 `主流手机：IMG_yyyymmdd_hhmmss`。
 #[test]
 fn phone_img_pattern() {
     let c = parse_filename("IMG_20240501_143000.jpg", east8()).unwrap();
@@ -48,7 +48,7 @@ fn unknown_filename_returns_none() {
     assert!(parse_filename("vacation_photo.jpg", utc_offset()).is_none());
 }
 
-/// spec §四：文件名无时区，由调用方默认时区解释，inferred_offset 标 true。
+/// spec §`四：文件名无时区，由调用方默认时区解释，inferred_offset` 标 true。
 #[test]
 fn filename_inferred_offset_flagged() {
     let c = parse_filename("DSC_20240501_143000.jpg", east8()).unwrap();

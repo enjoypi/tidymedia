@@ -122,7 +122,7 @@ mod test_io {
         let src = tempdir().unwrap();
         let out = tempdir().unwrap();
         copy(
-            vec![local_source(src.path())],
+            &[local_source(src.path())],
             local_source(out.path()),
             false,
             false,
@@ -138,7 +138,7 @@ mod test_io {
         tc::copy_png_to(src.path(), "photo.png").unwrap();
         let out = tempdir().unwrap();
         copy(
-            vec![local_source(src.path())],
+            &[local_source(src.path())],
             local_source(out.path()),
             true,
             false,
@@ -156,7 +156,7 @@ mod test_io {
         tc::copy_png_to(&nested, "photo.png").unwrap();
         let out = tempdir().unwrap();
         copy(
-            vec![local_source(src.path())],
+            &[local_source(src.path())],
             local_source(out.path()),
             false,
             false,
@@ -179,7 +179,7 @@ mod test_io {
         let out = tempdir().unwrap();
         fs::copy(tc::DATA_DNS_BENCHMARK, out.path().join("already.png")).unwrap();
         copy(
-            vec![local_source(src.path())],
+            &[local_source(src.path())],
             local_source(out.path()),
             false,
             false,
@@ -196,7 +196,7 @@ mod test_io {
         let out = tempdir().unwrap();
         fs::copy(tc::DATA_DNS_BENCHMARK, out.path().join("already.png")).unwrap();
         copy(
-            vec![local_source(src.path())],
+            &[local_source(src.path())],
             local_source(out.path()),
             false,
             true,
@@ -214,7 +214,7 @@ mod test_io {
         fs::create_dir_all(&src_dir).unwrap();
         let png_src = tc::copy_png_to(&src_dir, "photo.png").unwrap();
         copy(
-            vec![local_source(&src_dir)],
+            &[local_source(&src_dir)],
             local_source(&out_dir),
             false,
             true,
@@ -232,7 +232,7 @@ mod test_io {
         fs::write(src.path().join("plain.bin"), b"abc").unwrap();
         let out = tempdir().unwrap();
         copy(
-            vec![local_source(src.path())],
+            &[local_source(src.path())],
             local_source(out.path()),
             false,
             false,
@@ -295,7 +295,7 @@ mod test_io {
         let out = tempdir().unwrap();
         fill_collisions(&out.path().join("2024").join("01"));
         copy(
-            vec![local_source(src.path())],
+            &[local_source(src.path())],
             local_source(out.path()),
             false,
             false,
@@ -337,7 +337,7 @@ mod test_io {
             tc::copy_png_to(src.path(), "photo.png").unwrap();
             let out = tempdir().unwrap();
             copy(
-                vec![local_source(src.path())],
+                &[local_source(src.path())],
                 local_source(out.path()),
                 true,
                 false,
@@ -355,7 +355,7 @@ mod test_io {
         let out_file = tempfile::NamedTempFile::new().unwrap();
         let out_loc = Location::Local(Utf8PathBuf::from(out_file.path().to_str().unwrap()));
         let err = copy(
-            vec![local_source(src.path())],
+            &[local_source(src.path())],
             (out_loc, local_arc()),
             false,
             false,
@@ -377,7 +377,7 @@ mod test_io {
         fs::write(&indexed_path, &a).unwrap();
 
         let src_path = dir.path().join("source.bin");
-        let mut b = prefix.clone();
+        let mut b = prefix;
         b.push(b'B');
         fs::write(&src_path, &b).unwrap();
 
@@ -463,9 +463,7 @@ mod test_io {
         let info = make_media_info(src.path(), "photo.png");
 
         // chmod 000 让 fs_extra::file::copy 内部 open 失败
-        let mut perms = fs::metadata(&info.full_path.as_str())
-            .unwrap()
-            .permissions();
+        let mut perms = fs::metadata(info.full_path.as_str()).unwrap().permissions();
         let original_mode = perms.mode();
         perms.set_mode(0o000);
         fs::set_permissions(info.full_path.as_str(), perms.clone()).unwrap();
@@ -537,9 +535,7 @@ mod test_io {
         let src = tempdir().unwrap();
         let info = make_media_info(src.path(), "photo.png");
 
-        let mut perms = fs::metadata(&info.full_path.as_str())
-            .unwrap()
-            .permissions();
+        let mut perms = fs::metadata(info.full_path.as_str()).unwrap().permissions();
         let original_mode = perms.mode();
         perms.set_mode(0o000);
         fs::set_permissions(info.full_path.as_str(), perms.clone()).unwrap();
@@ -587,7 +583,7 @@ mod test_io {
         fs::write(src.path().join("readme.txt"), b"hello world").unwrap();
         let out = tempdir().unwrap();
         copy(
-            vec![local_source(src.path())],
+            &[local_source(src.path())],
             local_source(out.path()),
             false,
             false,
