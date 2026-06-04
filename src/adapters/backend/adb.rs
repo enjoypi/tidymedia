@@ -164,6 +164,10 @@ pub(crate) fn shell_quote(s: &str) -> String {
 #[path = "adb_tests.rs"]
 mod tests;
 
+#[cfg(test)]
+#[path = "adb_internals_tests.rs"]
+mod internals_tests;
+
 #[cfg(feature = "adb-backend")]
 #[path = "adb_real.rs"]
 pub mod real;

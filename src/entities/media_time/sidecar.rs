@@ -227,7 +227,8 @@ mod tests {
     }
 
     /// 非 Local `backend：with_extension` / `append_suffix` 都返回 None →
-    /// `discover_with_backend` 直接返回空 Vec（SMB/MTP 暂未支持 sibling 探测）。
+    /// `discover_with_backend` 直接返回空 Vec（SMB/MTP/ADB 暂未支持 sibling 探测；
+    /// 见 docs/media-time-detection.md 末「Known limitations」）。
     #[test]
     fn discover_with_backend_smb_returns_empty() {
         let smb_loc = Location::Smb {
@@ -239,6 +240,29 @@ mod tests {
         };
         let backend = LocalBackend::arc();
         assert!(discover_with_backend(&smb_loc, &backend).is_empty());
+    }
+
+    /// ADB Location 走同一非 Local guard，应直接返回空 Vec。
+    #[test]
+    fn discover_with_backend_adb_returns_empty() {
+        let adb_loc = Location::Adb {
+            serial: None,
+            path: Utf8PathBuf::from("/sdcard/DCIM/x.jpg"),
+        };
+        let backend = LocalBackend::arc();
+        assert!(discover_with_backend(&adb_loc, &backend).is_empty());
+    }
+
+    /// MTP Location 同样走非 Local guard。
+    #[test]
+    fn discover_with_backend_mtp_returns_empty() {
+        let mtp_loc = Location::Mtp {
+            device: "phone".into(),
+            storage: "internal".into(),
+            path: Utf8PathBuf::from("DCIM/Camera/x.jpg"),
+        };
+        let backend = LocalBackend::arc();
+        assert!(discover_with_backend(&mtp_loc, &backend).is_empty());
     }
 
     /// `FakeBackend` 用 Local Location `喂入：read_to_string` 走 fake 数据，验证 backend 调度

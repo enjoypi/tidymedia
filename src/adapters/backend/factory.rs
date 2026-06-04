@@ -98,9 +98,11 @@ fn build_smb_backend(loc: &Location) -> Result<Arc<dyn Backend>> {
 #[cfg_attr(coverage_nightly, coverage(off))]
 fn build_mtp_backend(loc: &Location) -> Result<Arc<dyn Backend>> {
     use crate::entities::backend::mtp::real::RealMtpClient;
-    let _ = loc;
-    let _ = RealMtpClient::new()?;
-    unreachable!("RealMtpClient::new always returns Err in the stub phase");
+    // stub 期 RealMtpClient::new() 必 Err，? 自然传播。
+    // 真实实现完成时改为 wrap 成 Backend 返回；当前 fallthrough 报 Unsupported，
+    // 避免原 unreachable!() 在 stub 成为可用时变成运行期 panic。
+    let _client = RealMtpClient::new()?;
+    Err(unsupported_backend(loc, "mtp-backend"))
 }
 
 #[cfg(not(feature = "mtp-backend"))]

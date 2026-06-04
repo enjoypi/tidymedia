@@ -162,3 +162,10 @@
 > **结论**：拍摄时间不是单一字段，而是**多来源候选 + 优先级排序 + 一致性校验**的结果。
 >
 > 实务上：P0 容器内"拍摄时刻"为首选 → P1 容器内"数字化时间"次之 → P2 文件名启发式 → P3 旁路 JSON / sidecar → P4 文件系统时间兜底。每一层都要做范围合理性检查与时区处理，冲突时优先告警。
+
+---
+
+## 九、当前实现已知约束 (Known limitations)
+
+- **P3 sidecar 仅 Local backend**：`entities/media_time/sidecar.rs` 的 `with_extension` / `append_suffix` 只在 `Location::Local` 上计算 sibling 路径；SMB / ADB / MTP 上即便存在 `.xmp` / `.json` 旁车，`discover_with_backend` 也直接返回空 Vec。从远端设备直接归档时，P3 时间源不可用，只能落到 P4 mtime 兜底。需要时由具体 backend 实现 sibling 解析后扩展。
+- **MTP backend 当前为 stub**：`adapters/backend/factory.rs::build_mtp_backend` 在 `--features mtp-backend` 启用时仍返回 `Unsupported`，等待选定 mtp crate 后接入。

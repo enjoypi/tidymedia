@@ -152,6 +152,10 @@ impl SmbBackend {
 #[path = "smb_tests.rs"]
 mod tests;
 
+#[cfg(test)]
+#[path = "smb_internals_tests.rs"]
+mod internals_tests;
+
 #[cfg(feature = "smb-backend")]
 #[path = "smb_real.rs"]
 pub mod real;

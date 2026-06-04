@@ -396,3 +396,7 @@ fn secure_hash(path: &str) -> io::Result<(usize, SecureHash)> {
 #[cfg(test)]
 #[path = "file_info_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "file_info_stream_tests.rs"]
+mod stream_tests;

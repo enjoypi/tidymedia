@@ -286,3 +286,7 @@ impl Index {
 #[cfg(test)]
 #[path = "file_index_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "file_index_advanced_tests.rs"]
+mod advanced_tests;

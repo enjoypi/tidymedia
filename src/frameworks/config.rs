@@ -163,6 +163,25 @@ mod tests {
         assert_eq!(s, "k: 默认值");
     }
 
+    // 真实 config.yaml 中常出现一行多占位符（如 `host: ${HOST:-...} port: ${PORT:-...}`），
+    // 既验证两次替换都生效，也防御「第二个 `${` 起点定位」回归。
+    #[test]
+    fn expand_env_handles_multiple_placeholders_on_same_line() {
+        unsafe { std::env::remove_var("TIDYMEDIA_TEST_MULTI_HOST") };
+        unsafe { std::env::remove_var("TIDYMEDIA_TEST_MULTI_PORT") };
+        let both_missing = expand_env(
+            "host: ${TIDYMEDIA_TEST_MULTI_HOST:-127.0.0.1} port: ${TIDYMEDIA_TEST_MULTI_PORT:-5037}",
+        );
+        assert_eq!(both_missing, "host: 127.0.0.1 port: 5037");
+
+        unsafe { std::env::set_var("TIDYMEDIA_TEST_MULTI_HOST", "example.com") };
+        let host_set = expand_env(
+            "host: ${TIDYMEDIA_TEST_MULTI_HOST:-127.0.0.1} port: ${TIDYMEDIA_TEST_MULTI_PORT:-5037}",
+        );
+        assert_eq!(host_set, "host: example.com port: 5037");
+        unsafe { std::env::remove_var("TIDYMEDIA_TEST_MULTI_HOST") };
+    }
+
     #[test]
     fn resolve_var_missing_no_default_returns_empty() {
         unsafe { std::env::remove_var("TIDYMEDIA_TEST_NO_DEFAULT_W") };

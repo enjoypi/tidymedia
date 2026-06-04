@@ -258,139 +258,44 @@ fn copy_file_propagates_read_error() {
     assert_eq!(err.kind(), io::ErrorKind::Interrupted);
 }
 
-#[test]
-fn map_smb_error_eacces_to_permission_denied() {
-    let e = io::Error::other("smb client returned EACCES");
-    let mapped = SmbAdapter::map_error(e);
-    assert_eq!(mapped.kind(), io::ErrorKind::PermissionDenied);
-}
+// 内部 helpers / 适配器测试已外迁到 smb_internals_tests.rs（保持本文件 < 512 行，P0 §6）。
+
+// ===== rename（default impl: copy_file + remove_file）=====
 
 #[test]
-fn map_smb_error_passthrough_other_kinds() {
-    let e = io::Error::from(io::ErrorKind::TimedOut);
-    let mapped = SmbAdapter::map_error(e);
-    assert_eq!(mapped.kind(), io::ErrorKind::TimedOut);
-}
-
-#[test]
-fn map_smb_error_passthrough_other_without_eacces() {
-    let e = io::Error::other("disk full");
-    let mapped = SmbAdapter::map_error(e);
-    assert_eq!(mapped.kind(), io::ErrorKind::Other);
-    assert!(format!("{mapped}").contains("disk full"));
-}
-
-#[test]
-fn smb_buffered_writer_debug_format() {
-    use std::io::Write;
+fn rename_default_moves_file_via_copy_remove() {
     let client = fake_client();
-    let backend = backend_with(client);
-    let mut w = backend.open_write(&smb("x.bin"), false).unwrap();
-    w.write_all(b"abc").unwrap();
-    let s = format!("{w:?}");
-    assert!(s.contains("RemoteBufferedWriter"), "got: {s}");
-    assert!(s.contains("buffered_bytes"));
+    client.add_file("dir/a.jpg", b"photo".to_vec());
+    let backend = backend_with(client.clone());
+    backend
+        .rename(&smb("dir/a.jpg"), &smb("inbox/a.jpg"), false)
+        .unwrap();
+    assert!(client.get_file("dir/a.jpg").is_none(), "src must be gone");
+    assert_eq!(
+        client.get_file("inbox/a.jpg").as_deref(),
+        Some(b"photo".as_ref())
+    );
 }
 
 #[test]
-fn smb_buffered_writer_flush_ok() {
-    use std::io::Write;
+fn rename_propagates_copy_error_and_leaves_src() {
     let client = fake_client();
-    let backend = backend_with(client);
-    let mut w = backend.open_write(&smb("x.bin"), false).unwrap();
-    assert!(w.flush().is_ok());
-    w.finish().unwrap();
+    client.add_file("src.bin", b"x".to_vec());
+    client.inject(RemoteFakeOp::Read, "src.bin", io::ErrorKind::TimedOut);
+    let backend = backend_with(client.clone());
+    let err = backend
+        .rename(&smb("src.bin"), &smb("dst.bin"), false)
+        .unwrap_err();
+    assert_eq!(err.kind(), io::ErrorKind::TimedOut);
+    assert!(client.get_file("src.bin").is_some(), "src must remain");
 }
 
 #[test]
-fn parent_target_returns_none_for_root_path() {
-    let t = SmbTarget {
-        user: None,
-        host: "h".into(),
-        port: None,
-        share: "s".into(),
-        path: Utf8PathBuf::from("only.bin"),
-        password: None,
-        krb5_ccname: None,
-    };
-    assert!(t.parent().is_none());
-}
-
-#[test]
-fn parent_target_returns_some_for_nested_path() {
-    let t = SmbTarget {
-        user: None,
-        host: "h".into(),
-        port: None,
-        share: "s".into(),
-        path: Utf8PathBuf::from("a/b/c.bin"),
-        password: None,
-        krb5_ccname: None,
-    };
-    let p = t.parent().unwrap();
-    assert_eq!(p.path.as_str(), "a/b");
-}
-
-#[test]
-fn parent_target_returns_none_when_parent_empty() {
-    // Utf8PathBuf::from("x.bin").parent() == Some("")，要走 if-empty 早返回
-    let t = SmbTarget {
-        user: None,
-        host: "h".into(),
-        port: None,
-        share: "s".into(),
-        path: Utf8PathBuf::from("x.bin"),
-        password: None,
-        krb5_ccname: None,
-    };
-    assert!(t.parent().is_none());
-}
-
-#[test]
-fn build_target_threads_env_password_and_krb5() {
-    // 用 nextest 进程隔离让 set_var 安全；其他测试不会被污染
-    unsafe {
-        std::env::set_var("SMB_PASSWORD", "secret-pw");
-        std::env::set_var("KRB5CCNAME", "/tmp/krb5cc_0");
-    }
-    let t = SmbTarget::from_location(&smb("a.bin"), &()).unwrap();
-    assert_eq!(t.password.as_deref(), Some("secret-pw"));
-    assert_eq!(t.krb5_ccname.as_deref(), Some("/tmp/krb5cc_0"));
-    assert_eq!(t.user.as_deref(), Some("alice"));
-    assert_eq!(t.host, "nas");
-    assert_eq!(t.port, Some(445));
-    assert_eq!(t.share, "photos");
-    unsafe {
-        std::env::remove_var("SMB_PASSWORD");
-        std::env::remove_var("KRB5CCNAME");
-    }
-}
-
-#[test]
-fn build_target_leaves_password_none_when_env_unset() {
-    unsafe {
-        std::env::remove_var("SMB_PASSWORD");
-        std::env::remove_var("KRB5CCNAME");
-    }
-    let t = SmbTarget::from_location(&smb("a.bin"), &()).unwrap();
-    assert!(t.password.is_none());
-    assert!(t.krb5_ccname.is_none());
-}
-
-#[test]
-fn smb_target_equality_and_debug() {
-    let t1 = SmbTarget {
-        user: None,
-        host: "h".into(),
-        port: None,
-        share: "s".into(),
-        path: Utf8PathBuf::from("x"),
-        password: None,
-        krb5_ccname: None,
-    };
-    let t2 = t1.clone();
-    assert_eq!(t1, t2);
-    let _ = format!("{t1:?}");
+fn rename_rejects_non_smb_scheme() {
+    let backend = backend_with(fake_client());
+    let local = Location::Local(Utf8PathBuf::from("/tmp/x"));
+    let err = backend.rename(&local, &smb("dst.bin"), false).unwrap_err();
+    assert_eq!(err.kind(), io::ErrorKind::InvalidInput);
 }
 
 #[test]
@@ -468,62 +373,6 @@ fn copy_file_no_mkparent_when_dst_path_has_no_parent() {
     assert_eq!(stored.as_deref(), Some(&b"abc"[..]));
 }
 
-#[test]
-fn parent_target_returns_none_for_empty_path() {
-    // 空字符串 path 让 Utf8Path::parent() 直接返 None，命中 `?` early return
-    let t = SmbTarget {
-        user: None,
-        host: "h".into(),
-        port: None,
-        share: "s".into(),
-        path: Utf8PathBuf::from(""),
-        password: None,
-        krb5_ccname: None,
-    };
-    assert!(t.parent().is_none());
-}
-
-#[test]
-fn arc_with_client_builds_dyn_backend() {
-    let client: Arc<dyn SmbClient> = fake_client();
-    let backend = SmbBackend::arc_with_client(client);
-    assert_eq!(backend.scheme(), "smb");
-}
-
-#[test]
-fn smb_target_entry_location_constructs_uri() {
-    let t = SmbTarget {
-        user: Some("alice".into()),
-        host: "nas".into(),
-        port: Some(445),
-        share: "photos".into(),
-        path: Utf8PathBuf::from("a/b.jpg"),
-        password: None,
-        krb5_ccname: None,
-    };
-    let loc = t.entry_location(Utf8PathBuf::from("x/y.jpg"));
-    assert_eq!(
-        loc,
-        Location::Smb {
-            user: Some("alice".into()),
-            host: "nas".into(),
-            port: Some(445),
-            share: "photos".into(),
-            path: Utf8PathBuf::from("x/y.jpg"),
-        }
-    );
-}
-
-#[test]
-fn smb_target_path_returns_inner_path() {
-    let t = SmbTarget {
-        user: None,
-        host: "h".into(),
-        port: None,
-        share: "s".into(),
-        path: Utf8PathBuf::from("a/b.jpg"),
-        password: None,
-        krb5_ccname: None,
-    };
-    assert_eq!(t.path().as_str(), "a/b.jpg");
-}
+// （`parent_target_returns_none_for_empty_path` / `arc_with_client_builds_dyn_backend`
+//   / `smb_target_entry_location_constructs_uri` / `smb_target_path_returns_inner_path`
+//   均已移至 smb_internals_tests.rs。）

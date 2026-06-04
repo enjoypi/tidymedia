@@ -214,5 +214,13 @@ impl<A: RemoteAdapter> MediaWriter for RemoteBufferedWriter<A> {
 }
 
 #[cfg(test)]
+#[path = "remote_test_helpers.rs"]
+mod test_helpers;
+
+#[cfg(test)]
 #[path = "remote_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "remote_advanced_tests.rs"]
+mod advanced_tests;

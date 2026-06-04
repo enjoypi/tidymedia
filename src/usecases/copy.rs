@@ -407,3 +407,7 @@ fn extract_valuable_name(full_path: &Utf8Path) -> String {
 #[cfg(test)]
 #[path = "copy_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "copy_advanced_tests.rs"]
+mod advanced_tests;

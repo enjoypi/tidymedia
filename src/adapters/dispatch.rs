@@ -5,7 +5,9 @@ use crate::adapters::cli::Commands;
 use crate::entities::common::{Error, Result};
 use crate::entities::uri::Location;
 use crate::usecases::config::validate_archive_template;
-use crate::usecases::report::{CopyReport, FindReport, write_find_report};
+#[cfg(feature = "android-app")]
+use crate::usecases::report::CopyReport;
+use crate::usecases::report::{FindReport, write_find_report};
 
 /// 用默认 backend factory 跑命令；旧入口，等价于 `tidy_with(&DefaultBackendFactory, ...)`。
 ///

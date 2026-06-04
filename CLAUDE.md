@@ -52,6 +52,8 @@
 - **expect/unwrap 的 panic 边永远算 region miss**：不可通过测试 cover，要么抽 helper 单独标 `coverage(off)`，要么直接接受
 - 消除生产代码 `?` Err 不可触发分支的优先级：①改 `unwrap_or` 兜底 → ②返 `Option` 替代 `Result`（小重构）→ ③才考虑 `#[cfg_attr(coverage_nightly, coverage(off))]`。前两者让 stable 默认就 100%
 - `std::env::set_var` 在 edition 2024 是 unsafe（rust-p0 §13；本项目即 edition 2024），必须包 `unsafe { }`；nextest 每测试独立进程让其可安全用于单测（按 §13 应每 unsafe 块加 `// SAFETY: nextest 每测试独立进程`，现状缺注释，补时逐处加）
+- **`cargo-llvm-cov` 自动排除规则**：仅排除 `*_tests.rs` 后缀。`*_test_helpers.rs` / `*_test_common.rs` 等辅助文件**不**被自动排除，整文件顶部需加 inner attr `#![cfg_attr(coverage_nightly, coverage(off))]` 才不进统计（参考 `src/adapters/backend/remote_test_helpers.rs`）
+- **跨 mod 测试 helpers 共享套路**：独立 `<mod>_test_helpers.rs` + 整文件 `coverage(off)` + 类型/字段/fn 都标 `pub(super)`；两个 sibling test mod 通过 `super::test_helpers::*` 引入（参考 `remote_tests.rs` + `remote_advanced_tests.rs` 共享 `remote_test_helpers.rs`）
 
 ## Fixture
 - `tests/data/` 下文件的 mtime 每次 `git checkout` 都会被重置，EXIF / 时间相关测试必须用 `filetime::set_file_mtime` 固定
@@ -68,11 +70,12 @@
 - `entities/test_common` 与 `entities/exif` 是 `pub(crate)`，跨模块测试可访问
 - CA 重构移动文件时：`pub use A::B` 只 re-export 类型不保留路径，`pub mod B { pub use A::B::*; }` 保留完整模块路径；配套测试的 `super::` 需改为 `crate::` 绝对路径
 - CA 依赖方向验证：`grep -rn "use crate::adapters\|use crate::frameworks" src/entities/ src/usecases/` 应仅返回 re-export 桥接，不含业务逻辑导入
+- 集成测试拆分：`tests/<name>.rs` 是 root binary，`tests/<name>/*.rs` 子目录中的 .rs **不**会被当独立 binary。root 用 `#[path = "<name>/sub.rs"] mod sub;` 装配；root 顶层 helpers 对 sub-mod 通过 `super::xxx` 可见（同 binary crate，无需 `pub` 修饰符）。参考 `tests/lib_tidy.rs` + `tests/lib_tidy/{dispatch_and_cli,backends,archive}.rs`
 
 ## 同步检查点（改 X → MUST 同步 Y）
 > 字面默认值变更先 `rg <旧值>` 兜底改全。
 - **新增 `Location` variant / backend scheme** → `entities/uri.rs` 的 `FromStr` 解析 + `adapters/backend/factory.rs`（cfg-gated 分支 + Unsupported 兜底）+ 对应 `Backend` 实现 + `adapters/dispatch.rs` 调度 + 本文「URI 格式」节
-- **新增 `Backend` trait 方法**（`entities/backend/mod.rs`）→ 全部 7 个实现同步加默认或 override：`local`/`remote`/`smb`/`adb`/`mtp`/`fake`/`fake_remote`；并按「远端 backend 测试套路」补 OK / client Err 注入 / 非自家 scheme 三类测试
+- **新增 `Backend` trait 方法**（`entities/backend/mod.rs`）→ 全部 7 个实现同步加默认或 override：`local`/`remote`/`smb`/`adb`/`mtp`/`fake`/`fake_remote`；并按「远端 backend 测试套路」补 OK / client Err 注入 / 非自家 scheme 三类测试。**默认 impl 方法**（如 `rename = copy_file + remove_file`）的远端测试模板：`<scheme>_default_moves_file_via_copy_remove` + `<scheme>_propagates_copy_error_and_leaves_src`（注入 `RemoteFakeOp::Read` Err）+ `<scheme>_rejects_non_<scheme>_scheme`（传 `Location::Local`）。参考 `smb_tests.rs::rename_*` / `adb_tests.rs::rename_*` / `mtp_tests.rs::rename_*`
 - **新增配置字段** → `usecases/config.rs` 结构体 + `config.yaml` + `validate_*` 校验或被消费（新增字段 MUST 被校验或被读取，杜绝哑配置）；若为 secret 再加 `.env.example`（值 `changeme`）+ 确认 `.env` 已 gitignore
 - **新增 CLI flag**（`adapters/cli.rs`）→ `adapters/dispatch.rs` 调度透传 + **每个子命令路径（copy/move/find）独立 e2e 触发 Some/None 两边**；否则 dispatch 的 `if let Some(x) = flag` 仅一条路径触发，另一条 instance 报 LLVM branch miss
 - **新增 `media_time` 候选来源 / 调整 P0–P4** → 先改 `docs/media-time-detection.md` spec（代码注释引 §号）→ `priority.rs` 枚举 → 对应解析模块 → `resolve`/`decision` 裁决 → 补 fixture
@@ -181,3 +184,7 @@
 - HashMap 并行 in-place 改 value：用 `self.files.par_iter_mut().for_each(|(k, v)| ...)`，避免"par_iter→Vec→再 get_mut Option None"的不可达分支
 - **测试 shim 必须 `#[cfg(test)]` gate**：`Info::from` / `Index::visit_dir` / `Exif::from_path_with_offset` 是包 backend-aware API 的旧入口（仅测试用，生产走 `*::open` / `visit_location`）；`adapters/backend/fake_remote` 整模块同理（`*_tests.rs` 专用，无生产消费）。未 gate 会让 release build 报 `dead_code`
 - **`#[cfg(test)]` 标在方法/import 上，不要标在 `impl Foo {}` 块上**：同块生产方法会被一起 gate 掉。清 warning 时 `cargo build --release` 与 `cargo build --tests` 是不同 cfg，两边都要跑
+- **`--all-features` clippy 与 `#[cfg(not(feature))]` test 联动**：`cargo clippy --all-targets --all-features --locked -D warnings` 启用全部 feature 后，`#[cfg(not(feature = "smb-backend"))]` 等门控的 test fn 全 gate，对应 `use ...Location` / `Utf8PathBuf` / `adb_loc` 等 imports 必须用同样 `#[cfg(not(all(feature = "smb-backend", feature = "mtp-backend", feature = "adb-backend")))]` 包裹，否则报 `unused_import` error
+- **clippy 1.95 `doc_markdown` 扩大**：含点号的文件名（`smb_tests.rs` / `tests/lib_tidy.rs`）、含下划线的标识符（`map_error` / `buffered_writer` / `do_copy_propagates_*`）在 `///` 或 `//!` 注释中均需反引号包，否则 `--all-features` 下 `-D warnings` 报 error（rust-p1 §11 已记，但拆分新测试文件添 doc 注释时极易再踩）
+- **`Info::create_time` 不消费 P2 filename 候选**（spec §2.P2 与代码实际行为偏差）：`copy.rs::do_copy` 经 `Info::create_time(...)` 取时间时只看 EXIF + fs_fallback，**不**喂入 `media_time::filename::parse_filename` 的结果。从无 EXIF 的 `DSC_xxx.jpg` 拷出会落到 mtime 当前日期。archive_template 端到端测试必须选**含 EXIF** 的 fixture（如 `sample-with-offset.jpg`，含 `DateTimeOriginal=2024:05:01 14:30 +08:00`），不能用 P2 文件名 fixture（`DSC_20240501_143000.jpg` 等）
+- **`factory.rs::build_mtp_backend` 已移除 `unreachable!()`**：`RealMtpClient::new()?` 后 fallthrough `Err(unsupported_backend(loc, "mtp-backend"))`，stub 完成时不 panic；future PR 接入真实 client 时改最后一行为 wrap Backend 返回

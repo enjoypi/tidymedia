@@ -261,3 +261,7 @@ impl MediaWriter for LocalWriter {
 #[cfg(test)]
 #[path = "local_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "local_rename_tests.rs"]
+mod rename_tests;
