@@ -1,4 +1,3 @@
-use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::fmt;
@@ -11,14 +10,24 @@ use chrono::FixedOffset;
 use rayon::prelude::*;
 use tracing::warn;
 
-#[cfg(test)]
-use super::backend::local::LocalBackend;
 use super::backend::{Backend, EntryKind};
 use super::exif;
 use super::file_info::Info;
 use super::uri::Location;
+// 测试 helper `Index::visit_dir` 需要构造 LocalBackend instance。仅 #[cfg(test)]
+// 下引用 adapters，生产代码 visit_location 走 backend trait 注入（CA 规则）。
+#[cfg(test)]
+use crate::adapters::backend::local::LocalBackend;
 
 const FEATURE_INDEX: &str = "index";
+
+/// 一组重复文件：相同 size + 相同 content hash。size 仅 metadata，组身份由 paths 决定。
+/// 避免旧 `BTreeMap<u64, Vec<Utf8PathBuf>>` 用 size 作唯一键导致同 size 不同内容互相覆盖。
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DuplicateGroup {
+    pub size: u64,
+    pub paths: Vec<Utf8PathBuf>,
+}
 
 /// 扫描目录时累计的非致命跳过/错误计数。
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -140,32 +149,37 @@ impl Index {
             .collect::<Vec<_>>()
     }
 
-    pub fn search_same(&self) -> BTreeMap<u64, Vec<Utf8PathBuf>> {
+    pub fn search_same(&self) -> Vec<DuplicateGroup> {
         let results: Vec<_> = self.calc_same(super::file_info::Info::secure_hash);
         Self::filter_and_sort(&results)
     }
 
-    pub fn fast_search_same(&self) -> BTreeMap<u64, Vec<Utf8PathBuf>> {
+    pub fn fast_search_same(&self) -> Vec<DuplicateGroup> {
         let results: Vec<_> = self.calc_same(super::file_info::Info::calc_full_hash);
         Self::filter_and_sort(&results)
     }
 
-    fn filter_and_sort<T>(
-        map: &[HashMap<(u64, T), HashSet<Utf8PathBuf>>],
-    ) -> BTreeMap<u64, Vec<Utf8PathBuf>> {
-        let mut result = BTreeMap::new();
-
+    // 返回 Vec<DuplicateGroup> 而非 BTreeMap<size, …>：旧实现以 size 作 Map key，
+    // 两组不同内容但相同 size 的重复集会互相覆盖（content 哈希一致才是同组的判据，
+    // 见 calc_same 的 (size, hash) 复合 key）。Vec 形式保留每组独立性，size 仅作 metadata。
+    // 排序：size 降序（render_script 沿用 iter().rev()-style 大文件先报）；size 相同时
+    // 按组内首路径字典序，保证输出稳定。
+    fn filter_and_sort<T>(map: &[HashMap<(u64, T), HashSet<Utf8PathBuf>>]) -> Vec<DuplicateGroup> {
+        let mut groups: Vec<DuplicateGroup> = Vec::new();
         for same in map {
-            for ((key, _), paths) in same {
+            for ((size, _), paths) in same {
                 if paths.len() > 1 {
                     let mut v: Vec<_> = paths.iter().cloned().collect();
                     v.sort();
-                    result.insert(*key, v);
+                    groups.push(DuplicateGroup {
+                        size: *size,
+                        paths: v,
+                    });
                 }
             }
         }
-
-        result
+        groups.sort_by(|a, b| b.size.cmp(&a.size).then_with(|| a.paths.cmp(&b.paths)));
+        groups
     }
 
     pub fn add(&mut self, info: Info) -> &Info {

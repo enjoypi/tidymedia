@@ -179,8 +179,8 @@ fn secure_hash_stream_io_error_propagates() {
 
 // --- backend-aware Info::open 覆盖路径 ---
 
-use super::super::backend::fake::FakeBackend;
 use super::super::uri::Location;
+use crate::adapters::backend::fake::FakeBackend;
 use camino::Utf8PathBuf;
 use std::sync::Arc;
 

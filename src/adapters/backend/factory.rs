@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
+use crate::adapters::backend::local::LocalBackend;
 use crate::entities::backend::Backend;
-use crate::entities::backend::local::LocalBackend;
 use crate::entities::common::Error;
 use crate::entities::common::Result;
 use crate::entities::uri::Location;
@@ -62,8 +62,8 @@ fn unsupported_backend(loc: &Location, feature: &str) -> Error {
 #[cfg_attr(coverage_nightly, coverage(off))]
 fn build_smb_backend(loc: &Location) -> Result<Arc<dyn Backend>> {
     use crate::adapters::backend::smb::SmbBackend;
-    use crate::entities::backend::smb::SmbTarget;
-    use crate::entities::backend::smb::real::RealSmbClient;
+    use crate::adapters::backend::smb::SmbTarget;
+    use crate::adapters::backend::smb::real::RealSmbClient;
     let Location::Smb {
         user,
         host,
@@ -97,7 +97,7 @@ fn build_smb_backend(loc: &Location) -> Result<Arc<dyn Backend>> {
 #[cfg(feature = "mtp-backend")]
 #[cfg_attr(coverage_nightly, coverage(off))]
 fn build_mtp_backend(loc: &Location) -> Result<Arc<dyn Backend>> {
-    use crate::entities::backend::mtp::real::RealMtpClient;
+    use crate::adapters::backend::mtp::real::RealMtpClient;
     // stub 期 RealMtpClient::new() 必 Err，? 自然传播。
     // 真实实现完成时改为 wrap 成 Backend 返回；当前 fallthrough 报 Unsupported，
     // 避免原 unreachable!() 在 stub 成为可用时变成运行期 panic。
@@ -114,7 +114,7 @@ fn build_mtp_backend(loc: &Location) -> Result<Arc<dyn Backend>> {
 #[cfg_attr(coverage_nightly, coverage(off))]
 fn build_adb_backend(loc: &Location) -> Result<Arc<dyn Backend>> {
     use crate::adapters::backend::adb::AdbBackend;
-    use crate::entities::backend::adb::real::RealAdbClient;
+    use crate::adapters::backend::adb::real::RealAdbClient;
     let Location::Adb { serial, .. } = loc else {
         unreachable!("DefaultBackendFactory routes only Location::Adb here")
     };

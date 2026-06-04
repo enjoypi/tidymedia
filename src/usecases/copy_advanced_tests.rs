@@ -11,10 +11,12 @@ mod test_advanced {
     use tempfile::tempdir;
 
     use super::super::*;
+    use crate::adapters::backend::local::LocalBackend;
+    use crate::adapters::report_sink::JsonFileReportSink;
     use crate::entities::backend::Backend;
-    use crate::entities::backend::local::LocalBackend;
     use crate::entities::test_common as tc;
     use crate::entities::uri::Location;
+    use crate::usecases::report::ReportSink;
 
     const DEFAULT_TMPL: &str = "{year}/{month}/{valuable_name}";
 
@@ -369,6 +371,7 @@ mod test_advanced {
         let out = tempdir().unwrap();
         let report_dir = tempdir().unwrap();
         let report_path = report_dir.path().join("report.json");
+        let sink = JsonFileReportSink::new(report_path.to_str().unwrap());
         copy(
             &[local_source(src.path())],
             local_source(out.path()),
@@ -376,7 +379,7 @@ mod test_advanced {
             false,
             false,
             None,
-            Some(report_path.to_str().unwrap()),
+            Some(&sink as &dyn ReportSink),
         )
         .unwrap();
         let content = fs::read_to_string(&report_path).unwrap();
@@ -392,6 +395,7 @@ mod test_advanced {
         let out = tempdir().unwrap();
         let report_dir = tempdir().unwrap();
         let report_path = report_dir.path().join("empty_report.json");
+        let sink = JsonFileReportSink::new(report_path.to_str().unwrap());
         copy(
             &[local_source(src.path())],
             local_source(out.path()),
@@ -399,7 +403,7 @@ mod test_advanced {
             false,
             false,
             None,
-            Some(report_path.to_str().unwrap()),
+            Some(&sink as &dyn ReportSink),
         )
         .unwrap();
         let content = fs::read_to_string(&report_path).unwrap();

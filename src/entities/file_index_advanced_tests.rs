@@ -225,8 +225,8 @@ fn visit_location_accepts_multiple_backends_in_one_index() {
 
     use camino::Utf8PathBuf;
 
+    use crate::adapters::backend::fake::FakeBackend;
     use crate::entities::backend::Backend;
-    use crate::entities::backend::fake::FakeBackend;
     use crate::entities::uri::Location;
 
     let smb_root = Location::Smb {

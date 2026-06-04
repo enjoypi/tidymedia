@@ -1,13 +1,18 @@
-use camino::Utf8PathBuf;
-
 use crate::adapters::backend::factory::{BackendFactory, DefaultBackendFactory};
 use crate::adapters::cli::Commands;
+use crate::adapters::report_sink::JsonFileReportSink;
 use crate::entities::common::{Error, Result};
 use crate::entities::uri::Location;
 use crate::usecases::config::validate_archive_template;
-#[cfg(feature = "android-app")]
-use crate::usecases::report::CopyReport;
-use crate::usecases::report::{FindReport, write_find_report};
+use crate::usecases::report::{CopyReport, FindReport, Report, ReportSink};
+
+/// 子命令执行结果：Copy/Move 返回 [`CopyReport`]，Find 返回 [`FindReport`]。
+/// 让 `tidy_with` 单一入口同时服务 CLI（丢弃返回）与 Android/mobile（消费 report 字段）。
+#[derive(Debug)]
+pub enum CommandResult {
+    Copy(CopyReport),
+    Find(FindReport),
+}
 
 /// 用默认 backend factory 跑命令；旧入口，等价于 `tidy_with(&DefaultBackendFactory, ...)`。
 ///
@@ -15,15 +20,16 @@ use crate::usecases::report::{FindReport, write_find_report};
 ///
 /// 当命令执行过程中发生 IO 错误、backend 构造失败或业务逻辑出错时返回 `Err`。
 pub fn tidy(command: Commands) -> Result<()> {
-    tidy_with(&DefaultBackendFactory, command)
+    tidy_with(&DefaultBackendFactory, command).map(|_| ())
 }
 
 /// 注入版入口：调用方提供 [`BackendFactory`]，常用于集成测试用 fake 装配混合 scheme。
+/// 返回结构化 [`CommandResult`]：CLI 路径直接 `?` 丢弃，mobile 路径 match 取 report。
 ///
 /// # Errors
 ///
 /// 当 backend 构造失败、IO 操作出错或业务逻辑出错时返回 `Err`。
-pub fn tidy_with(factory: &dyn BackendFactory, command: Commands) -> Result<()> {
+pub fn tidy_with(factory: &dyn BackendFactory, command: Commands) -> Result<CommandResult> {
     match command {
         Commands::Copy {
             dry_run,
@@ -32,51 +38,16 @@ pub fn tidy_with(factory: &dyn BackendFactory, command: Commands) -> Result<()> 
             output,
             archive_template,
             report,
-        } => {
-            validate_template_arg(archive_template.as_deref())?;
-            let src_pairs = build_sources(factory, sources)?;
-            let out_pair = build_source(factory, output)?;
-            crate::usecases::copy(
-                &src_pairs,
-                out_pair,
-                dry_run,
-                false,
-                include_non_media,
-                archive_template.as_deref(),
-                report.as_deref(),
-            )
-            .map(|_| ())
-        }
-        Commands::Find {
-            secure,
+        } => dispatch_copy_or_move(
+            factory,
             sources,
             output,
-            report,
-        } => {
-            let src_pairs = build_sources(factory, sources)?;
-            let out_pair = output.map(|loc| build_source(factory, loc)).transpose()?;
-            let groups = crate::usecases::find_duplicates(secure, src_pairs, out_pair.as_ref());
-            if let Some(path) = report.as_deref() {
-                // scanned = total file paths across all groups（每组均为重复集，无 singleton）
-                let scanned = groups.values().flatten().count();
-                let report_data = FindReport {
-                    scanned,
-                    groups: groups
-                        .into_values()
-                        .map(|paths| {
-                            paths
-                                .into_iter()
-                                .map(|p: Utf8PathBuf| p.to_string())
-                                .collect()
-                        })
-                        .collect(),
-                    // bytes_read 在 find_duplicates 内部；此处仅统计重复组内路径数作轻量摘要。
-                    bytes_read: 0,
-                };
-                write_find_report(path, &report_data);
-            }
-            Ok(())
-        }
+            dry_run,
+            /* remove = */ false,
+            include_non_media,
+            archive_template.as_deref(),
+            report.as_deref(),
+        ),
         Commands::Move {
             dry_run,
             include_non_media,
@@ -84,22 +55,69 @@ pub fn tidy_with(factory: &dyn BackendFactory, command: Commands) -> Result<()> 
             output,
             archive_template,
             report,
-        } => {
-            validate_template_arg(archive_template.as_deref())?;
-            let src_pairs = build_sources(factory, sources)?;
-            let out_pair = build_source(factory, output)?;
-            crate::usecases::copy(
-                &src_pairs,
-                out_pair,
-                dry_run,
-                true,
-                include_non_media,
-                archive_template.as_deref(),
-                report.as_deref(),
-            )
-            .map(|_| ())
-        }
+        } => dispatch_copy_or_move(
+            factory,
+            sources,
+            output,
+            dry_run,
+            /* remove = */ true,
+            include_non_media,
+            archive_template.as_deref(),
+            report.as_deref(),
+        ),
+        Commands::Find {
+            secure,
+            sources,
+            output,
+            report,
+        } => dispatch_find(factory, sources, output, secure, report.as_deref()),
     }
+}
+
+// Copy / Move 唯一区别是 `remove` 布尔；提到此处避免两个 arm 18 行同体重复。
+#[allow(clippy::too_many_arguments)]
+fn dispatch_copy_or_move(
+    factory: &dyn BackendFactory,
+    sources: Vec<Location>,
+    output: Location,
+    dry_run: bool,
+    remove: bool,
+    include_non_media: bool,
+    archive_template: Option<&str>,
+    report: Option<&str>,
+) -> Result<CommandResult> {
+    validate_template_arg(archive_template)?;
+    let src_pairs = build_sources(factory, sources)?;
+    let out_pair = build_source(factory, output)?;
+    let sink = report.map(JsonFileReportSink::new);
+    let copy_report = crate::usecases::copy(
+        &src_pairs,
+        out_pair,
+        dry_run,
+        remove,
+        include_non_media,
+        archive_template,
+        sink.as_ref().map(|s| s as &dyn ReportSink),
+    )?;
+    Ok(CommandResult::Copy(copy_report))
+}
+
+fn dispatch_find(
+    factory: &dyn BackendFactory,
+    sources: Vec<Location>,
+    output: Option<Location>,
+    secure: bool,
+    report: Option<&str>,
+) -> Result<CommandResult> {
+    let src_pairs = build_sources(factory, sources)?;
+    let out_pair = output.map(|loc| build_source(factory, loc)).transpose()?;
+    let find_report = crate::usecases::find_duplicates(secure, src_pairs, out_pair.as_ref());
+    // Find 与 Copy/Move 对称：均通过 ReportSink trait 注入，不再硬编码 JsonFileReportSink。
+    if let Some(path) = report {
+        let sink = JsonFileReportSink::new(path);
+        sink.write(&Report::Find(&find_report));
+    }
+    Ok(CommandResult::Find(find_report))
 }
 
 // None 表示未传，跳过校验；Some(s) 时校验模板合法性。
@@ -127,53 +145,4 @@ fn build_sources(
     locs.into_iter()
         .map(|loc| build_source(factory, loc))
         .collect()
-}
-
-/// copy コマンドを実行して [`CopyReport`] を返す Android / mobile 専用入口。
-/// `tidy_with` は `Result<()>` で report を捨てるため、mobile 層が stats を取り出せない。
-/// このラッパーは Copy / Move 以外のコマンドを受け取ると `InvalidInput` を返す。
-///
-/// # Errors
-///
-/// backend 構築失敗、IO エラー、または非 Copy/Move コマンド時に `Err`。
-#[cfg(feature = "android-app")]
-pub(crate) fn copy_report(
-    factory: &dyn BackendFactory,
-    sources: Vec<Location>,
-    output: Location,
-    dry_run: bool,
-) -> Result<CopyReport> {
-    let src_pairs = build_sources(factory, sources)?;
-    let out_pair = build_source(factory, output)?;
-    crate::usecases::copy(&src_pairs, out_pair, dry_run, false, false, None, None)
-}
-
-/// find コマンドを実行して重複グループを [`FindReport`] として返す Android / mobile 専用入口。
-///
-/// # Errors
-///
-/// backend 構築失敗または IO エラー時に `Err`。
-#[cfg(feature = "android-app")]
-pub(crate) fn find_report(
-    factory: &dyn BackendFactory,
-    sources: Vec<Location>,
-    secure: bool,
-) -> Result<FindReport> {
-    let src_pairs = build_sources(factory, sources)?;
-    let groups = crate::usecases::find_duplicates(secure, src_pairs, None);
-    let scanned = groups.values().flatten().count();
-    let report = FindReport {
-        scanned,
-        groups: groups
-            .into_values()
-            .map(|paths| {
-                paths
-                    .into_iter()
-                    .map(|p: Utf8PathBuf| p.to_string())
-                    .collect()
-            })
-            .collect(),
-        bytes_read: 0,
-    };
-    Ok(report)
 }

@@ -1,31 +1,13 @@
 //! Backend Gateway 抽象：把"按 [`Location`] 做文件 IO"的差异封进单一 trait，
-//! 让 entities / usecases 层不再硬绑 `std::fs`。Local/Smb/Mtp 三实现分别落在
-//! 同目录的兄弟模块。CLAUDE.md「URI 与 Backend」段记录使用约定。
+//! 让 entities / usecases 层不再硬绑 `std::fs`。具体实现（Local/SMB/MTP/ADB/Fake）
+//! 落在 `adapters::backend::*`；entities 只持 trait 与值类型，编译期对 adapters
+//! 零依赖（Clean Architecture 依赖方向规则）。CLAUDE.md「URI 与 Backend」段记录
+//! 使用约定。
 
 use std::io::{self, Read, Seek, Write};
 use std::time::SystemTime;
 
 use super::uri::Location;
-
-pub mod adb {
-    pub use crate::adapters::backend::adb::*;
-}
-pub mod local {
-    pub use crate::adapters::backend::local::LocalBackend;
-}
-pub mod mtp {
-    pub use crate::adapters::backend::mtp::*;
-}
-pub mod smb {
-    pub use crate::adapters::backend::smb::*;
-}
-
-// FakeBackend 是常驻编译的测试 helper：集成测试（`tests/`）需要在 `#[cfg(test)]`
-// 之外引用它来组装 FakeBackendFactory。`#[doc(hidden)]` 让它不出现在公开 docs。
-#[doc(hidden)]
-pub mod fake {
-    pub use crate::adapters::backend::fake::*;
-}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum EntryKind {

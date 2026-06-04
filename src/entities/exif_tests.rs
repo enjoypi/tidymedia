@@ -324,8 +324,8 @@ fn from_path_propagates_infer_io_error_when_unreadable() {
 /// 立即 read Err 的 `reader：sniff_mime` 内 `?` 把 Err 上抛到 open。
 #[test]
 fn open_propagates_sniff_mime_io_error() {
-    use super::super::backend::fake::FakeBackend;
     use super::super::uri::Location;
+    use crate::adapters::backend::fake::FakeBackend;
     use std::sync::Arc;
 
     let fake = Arc::new(FakeBackend::new("fake"));

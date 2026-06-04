@@ -13,12 +13,14 @@ use sha2::Sha512;
 use tracing::warn;
 
 use super::SecureHash;
-#[cfg(test)]
-use super::backend::local::LocalBackend;
 use super::backend::{Backend, EntryKind, MediaReader, Metadata as BackendMetadata};
 use super::exif;
 use super::media_time;
 use super::uri::Location;
+// 测试 helper `Info::from` 需要构造 LocalBackend instance。仅 #[cfg(test)] 下引用
+// adapters，生产 `Info::open` 走 backend trait 注入（CA 规则）。
+#[cfg(test)]
+use crate::adapters::backend::local::LocalBackend;
 
 // 栈数组要求编译期常量，保留为 const（性能边界例外）
 const FAST_READ_SIZE: usize = 4096;

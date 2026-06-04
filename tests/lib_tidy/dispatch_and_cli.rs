@@ -83,6 +83,44 @@ fn tidy_dispatches_move_dry_run_on_empty_source() {
     .expect("move dry run should succeed");
 }
 
+/// Copy --report 路径：dispatch 在 Some(path) 下构造 `JsonFileReportSink` 并把
+/// `&dyn ReportSink` 闭包转换喂给 use case；覆盖 `dispatch.rs` 的 sink 走 Some 分支。
+#[test]
+fn tidy_dispatches_copy_with_report_writes_json() {
+    let out = tempdir().unwrap();
+    let report_dir = tempdir().unwrap();
+    let report_path = report_dir.path().join("copy_report.json");
+    tidy(Commands::Copy {
+        dry_run: true,
+        include_non_media: false,
+        sources: vec![local(DATA_DIR)],
+        output: local(out.path().to_str().unwrap()),
+        archive_template: None,
+        report: Some(report_path.to_str().unwrap().to_string()),
+    })
+    .expect("copy with report should succeed");
+    assert!(report_path.exists(), "report should be written");
+}
+
+/// Move --report 路径：与上同理覆盖 `Commands::Move` 分支的 sink 装配。
+#[test]
+fn tidy_dispatches_move_with_report_writes_json() {
+    let src = tempdir().unwrap();
+    let out = tempdir().unwrap();
+    let report_dir = tempdir().unwrap();
+    let report_path = report_dir.path().join("move_report.json");
+    tidy(Commands::Move {
+        dry_run: true,
+        include_non_media: false,
+        sources: vec![local(src.path().to_str().unwrap())],
+        output: local(out.path().to_str().unwrap()),
+        archive_template: None,
+        report: Some(report_path.to_str().unwrap().to_string()),
+    })
+    .expect("move with report should succeed");
+    assert!(report_path.exists(), "report should be written");
+}
+
 /// SMB/MTP URI 当前未启用真实 client：CLI 解析成功（URI 语法正确）但 tidy
 /// adapter 拒收，给出清晰 Unsupported 错误。
 #[cfg(not(feature = "smb-backend"))]

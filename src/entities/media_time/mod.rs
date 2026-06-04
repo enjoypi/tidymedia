@@ -1,7 +1,8 @@
 // docs/media-time-detection.md 的方法论实现：
 //   P0/P1 候选来自 EXIF + 视频容器（exif::Exif 已经在上层解析好对应字段）
 //   P2 候选来自文件名（filename::parse_filename）
-//   P3 候选来自 sidecar（sidecar::discover）
+//   P3 候选来自 sidecar——协议解析在 `adapters::sidecar` Gateway（XMP/Takeout 是外部
+//     数据格式，不属 entities）；entities 只消费转好的 [`Candidate`]
 //   P4 候选来自文件系统 mtime（fs_time::from_modified）
 // 调用方组装好 Candidate 列表后交给 resolve::resolve 合并 + 冲突校验。
 
@@ -12,7 +13,6 @@ pub mod filter;
 pub mod fs_time;
 pub mod priority;
 pub mod resolve;
-pub mod sidecar;
 
 pub use candidate::Candidate;
 pub use decision::Confidence;
@@ -39,7 +39,7 @@ use super::exif::Exif;
 /// spec §3 P0 来源分流。
 ///
 /// 仅 crate 内部使用——Exif 是 pub(crate) 类型，集成测试请用 `epoch_to_candidate`
-/// 直接构造或经由 `filename::parse_filename` / `sidecar::discover` 等公开入口。
+/// 直接构造或经由 `filename::parse_filename` / `adapters::sidecar::discover` 等公开入口。
 pub(crate) fn candidates_from_exif(exif: &Exif, default_offset: FixedOffset) -> Vec<Candidate> {
     // MKV/WebM 的 DateUTC 是纯 UTC（无时区推断），offset 设 None、inferred=false；
     // QuickTime/MP4 可能含时区（iPhone com.apple.quicktime.creationdate），

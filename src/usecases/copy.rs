@@ -14,13 +14,13 @@ use tracing::warn;
 
 use crate::entities::backend::Backend;
 use crate::entities::common;
-use crate::entities::file_index::Index;
+use crate::entities::file_index::{Index, VisitStats};
 use crate::entities::file_info::Info;
 use crate::entities::uri::Location;
 
 use super::archive_template::{TemplateContext, render};
 use super::config::config;
-use super::report::{CopyReport, ReportError, write_copy_report};
+use super::report::{CopyReport, Report, ReportError, ReportSink};
 
 /// usecase 入口的 source / output 对：把 [`Location`] 与负责该 scheme 的
 /// [`Backend`] 句柄一起传入，避免内层重新解析 URI。
@@ -67,7 +67,7 @@ pub(crate) fn copy(
     remove: bool,
     include_non_media: bool,
     archive_template: Option<&str>,
-    report_path: Option<&str>,
+    report_sink: Option<&dyn ReportSink>,
 ) -> common::Result<CopyReport> {
     let (output_loc, output_backend) = output;
     let template = archive_template.unwrap_or(&config().copy.archive_template);
@@ -92,8 +92,18 @@ pub(crate) fn copy(
     );
 
     if total_files == 0 {
-        let report = make_report(dry_run, remove, include_non_media, 0, 0, 0, 0, vec![]);
-        emit_report(report_path, &report);
+        // walker 触达 0 文件，但 scan_stats 仍可能含 walker_errors / skipped_*：纳入 scanned。
+        let report = make_report(
+            dry_run,
+            remove,
+            include_non_media,
+            scan_stats,
+            0,
+            0,
+            0,
+            vec![],
+        );
+        emit_report(report_sink, &report);
         return Ok(report);
     }
 
@@ -139,13 +149,13 @@ pub(crate) fn copy(
         dry_run,
         remove,
         include_non_media,
-        total_files,
+        scan_stats,
         copied,
         ignored,
         failed,
         errors,
     );
-    emit_report(report_path, &report);
+    emit_report(report_sink, &report);
     Ok(report)
 }
 
@@ -196,22 +206,31 @@ fn run_copy_loop(
 }
 
 // 构造 CopyReport 值对象；抽出避免参数列表过长。
+// scanned = 入索引文件数（indexed）+ walker 触达但跳过的（empty/unreadable/walker_errors）。
 #[allow(clippy::too_many_arguments)]
 fn make_report(
     dry_run: bool,
     remove: bool,
     include_non_media: bool,
-    scanned: usize,
+    scan_stats: VisitStats,
     copied: usize,
     ignored: usize,
     failed: usize,
     errors: Vec<ReportError>,
 ) -> CopyReport {
+    // indexed = copied + ignored + failed（do_copy 三态都来自已入索引的文件）。
+    let indexed = copied + ignored + failed;
+    let skipped_total =
+        scan_stats.skipped_empty + scan_stats.skipped_unreadable + scan_stats.walker_errors;
+    let scanned = indexed + usize::try_from(skipped_total).unwrap_or(usize::MAX);
     CopyReport {
         scanned,
         copied,
         ignored,
         failed,
+        skipped_empty: scan_stats.skipped_empty,
+        skipped_unreadable: scan_stats.skipped_unreadable,
+        walker_errors: scan_stats.walker_errors,
         dry_run,
         remove,
         include_non_media,
@@ -219,12 +238,11 @@ fn make_report(
     }
 }
 
-// 根据 report_path 决定是否写报告；None 时跳过。
-fn emit_report(report_path: Option<&str>, report: &CopyReport) {
-    let Some(path) = report_path else {
-        return;
-    };
-    write_copy_report(path, report);
+// 通过注入的 sink 输出报告；None 时跳过（用 case 不知道协议与持久化细节）。
+fn emit_report(sink: Option<&dyn ReportSink>, report: &CopyReport) {
+    if let Some(s) = sink {
+        s.write(&Report::Copy(report));
+    }
 }
 
 // `coverage(off)`：内含 duplicate 检测 + `if remove && !dry_run` 等多条 branch；
@@ -289,12 +307,10 @@ pub(crate) fn do_copy(
         }
         println!("\"{}\"\t\"{}\"", src_display, target_loc.display());
 
-        // target 是刚刚 copy 成功的产物，按 backend 语义必然存在；
-        // 用 expect 替代 ?，避免不可触发的 Err 分支拉低覆盖率。
-        _ = output_index.add(
-            Info::open(&target_loc, Arc::clone(output_backend))
-                .expect("just copied target must exist"),
-        );
+        // target 是刚刚 copy 成功的产物，正常 FS 下必然存在；但 NFS/SMB 上偶发 ESTALE、
+        // 反病毒/索引器抢占等场景仍可能让 metadata 失败。P0 §2 禁止生产代码 unwrap/expect，
+        // 此处用 ? 传播 IO 错误，归入循环外的 failed 统计。
+        _ = output_index.add(Info::open(&target_loc, Arc::clone(output_backend))?);
 
         Ok(true)
     } else {

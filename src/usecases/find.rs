@@ -1,29 +1,30 @@
-use std::collections::BTreeMap;
 use std::io::Write;
 
-use camino::Utf8PathBuf;
 use tracing::error;
 use tracing::info;
 
 use crate::entities::backend::EntryKind;
 use crate::entities::file_index;
+use crate::entities::file_index::DuplicateGroup;
 use crate::entities::file_info;
 use crate::entities::uri::Location;
 
 use super::copy::Source;
+use super::report::FindReport;
 
 const FEATURE_FIND: &str = "find";
 
 // info!/error! 宏在不同 instantiation 间会产生重复的内部 region；用例入口本身的逻辑
 // 已经被各种集成测试覆盖。整体标 coverage(off) 让严格覆盖率统计稳定。
 //
-// 返回值：duplicate 组 map（key=size，value=路径列表），供 dispatch 层生成 JSON 报告用。
+// 返回值：完整的 FindReport（scanned = 全部入索引的文件数；bytes_read 来自 Index 累计；
+// groups 为 DuplicateGroup 列表）。dispatch 层可直接落 JSON 而无需重新统计。
 #[cfg_attr(coverage_nightly, coverage(off))]
 pub(crate) fn find_duplicates(
     secure: bool,
     sources: Vec<Source>,
     output: Option<&Source>,
-) -> BTreeMap<u64, Vec<Utf8PathBuf>> {
+) -> FindReport {
     let mut index = file_index::Index::new();
 
     if let Some((loc, backend)) = output {
@@ -38,7 +39,7 @@ pub(crate) fn find_duplicates(
                 output = %loc.display(),
                 "output path is not a directory"
             );
-            return BTreeMap::new();
+            return FindReport::default();
         }
     }
 
@@ -47,21 +48,23 @@ pub(crate) fn find_duplicates(
     }
 
     let scan_stats = index.stats();
+    let scanned = index.files().len();
+    let bytes_read = index.bytes_read();
     info!(
         feature = FEATURE_FIND,
         operation = "scan_complete",
         result = "ok",
         secure,
-        files = index.files().len(),
+        files = scanned,
         similar_files = index.similar_files().len(),
-        bytes_read = index.bytes_read(),
+        bytes_read,
         skipped_empty = scan_stats.skipped_empty,
         skipped_unreadable = scan_stats.skipped_unreadable,
         walker_errors = scan_stats.walker_errors,
         "index built"
     );
 
-    let same = if secure {
+    let groups = if secure {
         index.search_same()
     } else {
         index.fast_search_same()
@@ -71,14 +74,14 @@ pub(crate) fn find_duplicates(
         operation = "search_same",
         result = "ok",
         secure,
-        groups = same.len(),
+        groups = groups.len(),
         "duplicate groups discovered"
     );
 
     let prefix_owned = compute_output_prefix(output);
 
     render_script(
-        &same,
+        &groups,
         prefix_owned.as_deref(),
         comment(),
         rm(),
@@ -89,11 +92,18 @@ pub(crate) fn find_duplicates(
         feature = FEATURE_FIND,
         operation = "finalize",
         result = "ok",
-        bytes_read = index.bytes_read(),
+        bytes_read,
         "find_duplicates done"
     );
 
-    same
+    FindReport {
+        scanned,
+        bytes_read,
+        groups: groups
+            .into_iter()
+            .map(|g| g.paths.into_iter().map(|p| p.to_string()).collect())
+            .collect(),
+    }
 }
 
 // 上方 is_dir 断言已经过滤掉非目录；到这里 output 必然是 (Location, Backend) 形态。
@@ -111,17 +121,18 @@ fn compute_output_prefix(output: Option<&Source>) -> Option<String> {
 }
 
 pub(crate) fn render_script(
-    same: &BTreeMap<u64, Vec<Utf8PathBuf>>,
+    same: &[DuplicateGroup],
     output_prefix: Option<&str>,
     comment_token: &str,
     rm_token: &str,
     sink: &mut impl Write,
 ) {
-    for (size, paths) in same.iter().rev() {
-        let _ = writeln!(sink, "{comment_token}SIZE {size}\r");
-        for path in paths {
+    // 输入已按 size 降序（DuplicateGroup filter_and_sort 内部约定）；直接顺序遍历。
+    for group in same {
+        let _ = writeln!(sink, "{comment_token}SIZE {}\r", group.size);
+        for path in &group.paths {
             let path_str = path.as_str();
-            let starts = output_prefix.is_some_and(|p| path_str.starts_with(p));
+            let starts = output_prefix.is_some_and(|p| under_prefix(path_str, p));
             if output_prefix.is_some() && !starts {
                 let _ = writeln!(sink, "{rm_token} \"{path}\"\r");
             } else {
@@ -130,6 +141,16 @@ pub(crate) fn render_script(
         }
         let _ = writeln!(sink);
     }
+}
+
+// 判 path 是否在 prefix 目录下：纯 starts_with 会让 /photos_backup 误判为 /photos 子目录。
+// 必须额外校验 prefix 后紧跟路径分隔符（或 path 恰等 prefix）。Unix 用 `/`，Windows 兼顾 `\`。
+fn under_prefix(path: &str, prefix: &str) -> bool {
+    if !path.starts_with(prefix) {
+        return false;
+    }
+    let rest = &path[prefix.len()..];
+    rest.is_empty() || rest.starts_with('/') || rest.starts_with('\\')
 }
 
 #[cfg(target_os = "windows")]
@@ -154,7 +175,6 @@ pub(crate) fn rm() -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeMap;
     use std::sync::Arc;
 
     use camino::Utf8PathBuf;
@@ -164,8 +184,9 @@ mod tests {
     use super::find_duplicates;
     use super::render_script;
     use super::rm;
+    use crate::adapters::backend::local::LocalBackend;
     use crate::entities::backend::Backend;
-    use crate::entities::backend::local::LocalBackend;
+    use crate::entities::file_index::DuplicateGroup;
     use crate::entities::test_common as tc;
     use crate::entities::uri::Location;
 
@@ -183,34 +204,30 @@ mod tests {
         )
     }
 
-    fn run_render(
-        same: &BTreeMap<u64, Vec<Utf8PathBuf>>,
-        prefix: Option<&str>,
-        c: &str,
-        r: &str,
-    ) -> String {
+    fn run_render(same: &[DuplicateGroup], prefix: Option<&str>, c: &str, r: &str) -> String {
         let mut sink: Vec<u8> = Vec::new();
         render_script(same, prefix, c, r, &mut sink);
         String::from_utf8(sink).unwrap()
     }
 
-    fn sample_two_groups() -> BTreeMap<u64, Vec<Utf8PathBuf>> {
-        let mut m = BTreeMap::new();
-        m.insert(
-            100,
-            vec![
-                Utf8PathBuf::from("/data/small_a"),
-                Utf8PathBuf::from("/data/small_b"),
-            ],
-        );
-        m.insert(
-            200,
-            vec![
-                Utf8PathBuf::from("/data/big_a"),
-                Utf8PathBuf::from("/data/big_b"),
-            ],
-        );
-        m
+    // sample 已按 size 降序（render_script 不再 iter().rev()，调用方负责排序）。
+    fn sample_two_groups() -> Vec<DuplicateGroup> {
+        vec![
+            DuplicateGroup {
+                size: 200,
+                paths: vec![
+                    Utf8PathBuf::from("/data/big_a"),
+                    Utf8PathBuf::from("/data/big_b"),
+                ],
+            },
+            DuplicateGroup {
+                size: 100,
+                paths: vec![
+                    Utf8PathBuf::from("/data/small_a"),
+                    Utf8PathBuf::from("/data/small_b"),
+                ],
+            },
+        ]
     }
 
     #[test]
@@ -245,17 +262,46 @@ mod tests {
         assert!(!out.contains("#rm \"/data/"));
     }
 
+    /// `/photos_backup` 不应被 `/photos` prefix 误判为「在 output 内须保留」。
+    /// 修复前：`path.starts_with("/photos")` 直接 true → 被注释 → 漏删；修复后：分隔符校验 → 待删。
+    #[test]
+    fn render_script_prefix_does_not_match_sibling_with_same_prefix() {
+        let groups = vec![DuplicateGroup {
+            size: 42,
+            paths: vec![
+                Utf8PathBuf::from("/photos/img.jpg"),
+                Utf8PathBuf::from("/photos_backup/img.jpg"),
+            ],
+        }];
+        let out = run_render(&groups, Some("/photos"), "#", "rm");
+        // /photos/img.jpg 在 output 下 → 被注释保护
+        assert!(out.contains("#rm \"/photos/img.jpg\"\r"));
+        // /photos_backup/img.jpg 不在 output 下 → 待删（非注释）
+        assert!(out.contains("rm \"/photos_backup/img.jpg\"\r"));
+        assert!(!out.contains("#rm \"/photos_backup/img.jpg\""));
+    }
+
+    /// path 恰等 prefix（虽极不常见但 `under_prefix` 的 `rest.is_empty()` 分支需覆盖）。
+    #[test]
+    fn render_script_path_exactly_equal_prefix_is_under() {
+        let groups = vec![DuplicateGroup {
+            size: 1,
+            paths: vec![Utf8PathBuf::from("/keepers"), Utf8PathBuf::from("/other/x")],
+        }];
+        let out = run_render(&groups, Some("/keepers"), "#", "rm");
+        assert!(out.contains("#rm \"/keepers\"\r"));
+    }
+
     #[test]
     fn render_script_keeps_paths_under_output_prefix_commented() {
-        let mut m: BTreeMap<u64, Vec<Utf8PathBuf>> = BTreeMap::new();
-        m.insert(
-            42,
-            vec![
+        let groups = vec![DuplicateGroup {
+            size: 42,
+            paths: vec![
                 Utf8PathBuf::from("/keepers/a"),
                 Utf8PathBuf::from("/other/b"),
             ],
-        );
-        let out = run_render(&m, Some("/keepers"), "#", "rm");
+        }];
+        let out = run_render(&groups, Some("/keepers"), "#", "rm");
         assert!(out.contains("#rm \"/keepers/a\"\r"));
         assert!(out.contains("rm \"/other/b\"\r"));
         assert!(!out.contains("#rm \"/other/b\""));
@@ -272,9 +318,52 @@ mod tests {
 
     #[test]
     fn render_script_empty_input_writes_nothing() {
-        let empty: BTreeMap<u64, Vec<Utf8PathBuf>> = BTreeMap::new();
+        let empty: Vec<DuplicateGroup> = Vec::new();
         let out = run_render(&empty, None, "#", "rm");
         assert!(out.is_empty());
+    }
+
+    /// 同 size 不同 content 的两组重复集必须独立保留（旧 `BTreeMap<size, _>` 实现会覆盖）。
+    #[test]
+    fn search_same_preserves_distinct_groups_with_identical_size() {
+        use std::fs;
+        let dir = tempdir().unwrap();
+        // 两对 4KiB 文件：a1=a2（首字节 'A'），b1=b2（首字节 'B'），全 1000 字节。
+        let make = |name: &str, fill: u8| {
+            let p = dir.path().join(name);
+            let bytes = vec![fill; 1000];
+            fs::write(&p, &bytes).unwrap();
+            p
+        };
+        let a1 = make("a1.bin", b'A');
+        let a2 = make("a2.bin", b'A');
+        let b1 = make("b1.bin", b'B');
+        let b2 = make("b2.bin", b'B');
+
+        let mut idx = crate::entities::file_index::Index::new();
+        idx.insert(a1.to_str().unwrap()).unwrap();
+        idx.insert(a2.to_str().unwrap()).unwrap();
+        idx.insert(b1.to_str().unwrap()).unwrap();
+        idx.insert(b2.to_str().unwrap()).unwrap();
+
+        // fast & secure 两种路径均必须返回 2 组（旧实现只剩 1 组）
+        let fast_groups = idx.fast_search_same();
+        assert_eq!(
+            fast_groups.len(),
+            2,
+            "fast: distinct content must yield 2 groups"
+        );
+        let secure_groups = idx.search_same();
+        assert_eq!(
+            secure_groups.len(),
+            2,
+            "secure: distinct content must yield 2 groups"
+        );
+        // 两组的 size 都是 1000
+        for g in &fast_groups {
+            assert_eq!(g.size, 1000);
+            assert_eq!(g.paths.len(), 2);
+        }
     }
 
     #[test]

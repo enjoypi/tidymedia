@@ -1,4 +1,3 @@
-use std::collections::BTreeMap;
 use std::fmt;
 use std::fs;
 
@@ -6,8 +5,17 @@ use tempfile::tempdir;
 
 use super::super::file_info;
 use super::super::test_common as common;
+use super::DuplicateGroup;
 use super::Index;
 use super::Info;
+
+// 测试辅助：从 Vec<DuplicateGroup> 中按 size 查首个匹配组（旧 BTreeMap 索引语义的替代）。
+fn group_by_size(groups: &[DuplicateGroup], size: u64) -> &DuplicateGroup {
+    groups
+        .iter()
+        .find(|g| g.size == size)
+        .expect("no duplicate group with the given size")
+}
 
 #[test]
 fn insert() {
@@ -25,19 +33,21 @@ fn search_same() {
     let mut index = Index::new();
     index.visit_dir(common::DATA_DIR);
 
-    let same: BTreeMap<u64, _> = index.search_same();
+    let same = index.search_same();
     assert_eq!(same.len(), 2);
-    assert_eq!(same[&common::DATA_LARGE_LEN].len(), 2);
-    assert_eq!(same[&common::DATA_SMALL_LEN].len(), 2);
+    let large = group_by_size(&same, common::DATA_LARGE_LEN);
+    let small = group_by_size(&same, common::DATA_SMALL_LEN);
+    assert_eq!(large.paths.len(), 2);
+    assert_eq!(small.paths.len(), 2);
 
     let large_path = file_info::full_path(common::DATA_LARGE).unwrap();
     let large_copy = file_info::full_path(common::DATA_LARGE_COPY).unwrap();
     let small_path = file_info::full_path(common::DATA_SMALL).unwrap();
     let small_copy = file_info::full_path(common::DATA_SMALL_COPY).unwrap();
-    assert!(same[&common::DATA_LARGE_LEN].contains(&large_path));
-    assert!(same[&common::DATA_LARGE_LEN].contains(&large_copy));
-    assert!(same[&common::DATA_SMALL_LEN].contains(&small_path));
-    assert!(same[&common::DATA_SMALL_LEN].contains(&small_copy));
+    assert!(large.paths.contains(&large_path));
+    assert!(large.paths.contains(&large_copy));
+    assert!(small.paths.contains(&small_path));
+    assert!(small.paths.contains(&small_copy));
 }
 
 #[test]
@@ -183,8 +193,8 @@ fn parse_exif_skips_files_deleted_between_visit_and_parse() {
 fn fast_search_same_matches_search_same() {
     let mut index = Index::new();
     index.visit_dir(common::DATA_DIR);
-    let secure: BTreeMap<u64, _> = index.search_same();
-    let fast: BTreeMap<u64, _> = index.fast_search_same();
+    let secure = index.search_same();
+    let fast = index.fast_search_same();
     assert_eq!(secure, fast);
 }
 

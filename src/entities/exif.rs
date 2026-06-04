@@ -14,12 +14,14 @@ use nom_exif::MediaSource;
 use nom_exif::TrackInfoTag;
 use nom_exif::URational;
 
-#[cfg(test)]
-use super::backend::local::LocalBackend;
 use super::backend::{Backend, MediaReader};
 use super::common;
 use super::file_info::read_fill;
 use super::uri::Location;
+// 测试 helper `Exif::from_path_with_offset` 需要构造 LocalBackend instance。
+// 仅 #[cfg(test)] gate 下引用 adapters，生产代码方向严格内向（CA 规则）。
+#[cfg(test)]
+use crate::adapters::backend::local::LocalBackend;
 
 const META_TYPE_IMAGE: &str = "image/";
 const META_TYPE_VIDEO: &str = "video/";

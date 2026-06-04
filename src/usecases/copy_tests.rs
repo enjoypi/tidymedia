@@ -81,8 +81,8 @@ mod test_io {
     use tempfile::tempdir;
 
     use super::super::*;
+    use crate::adapters::backend::local::LocalBackend;
     use crate::entities::backend::Backend;
-    use crate::entities::backend::local::LocalBackend;
     use crate::entities::test_common as tc;
     use crate::entities::uri::Location;
 

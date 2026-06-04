@@ -1,7 +1,7 @@
 // spec §2.P3：旁路 sidecar — XMP 与 Google Takeout JSON。
 
 use tidymedia::media_time::Source;
-use tidymedia::media_time::sidecar::discover;
+use tidymedia::sidecar::discover;
 
 /// spec §2.P3：XMP sidecar 中的 photoshop:DateCreated 被识别为 P3 候选。
 #[test]
