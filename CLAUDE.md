@@ -10,6 +10,7 @@
 - 构建：`cargo build`；运行：`cargo run -- copy /source -o /output`；dry-run：`cargo run -- copy /source -o /output --dry-run`
 - 测试：`cargo nextest run --release`；覆盖率：`cargo +nightly llvm-cov --release nextest --summary-only`
 - lint：`cargo +nightly fmt && cargo clippy --all-targets --all-features --locked -- -D warnings`（baseline 仍有少量 warnings，需逐步清零；见 rust-p0 §1）
+- 默认分支：`main`（2026-06 由 `master` 重命名；远端 `master` 已删除，PR / push 一律走 `main`）
 
 ### Lint 配置与偏差
 - **`[lints.clippy]` 已集中配置**（rust-p0 §1 + rust-p1 §1 模板）：`[lints.rust]` = `future-incompatible`(warn, priority -2) / `nonstandard_style`(deny, priority -1) / `unexpected_cfgs`；`[lints.clippy]` = `all`(deny, priority -2) / `pedantic`(warn, priority -1) / `redundant_clone`(deny)。**所有 group 必须用严格递增的负 priority**，否则报 `lint_groups_priority`（group 与具体 lint 同 priority=0 即 fail，具体 lint 须高于 group）。默认 features 与 `--all-features` 的 `cargo clippy --all-targets -- -D warnings` 均 0 warning
