@@ -4,7 +4,7 @@
 
 # tidymedia 开发上下文
 
-按「拍摄时间」去重并整理照片/视频的多后端 CLI：扫描 sources（local/smb/adb/mtp 可混合）→ SHA-512 去重 → 按解析出的拍摄时间归档到 `output/年/月`。核心算法 = 拍摄时间判定（P0–P4 优先级），spec 见 `docs/media-time-detection.md`（代码内「spec §X」均指该文件）。Clean Architecture 四层 + Android app（feature `android-app`）。
+按「拍摄时间」去重并整理照片/视频的多后端 CLI：扫描 sources（local/smb/adb/mtp 可混合）→ SHA-512 去重 → 按解析出的拍摄时间归档到 `output/年/月`。核心算法 = 拍摄时间判定（P0–P4 优先级，见下文「核心算法」节）。Clean Architecture 四层 + Android app（feature `android-app`）。代码注释里的 `spec §X` 指向已删除的 `docs/media-time-detection.md`，待补。
 
 ## Quick Start
 - 构建：`cargo build`；运行：`cargo run -- copy /source -o /output`；dry-run：`cargo run -- copy /source -o /output --dry-run`
@@ -20,7 +20,7 @@
 ## 测试与覆盖率（项目特有；通用套路见 rust-p1 §5）
 - 默认 stable：`cargo +nightly llvm-cov --release nextest --summary-only`（~99.6% region）
 - 严格 100%：`RUSTFLAGS="--cfg=coverage_nightly" cargo +nightly llvm-cov --release nextest --summary-only [--branch]`；`lib.rs` / `bin/tidymedia.rs` 顶部 `#![cfg_attr(coverage_nightly, feature(coverage_attribute))]`；`Cargo.toml [lints.rust] unexpected_cfgs` 注册 `cfg(coverage_nightly)`；不可稳定触发分支用函数级 `#[cfg_attr(coverage_nightly, coverage(off))]`
-- **`--branch` multi-binary instance 陷阱**：lib unit + 集成 binary 各自 codegen 热点 fn 副本，每副本独立计数器；某 binary 未触发即报 instance miss。可行：①重构成 `?`（算 region 不算 branch）；②函数级 `coverage(off)`（已用于 `Info::open` / `calc_full_hash` / `secure_hash` / `create_time` / `PartialEq::eq` / `full_path` / `do_copy`）
+- **`--branch` multi-binary instance 陷阱**：lib unit + 集成 binary 各自 codegen 热点 fn 副本，每副本独立计数器；某 binary 未触发即报 instance miss。可行：①重构成 `?`（算 region 不算 branch）；②函数级 `coverage(off)`（用于 hash / file_info / copy / exif 等 hot fn，具体位点 `rg "coverage\(off\)" src/`）
 - 改 `Cargo.toml` / `coverage` 属性后必跑 `cargo +nightly llvm-cov clean --workspace`
 - `FakeBackend::inject_reader_error`：`open_read` 成功但 reader `read` 立即 Err，覆盖 stream hash / `sniff_mime` 等 `?` Err 分支
 
@@ -42,7 +42,7 @@
 - **新增 `Backend` trait 方法** → 全部 7 个实现同步加默认或 override：`local`/`remote`/`smb`/`adb`/`mtp`/`fake`/`fake_remote`；按「远端测试套路」补 OK / client Err 注入 / 非自家 scheme 三类测试
 - **新增配置字段** → `usecases/config.rs` 结构体 + `config.yaml` + `validate_*` 校验或被消费（杜绝哑配置）；secret 再加 `.env.example`（值 `changeme`）+ 确认 `.env` 已 gitignore
 - **新增 CLI flag** → `adapters/dispatch.rs` 调度透传 + **每个子命令路径（copy/move/find）独立 e2e 触发 Some/None 两边**，否则 LLVM branch miss
-- **新增 `media_time` 候选来源 / 调整 P0–P4** → 先改 `docs/media-time-detection.md` spec → `priority.rs` 枚举 → 对应解析模块 → `resolve`/`decision` 裁决 → 补 fixture
+- **新增 `media_time` 候选来源 / 调整 P0–P4** → `entities/media_time/priority.rs` 的 `Source` + `Priority` 枚举 → 对应解析模块（`entities/exif`、`entities/media_time/filename`、`adapters/sidecar`、`entities/media_time/fs_time`）→ `resolve`/`decision` 裁决 → 补 fixture
 
 ## 项目分层（Clean Architecture）
 - 四层（自外向内）：`src/frameworks/` → `src/adapters/` → `src/usecases/` → `src/entities/`
@@ -52,9 +52,10 @@
 - 目录名是 `usecases`（无下划线）
 
 ## 核心算法：media_time
-- spec：`docs/media-time-detection.md`（§3 P0–P4 来源等级，§6 mtime 提示性冲突阈值）
-- `entities/media_time/` 8 子模块单一职责：`priority`（P0–P4 枚举）/ `candidate`（`epoch_to_candidate`：secs==0 视为未填返 None）/ `filename`（P2 启发式：`IMG_`/`DSC_`/`Screenshot_` 前缀 + 13 位毫秒 Unix 戳）/ `filter`（合理性过滤 + `EPOCH_1904` / `SOFT_THRESHOLD_1995` / `FUTURE_TOLERANCE_SECS`）/ `resolve` + `decision`（多候选裁决）/ `fs_time`（P3/P4）/ `sidecar`（XMP 旁车，backend-aware，sibling 路径计算当前仅 Local）
-- **`Info::create_time` 不消费 P2 filename 候选**（spec §2.P2 与代码偏差）：`copy.rs::do_copy` 只看 EXIF + fs_fallback。`archive_template` 端到端测试**必须**选含 EXIF 的 fixture（如 `sample-with-offset.jpg`），不能用 P2 文件名 fixture
+- 优先级：P0 = `ExifDateTimeOriginal` / `QuickTimeCreationDate` / `MkvDateUtc`；P1 = `ExifCreateDate` / `QuickTimeCreateDate`；P2 = 文件名启发式；P3 = `XmpSidecar` / `GoogleTakeoutJson`；P4 = `FsMtime`。mtime 比 P0 早 > 30 天发提示性冲突告警
+- `entities/media_time/` 7 子模块单一职责：`priority`（`Source` + `Priority` 枚举）/ `candidate`（`epoch_to_candidate`：secs==0 视为未填返 None）/ `filename`（P2 启发式：`IMG_`/`DSC_`/`Screenshot_` 前缀 + 13 位毫秒 Unix 戳 + WeChat/WhatsApp/Pixel/裸 YYYYMMDD）/ `filter`（合理性过滤 + `EPOCH_1904` / `SOFT_THRESHOLD_1995` / `FUTURE_TOLERANCE_SECS`）/ `resolve` + `decision`（多候选裁决）/ `fs_time`（P4）
+- P3 sidecar 在 `adapters/sidecar.rs`（Interface Adapter 层，不在 entities）：XMP `photoshop:DateCreated` 纯文本搜索 + Takeout `<media>.<ext>.json` `photoTakenTime.timestamp` 走 `serde_json`；backend-aware，sibling 路径计算当前仅 Local
+- **`Info::create_time` 不消费 P2 filename 候选**（与上面 P0–P4 模型偏差）：`copy.rs::do_copy` 只看 EXIF + fs_fallback。`archive_template` 端到端测试**必须**选含 EXIF 的 fixture（如 `sample-with-offset.jpg`），不能用 P2 文件名 fixture
 
 ## URI 与 Backend
 
