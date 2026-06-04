@@ -418,8 +418,6 @@ fn walk_socket_entry_kind_other() {
     assert!(any_other);
 }
 
-// rename 相关测试已外迁到 local_rename_tests.rs，保持本文件 < 512 行（P0 §6）。
-
 #[test]
 fn open_read_chmod_000_permission_denied() {
     let dir = tempdir().unwrap();

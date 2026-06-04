@@ -368,5 +368,3 @@ fn run_cli_move_include_non_media_dispatches() {
     ])
     .expect("move --include-non-media via run_cli should succeed");
 }
-
-// ===== Task 6：FakeBackendFactory 注入下的跨 scheme 调度集成测试 =====

@@ -139,7 +139,7 @@ fn from_path_reads_jpeg_with_exif() {
     assert_eq!(exif.mime_type(), "image/jpeg");
     assert!(exif.is_media());
     // EXIF: DateTimeOriginal=2024-01-01, CreateDate=2024-01-02 (UTC).
-    // ModifyDate=2024-01-03 在 EXIF block 里存在但 spec §5.4 故意不读取。
+    // ModifyDate=2024-01-03 在 EXIF block 里存在但故意不读取（避免编辑时间污染）。
     assert_eq!(exif.date_time_original(), 1_704_110_400);
     assert_eq!(exif.exif_create_date(), 1_704_196_800);
 }
@@ -182,7 +182,7 @@ fn from_path_reads_mkv_without_track_date() {
 }
 
 /// MKV 含 DateUTC=2023-06-15T10:30:00Z → `qt_create_date` 解析到正确 epoch，
-/// `is_mkv_container()` 返回 true（spec §3 P0：MkvDateUtc 分流）。
+/// `is_mkv_container()` 返回 true（MkvDateUtc 分流）。
 #[test]
 fn from_path_reads_mkv_with_date_utc() {
     let exif = Exif::from_path(Utf8Path::new(common::DATA_MKV_WITH_DATE)).unwrap();
@@ -231,7 +231,7 @@ fn from_path_jpeg_without_model_returns_none() {
     assert!(exif.make().is_none());
 }
 
-/// JPEG 含 GPS 时间字段 → `gps_utc()` 解析到 2023-06-15T10:30:00Z（spec §3/§6）。
+/// JPEG 含 GPS 时间字段 → `gps_utc()` 解析到 2023-06-15T10:30:00Z。
 #[test]
 fn from_path_reads_jpeg_with_gps_utc() {
     let exif = Exif::from_path(Utf8Path::new(common::DATA_JPEG_WITH_GPS)).unwrap();

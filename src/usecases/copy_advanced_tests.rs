@@ -335,7 +335,6 @@ mod test_advanced {
         );
     }
 
-    // 3.1 archive_template：自定义模板 {year}/{month}/{day} 实际写到正确子目录
     #[test]
     fn copy_with_custom_archive_template_uses_day() {
         let src = tempdir().unwrap();
@@ -363,7 +362,6 @@ mod test_advanced {
         assert!(expected.exists(), "expected file at {expected:?}");
     }
 
-    // 3.2 report：dry-run 后报告文件存在且可解析
     #[test]
     fn copy_with_report_path_creates_valid_json() {
         let src = tempdir().unwrap();
@@ -388,7 +386,6 @@ mod test_advanced {
         assert!(parsed["scanned"].as_u64().unwrap() >= 1);
     }
 
-    // 3.2 report：空 source 时报告仍写出
     #[test]
     fn copy_empty_source_with_report_writes_zero_counts() {
         let src = tempdir().unwrap();

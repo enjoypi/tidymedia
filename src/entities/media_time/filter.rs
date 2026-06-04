@@ -19,11 +19,11 @@ const FUTURE_TOLERANCE_SECS: i64 = 86_400;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Validity {
     Valid,
-    /// 保留候选但应降低置信度（spec §5.3）。
+    /// 保留候选但应降低置信度（1995 前）。
     LowConfidencePre1995,
-    /// 剔除：QuickTime 1904 占位（spec §5.1）。
+    /// 剔除：QuickTime 1904 占位。
     RejectEpoch1904,
-    /// 剔除：未来时间（spec §5.2）。
+    /// 剔除：未来时间。
     RejectFuture,
 }
 
@@ -61,7 +61,6 @@ mod tests {
 
     #[test]
     fn classify_epoch_1904_rejected() {
-        // spec §5.1
         assert_eq!(
             classify(quicktime_epoch(), fixed_now()),
             Validity::RejectEpoch1904
@@ -70,7 +69,6 @@ mod tests {
 
     #[test]
     fn classify_future_beyond_one_day_rejected() {
-        // spec §5.2
         let future = fixed_now() + chrono::TimeDelta::seconds(FUTURE_TOLERANCE_SECS + 1);
         assert_eq!(classify(future, fixed_now()), Validity::RejectFuture);
     }
@@ -84,7 +82,6 @@ mod tests {
 
     #[test]
     fn classify_pre_1995_low_confidence() {
-        // spec §5.3
         let pre = Utc.with_ymd_and_hms(1980, 1, 1, 0, 0, 0).unwrap();
         assert_eq!(classify(pre, fixed_now()), Validity::LowConfidencePre1995);
     }

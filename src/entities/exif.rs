@@ -33,7 +33,7 @@ const MIME_SNIFF_BYTES: usize = 256;
 /// 容器内自带时间字段。文件系统 mtime / btime 不在此结构体里——
 /// Clean Architecture 的边界让 Exif 只持有 EXIF/视频容器数据；
 /// 文件系统时间由 `entities::media_time::fs_time` 直接从 `fs::Metadata` 取。
-/// spec §5.4：EXIF `ModifyDate` 故意不解析，避免编辑/导出时间污染判定。
+/// EXIF `ModifyDate` 故意不解析，避免编辑/导出时间污染判定。
 #[derive(Clone, Debug, Default)]
 pub struct Exif {
     mime_type: String,
@@ -46,7 +46,7 @@ pub struct Exif {
     // 内部合并到 TrackInfoTag::CreateDate，因此这里只读一个字段即可。
     qt_create_date: u64,
 
-    // spec §3/§6：EXIF GPS 子 IFD 内的 GPSDateStamp + GPSTimeStamp 合成 UTC 时间，
+    // EXIF GPS 子 IFD 内的 GPSDateStamp + GPSTimeStamp 合成 UTC 时间，
     // 用于 resolve 时与 P0 候选做交叉校验（差值 > 24h 时产生 GpsOver24h 冲突）。
     gps_utc: Option<DateTime<Utc>>,
 
@@ -118,14 +118,14 @@ impl Exif {
         self.qt_create_date
     }
 
-    /// spec §3/§6：GPS UTC 时间（由 `GPSDateStamp` + `GPSTimeStamp` 合成）。
+    /// GPS UTC 时间（由 `GPSDateStamp` + `GPSTimeStamp` 合成）。
     /// 仅图片 EXIF 含 GPS 子 IFD 时有值；视频容器不提供。
     pub fn gps_utc(&self) -> Option<DateTime<Utc>> {
         self.gps_utc
     }
 
     /// 当前 MIME 是否为 Matroska/WebM 容器（MKV/WEBM），用于区分
-    /// `Source::MkvDateUtc` vs `Source::QuickTimeCreationDate`（spec §3 P0）。
+    /// `Source::MkvDateUtc` vs `Source::QuickTimeCreationDate`。
     pub fn is_mkv_container(&self) -> bool {
         self.mime_type.starts_with("video/x-matroska") || self.mime_type.starts_with("video/webm")
     }
@@ -193,9 +193,9 @@ fn populate_image_dates(reader: Box<dyn MediaReader>, exif: &mut Exif, local_off
     if let Some(v) = parsed.get(ExifTag::CreateDate) {
         exif.create_date = entry_value_to_epoch(v, local_offset);
     }
-    // spec §3/§6：GPSDateStamp + GPSTimeStamp 合成 GPS UTC 作校验锚点。
+    // GPSDateStamp + GPSTimeStamp 合成 GPS UTC 作校验锚点。
     exif.gps_utc = parse_gps_utc(&parsed);
-    // spec §5.4：ExifTag::ModifyDate 故意不读，避免被编辑/导出时间污染判定。
+    // ExifTag::ModifyDate 故意不读，避免被编辑/导出时间污染判定。
     // Make / Model：仅在 EXIF 存在时读取；用于 archive_template 占位符。
     exif.make = parsed
         .get(ExifTag::Make)
@@ -205,9 +205,9 @@ fn populate_image_dates(reader: Box<dyn MediaReader>, exif: &mut Exif, local_off
         .and_then(|v| v.as_str().map(str::to_owned));
 }
 
-/// spec §3/§6：从已解析的 EXIF 读 `GPSDateStamp`（文本 "YYYY:MM:DD"）和
+/// 从已解析的 EXIF 读 `GPSDateStamp`（文本 "YYYY:MM:DD"）和
 /// `GPSTimeStamp`（3 元素 `URationalArray`：[时, 分, 秒]），合成 GPS UTC。
-/// GPS 时间永远是 UTC（spec §四）。任一字段缺失或格式非法均返回 None。
+/// GPS 时间永远是 UTC。任一字段缺失或格式非法均返回 None。
 ///
 /// nom-exif 把 GPS 子 IFD 条目按 IFD 索引 ≥ 2 存入 `Exif`，无法用 `get()`
 /// 直接读；改用 `iter()` 遍历所有 IFD 条目按 tag code 匹配。

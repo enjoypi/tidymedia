@@ -392,5 +392,4 @@ mod test_io {
         .unwrap_err();
         let _ = err;
     }
-    // do_copy_propagates_* / include_non_media / archive_template / report 测试已外迁到 copy_advanced_tests.rs。
 }

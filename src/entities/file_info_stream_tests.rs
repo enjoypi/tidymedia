@@ -221,7 +221,7 @@ fn info_open_propagates_reader_error_from_fast_hash() {
     assert_eq!(err.kind(), io::ErrorKind::Interrupted);
 }
 
-/// spec §6：mtime 比 P0 早 > 30 天时 `create_time` 应发出 tracing warn 冲突告警。
+/// mtime 比 P0 早 > 30 天时 `create_time` 应发出 tracing warn 冲突告警。
 ///
 /// 场景：给文件设置 mtime=2022-01-01，EXIF `DateTimeOriginal`=2024-01-01。
 /// resolve 发现差距 > 30 天，push `MtimeMuchEarlierThanP0` 冲突，
@@ -294,7 +294,7 @@ fn create_time_emits_warn_when_mtime_much_earlier_than_p0() {
     );
 }
 
-/// spec §6：mtime 与 P0 差距小于阈值时不产生冲突告警。
+/// mtime 与 P0 差距小于阈值时不产生冲突告警。
 #[test]
 fn create_time_no_warn_when_mtime_close_to_p0() {
     use std::sync::atomic::{AtomicBool, Ordering};

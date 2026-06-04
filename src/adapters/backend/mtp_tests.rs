@@ -465,8 +465,6 @@ fn mtp_target_path_returns_inner_path() {
     assert_eq!(t.path().as_str(), "DCIM/photo.jpg");
 }
 
-// ===== rename（default impl: copy_file + remove_file）=====
-
 #[test]
 fn rename_default_moves_file_via_copy_remove() {
     let client = fake_client();

@@ -17,8 +17,6 @@ fn epoch(s: &str) -> i64 {
     chrono::DateTime::parse_from_rfc3339(s).unwrap().timestamp()
 }
 
-// ─── IMG_ / DSC_ / VID_ ───────────────────────────────────────────────────
-
 #[rstest]
 #[case::img_basic(
     "IMG_20240501_143000.jpg",
@@ -84,8 +82,6 @@ fn camera_phone_rejects(#[case] name: &str) {
     assert!(parse_filename(name, utc_offset()).is_none());
 }
 
-// ─── PXL_ (Google Pixel) ──────────────────────────────────────────────────
-
 #[rstest]
 #[case::pxl_basic("PXL_20230615_103045123.jpg", epoch("2023-06-15T10:30:45Z"))]
 #[case::pxl_mp("PXL_20230615_103045123.MP.jpg", epoch("2023-06-15T10:30:45Z"))]
@@ -107,8 +103,6 @@ fn pixel_rejects(#[case] name: &str) {
     assert!(parse_filename(name, utc_offset()).is_none());
 }
 
-// ─── Screenshot_ ──────────────────────────────────────────────────────────
-
 #[rstest]
 #[case::screenshot_basic("Screenshot_2024-05-17-12-00-00.jpg", epoch("2024-05-17T12:00:00Z"))]
 #[case::screenshot_no_ext("Screenshot_2024-05-17-12-00-00", epoch("2024-05-17T12:00:00Z"))]
@@ -126,8 +120,6 @@ fn screenshot_parsed(#[case] name: &str, #[case] expected_ts: i64) {
 fn screenshot_rejects(#[case] name: &str) {
     assert!(parse_filename(name, utc_offset()).is_none());
 }
-
-// ─── mmexport (WeChat) ────────────────────────────────────────────────────
 
 #[rstest]
 #[case::mmexport_basic("mmexport1686824625000.jpg", 1_686_824_625)]
@@ -150,8 +142,6 @@ fn mmexport_parsed(#[case] name: &str, #[case] expected_ts: i64) {
 fn mmexport_rejects(#[case] name: &str) {
     assert!(parse_filename(name, utc_offset()).is_none());
 }
-
-// ─── WhatsApp ─────────────────────────────────────────────────────────────
 
 #[rstest]
 #[case::wa_image(
@@ -192,8 +182,6 @@ fn whatsapp_rejects(#[case] name: &str) {
     assert!(parse_filename(name, utc_offset()).is_none());
 }
 
-// ─── Bare YYYYMMDD_HHMMSS ─────────────────────────────────────────────────
-
 #[rstest]
 #[case::bare_basic("20230615_103000.jpg", epoch("2023-06-15T10:30:00Z"))]
 #[case::bare_no_ext("20230615_103000", epoch("2023-06-15T10:30:00Z"))]
@@ -221,8 +209,6 @@ fn bare_yyyymmdd_rejects_or_routes_elsewhere(#[case] name: &str) {
     }
 }
 
-// ─── Unix millis (pure 13-digit) ─────────────────────────────────────────
-
 #[rstest]
 #[case::millis_basic("1715961600000.jpg", 1_715_961_600)]
 #[case::millis_no_ext("1715961600000", 1_715_961_600)]
@@ -245,8 +231,6 @@ fn unix_millis_rejects(#[case] name: &str) {
     assert!(parse_filename(name, utc_offset()).is_none());
 }
 
-// ─── No match ─────────────────────────────────────────────────────────────
-
 #[test]
 fn no_known_pattern_returns_none() {
     assert!(parse_filename("random.jpg", utc_offset()).is_none());
@@ -257,8 +241,6 @@ fn empty_name_returns_none() {
     assert!(parse_filename("", utc_offset()).is_none());
 }
 
-// ─── stem_without_ext ─────────────────────────────────────────────────────
-
 #[test]
 fn stem_strips_last_extension_only() {
     // PXL with .MP.jpg — stem_without_ext strips only .jpg, then try_pixel strips .MP via prefix-then-15chars
@@ -266,8 +248,6 @@ fn stem_strips_last_extension_only() {
     let stem = super::stem_without_ext("PXL_20230615_103045123.MP.jpg");
     assert_eq!(stem, "PXL_20230615_103045123.MP");
 }
-
-// ─── Regression: east8 offset applied to new formats ────────────────────
 
 #[test]
 fn vid_east8_offset_applied() {

@@ -17,7 +17,6 @@ android {
         versionCode = 1
         versionName = "0.1.0"
 
-        // 只构 aarch64（现代 Android 设备主流）；i686/x86_64 模拟器需要再加。
         ndk {
             abiFilters += listOf("arm64-v8a")
         }
@@ -55,7 +54,6 @@ android {
     }
 }
 
-// Kotlin 2.0+ 推荐：用 kotlin.compilerOptions 替代旧 android.kotlinOptions
 kotlin {
     compilerOptions {
         jvmTarget.set(JvmTarget.JVM_17)
@@ -63,7 +61,6 @@ kotlin {
 }
 
 dependencies {
-    // Compose BOM 控版本一致性
     implementation(platform("androidx.compose:compose-bom:2024.10.00"))
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.ui:ui")

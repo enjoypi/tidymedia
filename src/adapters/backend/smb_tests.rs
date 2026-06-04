@@ -258,10 +258,6 @@ fn copy_file_propagates_read_error() {
     assert_eq!(err.kind(), io::ErrorKind::Interrupted);
 }
 
-// 内部 helpers / 适配器测试已外迁到 smb_internals_tests.rs（保持本文件 < 512 行，P0 §6）。
-
-// ===== rename（default impl: copy_file + remove_file）=====
-
 #[test]
 fn rename_default_moves_file_via_copy_remove() {
     let client = fake_client();

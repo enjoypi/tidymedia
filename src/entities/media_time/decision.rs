@@ -21,7 +21,7 @@ pub struct MediaTimeDecision {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Confidence {
     High,
-    /// spec §5.3：1995 之前的时间被采纳但应人工复核。
+    /// 1995 之前的时间被采纳但应人工复核。
     Low,
 }
 
@@ -35,10 +35,10 @@ pub struct Conflict {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ConflictKind {
-    /// spec §6：P0 vs GPS UTC 差值 > 24h
+    /// P0 vs GPS UTC 差值 > 24h
     GpsOver24h,
-    /// spec §6：P0 vs 文件名解析差值 > 1d
+    /// P0 vs 文件名解析差值 > 1d
     FilenameOver1Day,
-    /// spec §6：mtime < P0 且差距较大，仅提示
+    /// mtime < P0 且差距较大，仅提示
     MtimeMuchEarlierThanP0,
 }

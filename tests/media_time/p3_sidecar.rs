@@ -1,9 +1,7 @@
-// spec §2.P3：旁路 sidecar — XMP 与 Google Takeout JSON。
-
 use tidymedia::media_time::Source;
 use tidymedia::sidecar::discover;
 
-/// spec §2.P3：XMP sidecar 中的 photoshop:DateCreated 被识别为 P3 候选。
+/// XMP sidecar 中的 photoshop:DateCreated 被识别为 P3 候选。
 #[test]
 fn xmp_photoshop_datecreated() {
     let dir = tempfile::tempdir().unwrap();
@@ -27,7 +25,7 @@ photoshop:DateCreated="2024-05-01T14:30:00+08:00"/>
     assert_eq!(cands[0].utc.timestamp(), 1_714_545_000);
 }
 
-/// spec §2.P3：Google Takeout 的 photoTakenTime.timestamp 被识别为 P3 候选。
+/// Google Takeout 的 photoTakenTime.timestamp 被识别为 P3 候选。
 #[test]
 fn google_takeout_json_phototakentime() {
     let dir = tempfile::tempdir().unwrap();
@@ -47,7 +45,7 @@ fn google_takeout_json_phototakentime() {
     assert_eq!(cands[0].utc.timestamp(), 1_714_576_200);
 }
 
-/// spec §2.P3：无 sidecar 时返回空。
+/// 无 sidecar 时返回空。
 #[test]
 fn no_sidecar_yields_empty() {
     let dir = tempfile::tempdir().unwrap();

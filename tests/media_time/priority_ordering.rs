@@ -1,10 +1,8 @@
-// spec §三：优先级表 + 同优先级取较早。
-
 use tidymedia::media_time::{Priority, Source, epoch_to_candidate, resolve};
 
 use super::common::{fixed_now, utc_offset};
 
-/// spec §3：P0 > P1 > P2 > P3 > P4。
+/// P0 > P1 > P2 > P3 > P4。
 #[test]
 fn priority_descends_p0_to_p4() {
     let cs = vec![
@@ -37,7 +35,7 @@ fn priority_descends_p0_to_p4() {
     assert_eq!(d.source, Source::ExifDateTimeOriginal);
 }
 
-/// spec §3："同优先级冲突时取较早的值（更接近原始拍摄）"。
+/// 同优先级冲突时取较早的值（更接近原始拍摄）。
 #[test]
 fn same_priority_takes_earlier() {
     let later = epoch_to_candidate(
@@ -59,7 +57,7 @@ fn same_priority_takes_earlier() {
     assert_eq!(d.utc.timestamp(), 1_700_000_100);
 }
 
-/// spec §3：候选全空 → resolve 返回 None。
+/// 候选全空 → resolve 返回 None。
 #[test]
 fn no_candidates_resolves_to_none() {
     assert!(resolve(vec![], None, fixed_now()).is_none());

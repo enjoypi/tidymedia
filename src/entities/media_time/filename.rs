@@ -1,7 +1,6 @@
-// docs/media-time-detection.md §二.P2：文件名启发式。
-// 支持多类常见模板；未匹配返回 None。
+// 文件名启发式。支持多类常见模板；未匹配返回 None。
 // 文件名提取的时间通常无时区，调用方传入的 default_offset 当本地时区参与解释，
-// 并把 `inferred_offset` 标为 true（spec §四）。
+// 并把 `inferred_offset` 标为 true。
 
 use chrono::DateTime;
 use chrono::FixedOffset;

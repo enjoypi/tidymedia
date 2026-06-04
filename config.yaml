@@ -1,4 +1,3 @@
-# tidymedia 运行配置
 # 加载顺序：默认值 -> 当前文件 -> 环境变量覆盖
 # Secret 通过 ${VAR:-default} 语法从环境变量加载；本项目目前无 secret
 copy:

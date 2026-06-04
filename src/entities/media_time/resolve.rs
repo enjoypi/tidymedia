@@ -16,7 +16,7 @@ use super::filter::Validity;
 use super::priority::Priority;
 use super::priority::Source;
 
-/// spec §6："mtime < P0 但差距较大" 中的"较大"采用 30 天，超过即作为提示性冲突。
+/// "mtime < P0 但差距较大" 中的"较大"采用 30 天，超过即作为提示性冲突。
 const MTIME_VS_P0_HINT_SECS: i64 = 30 * 86_400;
 
 #[must_use]
@@ -102,7 +102,7 @@ fn detect_conflicts(
         }
         if cand.source == Source::FsMtime {
             let diff = (best.utc - cand.utc).num_seconds();
-            // spec §6："mtime < P0 但差距较大" 仅提示。这里要求 mtime 严格早于 best。
+            // "mtime < P0 但差距较大" 仅提示。这里要求 mtime 严格早于 best。
             if diff > MTIME_VS_P0_HINT_SECS {
                 conflicts.push(Conflict {
                     kind: ConflictKind::MtimeMuchEarlierThanP0,
@@ -306,13 +306,13 @@ mod tests {
             now(),
         )
         .unwrap();
-        // mtime > p0 → 不是"假象"模式（spec §6 only mtime < P0 提示）
+        // mtime > p0 → 不是"假象"模式（仅 mtime < P0 提示）
         assert!(d.conflicts.is_empty());
     }
 
     #[test]
     fn non_p0_best_skips_conflict_detection() {
-        // spec §6 的交叉校验仅针对 P0 best
+        // 交叉校验仅针对 P0 best
         let d = resolve(
             vec![
                 cand(Source::FilenamePhone, 1_700_000_100),

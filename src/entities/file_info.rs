@@ -206,7 +206,7 @@ impl Info {
         // resolve 返回 None（候选全部被过滤）与"低于阈值"走同一条 fallback 路径，
         // 避免在 create_time 里多一条不可稳定触发的分支。
         let decision = media_time::resolve(candidates, gps_utc, Utc::now());
-        // spec §6：冲突优先告警，不静默修正。
+        // 冲突优先告警，不静默修正。
         if let Some(ref d) = decision
             && !d.conflicts.is_empty()
         {
@@ -251,7 +251,7 @@ fn ensure_hashable(meta: &crate::entities::backend::Metadata, loc: &Location) ->
 }
 
 /// fs 兜底：取 mtime 与 btime 的较早值；任一缺失就用另一方；都缺失退到 `UNIX_EPOCH`。
-/// 这是 P4 内部决策（spec §2.P4：mtime 兜底）——选较早值是因为 btime 在某些
+/// 这是 P4 内部决策（mtime 兜底）——选较早值是因为 btime 在某些
 /// 文件系统上 == ctime，受 inode 变更影响，比 mtime 更不稳定。
 fn pick_fs_fallback(modified: Option<SystemTime>, created: Option<SystemTime>) -> SystemTime {
     match (modified, created) {

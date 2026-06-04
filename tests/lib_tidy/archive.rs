@@ -8,8 +8,6 @@ use tidymedia::{Backend, Commands, FakeBackend, tidy, tidy_with};
 
 use super::{DATA_DIR, FakeBackendFactory, adb_loc, local, smb_loc};
 
-// ===== dispatch.rs 覆盖率补充：--report / --archive-template 路径 =====
-
 // Find + report：触发 dispatch.rs L56 `if let Some(path)` True 分支（find report 写盘）。
 #[test]
 fn tidy_dispatches_find_with_report_writes_json() {
@@ -136,8 +134,6 @@ fn tidy_dispatches_copy_with_archive_template_writes_year_month_day_layout() {
         day_dir.display()
     );
 }
-
-// ===== 阶段 5：跨 backend e2e — ADB→SMB =====
 
 /// ADB source → SMB output：手机照片直接归档到 NAS，全程走 `FakeBackend` 不需真实设备/服务器。
 #[test]

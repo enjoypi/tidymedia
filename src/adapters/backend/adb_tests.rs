@@ -370,10 +370,6 @@ fn open_write_no_mkparent_when_path_at_root() {
     assert_eq!(meta.kind, EntryKind::File);
 }
 
-// 内部 helpers / 适配器测试已外迁到 adb_internals_tests.rs（保持本文件 < 512 行，P0 §6）。
-
-// ===== rename（default impl: copy_file + remove_file）=====
-
 #[test]
 fn rename_default_moves_file_via_copy_remove() {
     let client = fake_client();

@@ -36,7 +36,6 @@ use super::exif::Exif;
 ///
 /// 视频容器区分：MKV/WebM 的 `DateUTC` 标 `Source::MkvDateUtc`（P0）；
 /// QuickTime/MP4/MOV 的 `creationdate` 标 `Source::QuickTimeCreationDate`（P0）。
-/// spec §3 P0 来源分流。
 ///
 /// 仅 crate 内部使用——Exif 是 pub(crate) 类型，集成测试请用 `epoch_to_candidate`
 /// 直接构造或经由 `filename::parse_filename` / `adapters::sidecar::discover` 等公开入口。
@@ -181,7 +180,7 @@ mod tests {
         assert_eq!(v[0].utc.timestamp(), 100);
     }
 
-    /// MKV MIME → `qt_create_date` 候选用 `Source::MkvDateUtc`，offset=None，inferred=false（spec §3 P0）。
+    /// MKV MIME → `qt_create_date` 候选用 `Source::MkvDateUtc`，offset=None，inferred=false。
     #[test]
     fn mkv_mime_produces_mkv_date_utc_source() {
         let exif = Exif::with_mime("video/x-matroska").with_qt_create_date(1_686_825_000);

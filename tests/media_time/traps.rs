@@ -1,11 +1,9 @@
-// spec §五：常见陷阱。
-
 use tidymedia::media_time::filter::{Validity, classify, quicktime_epoch};
 use tidymedia::media_time::{Confidence, Priority, Source, epoch_to_candidate, resolve};
 
 use super::common::{fixed_now, ts, utc_offset};
 
-/// spec §5.1：MP4 未写 `creation_time` 时 nom-exif 返回 1904-01-01，必须剔除。
+/// MP4 未写 `creation_time` 时 nom-exif 返回 1904-01-01，必须剔除。
 #[test]
 fn epoch_1904_rejected() {
     assert_eq!(
@@ -14,11 +12,9 @@ fn epoch_1904_rejected() {
     );
 }
 
-/// spec §5.1：1904 候选与有效 P0 同时存在 → 1904 被剔除，P0 胜出。
+/// 1904 候选与有效 P0 同时存在 → 1904 被剔除，P0 胜出。
 #[test]
 fn epoch_1904_filtered_during_resolve() {
-    use chrono::DateTime;
-
     let bogus = epoch_to_candidate(
         quicktime_epoch().timestamp().max(0).cast_unsigned(),
         Source::QuickTimeCreateDate,
@@ -45,17 +41,16 @@ fn epoch_1904_filtered_during_resolve() {
     .unwrap();
     let d = resolve(vec![cand, good], None, fixed_now()).unwrap();
     assert_eq!(d.source, Source::ExifDateTimeOriginal);
-    let _ = DateTime::<chrono::Utc>::UNIX_EPOCH; // sanity import use
 }
 
-/// spec §5.2：相机日期没设对 → 2099 等未来年份必须剔除。
+/// 相机日期没设对 → 2099 等未来年份必须剔除。
 #[test]
 fn future_above_now_plus_one_day_rejected() {
     let future = ts(fixed_now().timestamp() + 100 * 86_400);
     assert_eq!(classify(future, fixed_now()), Validity::RejectFuture);
 }
 
-/// spec §5.2：未来 P0 候选被剔除，回退到合法的 P1。
+/// 未来 P0 候选被剔除，回退到合法的 P1。
 #[test]
 fn future_p0_falls_to_valid_p1() {
     let future = (fixed_now().timestamp() + 100 * 86_400).cast_unsigned();
@@ -65,7 +60,7 @@ fn future_p0_falls_to_valid_p1() {
     assert_eq!(d.priority, Priority::P1);
 }
 
-/// spec §5.3："1995 之前的数码照片几乎不可能存在，可作为软阈值" — 保留但降置信。
+/// "1995 之前的数码照片几乎不可能存在，可作为软阈值" — 保留但降置信。
 #[test]
 fn pre_1995_kept_but_low_confidence() {
     // 1980-01-01T00:00:00Z = 315532800
@@ -74,7 +69,7 @@ fn pre_1995_kept_but_low_confidence() {
     assert_eq!(d.confidence, Confidence::Low);
 }
 
-/// spec §5.4：P0 缺失时**不**回退到 ModifyDate（只有 `Source::Exif`* 与 `QuickTime`*
+/// P0 缺失时**不**回退到 ModifyDate（只有 `Source::Exif`* 与 `QuickTime`*
 /// 是允许的 P0/P1，ModifyDate 不在枚举里）。这里通过缺席验证：
 /// Source 枚举里没有 `ExifModifyDate` 变体，因此 `ModifyDate` 物理上无法成为候选。
 #[test]
@@ -98,12 +93,12 @@ fn modifydate_has_no_source_variant() {
         let name = format!("{s:?}");
         assert!(
             !name.contains("Modify"),
-            "Source {name} 含 Modify — spec §5.4 不允许"
+            "Source {name} 含 Modify — ModifyDate 不允许进入候选"
         );
     }
 }
 
-/// spec §5.6 截图无 EXIF：判定退到文件名启发式 P2。
+/// 截图无 EXIF：判定退到文件名启发式 P2。
 #[test]
 fn screenshot_without_exif_falls_to_filename_p2() {
     use tidymedia::media_time::filename::parse_filename;
@@ -113,7 +108,7 @@ fn screenshot_without_exif_falls_to_filename_p2() {
     assert_eq!(d.source, Source::FilenameScreenshot);
 }
 
-/// spec §5.7 IM 压缩剥离 EXIF：13 位毫秒文件名是唯一线索 → P2。
+/// IM 压缩剥离 EXIF：13 位毫秒文件名是唯一线索 → P2。
 #[test]
 fn im_stripped_exif_uses_filename_millis() {
     use tidymedia::media_time::filename::parse_filename;
@@ -123,7 +118,7 @@ fn im_stripped_exif_uses_filename_millis() {
     assert_eq!(d.source, Source::FilenameUnixMillis);
 }
 
-/// spec §5.10：mtime 不能被推到 P0。同时存在 mtime + P0 EXIF 时 P0 胜出。
+/// mtime 不能被推到 P0。同时存在 mtime + P0 EXIF 时 P0 胜出。
 #[test]
 fn mtime_never_promoted_to_p0() {
     let mtime = epoch_to_candidate(1_700_000_500, Source::FsMtime, None, false).unwrap();

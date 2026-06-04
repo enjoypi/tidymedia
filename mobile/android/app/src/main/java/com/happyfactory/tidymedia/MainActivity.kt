@@ -23,8 +23,6 @@ import uniffi.tidymedia.TidyStats
 import uniffi.tidymedia.tidyDryRun
 import uniffi.tidymedia.tidymediaVersion
 
-// 最小 Compose 壳：单页面，调 Rust core 跑 dry-run 并显示结果。
-// SAF 实际接入留到 P1.5 —— 现在固定扫 DCIM，验证 JNI 链路即可。
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)

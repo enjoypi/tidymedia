@@ -3,8 +3,6 @@ name = "tidymedia"
 version = "1.1.4"
 edition = "2024"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
 [features]
 default = []
 # 启用真实 SMB 后端（pavao + libsmbclient C 库）。
@@ -25,7 +23,6 @@ adb-backend = ["dep:adb_client"]
 # 生成 Kotlin 绑定，见 `mobile/build-android.sh`。
 android-app = ["dep:uniffi"]
 
-# Android 端把 Rust 编成 cdylib（被 JVM dlopen），同时保留 rlib 让桌面测试链得上。
 [lib]
 crate-type = ["cdylib", "rlib"]
 
