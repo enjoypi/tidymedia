@@ -167,10 +167,13 @@ mod test_advanced {
         assert!(res.is_err(), "expected copy failure but got {res:?}");
     }
 
-    // copy 成功 + remove=true，但 src 父目录 read-only → remove 失败。
+    // local→local + remove=true 命中 fast-path 走 fs::rename：src 父目录 chmod 555 后
+    // fs::rename 失去 dentry write 权限直接失败，Err 传播。覆盖 fast-path if-branch 的
+    // rename Err 路径（替代原"stream_copy 后 remove fail"语义——fast-path 下 rename 是
+    // 单步原子操作，没有"copy 成功但 remove 失败"中间态）。
     #[test]
     #[cfg(unix)]
-    fn do_copy_remove_after_stream_copy_propagates_error() {
+    fn do_copy_move_fails_when_src_parent_locked() {
         use std::os::unix::fs::PermissionsExt;
         let root = tempdir().unwrap();
         let src_parent = root.path().join("locked_src");
@@ -197,39 +200,7 @@ mod test_advanced {
         perms.set_mode(original_mode);
         fs::set_permissions(&src_parent, perms).unwrap();
 
-        assert!(
-            res.is_err(),
-            "expected remove failure after successful stream_copy"
-        );
-    }
-
-    // remove=true + source unreadable → move 失败。
-    #[test]
-    #[cfg(unix)]
-    fn do_copy_file_move_fails_when_source_unreadable() {
-        use std::os::unix::fs::PermissionsExt;
-        let src = tempdir().unwrap();
-        let info = make_media_info(src.path(), "photo.png");
-
-        let mut perms = fs::metadata(info.full_path.as_str()).unwrap().permissions();
-        let original_mode = perms.mode();
-        perms.set_mode(0o000);
-        fs::set_permissions(info.full_path.as_str(), perms.clone()).unwrap();
-
-        let out = tempdir().unwrap();
-        let mut idx = crate::entities::file_index::Index::new();
-        let opts = CopyOpts {
-            dry_run: false,
-            remove: true,
-            include_non_media: false,
-            template: DEFAULT_TMPL,
-        };
-        let res = do_copy(&info, &local_loc(out.path()), &local_arc(), &mut idx, &opts);
-
-        perms.set_mode(original_mode);
-        fs::set_permissions(info.full_path.as_str(), perms).unwrap();
-
-        assert!(res.is_err(), "expected move failure but got {res:?}");
+        assert!(res.is_err(), "expected rename failure but got {res:?}");
     }
 
     fn walk_files(root: &Path) -> Vec<std::path::PathBuf> {

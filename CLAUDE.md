@@ -23,6 +23,9 @@
 - **`--branch` multi-binary instance 陷阱**：lib unit + 集成 binary 各自 codegen 热点 fn 副本，每副本独立计数器；某 binary 未触发即报 instance miss。可行：①重构成 `?`（算 region 不算 branch）；②函数级 `coverage(off)`（用于 hash / file_info / copy / exif 等 hot fn，具体位点 `rg "coverage\(off\)" src/`）
 - 改 `Cargo.toml` / `coverage` 属性后必跑 `cargo +nightly llvm-cov clean --workspace`
 - `FakeBackend::inject_reader_error`：`open_read` 成功但 reader `read` 立即 Err，覆盖 stream hash / `sniff_mime` 等 `?` Err 分支
+- **fast-path 命中反向证据**：`fs::rename` / `fs::copy` 保留 src mtime，`std::io::copy` 不保留；用 `filetime::set_file_mtime` 钉 src 后 move 断言 dst mtime 不变即证明 fast-path 命中（参考 `tests/lib_tidy/move_idempotency.rs::move_local_fastpath_dst_mtime_matches_src`）。fast-path 走 `fs::rename` 不读源 → "chmod 000 src 文件" 类失败测试失效，改为 chmod 555 **src 父目录**（rename 需父目录 write 权限）
+- **Windows 同卷边界本地测**（`tests/lib_tidy/windows_same_volume.rs`，`#![cfg(windows)]`）：`Command::new("subst").args([letter, tempdir])` + `Command::new("cmd").args(["/C","mklink","/J",link,target])` 构造「不同前缀同卷」，**均不要 admin**；subst 盘字全局共享 → `.config/nextest.toml` 加 `[test-groups.windows-volume-mut] max-threads=1` + `filter='test(/windows_same_volume::/)'` 强制串行；释放盘字用 RAII Drop guard `subst Y: /D`
+- **`--all-features` 下 `dispatch.rs` 的 `usecases::copy(..)?` Err arm 覆盖**：现有 `tidy_rejects_*` 测试用 `#[cfg(not(feature = "smb-backend"))]` gate，启用全部 feature 跑覆盖率时这些测试不编译 → `?` Err arm miss。用 output 父路径占成普通文件触发 `mkdir_p` Err 兜底（参考 `dispatch_and_cli.rs::tidy_copy_propagates_mkdir_error_when_output_parent_is_file`）
 
 ## Fixture
 - `tests/data/` 下文件 mtime 每次 `git checkout` 重置；时间相关测试 **MUST** 用 `filetime::set_file_mtime` 固定（封装：`entities/test_common::copy_png_to`，固定到 `FIXED_MEDIA_MTIME` = 2024-01-01 12:00:00 UTC）
@@ -114,3 +117,4 @@
 - **重复组容器 MUST `Vec<DuplicateGroup { size, paths }>`**，MUST NOT `BTreeMap<size, _>`：size 作唯一键会让同 size 不同 content 的两组互相覆盖（`file_index.rs::filter_and_sort`）
 - **路径前缀匹配 MUST 校验分隔符边界**：`"/photos_backup/x".starts_with("/photos")` 会误判为 output 内须保留——见 `find.rs::under_prefix` 已封装
 - **`ReportSink` trait 用 `enum Report<'a>` + 单方法 `write(&Report<'_>)`** 收敛多报告类型；对象安全 + 新增 report 变体不强制升级既有 impl（替代旧 `write_copy` / `write_find` 双方法 boilerplate）
+- **同盘 move fast-path**：`do_copy` 在 `opts.remove && src.backend().scheme() == "local" && output_backend.scheme() == "local"` 时走 `Backend::rename`（`LocalBackend::rename` 内部 `fs::rename` 同卷原子 + `CrossesDevices` fallback 到 `fs::copy + remove`）。**MUST NOT** 在 Rust 层用 `metadata().dev()` / `GetVolumeInformationByHandleW` 重复判同卷——OS 内核是 same-volume 判定唯一权威源，能识别 subst/junction/mount point/bind mount/btrfs subvol 等所有边界，自己再判必漏

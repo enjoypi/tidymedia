@@ -1,6 +1,8 @@
 //! Move 故障恢复语义。`do_copy` 在 `OpenWrite` / `RemoveFile` 失败时 src 必须保留。
-//! 业务路径不调 `Backend::rename`，无论同 backend 还是跨 backend，都走
-//! `stream_copy + remove_file`；这里覆盖各阶段失败的"src 不丢"契约，
+//! local→local move 命中 fast-path 走 `Backend::rename`（`fs::rename` 同卷原子，
+//! 跨卷 fallback 到 copy+remove）；跨 backend（含本文件 `FakeBackend` 注入测试）仍走
+//! `stream_copy + remove_file`。本文件用 `FakeBackend` 跨 backend 测试，
+//! 不命中 fast-path，覆盖 stream 路径各阶段失败的"src 不丢"契约，
 //! 对应验收手册 §B3「中断处理」流程的可观察行为。
 
 use std::sync::Arc;

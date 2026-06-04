@@ -73,6 +73,66 @@ fn move_dry_run_does_not_touch_src_or_output() {
     );
 }
 
+// fast-path 命中：local→local + remove → src 删 / dst 落归档桶 / report.copied=1。
+#[test]
+fn move_local_fastpath_src_deleted_dst_exists() {
+    let src_dir = tempdir().unwrap();
+    let out_dir = tempdir().unwrap();
+    let src_file = copy_fixture(src_dir.path(), "sample-with-offset.jpg");
+
+    let factory = FakeBackendFactory::new();
+    let r = tidy_with(&factory, move_cmd(src_dir.path(), out_dir.path(), false)).expect("move");
+    let CommandResult::Copy(report) = r else {
+        panic!("expected Copy report, got {r:?}");
+    };
+
+    assert_eq!(report.copied, 1, "fast-path move must copy 1: {report:?}");
+    assert!(!src_file.exists(), "src must be removed after move");
+    let archived = out_dir
+        .path()
+        .join("2024")
+        .join("05")
+        .join("sample-with-offset.jpg");
+    assert!(archived.exists(), "dst missing at {archived:?}");
+}
+
+// fast-path 走 fs::rename 不重写文件：dst mtime 必须等于 src 原 mtime
+// （若走 stream_copy 路径 dst mtime = now，这里反向证明 fast-path 命中）。
+#[test]
+fn move_local_fastpath_dst_mtime_matches_src() {
+    use std::time::SystemTime;
+
+    const PINNED_SECS: u64 = 1_704_067_200; // 2024-01-01 UTC
+
+    let src_dir = tempdir().unwrap();
+    let out_dir = tempdir().unwrap();
+    let src_file = copy_fixture(src_dir.path(), "sample-with-offset.jpg");
+
+    let pinned = filetime::FileTime::from_unix_time(PINNED_SECS.cast_signed(), 0);
+    filetime::set_file_mtime(&src_file, pinned).expect("set src mtime");
+
+    let factory = FakeBackendFactory::new();
+    tidy_with(&factory, move_cmd(src_dir.path(), out_dir.path(), false)).expect("move");
+
+    let archived = out_dir
+        .path()
+        .join("2024")
+        .join("05")
+        .join("sample-with-offset.jpg");
+    let dst_mtime = std::fs::metadata(&archived)
+        .expect("dst exists")
+        .modified()
+        .expect("mtime");
+    let dst_secs = dst_mtime
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .expect("mtime after epoch")
+        .as_secs();
+    assert_eq!(
+        dst_secs, PINNED_SECS,
+        "fast-path rename must preserve src mtime"
+    );
+}
+
 // dry-run 之后接真跑：dry-run 不影响后续真跑的归档结果。
 #[test]
 fn move_dry_run_then_real_run_completes() {

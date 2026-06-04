@@ -2,5 +2,13 @@
 slow-timeout = { period = "30s", terminate-after = 2 }
 failure-output = "immediate-final"
 
+# subst 盘字是全局资源，Windows same-volume 测试必须串行。
+[test-groups]
+windows-volume-mut = { max-threads = 1 }
+
+[[profile.default.overrides]]
+filter = 'test(/windows_same_volume::/)'
+test-group = 'windows-volume-mut'
+
 [profile.ci]
 fail-fast = false

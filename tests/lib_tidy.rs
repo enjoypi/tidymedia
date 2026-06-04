@@ -92,3 +92,6 @@ mod adb_fake_errors;
 
 #[path = "lib_tidy/windows_path.rs"]
 mod windows_path;
+
+#[path = "lib_tidy/windows_same_volume.rs"]
+mod windows_same_volume;

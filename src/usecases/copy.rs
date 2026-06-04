@@ -299,11 +299,20 @@ pub(crate) fn do_copy(
 
         output_backend.mkdir_p(&target_dir_loc)?;
 
-        // 跨 backend 也走 stream（mkparents=false 因为上面 mkdir_p 已经建好）。
-        // 同 backend 时与 backend.copy_file 等价；好处是 src/out 不同 backend 时直接复用。
-        stream_copy(src, &target_loc, output_backend.as_ref())?;
-        if opts.remove {
-            src.backend().remove_file(&src_loc)?;
+        if opts.remove && src.backend().scheme() == "local" && output_backend.scheme() == "local" {
+            // 同 LocalBackend + remove → 走 fs::rename fast-path：同卷 OS 原子完成，
+            // 跨卷由 LocalBackend::rename 内部 fallback 到 fs::copy + fs::remove_file。
+            // 不在此处用 dev() / GetVolumeInformationByHandleW 自己判同盘——OS 内核是
+            // same-volume 判定的唯一权威源（识别 subst / junction / mount point /
+            // bind mount / btrfs subvol 等所有边界），自己再判一遍既冗余又会漏边界。
+            // mkparents=false：上方 mkdir_p 已建好父目录。
+            src.backend().rename(&src_loc, &target_loc, false)?;
+        } else {
+            // 跨 backend 或 copy（remove=false）走 stream（mkparents=false 同上）。
+            stream_copy(src, &target_loc, output_backend.as_ref())?;
+            if opts.remove {
+                src.backend().remove_file(&src_loc)?;
+            }
         }
         println!("\"{}\"\t\"{}\"", src_display, target_loc.display());
 

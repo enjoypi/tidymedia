@@ -287,6 +287,27 @@ fn run_cli_find_subcommand_executes() {
     run_cli(["tidymedia", "find", DATA_DIR]).expect("find via run_cli should succeed");
 }
 
+// output 父路径被普通文件占住 → usecases::copy 内 mkdir_p Err，
+// 触发 dispatch_copy_or_move 内 `usecases::copy(..)?` 的 Err arm（line 101）。
+// 所有 feature 组合下都跑（不依赖 backend feature gate）。
+#[test]
+fn tidy_copy_propagates_mkdir_error_when_output_parent_is_file() {
+    let root = tempdir().unwrap();
+    let blocker = root.path().join("file_not_dir");
+    std::fs::write(&blocker, b"i am a file").unwrap();
+    let bad_out = blocker.join("sub");
+
+    let res = tidy(Commands::Copy {
+        dry_run: false,
+        include_non_media: false,
+        sources: vec![local(DATA_DIR)],
+        output: local(bad_out.to_str().unwrap()),
+        archive_template: None,
+        report: None,
+    });
+    assert!(res.is_err(), "mkdir_p must fail when parent is a file");
+}
+
 #[test]
 fn run_cli_help_exits_with_ok() {
     run_cli(["tidymedia", "--help"]).expect("help should return Ok");

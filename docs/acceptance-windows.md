@@ -15,7 +15,7 @@
 |---|---|---|
 | ADB 非流式：单文件全量 `Vec<u8>` 读入内存 | 4K/8K 视频（>2GB）会让进程内存爆 | 流程 A 先 `find` 看大文件分布，单独拉 Movies/ 不与图片混跑 |
 | ADB `timeout_secs` 当前是配置占位，不生效 | USB 抖动 / 设备睡眠会让进程无限挂起 | 进程明显无 I/O 后 Ctrl+C，幂等重跑 |
-| Move 不是 rename：所有 backend 上 move = stream copy + 删源 | 中断会留半文件在 OUT，源仍在 | 检查 OUT 半文件大小不等 → 删半文件 → 幂等重跑 |
+| Move 语义：local same-volume 走 `fs::rename`（原子，无半文件）；cross-volume / 远端（SMB/ADB/MTP）走 stream copy + 删源 | 跨卷或远端 backend 中断会留半文件在 OUT，源仍在；same-volume 不会 | 跨卷/远端：检查 OUT 半文件大小不等 → 删半文件 → 幂等重跑 |
 | CLI 无 `--jobs` flag | rayon 用 CPU 数并发，HDD 上反而抖 | I/O 抢占严重时 `start /low /b ...` 降优先级 |
 | `valid_date_time_secs` 默认 2000-01-01 | 90 年代老照片 EXIF 日期被丢弃 | `set TIDYMEDIA_VALID_DATE_TIME_SECS=0` 接受任意 EXIF |
 
@@ -179,10 +179,10 @@ explorer %OUT%\2018\12
 
 ### B0 选 OUT
 
-- 同盘（`SRC=D:\Photos`、`OUT=D:\Photos-tidied`）：不需要额外空间（理论上），但**move 不是 rename**，依然走 copy + delete，所以中途会临时占用 OUT 上 = 单文件大小的空间
-- 跨盘（`SRC=D:\Photos`、`OUT=E:\Photos-tidied`）：需要 `OUT` 盘 free ≥ 当前 SRC 大小（因为先 copy 再 delete）
+- **same-volume**（OS 判定同卷，通常 SRC 与 OUT 都在同盘字下；`subst` / NTFS junction / mount point 会让"不同盘字"也属同卷——由 NTFS 内核判定，**不基于盘符前缀**）：走 `fs::rename` 秒级完成，**不产生临时副本，不需要 OUT 额外空闲空间**，操作原子（NTFS 同卷 rename 不可中断）
+- **cross-volume**（`SRC=D:\Photos`、`OUT=E:\Photos-tidied`，或 OUT 在网络映射盘）：走 `fs::copy + fs::remove`（OS 原生 `CopyFileEx` 加速，保留 mtime），需要 `OUT` 盘 free ≥ SRC 大小
 
-**重要**：所有 backend 下 `move` 都是 `copy + delete`，不是文件系统 rename。同盘 move 也要 OUT 盘有足够 free（即便最终空间持平）。
+**重要**：`local` backend same-volume move 走 `fs::rename`（无需额外空间、速度极快、由 OS 判定能识别 subst/junction/mount point）。cross-volume / 远端 backend（SMB/ADB/MTP）move 始终是 copy + delete。
 
 ### B1 极小样本
 
@@ -216,7 +216,7 @@ fsutil volume diskfree %OUT:~0,2%
 run-tidy.cmd move -o %OUT% --report %LOG%\B3.json "%SRC%" > %LOG%\B3.txt 2> %LOG%\B3.err
 ```
 
-预计耗时（HDD ~100 MB/s）：600 GB ≈ 100 分钟（同盘）/ 200 分钟（跨盘，I/O 抢占少）。
+预计耗时：same-volume 走 `fs::rename`，600 GB **秒级完成**（NTFS 元数据操作，无数据拷贝）。cross-volume 走 copy + delete，HDD ~100 MB/s → 600 GB ≈ 100 分钟（OUT 盘需 free ≥ SRC 大小）。
 
 #### 中断处理（必看）
 
