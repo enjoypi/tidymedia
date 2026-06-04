@@ -80,3 +80,15 @@ mod backends;
 
 #[path = "lib_tidy/archive.rs"]
 mod archive;
+
+#[path = "lib_tidy/move_idempotency.rs"]
+mod move_idempotency;
+
+#[path = "lib_tidy/move_failure_recovery.rs"]
+mod move_failure_recovery;
+
+#[path = "lib_tidy/adb_fake_errors.rs"]
+mod adb_fake_errors;
+
+#[path = "lib_tidy/windows_path.rs"]
+mod windows_path;

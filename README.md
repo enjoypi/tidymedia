@@ -109,3 +109,10 @@ exif:
 - 覆盖率（nightly 严格 100%）：`RUSTFLAGS="--cfg=coverage_nightly" cargo +nightly llvm-cov nextest --summary-only`
 
 详见 `CLAUDE.md`。
+
+## 验收
+
+Windows 用户从 Android 复制照片或本地整理 600G 库前，按
+[`docs/acceptance-windows.md`](docs/acceptance-windows.md) 渐进式走流程 A（Android → Win copy）
+与流程 B（本地 move 整理）。覆盖 adb 设备识别、大视频内存规避、move 中断半文件清理、
+幂等重跑、人工抽样验收。
