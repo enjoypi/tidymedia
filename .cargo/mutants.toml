@@ -37,6 +37,10 @@ exclude_re = [
     # sidecar 的 log_parse_failure 是纯 tracing 副作用 fn（R3 诊断日志，无返回值、
     # 无状态变更）；项目规约不靠捕日志断言，替换成 () 观测恒等不可杀。
     'replace log_parse_failure with \(\)',
+    # build_source_index 的 `excluded > 0` 仅 gate 一条 exclude_output_subtree
+    # info!（纯日志路径，避免零排除刷屏）；排除语义本身由 remove_under_prefix
+    # 的调用与 overlap_tests 锁定，比较符变异只改日志发出与否，不捕日志不可杀。
+    'replace > with .. in build_source_index',
 ]
 
 exclude_globs = [
