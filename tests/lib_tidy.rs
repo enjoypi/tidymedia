@@ -75,6 +75,12 @@ fn adb_loc(path: &str) -> Location {
 #[path = "lib_tidy/dispatch_and_cli.rs"]
 mod dispatch_and_cli;
 
+#[path = "lib_tidy/run_cli_flags.rs"]
+mod run_cli_flags;
+
+#[path = "lib_tidy/real_factory.rs"]
+mod real_factory;
+
 #[path = "lib_tidy/backends.rs"]
 mod backends;
 

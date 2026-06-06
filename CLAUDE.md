@@ -26,6 +26,8 @@
 - **fast-path 命中反向证据**：`fs::rename` / `fs::copy` 保留 src mtime，`std::io::copy` 不保留；用 `filetime::set_file_mtime` 钉 src 后 move 断言 dst mtime 不变即证明 fast-path 命中（参考 `tests/lib_tidy/move_idempotency.rs::move_local_fastpath_dst_mtime_matches_src`）。fast-path 走 `fs::rename` 不读源 → "chmod 000 src 文件" 类失败测试失效，改为 chmod 555 **src 父目录**（rename 需父目录 write 权限）
 - **Windows 同卷边界本地测**（`tests/lib_tidy/windows_same_volume.rs`，`#![cfg(windows)]`）：`Command::new("subst").args([letter, tempdir])` + `Command::new("cmd").args(["/C","mklink","/J",link,target])` 构造「不同前缀同卷」，**均不要 admin**；subst 盘字全局共享 → `.config/nextest.toml` 加 `[test-groups.windows-volume-mut] max-threads=1` + `filter='test(/windows_same_volume::/)'` 强制串行；释放盘字用 RAII Drop guard `subst Y: /D`
 - **`--all-features` 下 `dispatch.rs` 的 `usecases::copy(..)?` Err arm 覆盖**：现有 `tidy_rejects_*` 测试用 `#[cfg(not(feature = "smb-backend"))]` gate，启用全部 feature 跑覆盖率时这些测试不编译 → `?` Err arm miss。用 output 父路径占成普通文件触发 `mkdir_p` Err 兜底（参考 `dispatch_and_cli.rs::tidy_copy_propagates_mkdir_error_when_output_parent_is_file`）
+- **`--all-features` 严格覆盖也须 100%（mobile.rs 除外）**：feature 启用侧用 `#[cfg(feature = "...")]` gated 测试镜像 `tidy_rejects_*` 系列（`tests/lib_tidy/real_factory.rs`）。标准杠杆：`RealMtpClient::new` 是 stub 必 Err → 确定性触发 `dispatch.rs` 各 `?` Err arm 与 `factory.rs` builder 调用位点；`PavaoClient::new` / `ADBServerDevice::new` 仅初始化不连网可直接断言。`factory.rs::unsupported_backend` 三 feature 全开时 dead → 条件豁免 `cfg_attr(all(coverage_nightly, 三feature), coverage(off))`（与 `allow(dead_code)` 条件镜像）。**已知缺口**：`frameworks/mobile.rs` 7 region / 2 branch（`run_copy_internal` 的 `failed>0` 两 status arm + 两个 `let CommandResult::..else` 防御 arm），待补
+- **子行 region miss 定位**（lcov `DA`/`BRDA` 不显示，如 `?` Err arm）：`cargo +nightly llvm-cov report --release --text` 复用上次 run 的 profdata（不接 `--all-features`，feature 集随上次 run），输出中 `^0` 标记即未覆盖子行 region
 
 ## Fixture
 - `tests/data/` 下文件 mtime 每次 `git checkout` 重置；时间相关测试 **MUST** 用 `filetime::set_file_mtime` 固定（封装：`entities/test_common::copy_png_to`，固定到 `FIXED_MEDIA_MTIME` = 2024-01-01 12:00:00 UTC）
@@ -44,7 +46,7 @@
 - **新增 `Location` variant / backend scheme** → `entities/uri.rs` 的 `FromStr` + `adapters/backend/factory.rs`（cfg-gated 分支 + Unsupported 兜底）+ 对应 `Backend` 实现 + `adapters/dispatch.rs` 调度 + 本文「URI 格式」节
 - **新增 `Backend` trait 方法** → 全部 7 个实现同步加默认或 override：`local`/`remote`/`smb`/`adb`/`mtp`/`fake`/`fake_remote`；按「远端测试套路」补 OK / client Err 注入 / 非自家 scheme 三类测试
 - **新增配置字段** → `usecases/config.rs` 结构体 + `config.yaml` + `validate_*` 校验或被消费（杜绝哑配置）；secret 再加 `.env.example`（值 `changeme`）+ 确认 `.env` 已 gitignore
-- **新增 CLI flag** → `adapters/dispatch.rs` 调度透传 + **每个子命令路径（copy/move/find）独立 e2e 触发 Some/None 两边**，否则 LLVM branch miss
+- **新增 CLI flag** → `adapters/dispatch.rs` 调度透传 + **每个子命令路径（copy/move/find）独立 e2e 触发 Some/None 两边**，否则 LLVM branch miss；e2e **MUST 含 `run_cli(["tidymedia", ...])` 字符串形式**（clap flag 名映射只有该形式能验证，仅 `tidy(Commands::..)` 不算完整，参考 `tests/lib_tidy/run_cli_flags.rs`）
 - **新增 `media_time` 候选来源 / 调整 P0–P4** → `entities/media_time/priority.rs` 的 `Source` + `Priority` 枚举 → 对应解析模块（`entities/exif`、`entities/media_time/filename`、`adapters/sidecar`、`entities/media_time/fs_time`）→ `resolve`/`decision` 裁决 → 补 fixture
 
 ## 项目分层（Clean Architecture）
