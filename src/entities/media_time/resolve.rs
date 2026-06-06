@@ -19,6 +19,10 @@ use super::priority::Source;
 /// "mtime < P0 但差距较大" 中的"较大"采用 30 天，超过即作为提示性冲突。
 const MTIME_VS_P0_HINT_SECS: i64 = 30 * 86_400;
 
+/// P0 与 GPS / 文件名候选的交叉校验阈值：相差超过 1 天即记冲突
+/// （对应 `ConflictKind::GpsOver24h` / `FilenameOver1Day`）。
+const CONFLICT_OVER_DAY_SECS: i64 = 86_400;
+
 #[must_use]
 pub fn resolve(
     candidates: Vec<Candidate>,
@@ -78,7 +82,7 @@ fn detect_conflicts(
 
     if let Some(gps) = gps_utc {
         let diff = (best.utc - gps).num_seconds();
-        if diff.abs() > 24 * 3600 {
+        if diff.abs() > CONFLICT_OVER_DAY_SECS {
             conflicts.push(Conflict {
                 kind: ConflictKind::GpsOver24h,
                 other_utc: gps,
@@ -91,7 +95,7 @@ fn detect_conflicts(
     for (cand, _) in others {
         if is_filename_source(cand.source) {
             let diff = (best.utc - cand.utc).num_seconds();
-            if diff.abs() > 86_400 {
+            if diff.abs() > CONFLICT_OVER_DAY_SECS {
                 conflicts.push(Conflict {
                     kind: ConflictKind::FilenameOver1Day,
                     other_utc: cand.utc,
