@@ -1,31 +1,26 @@
+//! `Info` 实体：按需哈希（fast/full/secure）缓存 + EXIF 持有 + 拍摄时间裁决入口。
+
 use std::io;
 use std::sync::Arc;
 use std::time::Duration;
 use std::time::SystemTime;
 
-use camino::Utf8Path;
 use camino::Utf8PathBuf;
 use chrono::FixedOffset;
 use chrono::Utc;
 use parking_lot::Mutex;
-use sha2::Digest;
-use sha2::Sha512;
 use tracing::warn;
 
-use super::SecureHash;
-use super::backend::{Backend, EntryKind, MediaReader, Metadata as BackendMetadata};
-use super::exif;
-use super::media_time;
-use super::uri::Location;
+use super::streams::{fast_hash_stream, full_hash_stream, secure_hash_stream};
+use crate::entities::backend::{Backend, EntryKind, Metadata as BackendMetadata};
+use crate::entities::uri::Location;
+use crate::entities::{SecureHash, exif, media_time};
 // 测试 helper `Info::from` 需要构造 LocalBackend instance。仅 #[cfg(test)] 下引用
 // adapters，生产 `Info::open` 走 backend trait 注入（CA 规则）。
 #[cfg(test)]
+use super::paths::full_path;
+#[cfg(test)]
 use crate::adapters::backend::local::LocalBackend;
-
-// 栈数组要求编译期常量，保留为 const（性能边界例外）
-const FAST_READ_SIZE: usize = 4096;
-// 流式哈希分块。1 MiB 平衡 syscall 频率与远程 backend 网络往返。
-const STREAM_CHUNK: usize = 1 << 20;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct Lazy {
@@ -140,7 +135,7 @@ impl Info {
         Ok(full)
     }
 
-    fn full_hash(&self) -> u64 {
+    pub(super) fn full_hash(&self) -> u64 {
         self.lazy.lock().hash
     }
 
@@ -253,7 +248,10 @@ fn ensure_hashable(meta: &crate::entities::backend::Metadata, loc: &Location) ->
 /// fs 兜底：取 mtime 与 btime 的较早值；任一缺失就用另一方；都缺失退到 `UNIX_EPOCH`。
 /// 这是 P4 内部决策（mtime 兜底）——选较早值是因为 btime 在某些
 /// 文件系统上 == ctime，受 inode 变更影响，比 mtime 更不稳定。
-fn pick_fs_fallback(modified: Option<SystemTime>, created: Option<SystemTime>) -> SystemTime {
+pub(super) fn pick_fs_fallback(
+    modified: Option<SystemTime>,
+    created: Option<SystemTime>,
+) -> SystemTime {
     match (modified, created) {
         (Some(m), Some(c)) if m < c => m,
         // m >= c、或 m 缺失：优先用 c；两者都缺失退到 EPOCH
@@ -274,139 +272,3 @@ impl PartialEq for Info {
             && self.full_hash() == other.full_hash()
     }
 }
-
-// `coverage(off)`：`if full.is_absolute()` 在集成 test binary 永远 True（lib_tidy
-// 等用绝对路径），LLVM multi-binary 副本 False 分支不触发。语义由 lib unit
-// 测试 full_path_absolute_passthrough / full_path_relative_canonicalizes 断言。
-#[cfg_attr(coverage_nightly, coverage(off))]
-pub fn full_path(path: &str) -> io::Result<Utf8PathBuf> {
-    let full = Utf8Path::new(path);
-    if full.is_absolute() {
-        return Ok(full.to_path_buf());
-    }
-
-    let full = full.canonicalize_utf8()?;
-    Ok(Utf8PathBuf::from(strip_windows_unc(full.as_str())))
-}
-
-#[cfg(target_os = "windows")]
-pub(crate) fn strip_windows_unc(path: &str) -> &str {
-    path.strip_prefix(r"\\?\").unwrap_or(path)
-}
-
-#[cfg(not(target_os = "windows"))]
-pub(crate) fn strip_windows_unc(path: &str) -> &str {
-    path
-}
-
-/// 读首 [`FAST_READ_SIZE`] 字节算 wyhash + xxh3 双哈希。
-///
-/// 返回 (`bytes_read`, wyhash, xxhash)。
-/// 调用方须保证 reader 已 seek 到起点。
-pub fn fast_hash_stream(r: &mut dyn MediaReader) -> io::Result<(usize, u64, u64)> {
-    let mut buffer = [0u8; FAST_READ_SIZE];
-    let n = read_fill(r, &mut buffer)?;
-    let slice = &buffer[..n];
-    Ok((
-        n,
-        wyhash::wyhash(slice, 0),
-        xxhash_rust::xxh3::xxh3_64(slice),
-    ))
-}
-
-/// 流式整文件 xxh3-64 哈希。返回 (`bytes_read`, xxh3-64)。
-/// 调用方须保证 reader 已 seek 到起点。
-pub fn full_hash_stream(r: &mut dyn MediaReader) -> io::Result<(u64, u64)> {
-    let mut hasher = xxhash_rust::xxh3::Xxh3::new();
-    let mut buf = vec![0u8; STREAM_CHUNK];
-    let mut total = 0u64;
-    loop {
-        let n = r.read(&mut buf)?;
-        if n == 0 {
-            break;
-        }
-        hasher.update(&buf[..n]);
-        total += n as u64;
-    }
-    Ok((total, hasher.digest()))
-}
-
-/// 流式整文件 SHA-512 哈希。返回 (`bytes_read`, sha512)。
-/// 调用方须保证 reader 已 seek 到起点。
-pub fn secure_hash_stream(r: &mut dyn MediaReader) -> io::Result<(u64, SecureHash)> {
-    let mut hasher = Sha512::new();
-    let mut buf = vec![0u8; STREAM_CHUNK];
-    let mut total = 0u64;
-    loop {
-        let n = r.read(&mut buf)?;
-        if n == 0 {
-            break;
-        }
-        hasher.update(&buf[..n]);
-        total += n as u64;
-    }
-    Ok((total, hasher.finalize()))
-}
-
-/// 把 reader 读满到 buf；返回真实读取字节数。EOF 提前停止不算错误。
-/// 抽出来是为了让 `fast_hash_stream` 函数体保持在 64 行以内，同时给 `exif::sniff_mime`
-/// 复用，避免两份同款 read-to-fill 循环。
-pub(crate) fn read_fill(r: &mut dyn MediaReader, buf: &mut [u8]) -> io::Result<usize> {
-    let mut filled = 0;
-    while filled < buf.len() {
-        let n = r.read(&mut buf[filled..])?;
-        if n == 0 {
-            break;
-        }
-        filled += n;
-    }
-    Ok(filled)
-}
-
-// 测试专用 path-only 哈希实现：file_info_tests 用作 stream 版的对照基线。
-
-#[cfg(test)]
-#[cfg_attr(coverage_nightly, coverage(off))]
-fn fast_hash(path: &str) -> io::Result<(usize, u64, u64)> {
-    use std::io::Read;
-    let mut file = std::fs::File::open(path)?;
-    let mut buffer = [0; FAST_READ_SIZE];
-    let bytes_read = file.read(&mut buffer)?;
-    let short = wyhash::wyhash(&(buffer[..bytes_read]), 0);
-    let full = xxhash_rust::xxh3::xxh3_64(&(buffer[..bytes_read]));
-    Ok((bytes_read, short, full))
-}
-
-#[cfg(test)]
-#[cfg_attr(coverage_nightly, coverage(off))]
-fn full_hash(path: &str) -> io::Result<(usize, u64)> {
-    let file = std::fs::File::open(path)?;
-    // SAFETY: file 句柄仍持有；测试用辅助，运行期外部进程不会并发改写。
-    let mmap = unsafe { memmap2::Mmap::map(&file)? };
-    Ok((mmap.len(), xxhash_rust::xxh3::xxh3_64(&mmap)))
-}
-
-#[cfg(test)]
-#[cfg_attr(coverage_nightly, coverage(off))]
-fn secure_hash(path: &str) -> io::Result<(usize, SecureHash)> {
-    let file = std::fs::File::open(path)?;
-    // SAFETY: file 句柄仍持有；测试用辅助，运行期外部进程不会并发改写。
-    let mmap = unsafe { memmap2::Mmap::map(&file)? };
-    Ok((mmap.len(), Sha512::digest(&mmap)))
-}
-
-#[cfg(test)]
-#[path = "file_info_tests.rs"]
-mod tests;
-
-#[cfg(test)]
-#[path = "file_info_error_tests.rs"]
-mod error_tests;
-
-#[cfg(test)]
-#[path = "file_info_stream_tests.rs"]
-mod stream_tests;
-
-#[cfg(test)]
-#[path = "file_info_backend_tests.rs"]
-mod backend_tests;
