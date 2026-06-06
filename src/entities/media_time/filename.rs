@@ -144,10 +144,9 @@ fn try_bare_yyyymmdd(stem: &str, default_offset: FixedOffset) -> Option<Candidat
 }
 
 /// 纯 13 位毫秒 Unix 时间戳（`IM_/网盘/通用命名`）。无时区语义，直接当 UTC。
+/// 长度/纯数字校验由 `millis_str_to_candidate` 单点负责（重复 guard 会产生
+/// 等价变异且违反 DRY）。
 fn try_unix_millis(stem: &str) -> Option<Candidate> {
-    if stem.len() != 13 || !stem.bytes().all(|b| b.is_ascii_digit()) {
-        return None;
-    }
     millis_str_to_candidate(stem, Source::FilenameUnixMillis)
 }
 

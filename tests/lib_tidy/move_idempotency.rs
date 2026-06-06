@@ -163,3 +163,116 @@ fn move_dry_run_then_real_run_completes() {
         "real run must remove src after dry-run preview"
     );
 }
+
+/// 源内两份相同内容 → 第二份按重复计入 ignored，且恰好一次。精确计数杀
+/// `ignored += 1` 的 `-=`（usize wrap 成 MAX）与 `*=`（恒 0）算术变异。
+#[test]
+fn copy_counts_duplicate_source_as_ignored_exactly_once() {
+    let src_dir = tempdir().unwrap();
+    copy_fixture(src_dir.path(), "sample-with-offset.jpg");
+    let dup = src_dir.path().join("dup-of-offset.jpg");
+    std::fs::copy(format!("{DATA_DIR}/sample-with-offset.jpg"), &dup)
+        .expect("seed duplicate fixture");
+    let out_dir = tempdir().unwrap();
+
+    let factory = FakeBackendFactory::new();
+    let result = tidy_with(
+        &factory,
+        Commands::Copy {
+            dry_run: false,
+            include_non_media: false,
+            sources: vec![local(src_dir.path().to_str().unwrap())],
+            output: local(out_dir.path().to_str().unwrap()),
+            archive_template: None,
+            report: None,
+        },
+    )
+    .expect("copy with duplicate source should succeed");
+    let CommandResult::Copy(report) = result else {
+        panic!("expected Copy report");
+    };
+    // scanned = copied+ignored+failed 的多项非零和：顺带杀 make_report 求和算术变异
+    assert_eq!(
+        (report.scanned, report.copied, report.ignored, report.failed),
+        (2, 1, 1, 0),
+        "second identical file must be ignored exactly once: {report:?}"
+    );
+}
+
+/// `make_report` 的 scanned 求和（indexed + empty + unreadable + `walker_errors`）
+/// 各项全非零 + 精确断言：任一 `+` 被变异成 `-`/`*`（含 u64/usize wrap）都会
+/// 偏离期望值。copied=1 / empty=1 / unreadable=1 / walker=1 → scanned=4。
+#[test]
+#[cfg(unix)]
+fn copy_report_scanned_sums_all_skip_categories_exactly() {
+    use std::os::unix::fs::PermissionsExt;
+    let src_dir = tempdir().unwrap();
+    copy_fixture(src_dir.path(), "sample-with-offset.jpg");
+    std::fs::write(src_dir.path().join("empty.bin"), b"").unwrap();
+    let locked = src_dir.path().join("locked.bin");
+    std::fs::write(&locked, b"abcdef").unwrap();
+    let mut perms = std::fs::metadata(&locked).unwrap().permissions();
+    perms.set_mode(0o000);
+    std::fs::set_permissions(&locked, perms.clone()).unwrap();
+    let out_dir = tempdir().unwrap();
+
+    let factory = FakeBackendFactory::new();
+    let result = tidy_with(
+        &factory,
+        Commands::Copy {
+            dry_run: false,
+            include_non_media: false,
+            sources: vec![
+                local(src_dir.path().to_str().unwrap()),
+                local("/no/such/dir/zzz_scanned_sum_xyz"), // walker_errors += 1
+            ],
+            output: local(out_dir.path().to_str().unwrap()),
+            archive_template: None,
+            report: None,
+        },
+    );
+    // 恢复权限以便 tempdir 清理
+    perms.set_mode(0o644);
+    std::fs::set_permissions(&locked, perms).unwrap();
+
+    let CommandResult::Copy(report) = result.expect("copy should succeed") else {
+        panic!("expected Copy report");
+    };
+    assert_eq!(
+        (
+            report.scanned,
+            report.copied,
+            report.skipped_empty,
+            report.skipped_unreadable,
+            report.walker_errors,
+        ),
+        (4, 1, 1, 1, 1),
+        "scanned must be the exact sum of all categories: {report:?}"
+    );
+}
+
+/// find 带合法 output 目录：必须真扫描（scanned >= 1）而非空 default 报告。
+/// 杀 `m.kind == EntryKind::Dir` 被变异成 `!=`（合法目录被误判 → 短路返 default，
+/// 现有 `run_cli` e2e 只断言 Ok 杀不掉）。
+#[test]
+fn find_with_valid_output_dir_scans_sources() {
+    let out_dir = tempdir().unwrap();
+    let factory = FakeBackendFactory::new();
+    let result = tidy_with(
+        &factory,
+        Commands::Find {
+            secure: false,
+            sources: vec![local(DATA_DIR)],
+            output: Some(local(out_dir.path().to_str().unwrap())),
+            report: None,
+        },
+    )
+    .expect("find with valid output dir should succeed");
+    let CommandResult::Find(report) = result else {
+        panic!("expected Find report");
+    };
+    assert!(
+        report.scanned >= 1,
+        "valid dir output must not short-circuit the scan: {report:?}"
+    );
+}

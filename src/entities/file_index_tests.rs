@@ -284,6 +284,32 @@ fn insert_propagates_info_from_error() {
     assert_eq!(err.kind(), std::io::ErrorKind::NotFound);
 }
 
+// calc_same 预过滤只放行 fast_hash 冲突桶（len>1）：唯一文件的单例桶不得进入
+// 逐文件 hash 阶段。结果以 pub calc_same 返回 Vec 的元素个数观测（search_same 的
+// filter_and_sort 会把单例再滤掉，杀不了「>1 变 >=1」边界变异）。
+#[test]
+fn calc_same_excludes_singleton_buckets_from_results() {
+    let dir = tempdir().unwrap();
+    let dup_a = dir.path().join("dup_a.bin");
+    fs::write(&dup_a, b"same-content-same-content").unwrap();
+    let dup_b = dir.path().join("dup_b.bin");
+    fs::write(&dup_b, b"same-content-same-content").unwrap();
+    let unique = dir.path().join("unique.bin");
+    fs::write(&unique, b"totally-different-payload!").unwrap();
+
+    let mut index = Index::new();
+    index.insert(dup_a.to_str().unwrap()).unwrap();
+    index.insert(dup_b.to_str().unwrap()).unwrap();
+    index.insert(unique.to_str().unwrap()).unwrap();
+
+    let results = index.calc_same(Info::secure_hash);
+    assert_eq!(
+        results.len(),
+        1,
+        "only the duplicate fast-hash bucket may enter the calc phase"
+    );
+}
+
 // 让 similar_files 有两个冲突 path，其中一个对应的文件已删除：
 // - calc(info) 对删除的文件 Err → 被 `if let Ok` 过滤 (L98 失败分支)
 // - 剩 1 个 path → filter_and_sort 走 paths.len()==1 的 else 分支 (L126)

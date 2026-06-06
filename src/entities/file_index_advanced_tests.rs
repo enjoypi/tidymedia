@@ -191,7 +191,8 @@ fn visit_dir_counts_skipped_unreadable() {
 fn visit_dir_counts_walker_errors_on_missing_root() {
     let mut index = Index::new();
     index.visit_dir("/no/such/dir/zzz_walker_err_xyz");
-    assert!(index.stats().walker_errors >= 1);
+    // 精确计数：`>= 1` 杀不掉「+= 变 -=」变异（u64 release 下 wrap 成 MAX 仍 >= 1）
+    assert_eq!(index.stats().walker_errors, 1);
     assert_eq!(index.files().len(), 0);
 }
 
@@ -299,9 +300,11 @@ fn visit_dir_counts_non_utf8_path() {
 
     let mut index = Index::new();
     index.visit_dir(dir.path().to_str().unwrap());
-    assert!(
-        index.stats().walker_errors >= 1,
-        "non-UTF-8 path must bump walker_errors"
+    // 精确计数同 visit_dir_counts_walker_errors_on_missing_root：防 += 算术变异 wrap
+    assert_eq!(
+        index.stats().walker_errors,
+        1,
+        "non-UTF-8 path must bump walker_errors exactly once"
     );
     assert_eq!(index.files().len(), 0);
 }

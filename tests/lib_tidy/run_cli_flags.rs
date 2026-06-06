@@ -234,3 +234,95 @@ fn run_cli_copy_missing_required_output_returns_err() {
     let msg = format!("{err}");
     assert!(msg.contains("--output"), "got: {msg}");
 }
+
+/// spawn 真实 binary 验证 `install_logging` 真装上了 subscriber：`--log-level debug`
+/// 时 `run_cli` 的 "cli parsed" debug 日志必须落在 stderr。in-process 测不了——
+/// 全局 subscriber 只能 `try_init` 一次；且变异 `install_logging → ()` 时唯一可观测
+/// 差异就是 stderr 没有日志输出。
+#[test]
+fn binary_emits_debug_log_to_stderr_when_log_level_debug() {
+    let src = tempdir().unwrap();
+    seed_fixture(src.path());
+    let out = std::process::Command::new(env!("CARGO_BIN_EXE_tidymedia"))
+        .args(["--log-level", "debug", "find", src.path().to_str().unwrap()])
+        .env_remove("RUST_LOG") // 不让外部 RUST_LOG 干扰 EnvFilter::try_from_default_env
+        .output()
+        .expect("spawn tidymedia binary");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        out.status.success() && stderr.contains("cli parsed"),
+        "binary must log 'cli parsed' to stderr at debug level; status: {:?}, stderr: {stderr}",
+        out.status
+    );
+}
+
+/// e2e 走真实 copy 路径验证 `Info::exif_ref` 接线：`{make}/{model}` 必须渲染出
+/// fixture 的真值目录。`exif_ref` 被变异成 `None` 或 `Some(默认 Exif)` 时
+/// 两个占位符都退化为 "unknown"，本断言即失败。
+#[test]
+fn run_cli_copy_archive_template_renders_make_model_from_exif() {
+    let src = tempdir().unwrap();
+    std::fs::copy(
+        format!("{DATA_DIR}/sample-with-make-model.jpg"),
+        src.path().join("m.jpg"),
+    )
+    .expect("seed make/model fixture");
+    let out = tempdir().unwrap();
+    run_cli([
+        "tidymedia",
+        "copy",
+        "--archive-template",
+        "{make}/{model}",
+        "-o",
+        out.path().to_str().unwrap(),
+        src.path().to_str().unwrap(),
+    ])
+    .expect("copy with make/model template should succeed");
+    assert!(
+        out.path().join("TestCam/TestModel/m.jpg").exists(),
+        "make/model from real EXIF must shape the archive dir"
+    );
+}
+
+/// spawn binary 断言 find -o 的脚本语义：output 目录外的重复文件出 `rm` 行、
+/// output 目录内的被注释保留。杀 `compute_output_prefix -> None`（变异后全部
+/// 被注释，stdout 无未注释 rm 行）及 `under_prefix` 边界类变异。
+#[test]
+fn binary_find_with_output_emits_rm_for_outside_and_comment_for_inside() {
+    let root = tempdir().unwrap();
+    let keep = root.path().join("keep");
+    std::fs::create_dir(&keep).unwrap();
+    std::fs::copy(
+        format!("{DATA_DIR}/sample-with-offset.jpg"),
+        keep.join("a.jpg"),
+    )
+    .expect("seed kept copy");
+    std::fs::copy(
+        format!("{DATA_DIR}/sample-with-offset.jpg"),
+        root.path().join("b.jpg"),
+    )
+    .expect("seed duplicate outside output");
+
+    let out = std::process::Command::new(env!("CARGO_BIN_EXE_tidymedia"))
+        .args([
+            "find",
+            root.path().to_str().unwrap(),
+            "-o",
+            keep.to_str().unwrap(),
+        ])
+        .output()
+        .expect("spawn tidymedia binary");
+    assert!(out.status.success());
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let rm_outside = stdout
+        .lines()
+        .any(|l| l.starts_with("rm ") && l.contains("b.jpg"));
+    let kept_commented = stdout
+        .lines()
+        .filter(|l| l.contains("a.jpg"))
+        .all(|l| !l.starts_with("rm "));
+    assert!(
+        rm_outside && kept_commented,
+        "outside dup must be rm'd, kept copy commented; stdout:\n{stdout}"
+    );
+}

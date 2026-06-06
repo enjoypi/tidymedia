@@ -108,3 +108,33 @@ fn rename_mkparents_propagates_create_dir_all_error() {
     // src 必须仍在，rename 未发生
     assert!(src.exists(), "rename failed before move, src must remain");
 }
+
+/// 非 `CrossesDevices` 的 rename 失败（src 父目录只读 → EACCES）必须原样传播，
+/// 不得落入 copy+remove 兜底。杀「guard 变 true」变异：变异后 copy 先成功，
+/// dst 残留半成品文件（remove 再失败），原子性被破坏。
+#[test]
+#[cfg(unix)]
+fn rename_propagates_non_crossdevice_error_without_fallback_copy() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = tempfile::tempdir().unwrap();
+    let src_parent = dir.path().join("locked");
+    fs::create_dir(&src_parent).unwrap();
+    let src = src_parent.join("a.bin");
+    fs::write(&src, b"keep-atomic").unwrap();
+    let dst = dir.path().join("b.bin");
+
+    let mut perms = fs::metadata(&src_parent).unwrap().permissions();
+    perms.set_mode(0o555); // rename 需要 src 父目录 write 权限
+    fs::set_permissions(&src_parent, perms.clone()).unwrap();
+
+    let result = LocalBackend::new().rename(&local(&src), &local(&dst), false);
+
+    perms.set_mode(0o755); // 恢复以便 tempdir 清理
+    fs::set_permissions(&src_parent, perms).unwrap();
+
+    assert!(result.is_err(), "EACCES rename must propagate as Err");
+    assert!(
+        !dst.exists(),
+        "no fallback copy may leave a partial dst on non-crossdevice failure"
+    );
+}

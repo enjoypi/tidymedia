@@ -69,6 +69,25 @@ impl FakeBackend {
         s.metas.insert(loc, file_meta(size));
     }
 
+    /// 覆写默认 EPOCH 时间元数据：构造 `modified`/`created` 任意组合（如
+    /// `modified=None`），供 `create_time` 边界测试——真实文件系统造不出 mtime 缺失。
+    pub fn add_file_with_times(
+        &self,
+        loc: &Location,
+        data: Vec<u8>,
+        modified: Option<std::time::SystemTime>,
+        created: Option<std::time::SystemTime>,
+    ) {
+        self.add_file(loc.clone(), data);
+        let mut s = self.state.lock().unwrap();
+        let meta = s
+            .metas
+            .get_mut(loc)
+            .expect("internal: add_file just inserted this meta");
+        meta.modified = modified;
+        meta.created = created;
+    }
+
     pub fn add_dir(&self, loc: Location) {
         let mut s = self.state.lock().unwrap();
         s.metas.insert(

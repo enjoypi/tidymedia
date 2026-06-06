@@ -2,10 +2,20 @@
 mod test {
     use super::super::*;
 
+    /// 结构化日志 summary 的 result 维度：0 失败 → "ok"，>0 → "partial"。
+    /// 直测 helper —— 该值只进 tracing 字段，集成测试不捕日志杀不掉 `==` 变异。
+    #[test]
+    fn summary_result_maps_failed_count_to_dimension() {
+        assert_eq!(summary_result(0), "ok");
+        assert_eq!(summary_result(3), "partial");
+    }
+
     #[test]
     fn test_match_non_english() {
         assert!(!any_non_english("abc"));
         assert!(any_non_english("abc中文"));
+        // 边界值 0x7F（DEL）仍是 ASCII：杀 `> 127` 被变异成 `>= 127`
+        assert!(!any_non_english("\u{7f}"));
     }
 
     #[test]
@@ -29,6 +39,22 @@ mod test {
     #[test]
     fn extract_valuable_name_single_component_returns_empty() {
         let path = Utf8Path::new("photo");
+        assert_eq!(extract_valuable_name(path), "");
+    }
+
+    /// 单段非英文路径：len==1 不 pop，整段就是 valuable name。
+    /// 杀 `components.len() > 1` 被变异成 `>= 1`（单段也被弹掉 → 误返空）。
+    #[test]
+    fn extract_valuable_name_keeps_single_non_english_component() {
+        let path = Utf8Path::new("中文相册");
+        assert_eq!(extract_valuable_name(path), "中文相册");
+    }
+
+    /// 非英文出现在最后一段（文件名）：必须被 pop 排除 → 返回空。
+    /// 杀 `components.len() > 1` 被变异成 `== 1`（多段路径不再弹文件名）。
+    #[test]
+    fn extract_valuable_name_excludes_filename_component() {
+        let path = Utf8Path::new("/a/b/中文名.jpg");
         assert_eq!(extract_valuable_name(path), "");
     }
 

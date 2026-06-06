@@ -109,6 +109,15 @@ mod tests {
         assert_eq!(s, "a: 7");
     }
 
+    /// placeholder 位于串首（i=0）：既有用例 `${` 全在 i>=2 处，杀不掉
+    /// `find_close_brace(bytes, i + 2)` 被变异成 `i - 2`（i>=2 时搜索结果恰好相同；
+    /// i=0 时 usize 下溢 → 越界 panic）。
+    #[test]
+    fn expand_env_placeholder_at_string_start_expands() {
+        unsafe { std::env::remove_var("TIDYMEDIA_TEST_START_VAR") };
+        assert_eq!(expand_env("${TIDYMEDIA_TEST_START_VAR:-dft}"), "dft");
+    }
+
     #[test]
     fn expand_env_uses_env_value_when_set() {
         unsafe { std::env::set_var("TIDYMEDIA_TEST_SET_VAR_Y", "42") };

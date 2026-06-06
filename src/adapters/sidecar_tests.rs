@@ -58,6 +58,17 @@ fn parse_takeout_json_overflow_returns_none() {
     assert!(parse_takeout_json(s).is_none());
 }
 
+/// 直测 `strip_xml_comments` 精确输出：注释体替换为同字节数空格、前后正文与偏移
+/// 原样保留。注释起点远离 0（i=5）能区分 `i+4` 被变异成 `i*4`（越界→整段误抹）、
+/// `p+3` 变异成 `p-3`（尾部 `-->` 残留）等算术错误——仅断言解析结果杀不掉这些变异。
+#[test]
+fn strip_xml_comments_blanks_mid_text_comment_preserving_offsets() {
+    assert_eq!(
+        strip_xml_comments("12345<!--x-->after"),
+        "12345        after"
+    );
+}
+
 /// 真实场景下注释先于属性出现：`parse_xmp_date` 应解析正文属性而非注释里的字面量。
 #[test]
 fn parse_xmp_date_skips_xml_comment() {

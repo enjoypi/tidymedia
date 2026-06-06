@@ -127,7 +127,7 @@ pub(crate) fn copy(
     let (copied, ignored, failed, errors) =
         run_copy_loop(&source, &output_loc, &output_backend, &opts);
 
-    let result = if failed == 0 { "ok" } else { "partial" };
+    let result = summary_result(failed);
     info!(
         feature = FEATURE_COPY,
         operation = "summary",
@@ -236,6 +236,11 @@ fn make_report(
         include_non_media,
         errors,
     }
+}
+
+// 结构化日志 summary 的 result 维度值：失败计数为 0 即 "ok"，否则 "partial"。
+fn summary_result(failed: usize) -> &'static str {
+    if failed == 0 { "ok" } else { "partial" }
 }
 
 // 通过注入的 sink 输出报告；None 时跳过（用 case 不知道协议与持久化细节）。

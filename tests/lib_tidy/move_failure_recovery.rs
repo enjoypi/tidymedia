@@ -53,9 +53,15 @@ fn move_keeps_src_when_target_open_write_fails() {
         panic!("expected Copy report");
     };
 
-    assert!(
-        report.failed >= 1,
-        "OpenWrite failure must be counted in failed: {report:?}"
+    // 精确计数：`>= 1` 杀不掉「+= 变 -=」变异（usize release 下 wrap 成 MAX 仍 >= 1）
+    assert_eq!(
+        report.failed, 1,
+        "OpenWrite failure must be counted in failed exactly once: {report:?}"
+    );
+    // scanned = 0+0+failed：杀 make_report `+ failed` 变 `- failed`（wrap 成巨数）
+    assert_eq!(
+        report.scanned, 1,
+        "single failing file must scan as 1: {report:?}"
     );
     assert!(src_file.exists(), "src must be kept on copy failure");
 }
@@ -95,9 +101,9 @@ fn move_keeps_src_and_dst_when_remove_file_fails() {
         panic!("expected Copy report");
     };
 
-    assert!(
-        report.failed >= 1,
-        "remove_file failure must be counted in failed: {report:?}"
+    assert_eq!(
+        report.failed, 1,
+        "remove_file failure must be counted in failed exactly once: {report:?}"
     );
     assert!(
         fake_smb.read_bytes(&smb_src_file).is_some(),
@@ -147,7 +153,7 @@ fn move_retry_after_target_open_write_failure_succeeds() {
     let CommandResult::Copy(rep1) = r1 else {
         panic!("expected Copy report");
     };
-    assert!(rep1.failed >= 1);
+    assert_eq!(rep1.failed, 1);
     assert!(src_file.exists(), "round 1: src must be kept");
 
     // Round 2：全新 backend，无注入，模拟环境恢复

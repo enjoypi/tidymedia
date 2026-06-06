@@ -87,6 +87,8 @@ fn camera_phone_rejects(#[case] name: &str) {
 #[case::pxl_mp("PXL_20230615_103045123.MP.jpg", epoch("2023-06-15T10:30:45Z"))]
 #[case::pxl_portrait("PXL_20230615_103045123.PORTRAIT.jpg", epoch("2023-06-15T10:30:45Z"))]
 #[case::pxl_no_ext("PXL_20230615_103045123", epoch("2023-06-15T10:30:45Z"))]
+// 恰好 15 字符（无毫秒后缀）：杀 `len < 15` 被变异成 `<= 15`（边界值被误拒）
+#[case::pxl_exact_15_no_millis("PXL_20230615_103045.jpg", epoch("2023-06-15T10:30:45Z"))]
 fn pixel_parsed(#[case] name: &str, #[case] expected_ts: i64) {
     let c = parse_filename(name, utc_offset()).unwrap();
     assert_eq!(c.source, Source::FilenamePixel);

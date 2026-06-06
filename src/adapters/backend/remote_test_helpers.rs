@@ -113,6 +113,8 @@ pub(super) struct DummyClient {
     pub(super) write: Option<io::ErrorKind>,
     pub(super) unlink: Option<io::ErrorKind>,
     pub(super) mkdir: Option<io::ErrorKind>,
+    /// mkdir 实际被调用的次数；杀「mkparent 整函数被替换成 ()」类变异用。
+    pub(super) mkdir_calls: std::sync::atomic::AtomicUsize,
 }
 
 impl DummyClient {
@@ -173,6 +175,8 @@ impl RemoteClient<DummyTarget> for DummyClient {
         Ok(())
     }
     fn mkdir(&self, _t: &DummyTarget) -> io::Result<()> {
+        self.mkdir_calls
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         if let Some(k) = self.mkdir {
             return Err(io::Error::from(k));
         }

@@ -166,3 +166,21 @@ fn default_map_error_passthrough() {
     let mapped = DummyAdapter::map_error(e);
     assert_eq!(mapped.kind(), io::ErrorKind::Other);
 }
+
+/// mkparents=true 时 `open_write` 必须对 parent 调一次 mkdir（best-effort 建父目录）。
+/// 杀「`mkparent` 整函数被替换成 `()`」：Dummy/Fake client 不强制父目录存在，
+/// 仅靠结果断言无感知，必须数调用次数。
+#[test]
+fn open_write_mkparents_invokes_mkdir_once_on_parent() {
+    let client = Arc::new(DummyClient::default());
+    let b = RemoteBackend {
+        adapter: DummyAdapter::with_client(
+            Arc::clone(&client) as Arc<dyn RemoteClient<DummyTarget>>
+        ),
+    };
+    b.open_write(&loc(), true).unwrap();
+    let calls = client
+        .mkdir_calls
+        .load(std::sync::atomic::Ordering::Relaxed);
+    assert_eq!(calls, 1, "mkparents must trigger exactly one mkdir");
+}

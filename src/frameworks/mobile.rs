@@ -20,6 +20,7 @@ use crate::adapters::backend::factory::DefaultBackendFactory;
 use crate::adapters::cli::Commands;
 use crate::adapters::dispatch::{CommandResult, tidy_with};
 use crate::entities::uri::Location;
+use crate::usecases::report::{CopyReport, FindReport};
 
 /// 一次 tidy copy 调用的统计。UI 用这些字段显示进度。
 #[derive(uniffi::Record, Clone, Debug)]
@@ -120,21 +121,9 @@ pub fn tidy_find_duplicates(
             report: None,
         },
     )?;
-    let CommandResult::Find(report) = result else {
-        return Err(TidyError::Generic {
-            text: "internal error: find command returned non-find result".into(),
-        });
-    };
-    Ok(MobileFindReport {
-        scanned: u32::try_from(report.scanned).unwrap_or(u32::MAX),
-        group_count: u32::try_from(report.groups.len()).unwrap_or(u32::MAX),
-        groups: report
-            .groups
-            .into_iter()
-            .map(|paths| MobileDuplicateGroup { paths })
-            .collect(),
-        bytes_read: report.bytes_read,
-    })
+    // .map 而非 `?`+Ok：expect_find 的 Err arm 在本调用点不可达（Find 命令必返
+    // Find 结果），`?` 会留下永不触发的 Err 传播 region。
+    expect_find(result).map(mobile_report_from)
 }
 
 /// 版本号给 UI 显示用，便于排查"App 里 Rust core 哪个版本"。
@@ -174,25 +163,64 @@ fn run_copy_internal(src: &str, output: &str, dry_run: bool) -> Result<TidyStats
             report: None,
         },
     )?;
+    // 同 tidy_find_duplicates：.map 避免调用点不可达的 `?` Err region。
+    expect_copy(result).map(|report| stats_from(&report, dry_run))
+}
+
+// 纯映射：CopyReport → TidyStats，status 文案由 copy_status 决定。
+fn stats_from(report: &CopyReport, dry_run: bool) -> TidyStats {
+    TidyStats {
+        total_scanned: u32::try_from(report.scanned).unwrap_or(u32::MAX),
+        copied: u32::try_from(report.copied).unwrap_or(u32::MAX),
+        ignored: u32::try_from(report.ignored).unwrap_or(u32::MAX),
+        failed: u32::try_from(report.failed).unwrap_or(u32::MAX),
+        status: copy_status(dry_run, report.failed),
+    }
+}
+
+// 纯映射：FindReport → MobileFindReport（保留组边界，不做 CSV 展平）。
+fn mobile_report_from(report: FindReport) -> MobileFindReport {
+    MobileFindReport {
+        scanned: u32::try_from(report.scanned).unwrap_or(u32::MAX),
+        group_count: u32::try_from(report.groups.len()).unwrap_or(u32::MAX),
+        groups: report
+            .groups
+            .into_iter()
+            .map(|paths| MobileDuplicateGroup { paths })
+            .collect(),
+        bytes_read: report.bytes_read,
+    }
+}
+
+// 收敛 dispatch 返回的 CommandResult 到 CopyReport；Copy 命令必返 Copy 结果，
+// 错配属内部错误——FFI 边界不 panic，改返 Err 让 Kotlin 端展示文案。
+fn expect_copy(result: CommandResult) -> Result<CopyReport, TidyError> {
     let CommandResult::Copy(report) = result else {
         return Err(TidyError::Generic {
             text: "internal error: copy command returned non-copy result".into(),
         });
     };
-    // 与 CLI 路径（copy.rs L120）对齐：failed>0 → partial；dry-run 走独立 status 文案。
-    let status = match (dry_run, report.failed) {
+    Ok(report)
+}
+
+// expect_copy 的 Find 对偶。
+fn expect_find(result: CommandResult) -> Result<FindReport, TidyError> {
+    let CommandResult::Find(report) = result else {
+        return Err(TidyError::Generic {
+            text: "internal error: find command returned non-find result".into(),
+        });
+    };
+    Ok(report)
+}
+
+// 与 CLI 路径（copy.rs）对齐：failed>0 → partial；dry-run 走独立 status 文案。
+fn copy_status(dry_run: bool, failed: usize) -> String {
+    match (dry_run, failed) {
         (true, 0) => "dry-run ok".to_string(),
         (true, n) => format!("dry-run partial ({n} failed)"),
         (false, 0) => "ok".to_string(),
         (false, n) => format!("partial ({n} failed)"),
-    };
-    Ok(TidyStats {
-        total_scanned: u32::try_from(report.scanned).unwrap_or(u32::MAX),
-        copied: u32::try_from(report.copied).unwrap_or(u32::MAX),
-        ignored: u32::try_from(report.ignored).unwrap_or(u32::MAX),
-        failed: u32::try_from(report.failed).unwrap_or(u32::MAX),
-        status,
-    })
+    }
 }
 
 #[cfg(test)]
@@ -361,6 +389,14 @@ mod tests {
     }
 
     #[test]
+    fn find_duplicates_mtp_source_surfaces_dispatch_err() {
+        // mtp://: feature off → factory 返 Unsupported；feature on → RealMtpClient::new
+        // stub 必 Err。两种组合都让 tidy_with 返 Err，稳定覆盖 `)?` 的 Err arm。
+        let err = tidy_find_duplicates(vec!["mtp://device/storage/x".into()], false);
+        assert!(err.is_err());
+    }
+
+    #[test]
     fn dry_run_invalid_src_uri_returns_err() {
         let out = tempfile::tempdir().unwrap();
         let result = tidy_dry_run("smb://".into(), out.path().to_str().unwrap().into());
@@ -372,6 +408,61 @@ mod tests {
         let src = tempfile::tempdir().unwrap();
         let result = tidy_dry_run(src.path().to_str().unwrap().into(), "smb://".into());
         assert!(result.is_err());
+    }
+
+    #[rstest::rstest]
+    #[case::dry_run_clean(true, 0, "dry-run ok")]
+    #[case::dry_run_partial(true, 2, "dry-run partial (2 failed)")]
+    #[case::real_clean(false, 0, "ok")]
+    #[case::real_partial(false, 3, "partial (3 failed)")]
+    fn copy_status_maps_dry_run_and_failed_to_text(
+        #[case] dry_run: bool,
+        #[case] failed: usize,
+        #[case] expected: &str,
+    ) {
+        assert_eq!(copy_status(dry_run, failed), expected);
+    }
+
+    #[test]
+    fn expect_copy_returns_report_for_copy_result() {
+        let report = expect_copy(CommandResult::Copy(sample_copy_report())).unwrap();
+        assert_eq!(report.copied, 3);
+    }
+
+    #[test]
+    fn expect_copy_rejects_find_result() {
+        let err = expect_copy(CommandResult::Find(FindReport::default())).unwrap_err();
+        let TidyError::Generic { text } = err;
+        assert!(text.contains("non-copy result"), "got: {text}");
+    }
+
+    #[test]
+    fn expect_find_returns_report_for_find_result() {
+        let report = expect_find(CommandResult::Find(FindReport::default())).unwrap();
+        assert_eq!(report.scanned, 0);
+    }
+
+    #[test]
+    fn expect_find_rejects_copy_result() {
+        let err = expect_find(CommandResult::Copy(sample_copy_report())).unwrap_err();
+        let TidyError::Generic { text } = err;
+        assert!(text.contains("non-find result"), "got: {text}");
+    }
+
+    fn sample_copy_report() -> CopyReport {
+        CopyReport {
+            scanned: 5,
+            copied: 3,
+            ignored: 1,
+            failed: 1,
+            skipped_empty: 0,
+            skipped_unreadable: 0,
+            walker_errors: 0,
+            dry_run: false,
+            remove: false,
+            include_non_media: false,
+            errors: Vec::new(),
+        }
     }
 
     #[test]

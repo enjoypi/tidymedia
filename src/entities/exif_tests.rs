@@ -259,6 +259,8 @@ fn from_path_jpeg_without_gps_returns_none() {
 fn parse_gps_date_invalid_returns_none() {
     assert!(super::parse_gps_date("not-a-date").is_none());
     assert!(super::parse_gps_date("2023:13:01").is_none()); // month 13 invalid
+    // 数字合法但段数不足：必须由 len 前置 guard 拦下（而非依赖 parse 失败或越界 panic）
+    assert!(super::parse_gps_date("2024:05").is_none());
 }
 
 /// `rational_to_u32`：denominator=0 → None。
@@ -266,6 +268,14 @@ fn parse_gps_date_invalid_returns_none() {
 fn rational_to_u32_zero_denominator_returns_none() {
     let r = nom_exif::URational::new(10, 0);
     assert!(super::rational_to_u32(r).is_none());
+}
+
+/// `rational_to_u32`：denominator>1 时做真除法（10/2=5，杀「/ 变 *」类算术变异；
+/// 既有用例 denom 全是 0 或 1，1 时乘除等价）。
+#[test]
+fn rational_to_u32_divides_by_denominator() {
+    let r = nom_exif::URational::new(10, 2);
+    assert_eq!(super::rational_to_u32(r), Some(5));
 }
 
 /// `build_gps_utc`：date 或 time 任一为 None → None。

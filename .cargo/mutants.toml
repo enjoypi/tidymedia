@@ -1,0 +1,46 @@
+# cargo-mutants 配置（工具强制 toml 格式，是「自定义配置用 yaml」规约的工具例外）。
+# 与项目测试规约对齐：nextest + release（debug 下 SHA-512 fixture 哈希显著变慢）。
+# --all-features 让 mobile.rs / 各 backend cfg 分支参与编译，其内 mutant 才可被杀。
+test_tool = "nextest"
+profile = "release"
+additional_cargo_args = ["--all-features"]
+
+# 等价/不可达变异豁免（任何测试都杀不掉，原因逐条注明）：
+# - pick_fs_fallback 的 `m < c` guard 变 `m <= c`——仅 m==c 时换 arm，
+#   而两个 arm 此时返回同一值（m 与 c 相等），观测输出恒等。
+# - strip_windows_unc：cfg(windows) 版本在 Linux host 不参与编译，变异必幸存；
+#   cfg(not(windows)) 版本是恒等函数，已有 strip_windows_unc_* 直测保护。
+# - find.rs 的 comment()/rm()：cfg(windows) 对偶版本在 Linux host 不编译必幸存；
+#   cfg(not(windows)) 版本的 "#"/"rm" 字面量由 run_cli_flags.rs 的
+#   binary_find_with_output_* e2e（starts_with("rm ") / 注释前缀判断）锁定。
+exclude_re = [
+    "replace < with <= in pick_fs_fallback",
+    "replace strip_windows_unc -> &str with",
+    "replace comment -> &'static str with",
+    "replace rm -> &'static str with",
+    # RemoteAdapter::ctx 返回 &()：unit 只有一个值，Box::leak(Box::new(())) 与
+    # &() 观测恒等，结构性等价不可杀。
+    'replace .*::ctx -> &\(\) with',
+    # factory 的 build_*_backend：cfg(not(feature)) 镜像版在 --all-features 变异
+    # 口径下不编译必幸存（行为由默认 features 的 tidy_rejects_* 测试维护）；
+    # feature-on 版需真实 SMB/ADB 设备，与 *_real.rs 同因不可 CI 触发。
+    'replace build_(smb|mtp|adb)_backend ',
+    # rename_or_fallback 的 CrossesDevices guard 变 false：仅当 rename 真返回
+    # EXDEV 时可区分，需要真实跨设备挂载点，tempdir 单测不可复现（与该函数
+    # coverage(off) 注释同因）。guard 变 true / == 变 != 由
+    # rename_propagates_non_crossdevice_error_without_fallback_copy 杀掉。
+    'replace match guard e\.kind\(\) == io::ErrorKind::CrossesDevices with false',
+    # LocalWriter 的 flush/finish 委托 fs::File::flush——std 对 File 的 flush 实现
+    # 本身就是恒返 Ok(()) 的 no-op（无用户态缓冲）；finish 的 Box self 两边都在
+    # 函数尾析构关闭句柄。替换成 Ok(()) 字面等价不可杀。
+    'LocalWriter>::(flush|finish) -> io::Result<\(\)> with Ok\(\(\)\)',
+]
+
+exclude_globs = [
+    "src/**/*_tests.rs",                        # 外置单测文件本身不变异
+    "src/**/*_real.rs",                         # 需真实 SMB/MTP/ADB 设备（coverage 同样豁免）
+    "src/entities/test_common.rs",              # 测试基建
+    "src/adapters/backend/remote_test_helpers.rs",
+    "src/adapters/backend/fake*.rs",
+    "src/bin/**",                               # 单行入口，无逻辑
+]

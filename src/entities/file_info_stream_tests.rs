@@ -388,3 +388,58 @@ fn secure_hash_propagates_reader_stream_error() {
     let err = info.secure_hash().unwrap_err();
     assert_eq!(err.kind(), io::ErrorKind::TimedOut);
 }
+
+/// threshold=0 + 候选全空（EXIF 存在但无日期字段、`modified=None`）→ `secs==0`
+/// 必须仍走 `fs_fallback`（= created），不得把 EPOCH 当判定结果返回。
+/// 杀 `secs > 0` 被变异成 `>= 0`。注意两个构造要点：EXIF 必须存在（否则 let-else
+/// 早返回走不到该行）；mtime 必须缺失（真实文件系统造不出，只能用
+/// `FakeBackend::add_file_with_times`）。
+#[test]
+fn create_time_zero_threshold_without_candidates_uses_fs_fallback() {
+    use std::time::{Duration, SystemTime};
+    let fake = Arc::new(FakeBackend::new("fake"));
+    let loc = Location::Local(camino::Utf8PathBuf::from("/in-memory/no-times.bin"));
+    let created = SystemTime::UNIX_EPOCH + Duration::from_secs(1_600_000_000);
+    fake.add_file_with_times(&loc, b"payload".to_vec(), None, Some(created));
+
+    let mut info = super::Info::open(&loc, fake).unwrap();
+    // 无日期字段的 EXIF：candidates_from_exif 产出为空，decision → None → secs=0
+    info.set_exif(crate::entities::exif::Exif::with_mime("image/png"));
+    assert_eq!(info.create_time(0), created);
+}
+
+/// 缓冲区填满后 `read_fill` 不得再发起额外 read：用「数据尽即 Err」的 reader
+/// 验证。`filled < buf.len()` 被变异成 `<=` 时会对空 slice 多读一次，把 EOF 后
+/// 的 Err 误传播出来。
+#[test]
+fn read_fill_stops_exactly_at_buffer_capacity() {
+    #[derive(Debug)]
+    struct ErrAfterData {
+        data: Vec<u8>,
+        pos: usize,
+    }
+    impl io::Read for ErrAfterData {
+        fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+            if self.pos >= self.data.len() {
+                return Err(io::Error::other("read past end"));
+            }
+            let n = (self.data.len() - self.pos).min(buf.len());
+            buf[..n].copy_from_slice(&self.data[self.pos..self.pos + n]);
+            self.pos += n;
+            Ok(n)
+        }
+    }
+    impl io::Seek for ErrAfterData {
+        fn seek(&mut self, _pos: io::SeekFrom) -> io::Result<u64> {
+            Ok(0)
+        }
+    }
+
+    let mut r = ErrAfterData {
+        data: vec![7u8; 16],
+        pos: 0,
+    };
+    let mut buf = [0u8; 16];
+    let n = super::read_fill(&mut r, &mut buf).expect("must not read past a full buffer");
+    assert_eq!(n, 16);
+}
