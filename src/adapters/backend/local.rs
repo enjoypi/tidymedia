@@ -265,3 +265,7 @@ mod tests;
 #[cfg(test)]
 #[path = "local_rename_tests.rs"]
 mod rename_tests;
+
+#[cfg(test)]
+#[path = "local_edge_tests.rs"]
+mod edge_tests;

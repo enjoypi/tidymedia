@@ -168,6 +168,10 @@ mod tests;
 #[path = "adb_internals_tests.rs"]
 mod internals_tests;
 
+#[cfg(test)]
+#[path = "adb_ops_tests.rs"]
+mod ops_tests;
+
 #[cfg(feature = "adb-backend")]
 #[path = "adb_real.rs"]
 pub mod real;

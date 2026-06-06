@@ -400,5 +400,13 @@ fn secure_hash(path: &str) -> io::Result<(usize, SecureHash)> {
 mod tests;
 
 #[cfg(test)]
+#[path = "file_info_error_tests.rs"]
+mod error_tests;
+
+#[cfg(test)]
 #[path = "file_info_stream_tests.rs"]
 mod stream_tests;
+
+#[cfg(test)]
+#[path = "file_info_backend_tests.rs"]
+mod backend_tests;

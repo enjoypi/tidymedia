@@ -156,6 +156,10 @@ impl MtpBackend {
 #[path = "mtp_tests.rs"]
 mod tests;
 
+#[cfg(test)]
+#[path = "mtp_types_tests.rs"]
+mod types_tests;
+
 #[cfg(feature = "mtp-backend")]
 #[path = "mtp_real.rs"]
 pub mod real;

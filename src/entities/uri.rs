@@ -358,3 +358,7 @@ fn render_adb(serial: Option<&str>, path: &str) -> String {
 #[cfg(test)]
 #[path = "uri_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "uri_display_tests.rs"]
+mod display_tests;
