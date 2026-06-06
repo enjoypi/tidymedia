@@ -7,7 +7,8 @@
 use std::io;
 use std::sync::Arc;
 
-use camino::Utf8PathBuf;
+use camino::{Utf8Path, Utf8PathBuf};
+use tracing::debug;
 
 use crate::entities::backend::{Backend, Entry, MediaReader, MediaWriter, Metadata};
 use crate::entities::uri::Location;
@@ -76,6 +77,30 @@ impl<A: RemoteAdapter> RemoteBackend<A> {
     }
 }
 
+/// 统一记录远端 op 失败并套用协议级错误映射（R3：外部调用失败不静默）。
+/// 非泛型：日志逻辑只编译一份，避免 monomorphization 覆盖率重复计数。
+fn map_and_log(
+    scheme: &'static str,
+    operation: &'static str,
+    path: &Utf8Path,
+    map: fn(io::Error) -> io::Error,
+    e: io::Error,
+) -> io::Error {
+    let mapped = map(e);
+    let err = mapped.to_string();
+    let path = path.as_str();
+    debug!(
+        feature = "backend",
+        scheme,
+        operation,
+        path,
+        result = "error",
+        err,
+        "remote op failed"
+    );
+    mapped
+}
+
 fn mkparent<A: RemoteAdapter>(target: &A::Target, client: &Arc<dyn RemoteClient<A::Target>>) {
     if let Some(parent) = target.parent() {
         let _ = client.mkdir(&parent);
@@ -98,7 +123,10 @@ impl<A: RemoteAdapter> Backend for RemoteBackend<A> {
 
     fn metadata(&self, loc: &Location) -> io::Result<Metadata> {
         let target = self.build_target(loc)?;
-        self.adapter.client().stat(&target).map_err(A::map_error)
+        self.adapter
+            .client()
+            .stat(&target)
+            .map_err(|e| map_and_log(A::scheme(), "stat", target.path(), A::map_error, e))
     }
 
     fn exists(&self, loc: &Location) -> io::Result<bool> {
@@ -117,7 +145,12 @@ impl<A: RemoteAdapter> Backend for RemoteBackend<A> {
             Ok(t) => t,
             Err(e) => return Box::new(std::iter::once(Err(e))),
         };
-        let entries = match self.adapter.client().list(&target).map_err(A::map_error) {
+        let listed = self
+            .adapter
+            .client()
+            .list(&target)
+            .map_err(|e| map_and_log(A::scheme(), "list", target.path(), A::map_error, e));
+        let entries = match listed {
             Ok(v) => v,
             Err(e) => return Box::new(std::iter::once(Err(e))),
         };
@@ -126,7 +159,11 @@ impl<A: RemoteAdapter> Backend for RemoteBackend<A> {
 
     fn open_read(&self, loc: &Location) -> io::Result<Box<dyn MediaReader>> {
         let target = self.build_target(loc)?;
-        let bytes = self.adapter.client().read(&target).map_err(A::map_error)?;
+        let bytes = self
+            .adapter
+            .client()
+            .read(&target)
+            .map_err(|e| map_and_log(A::scheme(), "read", target.path(), A::map_error, e))?;
         Ok(Box::new(std::io::Cursor::new(bytes)))
     }
 
@@ -144,18 +181,27 @@ impl<A: RemoteAdapter> Backend for RemoteBackend<A> {
 
     fn remove_file(&self, loc: &Location) -> io::Result<()> {
         let target = self.build_target(loc)?;
-        self.adapter.client().unlink(&target).map_err(A::map_error)
+        self.adapter
+            .client()
+            .unlink(&target)
+            .map_err(|e| map_and_log(A::scheme(), "unlink", target.path(), A::map_error, e))
     }
 
     fn mkdir_p(&self, loc: &Location) -> io::Result<()> {
         let target = self.build_target(loc)?;
-        self.adapter.client().mkdir(&target).map_err(A::map_error)
+        self.adapter
+            .client()
+            .mkdir(&target)
+            .map_err(|e| map_and_log(A::scheme(), "mkdir", target.path(), A::map_error, e))
     }
 
     fn read_to_string(&self, loc: &Location) -> io::Result<String> {
         let bytes = {
             let target = self.build_target(loc)?;
-            self.adapter.client().read(&target).map_err(A::map_error)?
+            self.adapter
+                .client()
+                .read(&target)
+                .map_err(|e| map_and_log(A::scheme(), "read", target.path(), A::map_error, e))?
         };
         String::from_utf8(bytes).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
     }
@@ -166,15 +212,14 @@ impl<A: RemoteAdapter> Backend for RemoteBackend<A> {
         if mkparents {
             mkparent::<A>(&dst_target, self.adapter.client());
         }
-        let bytes = self
-            .adapter
-            .client()
-            .read(&src_target)
-            .map_err(A::map_error)?;
+        let bytes =
+            self.adapter.client().read(&src_target).map_err(|e| {
+                map_and_log(A::scheme(), "read", src_target.path(), A::map_error, e)
+            })?;
         self.adapter
             .client()
             .write(&dst_target, &bytes)
-            .map_err(A::map_error)
+            .map_err(|e| map_and_log(A::scheme(), "write", dst_target.path(), A::map_error, e))
     }
 }
 
@@ -209,7 +254,7 @@ impl<A: RemoteAdapter> MediaWriter for RemoteBufferedWriter<A> {
         self.client
             .write(&self.target, &self.buffer)
             .map(|_| ())
-            .map_err(A::map_error)
+            .map_err(|e| map_and_log(A::scheme(), "write", self.target.path(), A::map_error, e))
     }
 }
 

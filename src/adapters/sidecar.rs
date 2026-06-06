@@ -7,6 +7,7 @@
 //! sidecar 协议解析成内层 [`Candidate`]，protocol 细节（XMP 字面量 / Takeout schema /
 //! `serde_json`）不泄漏到 entities / usecases。
 
+use std::io;
 use std::sync::Arc;
 
 use camino::Utf8Path;
@@ -15,6 +16,7 @@ use chrono::DateTime;
 use chrono::TimeDelta;
 use chrono::Utc;
 use serde_derive::Deserialize;
+use tracing::debug;
 
 use crate::adapters::backend::local::LocalBackend;
 use crate::entities::backend::Backend;
@@ -23,6 +25,7 @@ use crate::entities::media_time::Source;
 use crate::entities::uri::Location;
 
 const XMP_KEY: &str = "photoshop:DateCreated=\"";
+const FEATURE_SIDECAR: &str = "sidecar";
 
 /// 旧入口：本地路径 → Local backend shim。便于现有测试与 use case 不引入 backend 类型。
 #[must_use]
@@ -47,8 +50,11 @@ pub fn discover_with_backend(media_loc: &Location, backend: &Arc<dyn Backend>) -
 
 fn try_xmp(media_loc: &Location, backend: &dyn Backend) -> Option<Candidate> {
     let xmp_loc = with_extension(media_loc, "xmp")?;
-    let content = backend.read_to_string(&xmp_loc).ok()?;
-    let utc = parse_xmp_date(&content)?;
+    let content = read_sidecar(&xmp_loc, backend, "read_xmp")?;
+    let Some(utc) = parse_xmp_date(&content) else {
+        log_parse_failure("parse_xmp", &xmp_loc);
+        return None;
+    };
     Some(Candidate {
         utc,
         offset: None,
@@ -61,8 +67,11 @@ fn try_takeout(media_loc: &Location, backend: &dyn Backend) -> Option<Candidate>
     // Takeout 同目录文件：<media-full-name>.json（例如 photo.jpg.json）。
     // 直接拼后缀，避免 with_extension 在无扩展名时产生 `photo..json`（多一个点）。
     let json_loc = append_suffix(media_loc, ".json")?;
-    let content = backend.read_to_string(&json_loc).ok()?;
-    let utc = parse_takeout_json(&content)?;
+    let content = read_sidecar(&json_loc, backend, "read_takeout")?;
+    let Some(utc) = parse_takeout_json(&content) else {
+        log_parse_failure("parse_takeout", &json_loc);
+        return None;
+    };
     Some(Candidate {
         utc,
         offset: None,
@@ -83,6 +92,45 @@ fn with_extension(loc: &Location, ext: &str) -> Option<Location> {
 fn append_suffix(loc: &Location, sfx: &str) -> Option<Location> {
     let Location::Local(p) = loc else { return None };
     Some(Location::Local(Utf8PathBuf::from(format!("{p}{sfx}"))))
+}
+
+/// 读 sidecar 内容；失败时按需输出诊断日志（R3：外部读取不静默）。
+fn read_sidecar(loc: &Location, backend: &dyn Backend, operation: &'static str) -> Option<String> {
+    match backend.read_to_string(loc) {
+        Ok(content) => Some(content),
+        Err(e) => {
+            if should_log_read_error(e.kind()) {
+                let path = loc.display();
+                let err = e.to_string();
+                debug!(
+                    feature = FEATURE_SIDECAR,
+                    operation,
+                    path,
+                    result = "error",
+                    err,
+                    "cannot read sidecar"
+                );
+            }
+            None
+        }
+    }
+}
+
+/// `NotFound` 是常态（绝大多数媒体没有 sidecar），记日志只会刷屏；其余 IO 错误才值得诊断。
+fn should_log_read_error(kind: io::ErrorKind) -> bool {
+    kind != io::ErrorKind::NotFound
+}
+
+/// sidecar 文件存在但内容不符合预期格式：这是 P3 候选"应生效而未生效"的关键诊断点。
+fn log_parse_failure(operation: &'static str, loc: &Location) {
+    let path = loc.display();
+    debug!(
+        feature = FEATURE_SIDECAR,
+        operation,
+        path,
+        result = "error",
+        "cannot parse sidecar"
+    );
 }
 
 pub(crate) fn parse_xmp_date(content: &str) -> Option<DateTime<Utc>> {

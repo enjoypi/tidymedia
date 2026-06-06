@@ -34,6 +34,9 @@ exclude_re = [
     # 本身就是恒返 Ok(()) 的 no-op（无用户态缓冲）；finish 的 Box self 两边都在
     # 函数尾析构关闭句柄。替换成 Ok(()) 字面等价不可杀。
     'LocalWriter>::(flush|finish) -> io::Result<\(\)> with Ok\(\(\)\)',
+    # sidecar 的 log_parse_failure 是纯 tracing 副作用 fn（R3 诊断日志，无返回值、
+    # 无状态变更）；项目规约不靠捕日志断言，替换成 () 观测恒等不可杀。
+    'replace log_parse_failure with \(\)',
 ]
 
 exclude_globs = [

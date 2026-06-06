@@ -198,6 +198,33 @@ fn discover_with_backend_mtp_returns_empty() {
     assert!(discover_with_backend(&mtp_loc, &backend).is_empty());
 }
 
+/// `NotFound` 是 sidecar 缺失常态，不值得记日志；其余 IO 错误（超时/权限）才需诊断。
+#[test]
+fn should_log_read_error_skips_not_found() {
+    assert!(!should_log_read_error(std::io::ErrorKind::NotFound));
+}
+
+#[test]
+fn should_log_read_error_reports_timed_out() {
+    assert!(should_log_read_error(std::io::ErrorKind::TimedOut));
+}
+
+/// sidecar 读取遇非 `NotFound` 错误（注入 `TimedOut`）：走日志分支后仍返回空候选，
+/// 不让 P3 失败中断扫描。
+#[test]
+fn discover_with_fake_backend_read_error_returns_empty() {
+    use crate::adapters::backend::fake::{FakeBackend, Op};
+    let fake = std::sync::Arc::new(FakeBackend::new("local"));
+    let media = Location::Local(Utf8PathBuf::from("/in-mem/x.jpg"));
+    let xmp = Location::Local(Utf8PathBuf::from("/in-mem/x.xmp"));
+    let json = Location::Local(Utf8PathBuf::from("/in-mem/x.jpg.json"));
+    fake.add_file(media.clone(), b"img-bytes".to_vec());
+    fake.inject_error(xmp, Op::ReadToString, std::io::ErrorKind::TimedOut);
+    fake.inject_error(json, Op::ReadToString, std::io::ErrorKind::TimedOut);
+    let backend: std::sync::Arc<dyn Backend> = fake;
+    assert!(discover_with_backend(&media, &backend).is_empty());
+}
+
 /// `FakeBackend` 用 Local Location `喂入：read_to_string` 走 fake 数据，验证 backend 调度
 /// 与 `LocalBackend` 同语义。
 #[test]
