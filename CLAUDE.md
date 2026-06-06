@@ -28,7 +28,7 @@
 - **`--all-features` 下 `dispatch.rs` 的 `usecases::copy(..)?` Err arm 覆盖**：现有 `tidy_rejects_*` 测试用 `#[cfg(not(feature = "smb-backend"))]` gate，启用全部 feature 跑覆盖率时这些测试不编译 → `?` Err arm miss。用 output 父路径占成普通文件触发 `mkdir_p` Err 兜底（参考 `dispatch_and_cli.rs::tidy_copy_propagates_mkdir_error_when_output_parent_is_file`）
 - **`--all-features` 严格覆盖也须 100%**：feature 启用侧用 `#[cfg(feature = "...")]` gated 测试镜像 `tidy_rejects_*` 系列（`tests/lib_tidy/real_factory.rs`）。标准杠杆：`RealMtpClient::new` 是 stub 必 Err → 确定性触发 `dispatch.rs` 各 `?` Err arm 与 `factory.rs` builder 调用位点；`PavaoClient::new` / `ADBServerDevice::new` 仅初始化不连网可直接断言。`factory.rs::unsupported_backend` 三 feature 全开时 dead → 条件豁免 `cfg_attr(all(coverage_nightly, 三feature), coverage(off))`（与 `allow(dead_code)` 条件镜像）。`mobile.rs` 不可达防御逻辑抽纯 helper（`expect_copy`/`expect_find`/`copy_status`/`stats_from`/`mobile_report_from`）直测；调用点用 `.map` 替代 `?` 消除永不触发的 Err 传播 region
 - **子行 region miss 定位**（lcov `DA`/`BRDA` 不显示，如 `?` Err arm）：`cargo +nightly llvm-cov report --release --text` 复用上次 run 的 profdata（不接 `--all-features`，feature 集随上次 run），输出中 `^0` 标记即未覆盖子行 region
-- **mutation testing**：配置在 `.cargo/mutants.toml`（nextest + release + `--all-features`，排除 `*_real.rs`/测试基建；等价/平台 cfg/feature-gate 豁免全在 `exclude_re` 逐条注明 WHY）。日常增量 `cargo mutants --in-diff <(git diff main)`；全量审计 677 mutants / 约 3h（2 核机；2026-06 基线：509 caught / 168 unviable / 0 missed）；定点复验 `cargo mutants -F '<name regex>'`（注意 `-E` 是 exclude）。已沉淀套路：①计数断言 MUST 精确 `==`，`>= 1` 杀不掉 `+=`→`-=`（usize release wrap 成 MAX）；②与被调函数重复的入参 guard 产生等价变异，删冗余 guard 单点校验（DRY）；③`cfg(windows)`/`cfg(not(feature))` 代码在单口径跑必假幸存 → exclude_re；④只进 tracing 字段的取值（如 `summary_result`）抽纯 fn 直测，不靠捕日志；⑤防御性不可达 arm 抽纯 helper 喂错配变体直测（mobile.rs `expect_copy`/`expect_find` 模式）；⑥写 kill 测试前先确认变异行在该输入下**可达**（`create_time` 无 EXIF 时 let-else 早返回，到不了被变异行——曾致 kill 测试绿但 mutant 仍幸存）；⑦`cargo mutants` 启动即快照源树，长跑期间可安全并行写 kill 测试/改源码，不影响进行中的运行
+- **mutation testing**：配置在 `.cargo/mutants.toml`（nextest + release + `--all-features`，排除 `*_real.rs`/测试基建；等价/平台 cfg/feature-gate 豁免全在 `exclude_re` 逐条注明 WHY）。日常增量 `cargo mutants --in-diff <(git diff main)`；全量审计 677 mutants / 约 3h（2 核机；2026-06 基线：509 caught / 168 unviable / 0 missed）；定点复验 `cargo mutants -F '<name regex>'`（注意 `-E` 是 exclude）。已沉淀套路：①计数断言 MUST 精确 `==`，`>= 1` 杀不掉 `+=`→`-=`（usize release wrap 成 MAX）；②与被调函数重复的入参 guard 产生等价变异，删冗余 guard 单点校验（DRY）；③`cfg(windows)`/`cfg(not(feature))` 代码在单口径跑必假幸存 → exclude_re；④只进 tracing 字段的取值（如 `summary_result`）抽纯 fn 直测，不靠捕日志；⑤防御性不可达 arm 喂错配变体直测（见上文「`--all-features` 严格覆盖」条的 `mobile.rs` helper 模式）；⑥写 kill 测试前先确认变异行在该输入下**可达**（`create_time` 无 EXIF 时 let-else 早返回，到不了被变异行——曾致 kill 测试绿但 mutant 仍幸存）；⑦`cargo mutants` 启动即快照源树，长跑期间可安全并行写 kill 测试/改源码，不影响进行中的运行
 
 ## Fixture
 - `tests/data/` 下文件 mtime 每次 `git checkout` 重置；时间相关测试 **MUST** 用 `filetime::set_file_mtime` 固定（封装：`entities/test_common::copy_png_to`，固定到 `FIXED_MEDIA_MTIME` = 2024-01-01 12:00:00 UTC）
@@ -36,7 +36,7 @@
 - `camino::Utf8Path` 在 Linux 上**不**把 `\` 当分隔符，Windows 反斜杠路径测试行为不同
 
 ## 文件组织
-- 单文件 > 512 行拆测试：`#[cfg(test)] #[path = "X_tests.rs"] mod tests;`
+- 文件 ≥400 行预防性拆分至 ≤300：测试文件按先例追加第二个 `#[cfg(test)] #[path = "X_yyy_tests.rs"] mod yyy_tests;`；生产文件目录化 `foo/mod.rs`（仅声明+re-export，rust-p0 §9）+ 子模块（参考 `entities/file_info/`、`usecases/copy/`）。测试文件随迁目录、`#[path]` 挂 mod.rs；测试要访问的内部项在 mod.rs 用 `#[cfg(test)] use self::sub::item;` 私有 re-export（私有 use 对子模块可见，`super::X` / `super::super::*` glob 照常解析）；跨子模块项可见性用 `pub(super)`，对外 API 用 pub-in-private-mod + `pub(crate) use`
 - CA 重构移动文件：`pub use A::B` 只 re-export 类型不保留路径；`pub mod B { pub use A::B::*; }` 保留完整模块路径；配套测试 `super::` 需改 `crate::` 绝对路径
 - CA 依赖方向验证：`rg "use crate::adapters|use crate::frameworks" src/entities/ src/usecases/` 应仅返回 re-export 桥接
 - 集成测试拆分：`tests/<name>.rs` 是 root binary，`tests/<name>/*.rs` 子目录 **不**会被当独立 binary；root 用 `#[path = "<name>/sub.rs"] mod sub;` 装配（参考 `tests/lib_tidy.rs`）
@@ -61,7 +61,7 @@
 - 优先级：P0 = `ExifDateTimeOriginal` / `QuickTimeCreationDate` / `MkvDateUtc`；P1 = `ExifCreateDate` / `QuickTimeCreateDate`；P2 = 文件名启发式；P3 = `XmpSidecar` / `GoogleTakeoutJson`；P4 = `FsMtime`。mtime 比 P0 早 > 30 天发提示性冲突告警
 - `entities/media_time/` 7 子模块单一职责：`priority`（`Source` + `Priority` 枚举）/ `candidate`（`epoch_to_candidate`：secs==0 视为未填返 None）/ `filename`（P2 启发式：`IMG_`/`DSC_`/`Screenshot_` 前缀 + 13 位毫秒 Unix 戳 + WeChat/WhatsApp/Pixel/裸 YYYYMMDD）/ `filter`（合理性过滤 + `EPOCH_1904` / `SOFT_THRESHOLD_1995` / `FUTURE_TOLERANCE_SECS`）/ `resolve` + `decision`（多候选裁决）/ `fs_time`（P4）
 - P3 sidecar 在 `adapters/sidecar.rs`（Interface Adapter 层，不在 entities）：XMP `photoshop:DateCreated` 纯文本搜索 + Takeout `<media>.<ext>.json` `photoTakenTime.timestamp` 走 `serde_json`；backend-aware，sibling 路径计算当前仅 Local
-- **`Info::create_time` 不消费 P2 filename 候选**（与上面 P0–P4 模型偏差）：`copy.rs::do_copy` 只看 EXIF + fs_fallback。`archive_template` 端到端测试**必须**选含 EXIF 的 fixture（如 `sample-with-offset.jpg`），不能用 P2 文件名 fixture
+- **`Info::create_time` 不消费 P2 filename 候选**（与上面 P0–P4 模型偏差）：`copy/ops.rs::do_copy` 只看 EXIF + fs_fallback。`archive_template` 端到端测试**必须**选含 EXIF 的 fixture（如 `sample-with-offset.jpg`），不能用 P2 文件名 fixture
 
 ## URI 与 Backend
 
@@ -97,7 +97,7 @@
 - `UtcOffset::from_whole_seconds` 范围 ±25:59:59，越界返 `None`，用 `.unwrap_or(UtcOffset::UTC)` 兜底
 - **R1 外置**：`copy.{timezone_offset_hours, unique_name_max_attempts, archive_template}` / `exif.valid_date_time_secs` / `backend.smb.{default_user,workgroup,timeout_secs}` / `backend.mtp.{device_match,storage_match}` / `backend.adb.{server_host,server_port,timeout_secs}`
 - **不外置的合理例外**：spec §X 算法常量（`EPOCH_1904` / `SOFT_THRESHOLD_1995` / `FUTURE_TOLERANCE_SECS` / `MTIME_VS_P0_HINT_SECS`）/ 协议字面量（`IMG_` / `DSC_` / `Screenshot_` / `XMP_KEY`）/ 日志维度名（`FEATURE_*`）/ lookup 表（`MONTH`）/ 流式哈希（`FAST_READ_SIZE`、`STREAM_CHUNK = 1 MiB`、`MIME_SNIFF_BYTES = 256`）
-- `src/usecases/copy.rs` 的 `println!("\"{}\"\t\"{}\"", src, dst)` 是 CLI 脚本可读输出（dry-run + 完成回执），**不是** R3 日志路径，不要改成 tracing
+- `src/usecases/copy/ops.rs` 的 `println!("\"{}\"\t\"{}\"", src, dst)` 是 CLI 脚本可读输出（dry-run + 完成回执），**不是** R3 日志路径，不要改成 tracing
 
 ## Android / 移动端（feature `android-app`）
 - uniffi 0.31 proc-macro 模式：lib.rs 顶层 `uniffi::setup_scaffolding!()` + `#[uniffi::export]` / `#[derive(uniffi::Record)]` / `#[derive(uniffi::Error)]` 注解；不需要 build.rs / .udl
