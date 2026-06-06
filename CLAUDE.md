@@ -33,6 +33,7 @@
 ## Fixture
 - `tests/data/` 下文件 mtime 每次 `git checkout` 重置；时间相关测试 **MUST** 用 `filetime::set_file_mtime` 固定（封装：`entities/test_common::copy_png_to`，固定到 `FIXED_MEDIA_MTIME` = 2024-01-01 12:00:00 UTC）
 - MP4 不传 `-metadata creation_time=` 时 nom-exif 返 `Some(1904-01-01)`（QuickTime epoch），要 None 用 MKV
+- `FakeBackend` 默认 mtime = `UNIX_EPOCH` → `create_time` P4 兜底 + 默认时区 +8 → copy/move e2e 的归档桶固定为 `1970/01`（断言目标路径时直接用）
 - `camino::Utf8Path` 在 Linux 上**不**把 `\` 当分隔符，Windows 反斜杠路径测试行为不同
 
 ## 文件组织
@@ -49,6 +50,7 @@
 - **新增配置字段** → `usecases/config.rs` 结构体 + `config.yaml` + `validate_*` 校验或被消费（杜绝哑配置）；secret 再加 `.env.example`（值 `changeme`）+ 确认 `.env` 已 gitignore
 - **新增 CLI flag** → `adapters/dispatch.rs` 调度透传 + **每个子命令路径（copy/move/find）独立 e2e 触发 Some/None 两边**，否则 LLVM branch miss；e2e **MUST 含 `run_cli(["tidymedia", ...])` 字符串形式**（clap flag 名映射只有该形式能验证，仅 `tidy(Commands::..)` 不算完整，参考 `tests/lib_tidy/run_cli_flags.rs`）
 - **新增 `media_time` 候选来源 / 调整 P0–P4** → `entities/media_time/priority.rs` 的 `Source` + `Priority` 枚举 → 对应解析模块（`entities/exif`、`entities/media_time/filename`、`adapters/sidecar`、`entities/media_time/fs_time`）→ `resolve`/`decision` 裁决 → 补 fixture
+- **新增 archive_template 占位符** → `archive_template.rs::render` 替换分支 + 同文件 `PLACEHOLDERS` 常量 + `config.rs::validate_archive_template` 测试三处同步
 
 ## 项目分层（Clean Architecture）
 - 四层（自外向内）：`src/frameworks/` → `src/adapters/` → `src/usecases/` → `src/entities/`
@@ -60,8 +62,9 @@
 ## 核心算法：media_time
 - 优先级：P0 = `ExifDateTimeOriginal` / `QuickTimeCreationDate` / `MkvDateUtc`；P1 = `ExifCreateDate` / `QuickTimeCreateDate`；P2 = 文件名启发式；P3 = `XmpSidecar` / `GoogleTakeoutJson`；P4 = `FsMtime`。mtime 比 P0 早 > 30 天发提示性冲突告警
 - `entities/media_time/` 7 子模块单一职责：`priority`（`Source` + `Priority` 枚举）/ `candidate`（`epoch_to_candidate`：secs==0 视为未填返 None）/ `filename`（P2 启发式：`IMG_`/`DSC_`/`Screenshot_` 前缀 + 13 位毫秒 Unix 戳 + WeChat/WhatsApp/Pixel/裸 YYYYMMDD）/ `filter`（合理性过滤 + `EPOCH_1904` / `SOFT_THRESHOLD_1995` / `FUTURE_TOLERANCE_SECS`）/ `resolve` + `decision`（多候选裁决）/ `fs_time`（P4）
-- P3 sidecar 在 `adapters/sidecar.rs`（Interface Adapter 层，不在 entities）：XMP `photoshop:DateCreated` 纯文本搜索 + Takeout `<media>.<ext>.json` `photoTakenTime.timestamp` 走 `serde_json`；backend-aware，sibling 路径计算当前仅 Local
-- **`Info::create_time` 不消费 P2 filename 候选**（与上面 P0–P4 模型偏差）：`copy/ops.rs::do_copy` 只看 EXIF + fs_fallback。`archive_template` 端到端测试**必须**选含 EXIF 的 fixture（如 `sample-with-offset.jpg`），不能用 P2 文件名 fixture
+- P3 sidecar 在 `adapters/sidecar.rs`（Interface Adapter 层，不在 entities）：XMP `photoshop:DateCreated` 纯文本搜索 + Takeout `<media>.<ext>.json` `photoTakenTime.timestamp` 走 `serde_json`；backend-aware，sibling 路径计算当前仅 Local（SMB/ADB 上 sidecar 静默跳过）
+- **P0–P4 全链已接线 `Info::create_time`**：P0/P1 来自 EXIF；P2 由 `candidates_from_filename` 直接消费（文件名 naive 时间按 UTC 解释）；P3 经依赖倒置注入——`dispatch` 把 `adapters::sidecar::discover_with_backend` 传给 `usecases::copy_with_sidecar`，`Index::enrich_candidates` 并行调 provider 填 `Info::add_candidates`；P4 = mtime。**e2e fixture 注意**：含 P2 文件名模式（`IMG_*` 等）或带 `.json`/`.xmp` sidecar 的文件会按文件名/sidecar 时间归档，不再落 mtime 年月；`copy()`（无 provider）是 `#[cfg(test)]` shim，生产只走 `copy_with_sidecar`
+- **copy/move 重叠保护**（`copy/run.rs`）：source ⊆ output（canonical 前缀含相等）→ InvalidInput 拒绝（move 会把源判为自身副本删除）；output ⊂ source（就地归档）→ `Index::remove_under_prefix` 把已归档文件从 source 索引剔除。前缀比较用 `entities::common::under_prefix`（分隔符边界），Local 走 canonicalize、远端用 display
 
 ## URI 与 Backend
 
@@ -94,9 +97,10 @@
 ## 配置与日志
 - 运行时配置：`config.yaml`（项目根）+ `src/usecases/config.rs`，`config()` 返 `&'static Config`（`OnceLock`）
 - 切换配置：`TIDYMEDIA_CONFIG=/path/to.yaml`；语法 `${VAR:-default}` 由 `expand_env` 自实现（不引 dotenv）
+- 运行时配置非法值校验走 `frameworks/config.rs::sanitize`（warn + 回退默认，与 parse 失败回退 `Config::default` 同哲学；已覆盖 `unique_name_max_attempts==0`、非法 `archive_template`）；新增可校验字段在此加分支，勿在消费点散写
 - 结构化日志字段约定：`feature` / `operation` / `result`（CLI 工具无 request_id/user_id）
 - `UtcOffset::from_whole_seconds` 范围 ±25:59:59，越界返 `None`，用 `.unwrap_or(UtcOffset::UTC)` 兜底
-- **R1 外置**：`copy.{timezone_offset_hours, unique_name_max_attempts, archive_template}` / `exif.valid_date_time_secs` / `backend.smb.{default_user,workgroup,timeout_secs}` / `backend.mtp.{device_match,storage_match}` / `backend.adb.{server_host,server_port,timeout_secs}`
+- **R1 外置**：`copy.{timezone_offset_hours, unique_name_max_attempts, archive_template}` / `exif.valid_date_time_secs` / `backend.smb.{default_user,workgroup}` / `backend.adb.{server_host,server_port}`。曾有的 `*.timeout_secs` 与 `backend.mtp.*` 因无消费点已删（依赖库无 timeout API、MTP 是 stub）——库/实现就绪时随消费链一起加回，勿先加配置占位
 - **不外置的合理例外**：spec §X 算法常量（`EPOCH_1904` / `SOFT_THRESHOLD_1995` / `FUTURE_TOLERANCE_SECS` / `MTIME_VS_P0_HINT_SECS`）/ 协议字面量（`IMG_` / `DSC_` / `Screenshot_` / `XMP_KEY`）/ 日志维度名（`FEATURE_*`）/ lookup 表（`MONTH`）/ 流式哈希（`FAST_READ_SIZE`、`STREAM_CHUNK = 1 MiB`、`MIME_SNIFF_BYTES = 256`）
 - `src/usecases/copy/ops.rs` 的 `println!("\"{}\"\t\"{}\"", src, dst)` 是 CLI 脚本可读输出（dry-run + 完成回执），**不是** R3 日志路径，不要改成 tracing
 
@@ -113,6 +117,9 @@
 
 ## 项目 Gotcha
 - Cargo.toml 多数 dep 用 `"*"` 通配；`cargo update` 可能拉到不兼容主版本（sha2 0.10→0.11 已踩坑），主版本升级前先 dry-run
+- **远端 `RemoteClient::read` 整文件入堆**（已知限制，trait 文档有 WHY）：pavao `SmbFile` 借用 client 生命周期装不进 `Box<dyn MediaReader + 'static>`、`adb_client` pull 是回调式写入 API——真正流式需换库或线程+管道，YAGNI 暂不做；大视频在内存受限环境（Android）有 OOM 风险
+- **远端 `mkdir_p` 是真递归**（`remote.rs::mkdir_recursive`）：自底向上 stat 找存在的祖先再逐层 mkdir（`AlreadyExists` 容忍、stat 非 NotFound 直接传播）。远端协议 mkdir 多为 POSIX 单层语义（pavao 父层缺失返 ENOENT）；`FakeRemoteClient::mkdir` 不校验父目录，单层 vs 递归的差异 fake 测不出来，须用「中间层注入错误/断言中间层 metadata」类测试钉行为
+- **存在性查询的 Err MUST 传播，MUST NOT `unwrap_or(false)`**：把"查询失败"吞成"不存在"会让后续 open_write truncate 覆盖已有文件、move 模式连源一起删（naming.rs 已踩坑修复）；保守兜底方向是 `true`（多重试）而非 `false`（敢覆盖）
 - **测试 shim 必须 `#[cfg(test)]` gate**：`Info::from` / `Index::visit_dir` / `Exif::from_path_with_offset` / `adapters/backend/fake_remote` 是包 backend-aware API 的旧入口，仅测试用；未 gate 会让 release build 报 `dead_code`
 - **`#[cfg(test)]` 标在方法/import 上，不要标在 `impl Foo {}` 块上**：同块生产方法会被一起 gate 掉。`cargo build --release` 与 `cargo build --tests` 两边都要跑
 - **`--all-features` clippy 与 `#[cfg(not(feature))]` test 联动**：启用全部 feature 后，gate 掉的 test fn 对应 imports 必须用同样 `#[cfg(not(all(feature = "smb-backend", feature = "mtp-backend", feature = "adb-backend")))]` 包裹，否则 `unused_import` error
