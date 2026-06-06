@@ -1,4 +1,5 @@
-//! `LocalBackend` 边界测试：非 UTF-8 文件名 / socket / root-path / chmod（从 `local_tests.rs` 拆出）。
+//! `LocalBackend` 边界与 `copy_file` 测试：非 UTF-8 文件名 / socket / root-path /
+//! chmod / copy 三态（从 `local_tests.rs` 拆出）。
 
 use std::fs;
 use std::io;
@@ -14,6 +15,10 @@ use crate::entities::uri::Location;
 
 fn local(p: impl AsRef<std::path::Path>) -> Location {
     Location::Local(Utf8PathBuf::from_path_buf(p.as_ref().to_path_buf()).unwrap())
+}
+
+fn smb_uri() -> Location {
+    Location::parse("smb://nas/share/x").unwrap()
 }
 
 #[test]
@@ -130,4 +135,62 @@ fn open_read_chmod_000_permission_denied() {
     let mut restore = fs::metadata(&path).unwrap().permissions();
     restore.set_mode(original);
     fs::set_permissions(&path, restore).unwrap();
+}
+
+#[test]
+fn copy_file_no_mkparents_writes_target() {
+    let dir = tempdir().unwrap();
+    let src = dir.path().join("a.bin");
+    let dst = dir.path().join("b.bin");
+    fs::write(&src, b"data").unwrap();
+    let n = LocalBackend::new()
+        .copy_file(&local(&src), &local(&dst), false)
+        .unwrap();
+    assert_eq!(n, 4);
+    assert_eq!(fs::read(&dst).unwrap(), b"data");
+}
+
+#[test]
+fn copy_file_mkparents_creates_dir() {
+    let dir = tempdir().unwrap();
+    let src = dir.path().join("a.bin");
+    let dst = dir.path().join("sub/b.bin");
+    fs::write(&src, b"data").unwrap();
+    let n = LocalBackend::new()
+        .copy_file(&local(&src), &local(&dst), true)
+        .unwrap();
+    assert_eq!(n, 4);
+    assert_eq!(fs::read(&dst).unwrap(), b"data");
+}
+
+#[test]
+fn copy_file_missing_source_not_found() {
+    let dir = tempdir().unwrap();
+    let src = dir.path().join("missing");
+    let dst = dir.path().join("out");
+    let err = LocalBackend::new()
+        .copy_file(&local(&src), &local(&dst), false)
+        .unwrap_err();
+    assert_eq!(err.kind(), io::ErrorKind::NotFound);
+}
+
+#[test]
+fn copy_file_rejects_non_local_src_scheme() {
+    let dir = tempdir().unwrap();
+    let dst = dir.path().join("out");
+    let err = LocalBackend::new()
+        .copy_file(&smb_uri(), &local(&dst), false)
+        .unwrap_err();
+    assert_eq!(err.kind(), io::ErrorKind::InvalidInput);
+}
+
+#[test]
+fn copy_file_rejects_non_local_dst_scheme() {
+    let dir = tempdir().unwrap();
+    let src = dir.path().join("a.bin");
+    fs::write(&src, b"x").unwrap();
+    let err = LocalBackend::new()
+        .copy_file(&local(&src), &smb_uri(), false)
+        .unwrap_err();
+    assert_eq!(err.kind(), io::ErrorKind::InvalidInput);
 }
