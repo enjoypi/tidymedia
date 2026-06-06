@@ -1,0 +1,224 @@
+use std::sync::Arc;
+
+use camino::Utf8PathBuf;
+use tempfile::tempdir;
+
+use super::comment;
+use super::find_duplicates;
+use super::render_script;
+use super::rm;
+use crate::adapters::backend::local::LocalBackend;
+use crate::entities::backend::Backend;
+use crate::entities::file_index::DuplicateGroup;
+use crate::entities::test_common as tc;
+use crate::entities::uri::Location;
+
+fn local_data_dir() -> (Location, Arc<dyn Backend>) {
+    (
+        Location::Local(Utf8PathBuf::from(tc::DATA_DIR)),
+        LocalBackend::arc(),
+    )
+}
+
+fn local_dir(p: &std::path::Path) -> (Location, Arc<dyn Backend>) {
+    (
+        Location::Local(Utf8PathBuf::from(p.to_str().unwrap())),
+        LocalBackend::arc(),
+    )
+}
+
+fn run_render(same: &[DuplicateGroup], prefix: Option<&str>, c: &str, r: &str) -> String {
+    let mut sink: Vec<u8> = Vec::new();
+    render_script(same, prefix, c, r, &mut sink);
+    String::from_utf8(sink).unwrap()
+}
+
+// sample 已按 size 降序（render_script 不再 iter().rev()，调用方负责排序）。
+fn sample_two_groups() -> Vec<DuplicateGroup> {
+    vec![
+        DuplicateGroup {
+            size: 200,
+            paths: vec![
+                Utf8PathBuf::from("/data/big_a"),
+                Utf8PathBuf::from("/data/big_b"),
+            ],
+        },
+        DuplicateGroup {
+            size: 100,
+            paths: vec![
+                Utf8PathBuf::from("/data/small_a"),
+                Utf8PathBuf::from("/data/small_b"),
+            ],
+        },
+    ]
+}
+
+#[test]
+fn render_script_unix_tokens_no_output() {
+    let same = sample_two_groups();
+    let out = run_render(&same, None, "#", "rm");
+    let expected = "#SIZE 200\r\n#rm \"/data/big_a\"\r\n#rm \"/data/big_b\"\r\n\n\
+                    #SIZE 100\r\n#rm \"/data/small_a\"\r\n#rm \"/data/small_b\"\r\n\n";
+    assert_eq!(out, expected);
+}
+
+#[test]
+fn render_script_windows_tokens_no_output() {
+    let same = sample_two_groups();
+    let out = run_render(&same, None, ":", "DEL");
+    assert!(out.contains(":SIZE 200\r\n"));
+    assert!(out.contains(":DEL \"/data/big_a\"\r\n"));
+}
+
+#[test]
+fn render_script_uncommments_paths_outside_output_prefix() {
+    let same = sample_two_groups();
+    let out = run_render(&same, Some("/keepers"), "#", "rm");
+    for line in [
+        "rm \"/data/big_a\"\r",
+        "rm \"/data/big_b\"\r",
+        "rm \"/data/small_a\"\r",
+        "rm \"/data/small_b\"\r",
+    ] {
+        assert!(out.contains(line), "missing line: {line}\nfull:\n{out}");
+    }
+    assert!(!out.contains("#rm \"/data/"));
+}
+
+/// `/photos_backup` 不应被 `/photos` prefix 误判为「在 output 内须保留」。
+/// 修复前：`path.starts_with("/photos")` 直接 true → 被注释 → 漏删；修复后：分隔符校验 → 待删。
+#[test]
+fn render_script_prefix_does_not_match_sibling_with_same_prefix() {
+    let groups = vec![DuplicateGroup {
+        size: 42,
+        paths: vec![
+            Utf8PathBuf::from("/photos/img.jpg"),
+            Utf8PathBuf::from("/photos_backup/img.jpg"),
+        ],
+    }];
+    let out = run_render(&groups, Some("/photos"), "#", "rm");
+    // /photos/img.jpg 在 output 下 → 被注释保护
+    assert!(out.contains("#rm \"/photos/img.jpg\"\r"));
+    // /photos_backup/img.jpg 不在 output 下 → 待删（非注释）
+    assert!(out.contains("rm \"/photos_backup/img.jpg\"\r"));
+    assert!(!out.contains("#rm \"/photos_backup/img.jpg\""));
+}
+
+/// path 恰等 prefix（虽极不常见但 `under_prefix` 的 `rest.is_empty()` 分支需覆盖）。
+#[test]
+fn render_script_path_exactly_equal_prefix_is_under() {
+    let groups = vec![DuplicateGroup {
+        size: 1,
+        paths: vec![Utf8PathBuf::from("/keepers"), Utf8PathBuf::from("/other/x")],
+    }];
+    let out = run_render(&groups, Some("/keepers"), "#", "rm");
+    assert!(out.contains("#rm \"/keepers\"\r"));
+}
+
+#[test]
+fn render_script_keeps_paths_under_output_prefix_commented() {
+    let groups = vec![DuplicateGroup {
+        size: 42,
+        paths: vec![
+            Utf8PathBuf::from("/keepers/a"),
+            Utf8PathBuf::from("/other/b"),
+        ],
+    }];
+    let out = run_render(&groups, Some("/keepers"), "#", "rm");
+    assert!(out.contains("#rm \"/keepers/a\"\r"));
+    assert!(out.contains("rm \"/other/b\"\r"));
+    assert!(!out.contains("#rm \"/other/b\""));
+}
+
+#[test]
+fn render_script_descending_size_order() {
+    let same = sample_two_groups();
+    let out = run_render(&same, None, "#", "rm");
+    let idx_200 = out.find("SIZE 200").unwrap();
+    let idx_100 = out.find("SIZE 100").unwrap();
+    assert!(idx_200 < idx_100);
+}
+
+#[test]
+fn render_script_empty_input_writes_nothing() {
+    let empty: Vec<DuplicateGroup> = Vec::new();
+    let out = run_render(&empty, None, "#", "rm");
+    assert!(out.is_empty());
+}
+
+/// 同 size 不同 content 的两组重复集必须独立保留（旧 `BTreeMap<size, _>` 实现会覆盖）。
+#[test]
+fn search_same_preserves_distinct_groups_with_identical_size() {
+    use std::fs;
+    let dir = tempdir().unwrap();
+    // 两对 4KiB 文件：a1=a2（首字节 'A'），b1=b2（首字节 'B'），全 1000 字节。
+    let make = |name: &str, fill: u8| {
+        let p = dir.path().join(name);
+        let bytes = vec![fill; 1000];
+        fs::write(&p, &bytes).unwrap();
+        p
+    };
+    let a1 = make("a1.bin", b'A');
+    let a2 = make("a2.bin", b'A');
+    let b1 = make("b1.bin", b'B');
+    let b2 = make("b2.bin", b'B');
+
+    let mut idx = crate::entities::file_index::Index::new();
+    idx.insert(a1.to_str().unwrap()).unwrap();
+    idx.insert(a2.to_str().unwrap()).unwrap();
+    idx.insert(b1.to_str().unwrap()).unwrap();
+    idx.insert(b2.to_str().unwrap()).unwrap();
+
+    // fast & secure 两种路径均必须返回 2 组（旧实现只剩 1 组）
+    let fast_groups = idx.fast_search_same();
+    assert_eq!(
+        fast_groups.len(),
+        2,
+        "fast: distinct content must yield 2 groups"
+    );
+    let secure_groups = idx.search_same();
+    assert_eq!(
+        secure_groups.len(),
+        2,
+        "secure: distinct content must yield 2 groups"
+    );
+    // 两组的 size 都是 1000
+    for g in &fast_groups {
+        assert_eq!(g.size, 1000);
+        assert_eq!(g.paths.len(), 2);
+    }
+}
+
+#[test]
+#[cfg(not(target_os = "windows"))]
+fn comment_and_rm_unix_tokens() {
+    assert_eq!(comment(), "#");
+    assert_eq!(rm(), "rm");
+}
+
+#[test]
+#[cfg(target_os = "windows")]
+fn comment_and_rm_windows_tokens() {
+    assert_eq!(comment(), ":");
+    assert_eq!(rm(), "DEL");
+}
+
+#[test]
+fn find_duplicates_invalid_output_returns_ok() {
+    let tmp = tempfile::NamedTempFile::new().unwrap();
+    let out_loc = Location::Local(Utf8PathBuf::from(tmp.path().to_str().unwrap()));
+    let out_pair = (out_loc, LocalBackend::arc());
+    find_duplicates(true, vec![local_data_dir()], Some(&out_pair));
+}
+
+#[test]
+fn find_duplicates_no_output_branch_runs() {
+    find_duplicates(true, vec![local_data_dir()], None);
+}
+
+#[test]
+fn find_duplicates_with_output_branch_runs() {
+    let dir = tempdir().unwrap();
+    let out_pair = local_dir(dir.path());
+    find_duplicates(false, vec![local_data_dir()], Some(&out_pair));
+}
