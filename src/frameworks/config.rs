@@ -7,7 +7,7 @@ use std::sync::OnceLock;
 use tracing::debug;
 use tracing::warn;
 
-use crate::usecases::config::Config;
+use crate::usecases::config::{Config, CopyConfig, validate_archive_template};
 
 static CONFIG: OnceLock<Config> = OnceLock::new();
 
@@ -40,7 +40,7 @@ fn load() -> Config {
                 path = %path,
                 "config loaded"
             );
-            cfg
+            sanitize(cfg)
         }
         Err(e) => {
             warn!(
@@ -54,6 +54,40 @@ fn load() -> Config {
             Config::default()
         }
     }
+}
+
+/// 非法字段值回退默认并告警，与"parse 失败回退 `Config::default`"同一哲学：
+/// 配置错误不让 CLI panic 或静默全量失败，但必须可观测。
+/// - `unique_name_max_attempts == 0` 会让 `generate_unique_name` 的 `0..0` 循环
+///   永不执行恒返 `None`，所有 copy/move 静默失败
+/// - 非法 `archive_template`（嵌套/错配/未知占位符）会渲染出字面 `{xxx}` 目录
+fn sanitize(mut cfg: Config) -> Config {
+    if cfg.copy.unique_name_max_attempts == 0 {
+        let fallback = CopyConfig::default().unique_name_max_attempts;
+        warn!(
+            feature = "config",
+            operation = "sanitize",
+            result = "invalid_value",
+            field = "copy.unique_name_max_attempts",
+            fallback,
+            "unique_name_max_attempts must be >= 1; falling back to default"
+        );
+        cfg.copy.unique_name_max_attempts = fallback;
+    }
+    if let Err(e) = validate_archive_template(&cfg.copy.archive_template) {
+        let fallback = CopyConfig::default().archive_template;
+        warn!(
+            feature = "config",
+            operation = "sanitize",
+            result = "invalid_value",
+            field = "copy.archive_template",
+            error = %e,
+            fallback = %fallback,
+            "archive_template invalid; falling back to default"
+        );
+        cfg.copy.archive_template = fallback;
+    }
+    cfg
 }
 
 /// 把 `${VAR:-default}` 替换为环境变量值或默认值。
@@ -197,8 +231,10 @@ mod tests {
         assert_eq!(resolve_var("TIDYMEDIA_TEST_NO_DEFAULT_W"), "");
     }
 
+    // yaml 故意保留已删除的 timeout_secs / mtp 节：serde 默认忽略未知字段，
+    // 旧 config.yaml 必须保持向后兼容不报错。
     #[test]
-    fn backend_config_yaml_overrides_defaults() {
+    fn backend_config_yaml_overrides_defaults_and_ignores_removed_fields() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("backend.yaml");
         std::fs::write(
@@ -210,12 +246,8 @@ mod tests {
         let cfg = load();
         assert_eq!(cfg.backend.smb.default_user, "alice");
         assert_eq!(cfg.backend.smb.workgroup, "HOME");
-        assert_eq!(cfg.backend.smb.timeout_secs, 60);
-        assert_eq!(cfg.backend.mtp.device_match, "exact");
-        assert_eq!(cfg.backend.mtp.storage_match, "exact");
         assert_eq!(cfg.backend.adb.server_host, "10.0.0.5");
         assert_eq!(cfg.backend.adb.server_port, 15037);
-        assert_eq!(cfg.backend.adb.timeout_secs, 90);
         unsafe { std::env::remove_var("TIDYMEDIA_CONFIG") };
     }
 
@@ -260,5 +292,47 @@ mod tests {
         let a = config();
         let b = config();
         assert!(std::ptr::eq(a, b));
+    }
+
+    // max_attempts=0 会让 generate_unique_name 恒返 None（copy 静默全量失败），
+    // load 必须回退默认值。
+    #[test]
+    fn load_sanitizes_zero_unique_name_max_attempts_to_default() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("zero.yaml");
+        std::fs::write(&path, "copy:\n  unique_name_max_attempts: 0\n").unwrap();
+        unsafe { std::env::set_var("TIDYMEDIA_CONFIG", path.to_str().unwrap()) };
+        let cfg = load();
+        assert_eq!(cfg.copy.unique_name_max_attempts, 10);
+        unsafe { std::env::remove_var("TIDYMEDIA_CONFIG") };
+    }
+
+    // yaml 内非法模板（结构错配）回退默认模板，不让渲染产生字面 '{' 目录。
+    #[test]
+    fn load_sanitizes_invalid_archive_template_to_default() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("badtmpl.yaml");
+        std::fs::write(&path, "copy:\n  archive_template: \"{year/{month}}\"\n").unwrap();
+        unsafe { std::env::set_var("TIDYMEDIA_CONFIG", path.to_str().unwrap()) };
+        let cfg = load();
+        assert_eq!(cfg.copy.archive_template, "{year}/{month}/{valuable_name}");
+        unsafe { std::env::remove_var("TIDYMEDIA_CONFIG") };
+    }
+
+    // 合法配置不被 sanitize 改写（防 sanitize 被变异成无条件重置）。
+    #[test]
+    fn load_keeps_valid_copy_fields_unchanged() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("valid.yaml");
+        std::fs::write(
+            &path,
+            "copy:\n  unique_name_max_attempts: 3\n  archive_template: \"{year}/{day}\"\n",
+        )
+        .unwrap();
+        unsafe { std::env::set_var("TIDYMEDIA_CONFIG", path.to_str().unwrap()) };
+        let cfg = load();
+        assert_eq!(cfg.copy.unique_name_max_attempts, 3);
+        assert_eq!(cfg.copy.archive_template, "{year}/{day}");
+        unsafe { std::env::remove_var("TIDYMEDIA_CONFIG") };
     }
 }

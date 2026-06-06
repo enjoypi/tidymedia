@@ -12,7 +12,9 @@ use tracing::trace;
 use super::ops::do_copy;
 use crate::entities::backend::Backend;
 use crate::entities::common;
-use crate::entities::file_index::{Index, VisitStats};
+use crate::entities::common::under_prefix;
+use crate::entities::file_index::{CandidateProvider, Index, VisitStats};
+use crate::entities::file_info;
 use crate::entities::uri::Location;
 use crate::usecases::config::config;
 use crate::usecases::report::{CopyReport, Report, ReportError, ReportSink};
@@ -55,6 +57,9 @@ pub(super) fn chrono_offset_from_hours(hours: i8) -> FixedOffset {
     FixedOffset::east_opt(i32::from(hours) * 3600).unwrap_or_else(|| chrono::Utc.fix())
 }
 
+/// 测试 shim：等价于 `copy_with_sidecar(..., None)`。
+/// 生产路径（dispatch）走 [`copy_with_sidecar`] 注入 P3 发现；仅测试用本简短入口。
+#[cfg(test)]
 pub fn copy(
     sources: &[Source],
     output: Source,
@@ -64,14 +69,37 @@ pub fn copy(
     archive_template: Option<&str>,
     report_sink: Option<&dyn ReportSink>,
 ) -> common::Result<CopyReport> {
+    copy_with_sidecar(
+        sources,
+        output,
+        dry_run,
+        remove,
+        include_non_media,
+        archive_template,
+        report_sink,
+        None,
+    )
+}
+
+// 8 个参数源于 CLI 选项的一比一透传；与 make_report 同理 allow。
+#[allow(clippy::too_many_arguments)]
+pub fn copy_with_sidecar(
+    sources: &[Source],
+    output: Source,
+    dry_run: bool,
+    remove: bool,
+    include_non_media: bool,
+    archive_template: Option<&str>,
+    report_sink: Option<&dyn ReportSink>,
+    sidecar: Option<CandidateProvider>,
+) -> common::Result<CopyReport> {
     let (output_loc, output_backend) = output;
     let template = archive_template.unwrap_or(&config().copy.archive_template);
 
-    let mut source = Index::new();
-    for (loc, backend) in sources {
-        source.visit_location(loc, backend);
-    }
-    source.parse_exif(configured_chrono_offset());
+    // 重叠保护（先于扫描，fail fast）。
+    let output_prefix = canonical_prefix(&output_loc);
+    ensure_sources_outside_output(sources, &output_prefix)?;
+    let source = build_source_index(sources, &output_prefix, sidecar);
 
     let total_files = source.files().len();
     let scan_stats = source.stats();
@@ -152,6 +180,56 @@ pub fn copy(
     );
     emit_report(report_sink, &report);
     Ok(report)
+}
+
+// 重叠保护：source ⊆ output（canonical 前缀含相等）时，dedup 会把每个源文件判为
+// output 中已存在的副本，move 模式下 remove 即删除文件自身——必须 fail fast。
+fn ensure_sources_outside_output(sources: &[Source], output_prefix: &str) -> common::Result<()> {
+    for (loc, _) in sources {
+        let src_prefix = canonical_prefix(loc);
+        if under_prefix(&src_prefix, output_prefix) {
+            return Err(common::Error::Io(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                format!(
+                    "source {src_prefix} is inside output {output_prefix}; \
+                     move would treat sources as duplicates of themselves"
+                ),
+            )));
+        }
+    }
+    Ok(())
+}
+
+// 扫源建索引 + 重叠剔除 + EXIF/P3 富集；拆出让 copy_with_sidecar 保持在 100 行内。
+fn build_source_index(
+    sources: &[Source],
+    output_prefix: &str,
+    sidecar: Option<CandidateProvider>,
+) -> Index {
+    let mut source = Index::new();
+    for (loc, backend) in sources {
+        source.visit_location(loc, backend);
+    }
+    // output ⊂ source（就地归档，如 copy /photos -o /photos/archive）：把已归档
+    // 文件从 source 索引剔除，否则它们会被再次复制 / 在 move 模式下被误删。
+    let excluded = source.remove_under_prefix(output_prefix);
+    if excluded > 0 {
+        info!(
+            feature = FEATURE_COPY,
+            operation = "exclude_output_subtree",
+            result = "ok",
+            excluded,
+            output = %output_prefix,
+            "excluded already-archived files under output from source index"
+        );
+    }
+    source.parse_exif(configured_chrono_offset());
+    // P3 富集：adapters 层注入的 sidecar 发现（XMP / Takeout），entities 只消费
+    // 转换好的 Candidate（依赖倒置，协议细节不进 usecases）。
+    if let Some(provider) = sidecar {
+        source.enrich_candidates(provider);
+    }
+    source
 }
 
 // 拆出循环体，让 copy() 保持在 100 行内。
@@ -236,6 +314,17 @@ fn make_report(
 // 结构化日志 summary 的 result 维度值：失败计数为 0 即 "ok"，否则 "partial"。
 pub(super) fn summary_result(failed: usize) -> &'static str {
     if failed == 0 { "ok" } else { "partial" }
+}
+
+// 重叠保护用的可比前缀：Local 走 canonicalize 消除相对路径/symlink 差异，失败
+//（如 dry-run 下尚未创建的 output）回退原始路径；远端无 canonicalize，display
+// 即规范形（scheme/host 不同自然不构成前缀关系）。
+pub(super) fn canonical_prefix(loc: &Location) -> String {
+    match loc {
+        Location::Local(p) => file_info::full_path(p.as_str())
+            .map_or_else(|_| p.as_str().to_string(), |fp| fp.as_str().to_string()),
+        other => other.display(),
+    }
 }
 
 // 通过注入的 sink 输出报告；None 时跳过（用 case 不知道协议与持久化细节）。

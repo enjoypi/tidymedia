@@ -29,21 +29,41 @@ impl Default for CopyConfig {
     }
 }
 
-/// 校验归档模板：非空 + `{` `}` 配对（简单字符计数）。
+/// 校验归档模板：非空 + `{` `}` 结构配对 + 占位符名属已知集合。
+///
+/// 结构扫描替代旧的字符计数：`{year/{month}}` 计数配平但渲染时占位符无法
+/// 整 token 匹配，会静默产生字面 `{year` 目录；未知占位符（如 `{foo}`）同理。
 ///
 /// # Errors
 ///
-/// 模板为空或花括号不配对时返回 `Err`。
+/// 模板为空、花括号嵌套/错配/未闭合、或占位符名未知时返回 `Err`。
 pub fn validate_archive_template(template: &str) -> Result<(), String> {
     if template.is_empty() {
         return Err("archive_template must not be empty".into());
     }
-    let open = template.chars().filter(|&c| c == '{').count();
-    let close = template.chars().filter(|&c| c == '}').count();
-    if open != close {
-        return Err(format!(
-            "archive_template has unbalanced braces: {open} '{{' vs {close} '}}'"
-        ));
+    let mut start: Option<usize> = None;
+    for (i, c) in template.char_indices() {
+        match c {
+            '{' if start.is_some() => {
+                return Err("archive_template has unbalanced braces: nested '{'".into());
+            }
+            '{' => start = Some(i + 1),
+            '}' => {
+                let Some(s) = start.take() else {
+                    return Err("archive_template has unbalanced braces: unmatched '}'".into());
+                };
+                let name = &template[s..i];
+                if !crate::usecases::archive_template::PLACEHOLDERS.contains(&name) {
+                    return Err(format!(
+                        "archive_template has unknown placeholder {{{name}}}"
+                    ));
+                }
+            }
+            _ => {}
+        }
+    }
+    if start.is_some() {
+        return Err("archive_template has unbalanced braces: unclosed '{'".into());
     }
     Ok(())
 }
@@ -62,12 +82,17 @@ impl Default for ExifConfig {
     }
 }
 
+// 哑配置治理（杜绝声明了却无消费点的字段）：
+// - `smb.timeout_secs` / `adb.timeout_secs` 已删——pavao `SmbOptions` 与 adb_client
+//   均无 timeout API，字段只会制造"配置了却无效"的幻觉；库支持后再加回
+// - `MtpBackendConfig`（device_match / storage_match）已删——MTP real client 是
+//   stub，factory 不读这两个字段；real 接入时随 `MtpMatch` 消费链一起加回
+// serde 默认忽略未知字段，旧 config.yaml 含这些键不会报错。
 #[derive(Clone, Debug, Deserialize)]
 #[serde(default)]
 pub struct SmbBackendConfig {
     pub default_user: String,
     pub workgroup: String,
-    pub timeout_secs: u64,
 }
 
 impl Default for SmbBackendConfig {
@@ -75,23 +100,6 @@ impl Default for SmbBackendConfig {
         Self {
             default_user: String::new(),
             workgroup: "WORKGROUP".into(),
-            timeout_secs: 30,
-        }
-    }
-}
-
-#[derive(Clone, Debug, Deserialize)]
-#[serde(default)]
-pub struct MtpBackendConfig {
-    pub device_match: String,
-    pub storage_match: String,
-}
-
-impl Default for MtpBackendConfig {
-    fn default() -> Self {
-        Self {
-            device_match: "fuzzy".into(),
-            storage_match: "fuzzy".into(),
         }
     }
 }
@@ -101,7 +109,6 @@ impl Default for MtpBackendConfig {
 pub struct AdbBackendConfig {
     pub server_host: String,
     pub server_port: u16,
-    pub timeout_secs: u64,
 }
 
 impl Default for AdbBackendConfig {
@@ -109,7 +116,6 @@ impl Default for AdbBackendConfig {
         Self {
             server_host: "127.0.0.1".into(),
             server_port: 5037,
-            timeout_secs: 30,
         }
     }
 }
@@ -118,7 +124,6 @@ impl Default for AdbBackendConfig {
 #[serde(default)]
 pub struct BackendConfig {
     pub smb: SmbBackendConfig,
-    pub mtp: MtpBackendConfig,
     pub adb: AdbBackendConfig,
 }
 
@@ -143,12 +148,8 @@ mod tests {
         assert_eq!(c.exif.valid_date_time_secs, 946_684_800);
         assert_eq!(c.backend.smb.default_user, "");
         assert_eq!(c.backend.smb.workgroup, "WORKGROUP");
-        assert_eq!(c.backend.smb.timeout_secs, 30);
-        assert_eq!(c.backend.mtp.device_match, "fuzzy");
-        assert_eq!(c.backend.mtp.storage_match, "fuzzy");
         assert_eq!(c.backend.adb.server_host, "127.0.0.1");
         assert_eq!(c.backend.adb.server_port, 5037);
-        assert_eq!(c.backend.adb.timeout_secs, 30);
     }
 
     #[test]
@@ -171,5 +172,32 @@ mod tests {
     fn validate_archive_template_rejects_unbalanced_close() {
         let err = validate_archive_template("year}/month").unwrap_err();
         assert!(err.contains("unbalanced"), "got: {err}");
+    }
+
+    // 计数配平但结构错配：旧字符计数实现会放过，渲染时产生字面 '{year' 目录。
+    #[test]
+    fn validate_archive_template_rejects_count_balanced_but_nested() {
+        let err = validate_archive_template("{year/{month}}").unwrap_err();
+        assert!(err.contains("nested"), "got: {err}");
+    }
+
+    #[test]
+    fn validate_archive_template_rejects_unclosed_open() {
+        let err = validate_archive_template("{year").unwrap_err();
+        assert!(err.contains("unclosed"), "got: {err}");
+    }
+
+    #[test]
+    fn validate_archive_template_rejects_unknown_placeholder() {
+        let err = validate_archive_template("{year}/{foo}").unwrap_err();
+        assert!(err.contains("unknown placeholder {foo}"), "got: {err}");
+    }
+
+    #[test]
+    fn validate_archive_template_accepts_all_known_placeholders() {
+        assert!(
+            validate_archive_template("{year}/{month}/{day}/{make}/{model}/{valuable_name}")
+                .is_ok()
+        );
     }
 }

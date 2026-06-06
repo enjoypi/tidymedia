@@ -4,6 +4,8 @@ use tracing::error;
 use tracing::info;
 
 use crate::entities::backend::EntryKind;
+use crate::entities::common;
+use crate::entities::common::under_prefix;
 use crate::entities::file_index;
 use crate::entities::file_index::DuplicateGroup;
 use crate::entities::file_info;
@@ -19,12 +21,17 @@ const FEATURE_FIND: &str = "find";
 //
 // 返回值：完整的 FindReport（scanned = 全部入索引的文件数；bytes_read 来自 Index 累计；
 // groups 为 DuplicateGroup 列表）。dispatch 层可直接落 JSON 而无需重新统计。
+//
+// # Errors
+//
+// output 路径不存在或不是目录时返回 `Err`：空报告 + exit 0 与"无重复"不可区分，
+// 会误导基于退出码/空脚本做删除决策的调用方。
 #[cfg_attr(coverage_nightly, coverage(off))]
 pub(crate) fn find_duplicates(
     secure: bool,
     sources: Vec<Source>,
     output: Option<&Source>,
-) -> FindReport {
+) -> common::Result<FindReport> {
     let mut index = file_index::Index::new();
 
     if let Some((loc, backend)) = output {
@@ -39,7 +46,10 @@ pub(crate) fn find_duplicates(
                 output = %loc.display(),
                 "output path is not a directory"
             );
-            return FindReport::default();
+            return Err(common::Error::Io(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                format!("output path is not a directory: {}", loc.display()),
+            )));
         }
     }
 
@@ -96,14 +106,14 @@ pub(crate) fn find_duplicates(
         "find_duplicates done"
     );
 
-    FindReport {
+    Ok(FindReport {
         scanned,
         bytes_read,
         groups: groups
             .into_iter()
             .map(|g| g.paths.into_iter().map(|p| p.to_string()).collect())
             .collect(),
-    }
+    })
 }
 
 // 上方 is_dir 断言已经过滤掉非目录；到这里 output 必然是 (Location, Backend) 形态。
@@ -141,16 +151,6 @@ pub(crate) fn render_script(
         }
         let _ = writeln!(sink);
     }
-}
-
-// 判 path 是否在 prefix 目录下：纯 starts_with 会让 /photos_backup 误判为 /photos 子目录。
-// 必须额外校验 prefix 后紧跟路径分隔符（或 path 恰等 prefix）。Unix 用 `/`，Windows 兼顾 `\`。
-fn under_prefix(path: &str, prefix: &str) -> bool {
-    if !path.starts_with(prefix) {
-        return false;
-    }
-    let rest = &path[prefix.len()..];
-    rest.is_empty() || rest.starts_with('/') || rest.starts_with('\\')
 }
 
 #[cfg(target_os = "windows")]

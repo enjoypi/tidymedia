@@ -167,11 +167,10 @@ fn default_map_error_passthrough() {
     assert_eq!(mapped.kind(), io::ErrorKind::Other);
 }
 
-/// mkparents=true 时 `open_write` 必须对 parent 调一次 mkdir（best-effort 建父目录）。
-/// 杀「`mkparent` 整函数被替换成 `()`」：Dummy/Fake client 不强制父目录存在，
-/// 仅靠结果断言无感知，必须数调用次数。
+/// mkparents=true 且 parent 已存在（`DummyClient::stat` 默认 Ok）时
+/// `mkdir_recursive` 经 stat 短路，mkdir 不被调用。
 #[test]
-fn open_write_mkparents_invokes_mkdir_once_on_parent() {
+fn open_write_mkparents_skips_mkdir_when_parent_exists() {
     let client = Arc::new(DummyClient::default());
     let b = RemoteBackend {
         adapter: DummyAdapter::with_client(
@@ -182,5 +181,27 @@ fn open_write_mkparents_invokes_mkdir_once_on_parent() {
     let calls = client
         .mkdir_calls
         .load(std::sync::atomic::Ordering::Relaxed);
-    assert_eq!(calls, 1, "mkparents must trigger exactly one mkdir");
+    assert_eq!(calls, 0, "existing parent must not trigger mkdir");
+}
+
+/// mkparents=true 且 parent 缺失（stat 全 NotFound）时必须对 parent 链逐层 mkdir。
+/// 杀「`mkparent` 整函数被替换成 `()`」：Dummy/Fake client 不强制父目录存在，
+/// 仅靠结果断言无感知，必须数调用次数。`/dummy` 的 parent 链为 `/dummy` → `/`，
+/// mkparent 从 parent(`/`) 起 → 恰一次 mkdir。
+#[test]
+fn open_write_mkparents_invokes_mkdir_when_parent_missing() {
+    let client = Arc::new(DummyClient {
+        stat: Some(io::ErrorKind::NotFound),
+        ..Default::default()
+    });
+    let b = RemoteBackend {
+        adapter: DummyAdapter::with_client(
+            Arc::clone(&client) as Arc<dyn RemoteClient<DummyTarget>>
+        ),
+    };
+    b.open_write(&loc(), true).unwrap();
+    let calls = client
+        .mkdir_calls
+        .load(std::sync::atomic::Ordering::Relaxed);
+    assert_eq!(calls, 1, "missing parent must trigger exactly one mkdir");
 }

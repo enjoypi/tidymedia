@@ -310,6 +310,53 @@ fn calc_same_excludes_singleton_buckets_from_results() {
     );
 }
 
+// remove_under_prefix：仅移除 prefix 子树内条目，similar_files bucket 同步清理，
+// 剩余条目的 exists 查询不得 panic（bucket 指针悬空会触发 expect）。
+#[test]
+fn remove_under_prefix_removes_subtree_and_keeps_outside() {
+    let dir = tempdir().unwrap();
+    let sub = dir.path().join("archive");
+    fs::create_dir_all(&sub).unwrap();
+    let outside = dir.path().join("a.bin");
+    let inside = sub.join("b.bin");
+    // 相同内容 → 相同 fast_hash → 共享 similar_files bucket。
+    fs::write(&outside, b"same-content-x").unwrap();
+    fs::write(&inside, b"same-content-x").unwrap();
+
+    let mut index = Index::new();
+    index.insert(outside.to_str().unwrap()).unwrap();
+    index.insert(inside.to_str().unwrap()).unwrap();
+    assert_eq!(index.files().len(), 2);
+
+    let sub_canon = sub.canonicalize().unwrap();
+    let removed = index.remove_under_prefix(sub_canon.to_str().unwrap());
+    assert_eq!(removed, 1);
+    assert_eq!(index.files().len(), 1);
+
+    // bucket 已清理：对剩余文件做 exists 查询不得 panic。
+    let probe = Info::from(outside.to_str().unwrap()).unwrap();
+    let dup = index.exists(&probe, false).unwrap();
+    assert!(dup.is_some(), "outside file must remain queryable");
+}
+
+// 前缀必须按分隔符边界匹配：/photos_backup 不是 /photos 的子树。
+#[test]
+fn remove_under_prefix_does_not_match_sibling_with_common_prefix() {
+    let dir = tempdir().unwrap();
+    let backup = dir.path().join("photos_backup");
+    fs::create_dir_all(&backup).unwrap();
+    let f = backup.join("a.bin");
+    fs::write(&f, b"data-1234").unwrap();
+
+    let mut index = Index::new();
+    index.insert(f.to_str().unwrap()).unwrap();
+
+    let photos_prefix = dir.path().join("photos");
+    let removed = index.remove_under_prefix(photos_prefix.to_str().unwrap());
+    assert_eq!(removed, 0);
+    assert_eq!(index.files().len(), 1);
+}
+
 // 让 similar_files 有两个冲突 path，其中一个对应的文件已删除：
 // - calc(info) 对删除的文件 Err → 被 `if let Ok` 过滤 (L98 失败分支)
 // - 剩 1 个 path → filter_and_sort 走 paths.len()==1 的 else 分支 (L126)

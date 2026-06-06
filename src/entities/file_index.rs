@@ -11,8 +11,10 @@ use rayon::prelude::*;
 use tracing::warn;
 
 use super::backend::{Backend, EntryKind};
+use super::common;
 use super::exif;
 use super::file_info::Info;
+use super::media_time;
 use super::uri::Location;
 // 测试 helper `Index::visit_dir` 需要构造 LocalBackend instance。仅 #[cfg(test)]
 // 下引用 adapters，生产代码 visit_location 走 backend trait 注入（CA 规则）。
@@ -20,6 +22,11 @@ use super::uri::Location;
 use crate::adapters::backend::local::LocalBackend;
 
 const FEATURE_INDEX: &str = "index";
+
+/// P3 sidecar 等外部时间候选的发现函数（依赖倒置：协议解析在 adapters 层，
+/// entities 只接收转换好的 [`media_time::Candidate`]）。
+/// 普通 fn 指针即可——provider 无状态、`Send + Sync`、可直接进 rayon 并行。
+pub type CandidateProvider = fn(&Location, &Arc<dyn Backend>) -> Vec<media_time::Candidate>;
 
 /// 一组重复文件：相同 size + 相同 content hash。size 仅 metadata，组身份由 paths 决定。
 /// 避免旧 `BTreeMap<u64, Vec<Utf8PathBuf>>` 用 size 作唯一键导致同 size 不同内容互相覆盖。
@@ -182,6 +189,30 @@ impl Index {
         groups
     }
 
+    /// 移除 prefix 目录下（含恰等）的全部条目，返回移除数。
+    /// 用于 copy/move 的重叠保护：output 位于 source 子树内时，把已归档文件从
+    /// source 索引剔除，避免被再次复制或在 move 模式下被当作重复副本删除。
+    /// `similar_files` 反向同步清理——残留 bucket 指针会让 [`Self::exists`] panic。
+    pub fn remove_under_prefix(&mut self, prefix: &str) -> usize {
+        let to_remove: Vec<Utf8PathBuf> = self
+            .files
+            .keys()
+            .filter(|p| common::under_prefix(p.as_str(), prefix))
+            .cloned()
+            .collect();
+        for path in &to_remove {
+            if let Some(info) = self.files.remove(path)
+                && let Some(bucket) = self.similar_files.get_mut(&info.fast_hash)
+            {
+                bucket.remove(path);
+                if bucket.is_empty() {
+                    self.similar_files.remove(&info.fast_hash);
+                }
+            }
+        }
+        to_remove.len()
+    }
+
     pub fn add(&mut self, info: Info) -> &Info {
         use std::collections::hash_map::Entry;
         match self.files.entry(info.full_path.clone()) {
@@ -292,6 +323,17 @@ impl Index {
         self.files.par_iter_mut().for_each(|(_, info)| {
             if let Ok(e) = exif::Exif::open(info.location(), &info.backend(), local_offset) {
                 info.set_exif(e);
+            }
+        });
+    }
+
+    /// 并行对每个 indexed 文件调用 provider 注入额外时间候选（P3 sidecar 等），
+    /// 与 `parse_exif` 同为"尽力而为"富集步骤：无 sidecar 时 provider 返空即可。
+    pub fn enrich_candidates(&mut self, provider: CandidateProvider) {
+        self.files.par_iter_mut().for_each(|(_, info)| {
+            let candidates = provider(info.location(), &info.backend());
+            if !candidates.is_empty() {
+                info.add_candidates(candidates);
             }
         });
     }

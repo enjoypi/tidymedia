@@ -35,6 +35,14 @@ pub trait RemoteTarget: Clone + Send + Sync + std::fmt::Debug + Eq + 'static {
 
 /// 远端协议客户端的 6 个基础 IO 操作。实现者可以是真实库适配器（如
 /// `RealSmbClient`）或测试用 fake。
+///
+/// # 已知限制：`read` 整文件入堆
+///
+/// `read` 返回 `Vec<u8>`，`open_read` / `copy_file` 因而把远端文件完整读入内存
+///（大视频在内存受限环境有 OOM 风险）。这是依赖层形态决定的：pavao 的
+/// `SmbFile` 借用 client 生命周期，无法装入 `Box<dyn MediaReader + 'static>`；
+/// `adb_client` 的 pull 是回调式写入 API。真正流式需要换库或线程+管道泵数据，
+/// 当前按 YAGNI 不做（CLAUDE.md「项目 Gotcha」有记录）。
 pub trait RemoteClient<T: RemoteTarget>: Send + Sync + std::fmt::Debug {
     fn stat(&self, t: &T) -> io::Result<Metadata>;
     fn list(&self, t: &T) -> io::Result<Vec<Entry>>;
@@ -103,8 +111,40 @@ fn map_and_log(
 
 fn mkparent<A: RemoteAdapter>(target: &A::Target, client: &Arc<dyn RemoteClient<A::Target>>) {
     if let Some(parent) = target.parent() {
-        let _ = client.mkdir(&parent);
+        // best-effort：父目录创建失败由随后的 write/copy 自身报错。
+        let _ = mkdir_recursive::<A>(&parent, client);
     }
+}
+
+/// 远端 mkdir-p：自底向上用 stat 找到第一个已存在的祖先，再自浅入深逐层 mkdir。
+/// 远端协议的 mkdir 多为 POSIX 单层语义（父层缺失返回 ENOENT，如 pavao SMB），
+/// 叶节点单次 mkdir 对 `{year}/{month}` 等多层 archive 模板必败。
+/// `AlreadyExists` 容忍并发/重复创建；stat 的非 `NotFound` 错误（网络/权限）直接
+/// 传播，避免在故障链路上盲目 mkdir。
+fn mkdir_recursive<A: RemoteAdapter>(
+    target: &A::Target,
+    client: &Arc<dyn RemoteClient<A::Target>>,
+) -> io::Result<()> {
+    let mut missing: Vec<A::Target> = Vec::new();
+    let mut cur = Some(target.clone());
+    while let Some(t) = cur {
+        match client.stat(&t) {
+            Ok(_) => break,
+            Err(e) if e.kind() == io::ErrorKind::NotFound => {
+                cur = t.parent();
+                missing.push(t);
+            }
+            Err(e) => return Err(e),
+        }
+    }
+    for t in missing.iter().rev() {
+        if let Err(e) = client.mkdir(t)
+            && e.kind() != io::ErrorKind::AlreadyExists
+        {
+            return Err(e);
+        }
+    }
+    Ok(())
 }
 
 impl<A: RemoteAdapter> std::fmt::Debug for RemoteBackend<A> {
@@ -189,9 +229,7 @@ impl<A: RemoteAdapter> Backend for RemoteBackend<A> {
 
     fn mkdir_p(&self, loc: &Location) -> io::Result<()> {
         let target = self.build_target(loc)?;
-        self.adapter
-            .client()
-            .mkdir(&target)
+        mkdir_recursive::<A>(&target, self.adapter.client())
             .map_err(|e| map_and_log(A::scheme(), "mkdir", target.path(), A::map_error, e))
     }
 

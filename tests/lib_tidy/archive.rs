@@ -135,6 +135,42 @@ fn tidy_dispatches_copy_with_archive_template_writes_year_month_day_layout() {
     );
 }
 
+/// P3 sidecar 端到端：`sample-no-dates.jpg`（EXIF 存在但无日期字段）配
+/// Google Takeout sidecar `<name>.jpg.json`（photoTakenTime=1600000000 =
+/// 2020-09-13T12:26:40Z），经 dispatch 生产路径（`copy_with_sidecar` 注入
+/// `discover_with_backend`）归档到 sidecar 时间的 2020/09 目录而非 mtime 年月。
+#[test]
+fn tidy_copy_uses_takeout_sidecar_time_for_undated_media() {
+    let src_dir = tempdir().unwrap();
+    let src_file = src_dir.path().join("undated.jpg");
+    std::fs::copy(format!("{DATA_DIR}/sample-no-dates.jpg"), &src_file)
+        .expect("copy fixture into tempdir");
+    std::fs::write(
+        src_dir.path().join("undated.jpg.json"),
+        r#"{"photoTakenTime":{"timestamp":"1600000000"}}"#,
+    )
+    .unwrap();
+
+    let out = tempdir().unwrap();
+    tidy(Commands::Copy {
+        dry_run: false,
+        include_non_media: false,
+        sources: vec![local(src_dir.path().to_str().unwrap())],
+        output: local(out.path().to_str().unwrap()),
+        archive_template: Some("{year}/{month}".to_string()),
+        report: None,
+    })
+    .expect("copy with takeout sidecar should succeed");
+
+    // 1600000000 UTC + 默认时区 +8 → 2020-09-13 20:26 → 2020/09。
+    let archived = out.path().join("2020").join("09").join("undated.jpg");
+    assert!(
+        archived.is_file(),
+        "expected sidecar time to place file at 2020/09; out tree: {:?}",
+        std::fs::read_dir(out.path()).map(|d| d.flatten().map(|e| e.path()).collect::<Vec<_>>())
+    );
+}
+
 /// ADB source → SMB output：手机照片直接归档到 NAS，全程走 `FakeBackend` 不需真实设备/服务器。
 #[test]
 fn tidy_with_copy_adb_source_to_smb_output() {

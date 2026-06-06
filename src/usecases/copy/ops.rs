@@ -58,7 +58,7 @@ pub(super) fn do_copy(
     }
 
     if let Some((target_dir_loc, target_loc)) =
-        generate_unique_name(src, output_dir, output_backend, opts.template)
+        generate_unique_name(src, output_dir, output_backend, opts.template)?
     {
         if opts.dry_run {
             println!("\"{}\"\t\"{}\"", src_display, target_loc.display());
@@ -110,7 +110,12 @@ fn stream_copy(src: &Info, target: &Location, out_be: &dyn Backend) -> common::R
     let src_be = src.backend();
     let mut reader = src_be.open_read(src.location())?;
     let mut writer = out_be.open_write(target, false)?;
-    std::io::copy(&mut reader, &mut writer)?;
-    writer.finish()?;
+    let result = std::io::copy(&mut reader, &mut writer).and_then(|_| writer.finish());
+    if let Err(e) = result {
+        // open_write 已 create/truncate 目标；中途失败必须清理半截文件，否则残留
+        // 占据路径槽位且无告警。best-effort：清理失败不掩盖原始传输错误。
+        let _ = out_be.remove_file(target);
+        return Err(e.into());
+    }
     Ok(())
 }

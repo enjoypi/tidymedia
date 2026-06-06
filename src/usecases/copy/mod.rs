@@ -5,7 +5,7 @@ pub(super) mod naming;
 pub(super) mod ops;
 pub(super) mod run;
 
-pub(crate) use self::run::{Source, copy};
+pub(crate) use self::run::{Source, copy_with_sidecar};
 
 // 测试经 `super::super::*` glob 访问的内部项（私有 use 对子模块可见，生产侧不暴露）。
 #[cfg(test)]
@@ -13,7 +13,11 @@ use self::naming::{any_non_english, extract_valuable_name, generate_unique_name}
 #[cfg(test)]
 use self::ops::do_copy;
 #[cfg(test)]
-use self::run::{CopyOpts, chrono_offset_from_hours, offset_from_hours, summary_result};
+use self::run::copy;
+#[cfg(test)]
+use self::run::{
+    CopyOpts, canonical_prefix, chrono_offset_from_hours, offset_from_hours, summary_result,
+};
 #[cfg(test)]
 use crate::entities::file_info::Info;
 #[cfg(test)]
@@ -32,3 +36,7 @@ mod advanced_tests;
 #[cfg(test)]
 #[path = "copy_generate_tests.rs"]
 mod generate_tests;
+
+#[cfg(test)]
+#[path = "copy_overlap_tests.rs"]
+mod overlap_tests;

@@ -121,19 +121,10 @@ fn detect_conflicts(
     conflicts
 }
 
+// 从 Priority 推导而非穷举 9 个 Filename* variant：与 priority.rs 单点同源，
+// 新增 P2 来源时无需双写（漏改穷举会让新来源的冲突检测静默失效）。
 fn is_filename_source(s: Source) -> bool {
-    matches!(
-        s,
-        Source::FilenameCamera
-            | Source::FilenamePhone
-            | Source::FilenameVideoPhone
-            | Source::FilenameScreenshot
-            | Source::FilenameUnixMillis
-            | Source::FilenamePixel
-            | Source::FilenameBareYyyymmdd
-            | Source::FilenameWeChatExport
-            | Source::FilenameWhatsApp
-    )
+    s.priority() == Priority::P2
 }
 
 #[cfg(test)]

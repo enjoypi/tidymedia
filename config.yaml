@@ -13,22 +13,17 @@ exif:
   valid_date_time_secs: ${TIDYMEDIA_VALID_DATE_TIME_SECS:-946684800}
 # Backend Gateway 全局开关：仅放非凭据可调项；
 # SMB 密码经 SMB_PASSWORD env、Kerberos 走 KRB5CCNAME，均不入 yaml
+# 注：timeout_secs（smb/adb）与 mtp.{device_match,storage_match} 已删——依赖库无
+# timeout API、MTP real client 是 stub，占位字段只制造"配置了却无效"的幻觉；
+# 旧 yaml 含这些键不会报错（serde 忽略未知字段）
 backend:
   smb:
     # URI 未写 `user@` 时兜底用户名；真实 client 接入后由 SmbBackend 读取
     default_user: ${SMB_USER:-}
     # NTLM 工作组；pavao SmbCredentials::workgroup 必填
     workgroup: ${SMB_WORKGROUP:-WORKGROUP}
-    # 单次 SMB 操作超时秒数；当前 pavao 无显式 timeout API，仅作配置占位
-    timeout_secs: ${TIDYMEDIA_SMB_TIMEOUT_SECS:-30}
-  mtp:
-    # 设备 / 存储匹配策略：`exact` 或 `fuzzy`，fuzzy 由 client 自决（通常走 contains）
-    device_match: ${TIDYMEDIA_MTP_DEVICE_MATCH:-fuzzy}
-    storage_match: ${TIDYMEDIA_MTP_STORAGE_MATCH:-fuzzy}
   adb:
     # 本机 adb daemon 监听地址；adb_client 通过 TCP 连接此端口
     server_host: ${TIDYMEDIA_ADB_SERVER_HOST:-127.0.0.1}
     # adb daemon 默认端口；多个 adb 实例并存时按需调整
     server_port: ${TIDYMEDIA_ADB_SERVER_PORT:-5037}
-    # 单次 ADB 操作超时秒数；adb_client 暂无显式 timeout API，仅作配置占位
-    timeout_secs: ${TIDYMEDIA_ADB_TIMEOUT_SECS:-30}

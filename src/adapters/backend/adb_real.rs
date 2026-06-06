@@ -23,8 +23,8 @@
 //!
 //! - 多设备同时操作：`ADBServerDevice::autodetect` 仅在唯一在线设备时可用；
 //!   多设备时上层 URI 必须带 serial
-//! - timeout：`adb_client` 暂无显式 timeout API；`config.backend.adb.timeout_secs`
-//!   保留为配置占位
+//! - timeout：`adb_client` 暂无显式 timeout API；对应配置字段已删（杜绝哑配置），
+//!   库支持后随消费链一起加回
 
 #![cfg_attr(coverage_nightly, coverage(off))]
 

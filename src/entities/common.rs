@@ -8,6 +8,18 @@ pub enum Error {
 
 pub type Result<T> = std::result::Result<T, Error>;
 
+/// 判 path 是否在 prefix 目录下（或恰等于 prefix）：纯 `starts_with` 会让
+/// `/photos_backup` 误判为 `/photos` 子目录，必须额外校验 prefix 后紧跟路径
+/// 分隔符。Unix 用 `/`，Windows 兼顾 `\`。
+#[must_use]
+pub fn under_prefix(path: &str, prefix: &str) -> bool {
+    if !path.starts_with(prefix) {
+        return false;
+    }
+    let rest = &path[prefix.len()..];
+    rest.is_empty() || rest.starts_with('/') || rest.starts_with('\\')
+}
+
 #[cfg(test)]
 mod tests {
     use super::Error;

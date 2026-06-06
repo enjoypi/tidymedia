@@ -7,8 +7,9 @@ use std::sync::Arc;
 
 use camino::Utf8PathBuf;
 
-use super::super::fake_remote::FakeRemoteClient;
+use super::super::fake_remote::{FakeRemoteClient, RemoteFakeOp};
 use super::*;
+use crate::entities::backend::EntryKind;
 use crate::entities::uri::Location;
 
 type FakeClient = FakeRemoteClient<SmbTarget>;
@@ -32,6 +33,55 @@ fn smb(path: &str) -> Location {
 
 fn backend_with(client: Arc<FakeClient>) -> SmbBackend {
     SmbBackend::with_client(client as Arc<dyn SmbClient>)
+}
+
+// ── mkdir_p 递归（mkdir_recursive 经 SmbAdapter 的行为锚定）────────────────
+
+// mkdir_p 对多层路径必须逐层创建：pavao 的 mkdir 是 POSIX 单层语义，父层缺失返
+// ENOENT；默认 archive_template 渲染出 `{year}/{month}` 两层，旧实现仅叶节点
+// 一次 mkdir 在真实 SMB 上必败（fake 的 mkdir 不校验父目录曾掩盖该缺陷）。
+#[test]
+fn mkdir_p_creates_intermediate_layers() {
+    let client = fake_client();
+    let backend = backend_with(client.clone());
+    backend.mkdir_p(&smb("2024/01")).unwrap();
+    let parent = client
+        .get_metadata("2024")
+        .expect("parent layer must be created");
+    assert_eq!(parent.kind, EntryKind::Dir);
+    let leaf = client
+        .get_metadata("2024/01")
+        .expect("leaf layer must be created");
+    assert_eq!(leaf.kind, EntryKind::Dir);
+}
+
+// 中间层 mkdir 失败必须传播（证明父层 mkdir 确实被调用且错误不被吞）。
+#[test]
+fn mkdir_p_propagates_intermediate_mkdir_error() {
+    let client = fake_client();
+    client.inject(RemoteFakeOp::Mkdir, "2024", io::ErrorKind::TimedOut);
+    let backend = backend_with(client);
+    let err = backend.mkdir_p(&smb("2024/01")).unwrap_err();
+    assert_eq!(err.kind(), io::ErrorKind::TimedOut);
+}
+
+// 并发/重复创建产生的 AlreadyExists 必须被容忍。
+#[test]
+fn mkdir_p_tolerates_already_exists() {
+    let client = fake_client();
+    client.inject(RemoteFakeOp::Mkdir, "2024/01", io::ErrorKind::AlreadyExists);
+    let backend = backend_with(client);
+    backend.mkdir_p(&smb("2024/01")).unwrap();
+}
+
+// stat 的非 NotFound 错误（网络故障）直接传播，不在故障链路上盲目 mkdir。
+#[test]
+fn mkdir_p_propagates_non_notfound_stat_error() {
+    let client = fake_client();
+    client.inject(RemoteFakeOp::Stat, "2024/01", io::ErrorKind::TimedOut);
+    let backend = backend_with(client);
+    let err = backend.mkdir_p(&smb("2024/01")).unwrap_err();
+    assert_eq!(err.kind(), io::ErrorKind::TimedOut);
 }
 
 #[test]

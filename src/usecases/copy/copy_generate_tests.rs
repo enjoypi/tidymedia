@@ -68,6 +68,7 @@ fn generate_unique_name_uses_suffix_when_first_taken() {
     let _ = out_utf8;
     let (_, target) =
         generate_unique_name(&info, &local_loc(out.path()), &local_arc(), DEFAULT_TMPL)
+            .unwrap()
             .expect("unique name should be generated");
     let target_str = target.display();
     assert!(target_str.ends_with("photo_1.png"), "got {target_str}");
@@ -79,8 +80,70 @@ fn generate_unique_name_none_after_10_collisions() {
     let info = make_media_info(src.path(), "photo.png");
     let out = tempdir().unwrap();
     fill_collisions(&out.path().join("2024").join("01"));
-    let res = generate_unique_name(&info, &local_loc(out.path()), &local_arc(), DEFAULT_TMPL);
+    let res =
+        generate_unique_name(&info, &local_loc(out.path()), &local_arc(), DEFAULT_TMPL).unwrap();
     assert!(res.is_none(), "should exhaust after 10 collisions");
+}
+
+// 无扩展名文件冲突重命名不得产生尾点（"photo_1." 在 Windows 会被 CreateFile 剥点、
+// Linux 下是不可见怪文件）。
+#[test]
+fn generate_unique_name_no_extension_omits_trailing_dot() {
+    let src = tempdir().unwrap();
+    let info = make_media_info(src.path(), "photo");
+    let out = tempdir().unwrap();
+    let sub = out.path().join("2024").join("01");
+    fs::create_dir_all(&sub).unwrap();
+    fs::write(sub.join("photo"), b"x").unwrap();
+    let (_, target) =
+        generate_unique_name(&info, &local_loc(out.path()), &local_arc(), DEFAULT_TMPL)
+            .unwrap()
+            .expect("unique name should be generated");
+    let target_str = target.display();
+    assert!(target_str.ends_with("photo_1"), "got {target_str}");
+}
+
+// stream_copy 中途失败（reader read Err）须清理 open_write 已创建的半截目标文件。
+#[test]
+fn do_copy_stream_failure_removes_partial_target() {
+    let fake = Arc::new(crate::FakeBackend::new("local"));
+    let src_loc = Location::Local(Utf8PathBuf::from("/src/photo.png"));
+    fake.add_file(src_loc.clone(), b"data".to_vec());
+    let mut info = Info::open(&src_loc, Arc::clone(&fake) as Arc<dyn Backend>).unwrap();
+    info.set_exif(crate::entities::exif::Exif::with_mime("image/png"));
+    // Info::open 已读完 fast hash；此后注入让 stream_copy 的 io::copy 阶段失败。
+    fake.inject_reader_error(src_loc, std::io::ErrorKind::TimedOut);
+
+    let out = tempdir().unwrap();
+    let mut idx = crate::entities::file_index::Index::new();
+    let err = do_copy(
+        &info,
+        &local_loc(out.path()),
+        &local_arc(),
+        &mut idx,
+        &default_opts(DEFAULT_TMPL),
+    )
+    .expect_err("stream copy must fail");
+    assert!(err.to_string().contains("IO error"), "got: {err}");
+    // FakeBackend 默认 mtime = UNIX_EPOCH → +8h → 1970/01；半截目标必须被清理。
+    let partial = out.path().join("1970").join("01").join("photo.png");
+    assert!(!partial.exists(), "partial target must be cleaned up");
+}
+
+// exists 的 IO 错误必须传播而非被当作"不存在"：吞错会让 stream_copy 覆盖已存在目标。
+#[test]
+fn generate_unique_name_propagates_exists_error() {
+    let be = Arc::new(crate::FakeBackend::new("local"));
+    let src_loc = Location::Local(Utf8PathBuf::from("/src/photo.png"));
+    be.add_file(src_loc.clone(), b"data".to_vec());
+    let info = Info::open(&src_loc, Arc::clone(&be) as Arc<dyn Backend>).unwrap();
+    // FakeBackend 默认 mtime = UNIX_EPOCH → +8h 偏移 → 1970/01 子目录。
+    let target = Location::Local(Utf8PathBuf::from("/out/1970/01/photo.png"));
+    be.inject_error(target, crate::FakeOp::Exists, std::io::ErrorKind::TimedOut);
+    let out_loc = Location::Local(Utf8PathBuf::from("/out"));
+    let err =
+        generate_unique_name(&info, &out_loc, &(be as Arc<dyn Backend>), DEFAULT_TMPL).unwrap_err();
+    assert_eq!(err.kind(), std::io::ErrorKind::TimedOut);
 }
 
 #[test]

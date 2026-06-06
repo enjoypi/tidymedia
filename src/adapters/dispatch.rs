@@ -90,7 +90,7 @@ fn dispatch_copy_or_move(
     let src_pairs = build_sources(factory, sources)?;
     let out_pair = build_source(factory, output)?;
     let sink = report.map(JsonFileReportSink::new);
-    let copy_report = crate::usecases::copy(
+    let copy_report = crate::usecases::copy_with_sidecar(
         &src_pairs,
         out_pair,
         dry_run,
@@ -98,6 +98,8 @@ fn dispatch_copy_or_move(
         include_non_media,
         archive_template,
         sink.as_ref().map(|s| s as &dyn ReportSink),
+        // P3 sidecar 发现的依赖倒置注入点：adapters 协议解析进 usecases 流程。
+        Some(crate::adapters::sidecar::discover_with_backend),
     )?;
     Ok(CommandResult::Copy(copy_report))
 }
@@ -111,7 +113,7 @@ fn dispatch_find(
 ) -> Result<CommandResult> {
     let src_pairs = build_sources(factory, sources)?;
     let out_pair = output.map(|loc| build_source(factory, loc)).transpose()?;
-    let find_report = crate::usecases::find_duplicates(secure, src_pairs, out_pair.as_ref());
+    let find_report = crate::usecases::find_duplicates(secure, src_pairs, out_pair.as_ref())?;
     // Find 与 Copy/Move 对称：均通过 ReportSink trait 注入，不再硬编码 JsonFileReportSink。
     if let Some(path) = report {
         let sink = JsonFileReportSink::new(path);

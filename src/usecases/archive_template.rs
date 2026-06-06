@@ -12,6 +12,12 @@ use crate::entities::exif::Exif;
 
 const FEATURE_COPY: &str = "copy";
 
+/// `render` 支持的全部占位符名。`validate_archive_template` 据此拒绝未知占位符
+///（未知名渲染时不被替换，会产生形如 `{foo}` 的字面目录段）。
+/// 新增占位符时 MUST 同步 `render` 内的替换分支与此列表。
+pub(crate) const PLACEHOLDERS: [&str; 6] =
+    ["year", "month", "day", "valuable_name", "make", "model"];
+
 pub struct TemplateContext<'a> {
     pub year: &'a str,
     pub month: &'a str,
@@ -34,11 +40,11 @@ pub fn render(template: &str, ctx: &TemplateContext<'_>) -> String {
 
     // {make} / {model}：仅在模板包含时才访问 EXIF，避免无谓解析。
     if result.contains("{make}") {
-        let make = read_make(ctx.exif);
+        let make = read_exif_field(ctx.exif, Exif::make, "make");
         result = result.replace("{make}", &make);
     }
     if result.contains("{model}") {
-        let model = read_model(ctx.exif);
+        let model = read_exif_field(ctx.exif, Exif::model, "model");
         result = result.replace("{model}", &model);
     }
 
@@ -50,27 +56,20 @@ pub fn render(template: &str, ctx: &TemplateContext<'_>) -> String {
         .join("/")
 }
 
-fn read_make(exif: Option<&Exif>) -> String {
-    let value = exif.and_then(|e| e.make().filter(|s| !s.is_empty()));
+// {make} / {model} 共用的字段读取：无值（EXIF 缺失或字段空串）→ warn + "unknown"。
+// fn 指针入参（`Exif::make` / `Exif::model`）消除两份同体函数。
+fn read_exif_field(
+    exif: Option<&Exif>,
+    get: fn(&Exif) -> Option<&str>,
+    placeholder: &'static str,
+) -> String {
+    let value = exif.and_then(|e| get(e).filter(|s| !s.is_empty()));
     if value.is_none() {
         warn!(
             feature = FEATURE_COPY,
             operation = "render_template",
-            placeholder = "make",
-            "EXIF Make not found; substituting \"unknown\""
-        );
-    }
-    value.unwrap_or("unknown").to_string()
-}
-
-fn read_model(exif: Option<&Exif>) -> String {
-    let value = exif.and_then(|e| e.model().filter(|s| !s.is_empty()));
-    if value.is_none() {
-        warn!(
-            feature = FEATURE_COPY,
-            operation = "render_template",
-            placeholder = "model",
-            "EXIF Model not found; substituting \"unknown\""
+            placeholder,
+            "EXIF field not found; substituting \"unknown\""
         );
     }
     value.unwrap_or("unknown").to_string()

@@ -277,6 +277,50 @@ fn is_media_false_when_no_exif() {
     assert!(!info.is_media());
 }
 
+// P2 接线：无 EXIF 时文件名启发式候选必须被消费（旧实现 let-else 直接 fs 兜底）。
+#[test]
+fn create_time_uses_filename_candidate_without_exif() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("IMG_20240501_143000.jpg");
+    fs::write(&path, b"not-really-a-jpeg").unwrap();
+    let info = Info::from(path.to_str().unwrap()).unwrap();
+    let t = info.create_time(TEST_VALID_THRESHOLD_SECS);
+    let secs = t.duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
+    // 文件名 naive 时间按 UTC 解释：2024-05-01T14:30:00Z
+    assert_eq!(secs, 1_714_573_800);
+}
+
+// P0（EXIF DateTimeOriginal）必须压过 P2（文件名）。
+#[test]
+fn create_time_prefers_exif_over_filename() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("IMG_20240501_143000.jpg");
+    fs::write(&path, b"payload").unwrap();
+    let mut info = Info::from(path.to_str().unwrap()).unwrap();
+    let exif =
+        super::super::exif::Exif::with_mime("image/jpeg").with_date_time_original(1_700_000_000);
+    info.set_exif(exif);
+    let t = info.create_time(TEST_VALID_THRESHOLD_SECS);
+    let secs = t.duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
+    assert_eq!(secs, 1_700_000_000);
+}
+
+// P3 注入机制：add_candidates 注入的 sidecar 候选参与裁决并压过 P4 mtime。
+#[test]
+fn create_time_uses_injected_sidecar_candidate() {
+    use crate::entities::media_time::{Source, epoch_to_candidate};
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("plain.bin");
+    fs::write(&path, b"payload").unwrap();
+    let mut info = Info::from(path.to_str().unwrap()).unwrap();
+    let c = epoch_to_candidate(1_600_000_000, Source::XmpSidecar, None, false)
+        .expect("non-zero epoch yields candidate");
+    info.add_candidates(vec![c]);
+    let t = info.create_time(TEST_VALID_THRESHOLD_SECS);
+    let secs = t.duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
+    assert_eq!(secs, 1_600_000_000);
+}
+
 #[test]
 fn is_media_true_when_exif_present_and_media() {
     let mut info = Info::from(common::DATA_SMALL).unwrap();

@@ -15,8 +15,8 @@
 //!
 //! - Kerberos：当前只支持 username/password（pavao 0.2 暴露面有限）；`KRB5CCNAME`
 //!   走环境变量由 libsmbclient 自动拾取，无显式 API。
-//! - timeout：`SmbOptions` 没显式 timeout，本 PR 未接入；`config.backend.smb.timeout_secs`
-//!   暂仅作配置占位。
+//! - timeout：`SmbOptions` 没显式 timeout；对应配置字段已删（杜绝哑配置），
+//!   pavao 支持后随消费链一起加回。
 
 #![cfg_attr(coverage_nightly, coverage(off))]
 

@@ -297,6 +297,7 @@ mod test_advanced {
             &local_arc(),
             "{valuable_name}",
         )
+        .unwrap()
         .expect("should generate even with empty subdir");
         // 目标直接在 output_dir 下（无子目录层）
         assert!(

@@ -5,6 +5,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use std::time::SystemTime;
 
+use camino::Utf8Path;
 use camino::Utf8PathBuf;
 use chrono::FixedOffset;
 use chrono::Utc;
@@ -54,6 +55,9 @@ pub struct Info {
     backend: Arc<dyn Backend>,
 
     exif: Option<exif::Exif>,
+    /// P3 候选（XMP / Takeout sidecar）：协议解析在 adapters 层，经
+    /// [`Self::add_candidates`] 注入；entities 只消费转换好的 [`media_time::Candidate`]。
+    extra_candidates: Vec<media_time::Candidate>,
     lazy: Mutex<Lazy>,
     meta: BackendMetadata,
 }
@@ -96,6 +100,7 @@ impl Info {
             location: loc.clone(),
             backend,
             exif: None,
+            extra_candidates: Vec::new(),
             lazy: Mutex::new(Lazy::new(bytes_read as u64, second_hash)),
             meta,
         })
@@ -169,33 +174,45 @@ impl Info {
         self.exif = Some(exif);
     }
 
+    /// 注入外部来源（P3 sidecar 等）的时间候选；与 EXIF/文件名/mtime 候选一起
+    /// 参与 [`Self::create_time`] 的 P0–P4 裁决。
+    pub fn add_candidates(&mut self, candidates: Vec<media_time::Candidate>) {
+        self.extra_candidates.extend(candidates);
+    }
+
     /// 计算创建时间。走 docs/media-time-detection.md 的 P0→P4 优先级判定：
-    /// 把 EXIF/视频容器字段、文件 mtime 喂给 `media_time::resolve`，decision 时间若小于
-    /// `valid_threshold_secs`（配置层的"软阈值"）则回退到 fs 兜底。
+    /// 把 EXIF/视频容器字段（P0/P1）、文件名启发式（P2）、外部注入的 sidecar
+    /// 候选（P3，见 [`Self::add_candidates`]）、文件 mtime（P4）一起喂给
+    /// `media_time::resolve`，decision 时间若小于 `valid_threshold_secs`
+    ///（配置层的"软阈值"）则回退到 fs 兜底。
     /// `valid_threshold_secs` 由 Use Case 层从配置读入；Entity 不直接依赖配置加载。
     //
-    // `coverage(off)`：内含 `let Some(exif) else` + `if secs > 0 && ...` 两条 boundary
-    // branch；集成 test binary（lib_tidy / cli_smoke）的 source 永远带 exif 且
-    // secs>0，LLVM multi-binary inline 副本上 False 分支永远不触发。语义由
-    // create_time_no_exif_uses_meta / create_time_falls_back_when_exif_below_threshold
-    // 等单元测试断言。
+    // `coverage(off)`：内含 `if secs > 0 && ...` boundary branch；集成 test binary
+    //（lib_tidy / cli_smoke）的 source 永远 secs>0，LLVM multi-binary inline 副本上
+    // False 分支永远不触发。语义由 create_time_no_exif_uses_meta /
+    // create_time_falls_back_when_exif_below_threshold 等单元测试断言。
     #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn create_time(&self, valid_threshold_secs: u64) -> SystemTime {
         let modified = self.meta.modified;
         let created = self.meta.created;
         let fs_fallback = pick_fs_fallback(modified, created);
 
-        let Some(exif) = self.exif.as_ref() else {
-            return fs_fallback;
-        };
-
-        // 当前实现统一用 UTC 作为 NaiveDateTime 的解释时区——上层（usecases::copy）
-        // 已用 from_path_with_offset 把 EXIF 转 epoch 了，这里的 offset 仅作 P2 推断用，
-        // 但本入口未喂入 filename/sidecar 候选，因此 offset 实际不被消费。
+        // P2 文件名中的 naive 时间统一按 UTC 解释；P0/P1 的 epoch 已在 EXIF
+        // 解析层（from_path_with_offset）按配置时区转换完毕。
         let utc_offset = FixedOffset::east_opt(0).expect("0 offset is valid");
-        let gps_utc = exif.gps_utc();
-        let mut candidates = media_time::candidates_from_exif(exif, utc_offset);
-        // Option<Candidate> 实现 IntoIterator → extend 不引入 if-let 分支。
+        let gps_utc = self.exif.as_ref().and_then(exif::Exif::gps_utc);
+        let mut candidates = match self.exif.as_ref() {
+            Some(exif) => media_time::candidates_from_exif(exif, utc_offset),
+            None => Vec::new(),
+        };
+        // P2：文件名启发式（IMG_/DSC_/Screenshot_/毫秒戳等）。
+        candidates.extend(media_time::candidates_from_filename(
+            Utf8Path::new(self.full_path.as_str()),
+            utc_offset,
+        ));
+        // P3：adapters 层发现并注入的 sidecar 候选（XMP / Google Takeout）。
+        candidates.extend(self.extra_candidates.iter().copied());
+        // P4。Option<Candidate> 实现 IntoIterator → extend 不引入 if-let 分支。
         candidates.extend(media_time::fs_time::from_modified(modified));
 
         // resolve 返回 None（候选全部被过滤）与"低于阈值"走同一条 fallback 路径，

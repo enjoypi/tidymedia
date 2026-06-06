@@ -203,22 +203,33 @@ fn comment_and_rm_windows_tokens() {
     assert_eq!(rm(), "DEL");
 }
 
+// output 指向文件（非目录）必须返回 Err：旧实现返回空报告 + exit 0，
+// 与"无重复"不可区分，误导基于退出码做删除决策的脚本。
 #[test]
-fn find_duplicates_invalid_output_returns_ok() {
+fn find_duplicates_output_is_file_returns_err() {
     let tmp = tempfile::NamedTempFile::new().unwrap();
     let out_loc = Location::Local(Utf8PathBuf::from(tmp.path().to_str().unwrap()));
     let out_pair = (out_loc, LocalBackend::arc());
-    find_duplicates(true, vec![local_data_dir()], Some(&out_pair));
+    let err = find_duplicates(true, vec![local_data_dir()], Some(&out_pair)).unwrap_err();
+    assert!(err.to_string().contains("not a directory"), "got: {err}");
+}
+
+#[test]
+fn find_duplicates_output_missing_returns_err() {
+    let out_loc = Location::Local(Utf8PathBuf::from("/no/such/dir/xyz"));
+    let out_pair = (out_loc, LocalBackend::arc());
+    let err = find_duplicates(true, vec![local_data_dir()], Some(&out_pair)).unwrap_err();
+    assert!(err.to_string().contains("not a directory"), "got: {err}");
 }
 
 #[test]
 fn find_duplicates_no_output_branch_runs() {
-    find_duplicates(true, vec![local_data_dir()], None);
+    find_duplicates(true, vec![local_data_dir()], None).unwrap();
 }
 
 #[test]
 fn find_duplicates_with_output_branch_runs() {
     let dir = tempdir().unwrap();
     let out_pair = local_dir(dir.path());
-    find_duplicates(false, vec![local_data_dir()], Some(&out_pair));
+    find_duplicates(false, vec![local_data_dir()], Some(&out_pair)).unwrap();
 }
