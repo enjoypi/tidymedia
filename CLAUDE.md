@@ -4,7 +4,7 @@
 
 # tidymedia 开发上下文
 
-按「拍摄时间」去重并整理照片/视频的多后端 CLI：扫描 sources（local/smb/adb/mtp 可混合）→ SHA-512 去重 → 按解析出的拍摄时间归档到 `output/年/月`。核心算法 = 拍摄时间判定（P0–P4 优先级，见下文「核心算法」节）。Clean Architecture 四层 + Android app（feature `android-app`）。代码注释里的 `spec §X` 指向已删除的 `docs/media-time-detection.md`，待补。
+按「拍摄时间」去重并整理照片/视频的多后端 CLI：扫描 sources（local/smb/adb/mtp 可混合）→ SHA-512 去重 → 按解析出的拍摄时间归档到 `output/年/月`。核心算法 = 拍摄时间判定（P0–P4 优先级，见下文「核心算法」节）。Clean Architecture 四层 + Android app（feature `android-app`）。代码注释里的 `docs/media-time-detection.md §X` 指向已删除的 spec，待补。
 
 ## Quick Start
 - 构建：`cargo build`；运行：`cargo run -- copy /source -o /output`；dry-run：`cargo run -- copy /source -o /output --dry-run`
@@ -18,7 +18,7 @@
 - nom-exif `Exif::get(tag)` 仅读 IFD0/MAIN；GPS 子 IFD 标签必须用 `Exif::iter()` 按 tag code 匹配
 
 ## 测试与覆盖率（项目特有；通用套路见 rust-p1 §5）
-- 默认 stable：`cargo +nightly llvm-cov --release nextest --summary-only`（~99.6% region）
+- 默认口径（无 RUSTFLAGS，命令同 Quick Start）~99.6% region
 - 严格 100%：`RUSTFLAGS="--cfg=coverage_nightly" cargo +nightly llvm-cov --release nextest --summary-only [--branch]`；`lib.rs` / `bin/tidymedia.rs` 顶部 `#![cfg_attr(coverage_nightly, feature(coverage_attribute))]`；`Cargo.toml [lints.rust] unexpected_cfgs` 注册 `cfg(coverage_nightly)`；不可稳定触发分支用函数级 `#[cfg_attr(coverage_nightly, coverage(off))]`
 - **`--branch` multi-binary instance 陷阱**：lib unit + 集成 binary 各自 codegen 热点 fn 副本，每副本独立计数器；某 binary 未触发即报 instance miss。可行：①重构成 `?`（算 region 不算 branch）；②函数级 `coverage(off)`（用于 hash / file_info / copy / exif 等 hot fn，具体位点 `rg "coverage\(off\)" src/`）
 - 改 `Cargo.toml` / `coverage` 属性后必跑 `cargo +nightly llvm-cov clean --workspace`
@@ -28,7 +28,7 @@
 - **`--all-features` 下 `dispatch.rs` 的 `usecases::copy(..)?` Err arm 覆盖**：现有 `tidy_rejects_*` 测试用 `#[cfg(not(feature = "smb-backend"))]` gate，启用全部 feature 跑覆盖率时这些测试不编译 → `?` Err arm miss。用 output 父路径占成普通文件触发 `mkdir_p` Err 兜底（参考 `dispatch_and_cli.rs::tidy_copy_propagates_mkdir_error_when_output_parent_is_file`）
 - **`--all-features` 严格覆盖也须 100%**：feature 启用侧用 `#[cfg(feature = "...")]` gated 测试镜像 `tidy_rejects_*` 系列（`tests/lib_tidy/real_factory.rs`）。标准杠杆：`RealMtpClient::new` 是 stub 必 Err → 确定性触发 `dispatch.rs` 各 `?` Err arm 与 `factory.rs` builder 调用位点；`PavaoClient::new` / `ADBServerDevice::new` 仅初始化不连网可直接断言。`factory.rs::unsupported_backend` 三 feature 全开时 dead → 条件豁免 `cfg_attr(all(coverage_nightly, 三feature), coverage(off))`（与 `allow(dead_code)` 条件镜像）。`mobile.rs` 不可达防御逻辑抽纯 helper（`expect_copy`/`expect_find`/`copy_status`/`stats_from`/`mobile_report_from`）直测；调用点用 `.map` 替代 `?` 消除永不触发的 Err 传播 region
 - **子行 region miss 定位**（lcov `DA`/`BRDA` 不显示，如 `?` Err arm）：`cargo +nightly llvm-cov report --release --text` 复用上次 run 的 profdata（不接 `--all-features`，feature 集随上次 run），输出中 `^0` 标记即未覆盖子行 region
-- **mutation testing**：配置在 `.cargo/mutants.toml`（nextest + release + `--all-features`，排除 `*_real.rs`/测试基建；等价/平台 cfg/feature-gate 豁免全在 `exclude_re` 逐条注明 WHY）。日常增量 `cargo mutants --in-diff <(git diff main)`；全量审计约 677 mutants / 3h（2 核机，2026-06 基线：450 caught / 0 missed / 168 unviable）；定点复验 `cargo mutants -F '<name regex>'`（注意 `-E` 是 exclude）。已沉淀套路：①计数断言 MUST 精确 `==`，`>= 1` 杀不掉 `+=`→`-=`（usize release wrap 成 MAX）；②与被调函数重复的入参 guard 产生等价变异，删冗余 guard 单点校验（DRY）；③`cfg(windows)`/`cfg(not(feature))` 代码在单口径跑必假幸存 → exclude_re；④只进 tracing 字段的取值（如 `summary_result`）抽纯 fn 直测，不靠捕日志；⑤防御性不可达 arm 抽纯 helper 喂错配变体直测（mobile.rs `expect_copy`/`expect_find` 模式）；⑥写 kill 测试前先确认变异行在该输入下**可达**（`create_time` 无 EXIF 时 let-else 早返回，到不了被变异行——曾致 kill 测试绿但 mutant 仍幸存）；⑦`cargo mutants` 启动即快照源树，长跑期间可安全并行写 kill 测试/改源码，不影响进行中的运行
+- **mutation testing**：配置在 `.cargo/mutants.toml`（nextest + release + `--all-features`，排除 `*_real.rs`/测试基建；等价/平台 cfg/feature-gate 豁免全在 `exclude_re` 逐条注明 WHY）。日常增量 `cargo mutants --in-diff <(git diff main)`；全量审计 677 mutants / 约 3h（2 核机；2026-06 基线：509 caught / 168 unviable / 0 missed）；定点复验 `cargo mutants -F '<name regex>'`（注意 `-E` 是 exclude）。已沉淀套路：①计数断言 MUST 精确 `==`，`>= 1` 杀不掉 `+=`→`-=`（usize release wrap 成 MAX）；②与被调函数重复的入参 guard 产生等价变异，删冗余 guard 单点校验（DRY）；③`cfg(windows)`/`cfg(not(feature))` 代码在单口径跑必假幸存 → exclude_re；④只进 tracing 字段的取值（如 `summary_result`）抽纯 fn 直测，不靠捕日志；⑤防御性不可达 arm 抽纯 helper 喂错配变体直测（mobile.rs `expect_copy`/`expect_find` 模式）；⑥写 kill 测试前先确认变异行在该输入下**可达**（`create_time` 无 EXIF 时 let-else 早返回，到不了被变异行——曾致 kill 测试绿但 mutant 仍幸存）；⑦`cargo mutants` 启动即快照源树，长跑期间可安全并行写 kill 测试/改源码，不影响进行中的运行
 
 ## Fixture
 - `tests/data/` 下文件 mtime 每次 `git checkout` 重置；时间相关测试 **MUST** 用 `filetime::set_file_mtime` 固定（封装：`entities/test_common::copy_png_to`，固定到 `FIXED_MEDIA_MTIME` = 2024-01-01 12:00:00 UTC）
