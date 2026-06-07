@@ -22,28 +22,44 @@ fn smb_uri() -> Location {
     Location::parse("smb://nas/share/x").unwrap()
 }
 
-// Windows 文件名是 UTF-16，无法用任意字节构造非 UTF-8 路径
-#[cfg(unix)]
-#[test]
-fn walk_entry_to_io_non_utf8_path() {
-    use std::os::unix::ffi::OsStringExt;
-    // ignore::WalkBuilder 拿到无效 UTF-8 路径时映射到 InvalidData。
-    // 直接构造 ignore::DirEntry 不公开；我们走"在 tempdir 里创建一个含非 UTF-8 字节的文件名"
-    let dir = tempdir().unwrap();
-    let bad_name = std::ffi::OsString::from_vec(vec![0x66, 0x6f, 0xFF, 0x6f]); // f o \xFF o
-    let path = dir.path().join(&bad_name);
-    if fs::write(&path, b"x").is_err() {
-        // 某些文件系统不允许非 UTF-8 文件名；跳过
-        return;
-    }
+// 共享断言：walk 含非 UTF-8 文件名的目录必须产出 InvalidData 条目
+// （`walk_entry_to_io` 的 `Utf8PathBuf::from_path_buf` Err 映射）。
+// 直接构造 ignore::DirEntry 不公开，只能走真实目录。
+fn assert_walk_flags_non_utf8(dir: &std::path::Path) {
     let backend = LocalBackend::new();
-    let entries: Vec<_> = backend.walk(&local(dir.path())).collect();
+    let entries: Vec<_> = backend.walk(&local(dir)).collect();
     let has_non_utf8_err = entries.iter().any(|r| {
         r.as_ref()
             .err()
             .is_some_and(|e| e.kind() == io::ErrorKind::InvalidData)
     });
     assert!(has_non_utf8_err);
+}
+
+#[cfg(unix)]
+#[test]
+fn walk_entry_to_io_non_utf8_path() {
+    use std::os::unix::ffi::OsStringExt;
+    let dir = tempdir().unwrap();
+    let bad_name = std::ffi::OsString::from_vec(vec![0x66, 0x6f, 0xFF, 0x6f]); // f o \xFF o
+    if fs::write(dir.path().join(&bad_name), b"x").is_err() {
+        // 某些文件系统不允许非 UTF-8 文件名；跳过
+        return;
+    }
+    assert_walk_flags_non_utf8(dir.path());
+}
+
+// Windows 文件名是 UTF-16，但 NTFS 接受 unpaired surrogate（ill-formed UTF-16），
+// 其 WTF-8 表示不是合法 UTF-8 → 同样映射 InvalidData。unix 测试的镜像。
+#[cfg(windows)]
+#[test]
+fn walk_entry_to_io_non_utf8_path_windows() {
+    use std::os::windows::ffi::OsStringExt;
+    let dir = tempdir().unwrap();
+    // f o <unpaired surrogate 0xD800> o
+    let bad_name = std::ffi::OsString::from_wide(&[0x66, 0x6f, 0xD800, 0x6f]);
+    fs::write(dir.path().join(&bad_name), b"x").expect("NTFS accepts unpaired-surrogate filenames");
+    assert_walk_flags_non_utf8(dir.path());
 }
 
 #[test]

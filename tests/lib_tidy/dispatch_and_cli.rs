@@ -287,6 +287,23 @@ fn run_cli_find_subcommand_executes() {
     run_cli(["tidymedia", "find", DATA_DIR]).expect("find via run_cli should succeed");
 }
 
+// output 指向普通文件 → find_duplicates 的 not_a_directory 校验 Err，
+// 触发 dispatch_find 内 `find_duplicates(..)?` 的 Err arm（dispatch.rs:116）。
+#[test]
+fn tidy_find_propagates_error_when_output_is_file() {
+    let root = tempdir().unwrap();
+    let blocker = root.path().join("file_not_dir");
+    std::fs::write(&blocker, b"i am a file").unwrap();
+
+    let res = tidy(Commands::Find {
+        secure: false,
+        sources: vec![local(DATA_DIR)],
+        output: Some(local(blocker.to_str().unwrap())),
+        report: None,
+    });
+    assert!(res.is_err(), "find output must be an existing directory");
+}
+
 // output 父路径被普通文件占住 → usecases::copy 内 mkdir_p Err，
 // 触发 dispatch_copy_or_move 内 `usecases::copy(..)?` 的 Err arm（line 101）。
 // 所有 feature 组合下都跑（不依赖 backend feature gate）。

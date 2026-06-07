@@ -9,7 +9,7 @@ use sha2::Digest;
 // --- backend-aware Info::open 覆盖路径 ---
 
 use super::super::uri::Location;
-use crate::adapters::backend::fake::FakeBackend;
+use crate::adapters::backend::fake::{FakeBackend, Op};
 use camino::Utf8PathBuf;
 use std::sync::Arc;
 
@@ -35,6 +35,31 @@ fn info_open_smb_location_derives_full_path_from_display() {
     assert_eq!(xxh, xxhash_rust::xxh3::xxh3_64(b"hello-smb-content"));
     let sha = info.secure_hash().unwrap();
     assert_eq!(sha, sha2::Sha512::digest(b"hello-smb-content"));
+}
+
+/// `Info::open` 首步 `backend.metadata(loc)`? 的 Err arm：注入 Metadata 错误直接传播。
+#[test]
+fn info_open_propagates_metadata_error() {
+    let fake = Arc::new(FakeBackend::new("fake"));
+    let loc = Location::Local(Utf8PathBuf::from("/in-memory/meta-err.bin"));
+    fake.add_file(loc.clone(), vec![0u8; 8]);
+    fake.inject_error(loc.clone(), Op::Metadata, io::ErrorKind::PermissionDenied);
+
+    let err = super::Info::open(&loc, fake).unwrap_err();
+    assert_eq!(err.kind(), io::ErrorKind::PermissionDenied);
+}
+
+/// `Info::open` 中 `backend.open_read(loc)`? 的 Err arm：metadata 通过但 open 失败
+/// （与下方 reader-read Err 区分——此处连 reader 都拿不到）。
+#[test]
+fn info_open_propagates_open_read_error() {
+    let fake = Arc::new(FakeBackend::new("fake"));
+    let loc = Location::Local(Utf8PathBuf::from("/in-memory/open-err.bin"));
+    fake.add_file(loc.clone(), vec![0u8; 8]);
+    fake.inject_error(loc.clone(), Op::OpenRead, io::ErrorKind::TimedOut);
+
+    let err = super::Info::open(&loc, fake).unwrap_err();
+    assert_eq!(err.kind(), io::ErrorKind::TimedOut);
 }
 
 /// `FakeBackend::inject_reader_error` 让 `open_read` 成功但 read Err → `Info::open` 内
