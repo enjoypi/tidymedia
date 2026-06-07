@@ -357,3 +357,62 @@ fn mk_exif(mime: &str, init: impl FnOnce(&mut Exif)) -> Exif {
     init(&mut exif);
     exif
 }
+
+// ── AVI（RIFF strd 内嵌 EXIF）分流 ──
+
+const DATA_FUJI_AVI: &str = "tests/data/sample-fuji-strd.avi";
+
+#[test]
+fn from_path_reads_fuji_avi_embedded_exif() {
+    let exif = Exif::from_path(Utf8Path::new(DATA_FUJI_AVI)).unwrap();
+    assert_eq!(exif.mime_type(), "video/x-msvideo");
+    assert!(exif.is_media());
+    // fixture 内嵌 EXIF "2005:04:26 20:10:00"，按 UTC 解释
+    let want = chrono::NaiveDate::from_ymd_opt(2005, 4, 26)
+        .unwrap()
+        .and_hms_opt(20, 10, 0)
+        .unwrap()
+        .and_utc()
+        .timestamp()
+        .cast_unsigned();
+    assert_eq!(exif.date_time_original(), want);
+    assert_eq!(exif.exif_create_date(), want);
+    assert_eq!(exif.make(), Some("FUJIFILM"));
+    assert_eq!(exif.model(), Some("FinePix E550"));
+    // RIFF 路径不填 qt_create_date
+    assert_eq!(exif.qt_create_date(), 0);
+}
+
+#[test]
+fn avi_offset_shifts_epoch() {
+    // 同一 naive 时间按 +8 解释应比 UTC 提前 8 小时。
+    let east8 = FixedOffset::east_opt(8 * 3600).unwrap();
+    let utc_epoch = super::ascii_datetime_to_epoch("2005:04:26 20:10:00", utc());
+    let east_epoch = super::ascii_datetime_to_epoch("2005:04:26 20:10:00", east8);
+    assert_eq!(utc_epoch - east_epoch, 8 * 3600);
+}
+
+#[test]
+fn from_reader_avi_without_strd_leaves_fields_zero() {
+    // 只有 RIFF 头的"空" AVI：parse_avi_exif None → let-else 早返回。
+    let bytes = b"RIFF\x04\x00\x00\x00AVI ".to_vec();
+    let reader: Box<dyn super::MediaReader> = Box::new(std::io::Cursor::new(bytes));
+    let exif = Exif::from_reader(reader, "video/x-msvideo", utc());
+    assert_eq!(exif.date_time_original(), 0);
+    assert_eq!(exif.exif_create_date(), 0);
+    assert_eq!(exif.make(), None);
+}
+
+#[test]
+fn ascii_datetime_to_epoch_invalid_format_returns_zero() {
+    assert_eq!(super::ascii_datetime_to_epoch("not a date", utc()), 0);
+}
+
+#[test]
+fn ascii_datetime_to_epoch_epoch_start_returns_zero() {
+    // secs == 0 命中 `<= 0` 分支：与"字段未填"同义。
+    assert_eq!(
+        super::ascii_datetime_to_epoch("1970:01:01 00:00:00", utc()),
+        0
+    );
+}

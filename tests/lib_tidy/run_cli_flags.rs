@@ -308,6 +308,33 @@ fn run_cli_copy_archive_template_renders_make_model_from_exif() {
     );
 }
 
+/// AVI（RIFF strd 内嵌 EXIF）e2e：nom-exif 不支持 RIFF，`entities::riff` 自解析
+/// 提供 P0 候选——fixture 内嵌 "2005:04:26 20:10:00"（默认 +8 时区）必须归档到
+/// 2005/04，而非 mtime 年月（checkout 时间）。杀 `from_reader` AVI 分流接线变异。
+#[test]
+fn run_cli_copy_avi_archives_by_embedded_exif() {
+    let src = tempdir().unwrap();
+    let avi = src.path().join("sample-fuji-strd.avi");
+    std::fs::copy(format!("{DATA_DIR}/sample-fuji-strd.avi"), &avi).expect("seed AVI fixture");
+    let out = tempdir().unwrap();
+    run_cli([
+        "tidymedia",
+        "copy",
+        "--output",
+        out.path().to_str().unwrap(),
+        src.path().to_str().unwrap(),
+    ])
+    .expect("copy AVI via run_cli should succeed");
+    assert!(
+        out.path()
+            .join("2005")
+            .join("04")
+            .join("sample-fuji-strd.avi")
+            .exists(),
+        "AVI must be archived by embedded EXIF time 2005/04"
+    );
+}
+
 /// spawn binary 断言 find -o 的脚本语义：output 目录外的重复文件出 `rm` 行、
 /// output 目录内的被注释保留。杀 `compute_output_prefix -> None`（变异后全部
 /// 被注释，stdout 无未注释 rm 行）及 `under_prefix` 边界类变异。

@@ -13,6 +13,7 @@ pub(crate) mod exif;
 pub mod file_index;
 pub mod file_info;
 pub mod media_time;
+pub(crate) mod riff;
 #[cfg(test)]
 pub(crate) mod test_common;
 pub mod uri;

@@ -25,6 +25,8 @@ use crate::adapters::backend::local::LocalBackend;
 
 const META_TYPE_IMAGE: &str = "image/";
 const META_TYPE_VIDEO: &str = "video/";
+/// RIFF AVI 容器；nom-exif 不支持，走 `entities::riff` 自解析内嵌 EXIF。
+const MIME_AVI: &str = "video/x-msvideo";
 
 /// MIME sniff 时读取的字节数。`infer` 实际只看前 16-32 字节，256 留点余量
 /// 让边界 case（容器嵌套）的判定更稳。
@@ -50,7 +52,8 @@ pub struct Exif {
     // 用于 resolve 时与 P0 候选做交叉校验（差值 > 24h 时产生 GpsOver24h 冲突）。
     gps_utc: Option<DateTime<Utc>>,
 
-    // 相机厂商 / 型号；仅图片 EXIF 填写（视频容器一般不含这两个标签）。
+    // 相机厂商 / 型号；图片 EXIF 与 AVI strd 内嵌 EXIF 填写
+    // （QuickTime/MKV 容器一般不含这两个标签）。
     // 用于 archive_template 的 `{make}` / `{model}` 占位符。
     make: Option<String>,
     model: Option<String>,
@@ -96,6 +99,9 @@ impl Exif {
         };
         if mime_type.starts_with(META_TYPE_IMAGE) {
             populate_image_dates(reader, &mut exif, local_offset);
+        } else if mime_type.starts_with(MIME_AVI) {
+            // AVI 先于泛 video 分流：nom-exif 不认 RIFF，时间在 strd 内嵌 EXIF。
+            populate_avi_dates(reader, &mut exif, local_offset);
         } else if mime_type.starts_with(META_TYPE_VIDEO) {
             populate_video_dates(reader, &mut exif, local_offset);
         }
@@ -271,6 +277,41 @@ fn rational_to_u32(r: URational) -> Option<u32> {
         return None;
     }
     Some(r.numerator() / denom)
+}
+
+// AVI（RIFF）路径：`entities::riff` 提取 strd 内嵌 EXIF 的 ASCII 字段后在此转
+// epoch。日期与图片 EXIF 同语义（相机本地时间无时区），按调用方 offset 解释；
+// Make/Model 一并填充供 archive_template `{make}/{model}` 使用。
+fn populate_avi_dates(
+    mut reader: Box<dyn MediaReader>,
+    exif: &mut Exif,
+    local_offset: FixedOffset,
+) {
+    let Some(avi) = crate::entities::riff::parse_avi_exif(reader.as_mut()) else {
+        return;
+    };
+    exif.date_time_original = avi
+        .date_time_original
+        .as_deref()
+        .map_or(0, |s| ascii_datetime_to_epoch(s, local_offset));
+    exif.create_date = avi
+        .create_date
+        .as_deref()
+        .map_or(0, |s| ascii_datetime_to_epoch(s, local_offset));
+    exif.make = avi.make;
+    exif.model = avi.model;
+}
+
+// EXIF ASCII 日期（"YYYY:MM:DD HH:MM:SS"）转 epoch；非法格式 / 1970 前返回 0
+// （与 entry_value_to_epoch 的"0 = 字段未填"约定一致）。
+fn ascii_datetime_to_epoch(s: &str, local_offset: FixedOffset) -> u64 {
+    chrono::NaiveDateTime::parse_from_str(s, "%Y:%m:%d %H:%M:%S")
+        .ok()
+        .and_then(|nd| nd.and_local_timezone(local_offset).single())
+        .map_or(0, |dt| {
+            let secs = dt.timestamp();
+            if secs <= 0 { 0 } else { secs.cast_unsigned() }
+        })
 }
 
 // parse_track 内部 Err 需要构造"header 通过 sniff 但容器结构损坏"的特殊视频 fixture，
