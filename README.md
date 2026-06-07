@@ -104,11 +104,7 @@ exif:
 
 ## 开发
 
-- 测试：`cargo nextest run`
-- 覆盖率（stable）：`cargo llvm-cov nextest --summary-only`
-- 覆盖率（nightly 严格 100%）：`RUSTFLAGS="--cfg=coverage_nightly" cargo +nightly llvm-cov nextest --summary-only`
-
-详见 `CLAUDE.md`。
+构建 / 测试 / 覆盖率 / lint 流程见 [`CLAUDE.md`](CLAUDE.md)。
 
 ## 验收
 
