@@ -18,13 +18,15 @@ REPO_ROOT="$( cd "$SCRIPT_DIR/.." >/dev/null 2>&1 && pwd )"
 
 cd "$REPO_ROOT"
 
-# 1. 交叉编译 cdylib，目标 aarch64-linux-android，platform API 30（与 minSdk 对齐）
+# 1. 交叉编译 cdylib，目标 aarch64-linux-android，platform API 30（与 minSdk 对齐）。
+#    Cargo.toml 的 crate-type 只声明 rlib（cdylib 写死会让 Windows 上 lib/bin
+#    的 tidymedia.pdb 同名冲突，cargo#6313），这里用 `rustc --crate-type` 按需覆盖。
 echo ">>> [1/3] cargo ndk: target aarch64-linux-android, API 30, features=android-app"
 cargo ndk \
     --target aarch64-linux-android \
     --platform 30 \
     --output-dir "$SCRIPT_DIR/android/app/src/main/jniLibs" \
-    build --release --features android-app
+    rustc --lib --crate-type cdylib --release --features android-app
 
 SO_PATH="target/aarch64-linux-android/release/libtidymedia.so"
 if [[ ! -f "$SO_PATH" ]]; then
