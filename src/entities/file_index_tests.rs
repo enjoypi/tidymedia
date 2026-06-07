@@ -328,12 +328,11 @@ fn remove_under_prefix_removes_subtree_and_keeps_outside() {
     index.insert(inside.to_str().unwrap()).unwrap();
     assert_eq!(index.files().len(), 2);
 
-    let sub_canon = sub.canonicalize().unwrap();
-    // Windows canonicalize 产生 \\?\ verbatim 前缀，索引存的是无前缀绝对路径，
-    // 与生产入口 full_path 的 strip_windows_unc 行为保持一致
-    let sub_canon = sub_canon.to_str().unwrap();
-    let sub_canon = sub_canon.strip_prefix(r"\\?\").unwrap_or(sub_canon);
-    let removed = index.remove_under_prefix(sub_canon);
+    // prefix 与生产入口 canonical_prefix 同走 full_path（绝对路径透传），
+    // 不可手动 canonicalize：profile 目录为符号链接时（C:\Users\x → D:\Users\x）
+    // canonicalize 会解析出与索引存储不同的盘符，导致前缀匹配失败
+    let sub_prefix = file_info::full_path(sub.to_str().unwrap()).unwrap();
+    let removed = index.remove_under_prefix(sub_prefix.as_str());
     assert_eq!(removed, 1);
     assert_eq!(index.files().len(), 1);
 
