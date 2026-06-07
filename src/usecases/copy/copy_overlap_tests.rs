@@ -115,6 +115,35 @@ fn copy_in_place_second_run_excludes_output_subtree_from_scan() {
     assert_eq!(walkdir_files(&out).len(), 1, "no duplicate copy may appear");
 }
 
+// copy_with_sidecar 带 provider：build_source_index 的 enrich_candidates 注入
+// 路径（生产 dispatch 只走此口）。provider 语义断言见 tests/lib_tidy/archive.rs
+// 的 sidecar e2e；此处仅钉单测 binary 内的注入分支。
+#[test]
+fn copy_with_provider_runs_enrich_candidates() {
+    fn no_candidates(
+        _: &Location,
+        _: &Arc<dyn Backend>,
+    ) -> Vec<crate::entities::media_time::Candidate> {
+        Vec::new()
+    }
+    let dir = tempdir().unwrap();
+    tc::copy_png_to(dir.path(), "a.png").unwrap();
+    let out = tempdir().unwrap();
+
+    let report = copy_with_sidecar(
+        &[local_source(dir.path())],
+        local_source(out.path()),
+        /* dry_run = */ false,
+        /* remove = */ false,
+        /* include_non_media = */ false,
+        None,
+        None,
+        Some(no_candidates),
+    )
+    .unwrap();
+    assert_eq!(report.copied, 1);
+}
+
 // canonical_prefix：Local 路径 canonicalize；不存在的路径回退原始串。
 #[test]
 fn canonical_prefix_falls_back_for_missing_local_path() {

@@ -194,6 +194,18 @@ fn mkdir_p_records_dir() {
     assert_eq!(meta.kind, EntryKind::Dir);
 }
 
+// 祖先已存在时自底向上的 stat 在该层命中（mkdir_recursive 的 Ok => break），
+// 只补缺失的叶层，不重复 mkdir 既有目录。
+#[test]
+fn mkdir_p_stops_at_existing_ancestor() {
+    let client = fake_client();
+    let backend = backend_with(client.clone());
+    backend.mkdir_p(&smb("existing")).unwrap();
+    backend.mkdir_p(&smb("existing/sub")).unwrap();
+    let meta = client.get_metadata("existing/sub").unwrap();
+    assert_eq!(meta.kind, EntryKind::Dir);
+}
+
 #[test]
 fn read_to_string_decodes_utf8() {
     let client = fake_client();
