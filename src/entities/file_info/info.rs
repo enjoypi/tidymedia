@@ -227,7 +227,7 @@ impl Info {
                 operation = "resolve_time",
                 file = %self.full_path,
                 conflicts = ?d.conflicts,
-                "mtime vs primary candidate conflict"
+                "media time candidates conflict"
             );
         }
         let secs = decision.map_or(0, |d| d.utc.timestamp());

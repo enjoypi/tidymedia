@@ -40,16 +40,24 @@ pub fn resolve(
             .cmp(&b.0.priority())
             .then(a.0.utc.cmp(&b.0.utc))
     });
-    let (best, validity) = surviving[0];
+    let (mut best, mut validity) = surviving[0];
+    // 多数派仲裁：P0 错误（相机时钟未调）的典型痕迹是 filename 与 mtime
+    // 互证一致却与 P0 相差悬殊；两票对一票，推翻 P0 并记冲突（不静默）。
+    let mut conflicts = Vec::new();
+    if let Some((winner, v)) = majority_override(&best, &surviving[1..]) {
+        conflicts.push(Conflict {
+            kind: ConflictKind::P0OverruledByMajority,
+            other_utc: best.utc,
+            other_source: Some(best.source),
+            diff_secs: (best.utc - winner.utc).num_seconds(),
+        });
+        (best, validity) = (winner, v);
+    } else if best.priority() == Priority::P0 {
+        conflicts = detect_conflicts(&best, &surviving[1..], gps_utc);
+    }
     let confidence = match validity {
         Validity::LowConfidencePre1995 => Confidence::Low,
         _ => Confidence::High,
-    };
-
-    let conflicts = if best.priority() == Priority::P0 {
-        detect_conflicts(&best, &surviving[1..], gps_utc)
-    } else {
-        Vec::new()
     };
 
     Some(MediaTimeDecision {
@@ -71,6 +79,29 @@ fn apply_filters(candidates: Vec<Candidate>, now: DateTime<Utc>) -> Vec<(Candida
             v => Some((c, v)),
         })
         .collect()
+}
+
+/// 多数派仲裁：best 为 P0 时，若存在 filename 候选与某 mtime 候选互证
+/// （差 ≤ `CONFLICT_OVER_DAY_SECS`）且该 filename 与 P0 差 >
+/// `MTIME_VS_P0_HINT_SECS`，返回该 filename 候选作为新 best。
+fn majority_override(
+    best: &Candidate,
+    others: &[(Candidate, Validity)],
+) -> Option<(Candidate, Validity)> {
+    if best.priority() != Priority::P0 {
+        return None;
+    }
+    others
+        .iter()
+        .find(|(f, _)| {
+            is_filename_source(f.source)
+                && (best.utc - f.utc).num_seconds().abs() > MTIME_VS_P0_HINT_SECS
+                && others.iter().any(|(m, _)| {
+                    m.source == Source::FsMtime
+                        && (f.utc - m.utc).num_seconds().abs() <= CONFLICT_OVER_DAY_SECS
+                })
+        })
+        .copied()
 }
 
 fn detect_conflicts(
@@ -319,6 +350,88 @@ mod tests {
         .unwrap();
         assert_eq!(d.priority, Priority::P2);
         assert!(d.conflicts.is_empty());
+    }
+
+    // ── 多数派仲裁：filename 与 mtime 互证（差≤1天）且都与 P0 差>30天 ──
+    // 典型场景：相机时钟错误，事后重命名的文件名时间 + 文件 mtime 才是真实时间。
+
+    #[test]
+    fn majority_filename_mtime_overrules_wrong_p0() {
+        let p0 = 1_000_000_000; // 远早于 filename/mtime
+        let real = p0 + 600 * 86_400;
+        let d = resolve(
+            vec![
+                cand(Source::ExifDateTimeOriginal, p0),
+                cand(Source::FilenameDashedDateTime, real),
+                cand(Source::FsMtime, real + 3600),
+            ],
+            None,
+            now(),
+        )
+        .unwrap();
+        assert_eq!(d.utc.timestamp(), real);
+        assert_eq!(d.priority, Priority::P2);
+        assert_eq!(d.source, Source::FilenameDashedDateTime);
+        // 推翻 P0 必须可观测：记录冲突供 create_time 告警
+        assert_eq!(d.conflicts.len(), 1);
+        assert_eq!(d.conflicts[0].kind, ConflictKind::P0OverruledByMajority);
+        assert_eq!(d.conflicts[0].other_utc.timestamp(), p0);
+        assert_eq!(d.conflicts[0].other_source, Some(Source::ExifDateTimeOriginal));
+    }
+
+    #[test]
+    fn p0_kept_when_filename_lacks_mtime_corroboration() {
+        let p0 = 1_000_000_000;
+        let f = p0 + 600 * 86_400;
+        let d = resolve(
+            vec![
+                cand(Source::ExifDateTimeOriginal, p0),
+                cand(Source::FilenameDashedDateTime, f),
+                // mtime 与 filename 差 3 天 > 1 天：不互证
+                cand(Source::FsMtime, f + 3 * 86_400),
+            ],
+            None,
+            now(),
+        )
+        .unwrap();
+        assert_eq!(d.priority, Priority::P0);
+        assert_eq!(d.utc.timestamp(), p0);
+        assert_eq!(d.conflicts[0].kind, ConflictKind::FilenameOver1Day);
+    }
+
+    #[test]
+    fn p0_kept_when_no_mtime_candidate() {
+        let p0 = 1_000_000_000;
+        let d = resolve(
+            vec![
+                cand(Source::ExifDateTimeOriginal, p0),
+                cand(Source::FilenameDashedDateTime, p0 + 600 * 86_400),
+            ],
+            None,
+            now(),
+        )
+        .unwrap();
+        assert_eq!(d.priority, Priority::P0);
+        assert_eq!(d.conflicts[0].kind, ConflictKind::FilenameOver1Day);
+    }
+
+    #[test]
+    fn p0_kept_when_filename_within_30_days() {
+        let p0 = 1_700_000_100;
+        let f = p0 + 10 * 86_400; // >1 天（记冲突）但 ≤30 天（不推翻）
+        let d = resolve(
+            vec![
+                cand(Source::ExifDateTimeOriginal, p0),
+                cand(Source::FilenameDashedDateTime, f),
+                cand(Source::FsMtime, f),
+            ],
+            None,
+            now(),
+        )
+        .unwrap();
+        assert_eq!(d.priority, Priority::P0);
+        assert_eq!(d.utc.timestamp(), p0);
+        assert_eq!(d.conflicts[0].kind, ConflictKind::FilenameOver1Day);
     }
 
     #[test]

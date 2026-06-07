@@ -48,7 +48,41 @@ pub fn parse_filename(name: &str, default_offset: FixedOffset) -> Option<Candida
     if let Some(c) = try_unix_millis(stem) {
         return Some(c);
     }
+    if let Some(c) = try_generic_dashed(stem, default_offset) {
+        return Some(c);
+    }
     None
+}
+
+/// 通用 `<任意前缀>YYYY-MM-DD HH-MM-SS<任意后缀>`：事后批量重命名工具的常见
+/// 格式（相机时钟错误时文件名时间往往才是真实拍摄时间）。最宽松，放最后兜底。
+/// 扫描 stem 中第一个形状匹配且日期合法的 19 字节窗口。
+fn try_generic_dashed(stem: &str, default_offset: FixedOffset) -> Option<Candidate> {
+    const LEN: usize = 19; // "YYYY-MM-DD HH-MM-SS"
+    let bytes = stem.as_bytes();
+    for i in 0..=bytes.len().checked_sub(LEN)? {
+        if !dashed_window_shape_ok(&bytes[i..i + LEN]) {
+            continue;
+        }
+        // 形状匹配的窗口全 ASCII，str 字节切片必然落在 char 边界
+        if let Ok(naive) = NaiveDateTime::parse_from_str(&stem[i..i + LEN], "%Y-%m-%d %H-%M-%S") {
+            return Some(naive_to_candidate(
+                naive,
+                default_offset,
+                Source::FilenameDashedDateTime,
+            ));
+        }
+    }
+    None
+}
+
+/// 窗口形状：分隔符位（4,7 为 `-`、10 为空格、13,16 为 `-`），其余位为数字。
+fn dashed_window_shape_ok(w: &[u8]) -> bool {
+    w.iter().enumerate().all(|(i, &b)| match i {
+        4 | 7 | 13 | 16 => b == b'-',
+        10 => b == b' ',
+        _ => b.is_ascii_digit(),
+    })
 }
 
 fn stem_without_ext(name: &str) -> &str {

@@ -41,4 +41,7 @@ pub enum ConflictKind {
     FilenameOver1Day,
     /// mtime < P0 且差距较大，仅提示
     MtimeMuchEarlierThanP0,
+    /// filename 与 mtime 互证（差≤1天）且都与 P0 差>30天 → 多数派推翻 P0；
+    /// `other_*` 记录被推翻的 P0 候选（相机时钟错误的典型痕迹）
+    P0OverruledByMajority,
 }

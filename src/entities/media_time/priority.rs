@@ -29,6 +29,8 @@ pub enum Source {
     FilenameBareYyyymmdd,
     FilenameWeChatExport,
     FilenameWhatsApp,
+    /// 通用 `<任意前缀>YYYY-MM-DD HH-MM-SS`（事后批量重命名工具的常见格式）
+    FilenameDashedDateTime,
     // P3 — 旁路 sidecar
     XmpSidecar,
     GoogleTakeoutJson,
@@ -52,7 +54,8 @@ impl Source {
             | Source::FilenamePixel
             | Source::FilenameBareYyyymmdd
             | Source::FilenameWeChatExport
-            | Source::FilenameWhatsApp => Priority::P2,
+            | Source::FilenameWhatsApp
+            | Source::FilenameDashedDateTime => Priority::P2,
             Source::XmpSidecar | Source::GoogleTakeoutJson => Priority::P3,
             Source::FsMtime => Priority::P4,
         }

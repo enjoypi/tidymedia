@@ -233,6 +233,45 @@ fn unix_millis_rejects(#[case] name: &str) {
     assert!(parse_filename(name, utc_offset()).is_none());
 }
 
+// 通用 `<任意前缀>YYYY-MM-DD HH-MM-SS` 模板：相机时钟错误时，
+// 事后批量重命名工具写入文件名的时间往往才是真实拍摄时间。
+#[rstest]
+#[case::chinese_prefix(
+    "三星堆 2002-12-25 22-29-00.jpg",
+    epoch("2002-12-25T22:29:00Z")
+)]
+#[case::ascii_prefix("trip 2010-01-02 03-04-05.png", epoch("2010-01-02T03:04:05Z"))]
+// 无前缀：stem 恰好 19 chars，杀窗口起点 off-by-one 变异
+#[case::no_prefix("2002-12-25 22-29-00.jpg", epoch("2002-12-25T22:29:00Z"))]
+// 带后缀：日期时间不在 stem 末尾
+#[case::with_suffix("三星堆 2002-12-25 22-29-00 副本.jpg", epoch("2002-12-25T22:29:00Z"))]
+fn generic_dashed_datetime_parsed(#[case] name: &str, #[case] expected_ts: i64) {
+    let c = parse_filename(name, utc_offset()).unwrap();
+    assert_eq!(c.source, Source::FilenameDashedDateTime);
+    assert_eq!(c.utc.timestamp(), expected_ts);
+    assert!(c.inferred_offset);
+}
+
+#[test]
+fn generic_dashed_datetime_east8_offset_applied() {
+    let c = parse_filename("三星堆 2002-12-25 22-29-00.jpg", east8()).unwrap();
+    let expected = Utc.with_ymd_and_hms(2002, 12, 25, 14, 29, 0).unwrap();
+    assert_eq!(c.utc, expected);
+}
+
+#[rstest]
+// bad month 13
+#[case::bad_month("三星堆 2002-13-25 22-29-00.jpg")]
+// bad hour 99
+#[case::bad_hour("三星堆 2002-12-25 99-29-00.jpg")]
+// 分隔符形状不符（日期用点号）
+#[case::wrong_separator("三星堆 2002.12.25 22-29-00.jpg")]
+// stem 不足 19 chars
+#[case::too_short("2002-12-25.jpg")]
+fn generic_dashed_datetime_rejects(#[case] name: &str) {
+    assert!(parse_filename(name, utc_offset()).is_none());
+}
+
 #[test]
 fn no_known_pattern_returns_none() {
     assert!(parse_filename("random.jpg", utc_offset()).is_none());

@@ -1,0 +1,8 @@
+# 本机 shell 环境 PATH 中 Git coreutils 的 /usr/bin/link 会抢占 MSVC link.exe，
+# 且精简环境下 vcvars64 不可用；此处固定 linker 绝对路径 + LIB 搜索路径。
+# 注意：机器相关路径，换 MSVC/SDK 版本后需同步更新。
+[target.x86_64-pc-windows-msvc]
+linker = 'C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.51.36231\bin\Hostx64\x64\link.exe'
+
+[env]
+LIB = 'C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.51.36231\lib\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.28000.0\um\x64;C:\Program Files (x86)\Windows Kits\10\Lib\10.0.28000.0\ucrt\x64'

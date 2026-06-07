@@ -8,6 +8,7 @@
 
 ## Quick Start
 - **所有 cargo 命令（build/run/nextest/clippy/llvm-cov…）MUST 带 `--release`**：`profile.release` 已设 `opt-level = 0`，编译速度与 debug 相当，统一用一个 target 目录避免双份编译产物
+- MSVC 链接已固化在 `.cargo/config.toml`（linker 绝对路径 + `[env] LIB`；PATH 中 GNU coreutils `link` 会抢占 `link.exe`、vcvars64 在精简 shell 环境下不可用），cargo 直接用；换 MSVC/Windows SDK 版本需同步更新该文件
 - 构建：`cargo build --release`；运行：`cargo run --release -- copy /source -o /output`；dry-run：`cargo run --release -- copy /source -o /output --dry-run`
 - 测试：`cargo nextest run --release`；覆盖率：`cargo llvm-cov --release nextest --summary-only`（stable 够用；nightly 严格 100% 口径见「测试与覆盖率」节）
 - lint：`cargo +nightly fmt && cargo clippy --release --all-targets --all-features --locked -- -D warnings`（默认与 `--all-features` 均 0 warning；**`--all-features` 仅 Linux 可验**——smb-backend→pavao-sys 需 libsmbclient，Windows 编不过，本机验默认 feature 即可）
@@ -16,6 +17,7 @@
 
 ## 系统依赖与库特性
 - 无外部进程依赖；EXIF/视频元数据走 `nom-exif`（图片+视频）+ `infer`（magic-bytes MIME）
+- `bin/exiftool/exiftool.exe`（仅开发调试，非运行时依赖）：排查/修复 EXIF 时间，如 `-time:all -s <file>` 查全部时间字段、`-P '-AllDates<Filename' -overwrite_original <dir>` 按文件名批量改时间且保 mtime
 - nom-exif 内部用 `tracing::info!/warn!` 大量输出，`install_logging` 用 EnvFilter 把 `nom_exif=error` 默认压住，保留 `RUST_LOG` 覆盖
 - nom-exif 3.5 把 MKV `DateUTC` 合并到 `TrackInfoTag::CreateDate`（无独立 tag）；区分 MP4/MOV vs MKV/WebM 需 MIME 嗅探（`video/x-matroska` / `video/webm`）分流 `Source::MkvDateUtc` vs `QuickTimeCreateDate`
 - nom-exif `Exif::get(tag)` 仅读 IFD0/MAIN；GPS 子 IFD 标签必须用 `Exif::iter()` 按 tag code 匹配
@@ -63,8 +65,8 @@
 - 目录名是 `usecases`（无下划线）
 
 ## 核心算法：media_time
-- 优先级：P0 = `ExifDateTimeOriginal` / `QuickTimeCreationDate` / `MkvDateUtc`；P1 = `ExifCreateDate` / `QuickTimeCreateDate`；P2 = 文件名启发式；P3 = `XmpSidecar` / `GoogleTakeoutJson`；P4 = `FsMtime`。mtime 比 P0 早 > 30 天发提示性冲突告警
-- `entities/media_time/` 7 子模块单一职责：`priority`（`Source` + `Priority` 枚举）/ `candidate`（`epoch_to_candidate`：secs==0 视为未填返 None）/ `filename`（P2 启发式：`IMG_`/`DSC_`/`Screenshot_` 前缀 + 13 位毫秒 Unix 戳 + WeChat/WhatsApp/Pixel/裸 YYYYMMDD）/ `filter`（合理性过滤 + `EPOCH_1904` / `SOFT_THRESHOLD_1995` / `FUTURE_TOLERANCE_SECS`）/ `resolve` + `decision`（多候选裁决）/ `fs_time`（P4）
+- 优先级：P0 = `ExifDateTimeOriginal` / `QuickTimeCreationDate` / `MkvDateUtc`；P1 = `ExifCreateDate` / `QuickTimeCreateDate`；P2 = 文件名启发式；P3 = `XmpSidecar` / `GoogleTakeoutJson`；P4 = `FsMtime`。mtime 比 P0 早 > 30 天发提示性冲突告警；**多数派仲裁**：filename 候选与 mtime 互证（差≤1天）且与 P0 差>30天 → 推翻 P0（相机时钟错场景，`ConflictKind::P0OverruledByMajority` 记冲突告警不静默）
+- `entities/media_time/` 7 子模块单一职责：`priority`（`Source` + `Priority` 枚举）/ `candidate`（`epoch_to_candidate`：secs==0 视为未填返 None）/ `filename`（P2 启发式：`IMG_`/`DSC_`/`Screenshot_` 前缀 + 13 位毫秒 Unix 戳 + WeChat/WhatsApp/Pixel/裸 YYYYMMDD + 通用 `<任意前缀>YYYY-MM-DD HH-MM-SS` 兜底）/ `filter`（合理性过滤 + `EPOCH_1904` / `SOFT_THRESHOLD_1995` / `FUTURE_TOLERANCE_SECS`）/ `resolve` + `decision`（多候选裁决）/ `fs_time`（P4）
 - P3 sidecar 在 `adapters/sidecar.rs`（Interface Adapter 层，不在 entities）：XMP `photoshop:DateCreated` 纯文本搜索 + Takeout `<media>.<ext>.json` `photoTakenTime.timestamp` 走 `serde_json`；backend-aware，sibling 路径计算当前仅 Local（SMB/ADB 上 sidecar 静默跳过）
 - **P0–P4 全链已接线 `Info::create_time`**：P0/P1 来自 EXIF；P2 由 `candidates_from_filename` 直接消费（文件名 naive 时间按 UTC 解释）；P3 经依赖倒置注入——`dispatch` 把 `adapters::sidecar::discover_with_backend` 传给 `usecases::copy_with_sidecar`，`Index::enrich_candidates` 并行调 provider 填 `Info::add_candidates`；P4 = mtime。**e2e fixture 注意**：含 P2 文件名模式（`IMG_*` 等）或带 `.json`/`.xmp` sidecar 的文件会按文件名/sidecar 时间归档，不再落 mtime 年月；`copy()`（无 provider）是 `#[cfg(test)]` shim，生产只走 `copy_with_sidecar`
 - **copy/move 重叠保护**（`copy/run.rs`）：source ⊆ output（canonical 前缀含相等）→ InvalidInput 拒绝（move 会把源判为自身副本删除）；output ⊂ source（就地归档）→ `Index::remove_under_prefix` 把已归档文件从 source 索引剔除。前缀比较用 `entities::common::under_prefix`（分隔符边界），Local 走 `full_path`（绝对路径透传、相对路径才 canonicalize）、远端用 display
@@ -100,6 +102,7 @@
 ## 配置与日志
 - 运行时配置：`config.yaml`（项目根）+ `src/usecases/config.rs`，`config()` 返 `&'static Config`（`OnceLock`）
 - 切换配置：`TIDYMEDIA_CONFIG=/path/to.yaml`；语法 `${VAR:-default}` 由 `expand_env` 自实现（不引 dotenv）
+- `expand_env` 嵌套 `{}` 默认值按括号配对解析；展开后以 `{` 开头的值（如 `archive_template`）在 yaml 中 MUST 加引号，否则被 YAML 当 flow mapping 致整个配置回退默认
 - 运行时配置非法值校验走 `frameworks/config.rs::sanitize`（warn + 回退默认，与 parse 失败回退 `Config::default` 同哲学；已覆盖 `unique_name_max_attempts==0`、非法 `archive_template`）；新增可校验字段在此加分支，勿在消费点散写
 - 结构化日志字段约定：`feature` / `operation` / `result`（CLI 工具无 request_id/user_id）
 - `UtcOffset::from_whole_seconds` 范围 ±25:59:59，越界返 `None`，用 `.unwrap_or(UtcOffset::UTC)` 兜底

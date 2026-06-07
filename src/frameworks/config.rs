@@ -117,11 +117,23 @@ fn expand_env(input: &str) -> String {
     out
 }
 
+// 按括号配对计数找闭合 `}`：默认值可含嵌套占位符
+// （如 `${TMPL:-{year}/{month}}`），取第一个 `}` 会截断默认值产生非法 YAML。
 fn find_close_brace(bytes: &[u8], start: usize) -> Option<usize> {
-    bytes[start..]
-        .iter()
-        .position(|&b| b == b'}')
-        .map(|off| start + off)
+    let mut depth = 1usize;
+    for (off, &b) in bytes[start..].iter().enumerate() {
+        match b {
+            b'{' => depth += 1,
+            b'}' => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(start + off);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
 }
 
 fn resolve_var(body: &str) -> String {
@@ -171,6 +183,23 @@ mod tests {
     #[test]
     fn expand_env_keeps_text_without_placeholder() {
         assert_eq!(expand_env("plain: text"), "plain: text");
+    }
+
+    // 默认值含嵌套 `{}`（如 archive_template 的占位符）：必须按括号配对找
+    // 闭合 `}`，否则截断成 `{year` 产生非法 YAML（真实 config.yaml:10 的回归）。
+    #[test]
+    fn expand_env_default_with_nested_braces_expands_fully() {
+        unsafe { std::env::remove_var("TIDYMEDIA_TEST_NESTED_TMPL") };
+        let s = expand_env(
+            "t: \"${TIDYMEDIA_TEST_NESTED_TMPL:-{year}/{month}/{valuable_name}}\"",
+        );
+        assert_eq!(s, "t: \"{year}/{month}/{valuable_name}\"");
+    }
+
+    // 嵌套 `{` 打开后未闭合：depth 永不归零，整段保留原文不替换。
+    #[test]
+    fn expand_env_leaves_unbalanced_nested_braces() {
+        assert_eq!(expand_env("a: ${VAR:-{x}"), "a: ${VAR:-{x}");
     }
 
     #[test]
@@ -316,6 +345,26 @@ mod tests {
         unsafe { std::env::set_var("TIDYMEDIA_CONFIG", path.to_str().unwrap()) };
         let cfg = load();
         assert_eq!(cfg.copy.archive_template, "{year}/{month}/{valuable_name}");
+        unsafe { std::env::remove_var("TIDYMEDIA_CONFIG") };
+    }
+
+    // 端到端回归：真实 config.yaml 写法（带引号 + 嵌套占位符默认值）必须
+    // 解析成功，不触发 parse_error 回退。
+    #[test]
+    fn load_parses_quoted_template_placeholder_default() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("tmpl.yaml");
+        std::fs::write(
+            &path,
+            "copy:\n  archive_template: \"${TIDYMEDIA_TEST_LOAD_TMPL:-{year}/{day}}\"\n  unique_name_max_attempts: 4\n",
+        )
+        .unwrap();
+        unsafe { std::env::remove_var("TIDYMEDIA_TEST_LOAD_TMPL") };
+        unsafe { std::env::set_var("TIDYMEDIA_CONFIG", path.to_str().unwrap()) };
+        let cfg = load();
+        assert_eq!(cfg.copy.archive_template, "{year}/{day}");
+        // 同文件其余字段未因 parse_error 丢失
+        assert_eq!(cfg.copy.unique_name_max_attempts, 4);
         unsafe { std::env::remove_var("TIDYMEDIA_CONFIG") };
     }
 
