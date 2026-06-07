@@ -5,8 +5,8 @@ use std::sync::Arc;
 use chrono::FixedOffset;
 use chrono::Offset;
 use time::UtcOffset;
+use tracing::debug;
 use tracing::error;
-use tracing::info;
 use tracing::trace;
 
 use super::ops::do_copy;
@@ -28,6 +28,13 @@ pub(super) const MONTH: [&str; 13] = [
 ];
 
 pub(super) const FEATURE_COPY: &str = "copy";
+pub(super) const FEATURE_MOVE: &str = "move";
+
+// Move 复用 copy 流程（remove=true 即 move）；日志 feature 按用户实际子命令呈现，
+// 避免 `move` 命令输出 feature="copy" 误导排障。
+pub(super) fn feature_of(remove: bool) -> &'static str {
+    if remove { FEATURE_MOVE } else { FEATURE_COPY }
+}
 
 /// [`do_copy`] 的选项包；把 bool + template 打包，规避 `clippy::too_many_arguments`。
 pub struct CopyOpts<'a> {
@@ -99,12 +106,13 @@ pub fn copy_with_sidecar(
     // 重叠保护（先于扫描，fail fast）。
     let output_prefix = canonical_prefix(&output_loc);
     ensure_sources_outside_output(sources, &output_prefix)?;
-    let source = build_source_index(sources, &output_prefix, sidecar);
+    let feature = feature_of(remove);
+    let source = build_source_index(sources, &output_prefix, sidecar, feature);
 
     let total_files = source.files().len();
     let scan_stats = source.stats();
-    info!(
-        feature = FEATURE_COPY,
+    debug!(
+        feature,
         operation = "scan_sources",
         result = "ok",
         total_files,
@@ -131,7 +139,7 @@ pub fn copy_with_sidecar(
     }
 
     trace!(
-        feature = FEATURE_COPY,
+        feature,
         operation = "sample_files",
         sample = ?source.some_files(10),
         "first files sample"
@@ -151,8 +159,8 @@ pub fn copy_with_sidecar(
         run_copy_loop(&source, &output_loc, &output_backend, &opts);
 
     let result = summary_result(failed);
-    info!(
-        feature = FEATURE_COPY,
+    debug!(
+        feature,
         operation = "summary",
         result,
         total = total_files,
@@ -165,7 +173,7 @@ pub fn copy_with_sidecar(
         skipped_empty = scan_stats.skipped_empty,
         skipped_unreadable = scan_stats.skipped_unreadable,
         walker_errors = scan_stats.walker_errors,
-        "copy operation summary"
+        "operation summary"
     );
 
     let report = make_report(
@@ -205,6 +213,7 @@ fn build_source_index(
     sources: &[Source],
     output_prefix: &str,
     sidecar: Option<CandidateProvider>,
+    feature: &'static str,
 ) -> Index {
     let mut source = Index::new();
     for (loc, backend) in sources {
@@ -214,8 +223,8 @@ fn build_source_index(
     // 文件从 source 索引剔除，否则它们会被再次复制 / 在 move 模式下被误删。
     let excluded = source.remove_under_prefix(output_prefix);
     if excluded > 0 {
-        info!(
-            feature = FEATURE_COPY,
+        debug!(
+            feature,
             operation = "exclude_output_subtree",
             result = "ok",
             excluded,
@@ -242,6 +251,10 @@ fn run_copy_loop(
     let mut output_index = Index::new();
     output_index.visit_location(output_loc, output_backend);
 
+    // 提出宏外：tracing 字段表达式仅在事件被订阅时求值，留在宏内会成为
+    // 测试中永不执行的 region，破坏 100% 覆盖率口径。
+    let feature = feature_of(opts.remove);
+
     let mut copied = 0usize;
     let mut ignored = 0usize;
     let mut failed = 0usize;
@@ -259,7 +272,7 @@ fn run_copy_loop(
                 failed += 1;
                 let msg = e.to_string();
                 error!(
-                    feature = FEATURE_COPY,
+                    feature,
                     operation = "do_copy",
                     result = "error",
                     source = %src.full_path,

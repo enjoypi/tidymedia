@@ -6,7 +6,7 @@ use tracing::debug;
 use tracing::warn;
 
 use super::naming::generate_unique_name;
-use super::run::{CopyOpts, FEATURE_COPY};
+use super::run::{CopyOpts, feature_of};
 use crate::entities::backend::Backend;
 use crate::entities::common;
 use crate::entities::file_index::Index;
@@ -29,14 +29,15 @@ pub(super) fn do_copy(
 ) -> common::Result<bool> {
     let src_loc = src.location().clone();
     let src_display = src.full_path.as_str();
+    let feature = feature_of(opts.remove);
 
     // 涉及物理删除/移动，判等用 SHA-512 杜绝 xxh3 碰撞误删。
     if let Some(dup) = output_index.exists(src, true)? {
         debug!(
-            feature = FEATURE_COPY,
+            feature,
             operation = "detect_duplicate",
             result = "duplicate",
-            source = src_display,
+            source = %src_display,
             duplicate = %dup,
             "source duplicates an existing file in output"
         );
@@ -48,10 +49,10 @@ pub(super) fn do_copy(
 
     if !opts.include_non_media && !src.is_media() {
         warn!(
-            feature = FEATURE_COPY,
+            feature,
             operation = "filter_media",
             result = "skipped_non_media",
-            source = src_display,
+            source = %src_display,
             "file is not an image or video (pass --include-non-media to copy anyway)"
         );
         return Ok(false);
@@ -61,7 +62,14 @@ pub(super) fn do_copy(
         generate_unique_name(src, output_dir, output_backend, opts.template)?
     {
         if opts.dry_run {
-            println!("\"{}\"\t\"{}\"", src_display, target_loc.display());
+            debug!(
+                feature,
+                operation = "copy_file",
+                result = "dry_run",
+                source = %src_display,
+                target = %target_loc.display(),
+                "would transfer file"
+            );
             return Ok(true);
         }
 
@@ -82,7 +90,14 @@ pub(super) fn do_copy(
                 src.backend().remove_file(&src_loc)?;
             }
         }
-        println!("\"{}\"\t\"{}\"", src_display, target_loc.display());
+        debug!(
+            feature,
+            operation = "copy_file",
+            result = "ok",
+            source = %src_display,
+            target = %target_loc.display(),
+            "file transferred"
+        );
 
         // target 是刚刚 copy 成功的产物，正常 FS 下必然存在；但 NFS/SMB 上偶发 ESTALE、
         // 反病毒/索引器抢占等场景仍可能让 metadata 失败。P0 §2 禁止生产代码 unwrap/expect，

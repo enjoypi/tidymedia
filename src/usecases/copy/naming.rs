@@ -47,11 +47,12 @@ pub(super) fn generate_unique_name(
     };
     let sub_dir_rel = render(template, &template_ctx);
 
-    let sub_dir_path = if sub_dir_rel.is_empty() {
-        output_dir.path().to_path_buf()
-    } else {
-        output_dir.path().join(&sub_dir_rel)
-    };
+    // render 输出以 '/' 分隔；整串 join 会把 '/' 原样嵌进路径，Windows 下产生
+    // `D:\Pictures\2003/09` 混合分隔符。逐段 join 让分隔符回到 OS 原生形态。
+    let sub_dir_path = sub_dir_rel
+        .split('/')
+        .filter(|seg| !seg.is_empty())
+        .fold(output_dir.path().to_path_buf(), |p, seg| p.join(seg));
     let sub_dir_loc = output_dir.with_path(sub_dir_path.clone());
 
     let max_attempts = config().copy.unique_name_max_attempts;

@@ -1,7 +1,7 @@
 use std::io::Write;
 
+use tracing::debug;
 use tracing::error;
-use tracing::info;
 
 use crate::entities::backend::EntryKind;
 use crate::entities::common;
@@ -16,7 +16,7 @@ use super::report::FindReport;
 
 const FEATURE_FIND: &str = "find";
 
-// info!/error! 宏在不同 instantiation 间会产生重复的内部 region；用例入口本身的逻辑
+// debug!/error! 宏在不同 instantiation 间会产生重复的内部 region；用例入口本身的逻辑
 // 已经被各种集成测试覆盖。整体标 coverage(off) 让严格覆盖率统计稳定。
 //
 // 返回值：完整的 FindReport（scanned = 全部入索引的文件数；bytes_read 来自 Index 累计；
@@ -60,7 +60,7 @@ pub(crate) fn find_duplicates(
     let scan_stats = index.stats();
     let scanned = index.files().len();
     let bytes_read = index.bytes_read();
-    info!(
+    debug!(
         feature = FEATURE_FIND,
         operation = "scan_complete",
         result = "ok",
@@ -79,7 +79,7 @@ pub(crate) fn find_duplicates(
     } else {
         index.fast_search_same()
     };
-    info!(
+    debug!(
         feature = FEATURE_FIND,
         operation = "search_same",
         result = "ok",
@@ -98,7 +98,7 @@ pub(crate) fn find_duplicates(
         &mut std::io::stdout(),
     );
 
-    info!(
+    debug!(
         feature = FEATURE_FIND,
         operation = "finalize",
         result = "ok",
