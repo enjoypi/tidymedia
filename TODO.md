@@ -14,5 +14,5 @@
 | `src/usecases/copy/run.rs` | 2 | — | 1 | 1 |
 
 - branch 缺口先甄别 multi-binary instance 假阳性（套路见 CLAUDE.md「测试与覆盖率」节陷阱条）再补测试
-- 复现：`source ./dev-env.sh && RUSTFLAGS="--cfg=coverage_nightly" cargo +nightly llvm-cov --release nextest --summary-only --branch`
+- 复现：`RUSTFLAGS="--cfg=coverage_nightly" cargo +nightly llvm-cov --release nextest --summary-only --branch`
 - 定位子行 region：`cargo +nightly llvm-cov report --release --text`，找 `^0` 标记

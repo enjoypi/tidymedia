@@ -7,7 +7,6 @@
 按「拍摄时间」去重并整理照片/视频的多后端 CLI：扫描 sources（local/smb/adb/mtp 可混合）→ SHA-512 去重 → 按解析出的拍摄时间归档到 `output/年/月`。核心算法 = 拍摄时间判定（P0–P4 优先级，见下文「核心算法」节）。Clean Architecture 四层 + Android app（feature `android-app`）。代码注释里的 `docs/media-time-detection.md §X` 指向已删除的 spec，待补。
 
 ## Quick Start
-- **Windows clean shell 先 `source ./dev-env.sh`**（同一条命令内，如 `source ./dev-env.sh && cargo build --release`）：补回 cargo PATH、TMP/TEMP、MSVC 探测所需 env，否则 tempfile 落 `C:\WINDOWS` 报 PermissionDenied、链接误用 GNU link.exe
 - **所有 cargo 命令（build/run/nextest/clippy/llvm-cov…）MUST 带 `--release`**：`profile.release` 已设 `opt-level = 0`，编译速度与 debug 相当，统一用一个 target 目录避免双份编译产物
 - 构建：`cargo build --release`；运行：`cargo run --release -- copy /source -o /output`；dry-run：`cargo run --release -- copy /source -o /output --dry-run`
 - 测试：`cargo nextest run --release`；覆盖率：`cargo llvm-cov --release nextest --summary-only`（stable 够用；nightly 严格 100% 口径见「测试与覆盖率」节）
