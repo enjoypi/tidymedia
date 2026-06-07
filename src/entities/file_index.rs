@@ -200,17 +200,33 @@ impl Index {
             .filter(|p| common::under_prefix(p.as_str(), prefix))
             .cloned()
             .collect();
-        for path in &to_remove {
-            if let Some(info) = self.files.remove(path)
-                && let Some(bucket) = self.similar_files.get_mut(&info.fast_hash)
-            {
-                bucket.remove(path);
-                if bucket.is_empty() {
-                    self.similar_files.remove(&info.fast_hash);
-                }
+        // to_remove 刚取自 files.keys() → remove 必 Some，filter_map 折叠该不变式；
+        // bucket 清理的防御分支收敛进 detach_from_bucket 以便直测（不可达侧无法
+        // 经本入口触发，见该 fn 注释）。
+        let removed: Vec<Info> = to_remove
+            .iter()
+            .filter_map(|p| self.files.remove(p))
+            .collect();
+        for info in &removed {
+            Self::detach_from_bucket(&mut self.similar_files, info.fast_hash, &info.full_path);
+        }
+        removed.len()
+    }
+
+    /// 把 path 从 `fast_hash` bucket 摘除，空 bucket 整体移除。bucket 缺失时静默
+    /// 容忍——调用方不变式（[`Self::add`] 同步建 bucket）下不可达，独立成 fn 供
+    /// 测试直接喂「bucket 缺失」输入覆盖防御分支。
+    fn detach_from_bucket(
+        similar: &mut HashMap<u64, HashSet<Utf8PathBuf>>,
+        hash: u64,
+        path: &Utf8PathBuf,
+    ) {
+        if let Some(bucket) = similar.get_mut(&hash) {
+            bucket.remove(path);
+            if bucket.is_empty() {
+                similar.remove(&hash);
             }
         }
-        to_remove.len()
     }
 
     pub fn add(&mut self, info: Info) -> &Info {

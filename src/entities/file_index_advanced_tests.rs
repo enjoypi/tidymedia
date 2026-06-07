@@ -1,9 +1,10 @@
 //! `Index` 进阶/远端测试：`similar_files` / `exists_secure` / `visit_dir` 高级 / `visit_stats` / `visit_location` 多 backend。
 //! 从 `file_index_tests.rs` 拆出避免单文件 > 512 行（P0 §6）。
 
+use std::collections::{HashMap, HashSet};
 use std::fs;
 
-use camino::Utf8Path;
+use camino::{Utf8Path, Utf8PathBuf};
 use tempfile::tempdir;
 
 use super::super::file_info;
@@ -307,4 +308,37 @@ fn visit_dir_counts_non_utf8_path() {
         "non-UTF-8 path must bump walker_errors exactly once"
     );
     assert_eq!(index.files().len(), 0);
+}
+
+// --- detach_from_bucket 防御分支直测 ---
+// 「bucket 缺失」经 remove_under_prefix 不可达（add 不变式同步建 bucket），
+// 按「防御性不可达 arm 抽纯 helper 直测」套路覆盖全部分支。
+
+#[test]
+fn detach_from_bucket_tolerates_missing_bucket() {
+    let mut similar: HashMap<u64, HashSet<Utf8PathBuf>> = HashMap::new();
+    Index::detach_from_bucket(&mut similar, 42, &Utf8PathBuf::from("/x/a.bin"));
+    assert!(similar.is_empty(), "missing bucket must be a silent no-op");
+}
+
+#[test]
+fn detach_from_bucket_keeps_bucket_with_remaining_paths() {
+    let a = Utf8PathBuf::from("/x/a.bin");
+    let b = Utf8PathBuf::from("/x/b.bin");
+    let mut similar = HashMap::from([(7u64, HashSet::from([a.clone(), b.clone()]))]);
+    Index::detach_from_bucket(&mut similar, 7, &a);
+    let bucket = similar.get(&7).expect("bucket with survivors must remain");
+    assert_eq!(bucket.len(), 1);
+    assert!(bucket.contains(&b));
+}
+
+#[test]
+fn detach_from_bucket_removes_emptied_bucket() {
+    let a = Utf8PathBuf::from("/x/a.bin");
+    let mut similar = HashMap::from([(7u64, HashSet::from([a.clone()]))]);
+    Index::detach_from_bucket(&mut similar, 7, &a);
+    assert!(
+        !similar.contains_key(&7),
+        "emptied bucket must be removed to keep exists() from panicking"
+    );
 }
