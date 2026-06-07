@@ -11,7 +11,9 @@
 - **所有 cargo 命令（build/run/nextest/clippy/llvm-cov…）MUST 带 `--release`**：`profile.release` 已设 `opt-level = 0`，编译速度与 debug 相当，统一用一个 target 目录避免双份编译产物
 - 构建：`cargo build --release`；运行：`cargo run --release -- copy /source -o /output`；dry-run：`cargo run --release -- copy /source -o /output --dry-run`
 - 测试：`cargo nextest run --release`；覆盖率：`cargo llvm-cov --release nextest --summary-only`（stable 够用；nightly 严格 100% 口径见「测试与覆盖率」节）
-- lint：`cargo +nightly fmt && cargo clippy --release --all-targets --all-features --locked -- -D warnings`（默认与 `--all-features` 均 0 warning）
+- lint：`cargo +nightly fmt && cargo clippy --release --all-targets --all-features --locked -- -D warnings`（默认与 `--all-features` 均 0 warning；**`--all-features` 仅 Linux 可验**——smb-backend→pavao-sys 需 libsmbclient，Windows 编不过，本机验默认 feature 即可）
+- rustup default-host 与全部工具链 MUST 用 `x86_64-pc-windows-msvc`（`+nightly` 按 default-host 解析；gnu 工具链与 MSVC 链接不兼容）；cargo-llvm-cov 安装不带 `--locked`
+- git commit 格式：`type: 中文描述`（本项目无 TASK-ID 前缀），按主题拆分提交
 
 ## 系统依赖与库特性
 - 无外部进程依赖；EXIF/视频元数据走 `nom-exif`（图片+视频）+ `infer`（magic-bytes MIME）
@@ -20,7 +22,7 @@
 - nom-exif `Exif::get(tag)` 仅读 IFD0/MAIN；GPS 子 IFD 标签必须用 `Exif::iter()` 按 tag code 匹配
 
 ## 测试与覆盖率（项目特有；通用套路见 rust-p1 §5）
-- **覆盖率门槛：region / line / branch 三项 MUST 全 100%**（严格口径 + `--branch`，缺一不可）
+- **覆盖率门槛：region / line / branch 三项 MUST 全 100%**（严格口径 + `--branch`，缺一不可；当前缺口见 `TODO.md`）
 - 严格 100%：`RUSTFLAGS="--cfg=coverage_nightly" cargo +nightly llvm-cov --release nextest --summary-only --branch`；`lib.rs` / `bin/tidymedia.rs` 顶部 `#![cfg_attr(coverage_nightly, feature(coverage_attribute))]`；`Cargo.toml [lints.rust] unexpected_cfgs` 注册 `cfg(coverage_nightly)`；不可稳定触发分支用函数级 `#[cfg_attr(coverage_nightly, coverage(off))]`
 - **`--branch` multi-binary instance 陷阱**：lib unit + 集成 binary 各自 codegen 热点 fn 副本，每副本独立计数器；某 binary 未触发即报 instance miss。可行：①重构成 `?`（算 region 不算 branch）；②函数级 `coverage(off)`（用于 hash / file_info / copy / exif 等 hot fn，具体位点 `rg "coverage\(off\)" src/`）
 - 改 `Cargo.toml` / `coverage` 属性后必跑 `cargo +nightly llvm-cov clean --workspace`
