@@ -376,7 +376,10 @@ mod tests {
         assert_eq!(d.conflicts.len(), 1);
         assert_eq!(d.conflicts[0].kind, ConflictKind::P0OverruledByMajority);
         assert_eq!(d.conflicts[0].other_utc.timestamp(), p0);
-        assert_eq!(d.conflicts[0].other_source, Some(Source::ExifDateTimeOriginal));
+        assert_eq!(
+            d.conflicts[0].other_source,
+            Some(Source::ExifDateTimeOriginal)
+        );
     }
 
     #[test]

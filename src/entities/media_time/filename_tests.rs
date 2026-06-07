@@ -236,10 +236,7 @@ fn unix_millis_rejects(#[case] name: &str) {
 // 通用 `<任意前缀>YYYY-MM-DD HH-MM-SS` 模板：相机时钟错误时，
 // 事后批量重命名工具写入文件名的时间往往才是真实拍摄时间。
 #[rstest]
-#[case::chinese_prefix(
-    "三星堆 2002-12-25 22-29-00.jpg",
-    epoch("2002-12-25T22:29:00Z")
-)]
+#[case::chinese_prefix("三星堆 2002-12-25 22-29-00.jpg", epoch("2002-12-25T22:29:00Z"))]
 #[case::ascii_prefix("trip 2010-01-02 03-04-05.png", epoch("2010-01-02T03:04:05Z"))]
 // 无前缀：stem 恰好 19 chars，杀窗口起点 off-by-one 变异
 #[case::no_prefix("2002-12-25 22-29-00.jpg", epoch("2002-12-25T22:29:00Z"))]
