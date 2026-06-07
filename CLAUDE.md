@@ -18,9 +18,12 @@
 ## 系统依赖与库特性
 - 无外部进程依赖；EXIF/视频元数据走 `nom-exif`（图片+视频）+ `infer`（magic-bytes MIME）
 - `bin/exiftool/exiftool.exe`（仅开发调试，非运行时依赖）：排查/修复 EXIF 时间，如 `-time:all -s <file>` 查全部时间字段、`-P '-AllDates<Filename' -overwrite_original <dir>` 按文件名批量改时间且保 mtime
+  - 中文路径 MUST 加 `-charset FileName=GBK`（否则 warning 且部分文件读不到）；`"-AllDates+=Y:M:D H:M:S"` 日期平移可保组内拍摄顺序；`"-FileModifyDate<DateTimeOriginal"` 把 mtime 同步到 EXIF 时间（只改文件系统属性，对 AVI 等不可写格式也有效）
+  - 写操作默认产生 `<file>_original` 备份，处理完 MUST 清理——magic-bytes 仍是 JPEG，会被 tidymedia 当媒体文件归档
 - nom-exif 内部用 `tracing::info!/warn!` 大量输出，`install_logging` 用 EnvFilter 把 `nom_exif=error` 默认压住，保留 `RUST_LOG` 覆盖
 - nom-exif 3.5 把 MKV `DateUTC` 合并到 `TrackInfoTag::CreateDate`（无独立 tag）；区分 MP4/MOV vs MKV/WebM 需 MIME 嗅探（`video/x-matroska` / `video/webm`）分流 `Source::MkvDateUtc` vs `QuickTimeCreateDate`
 - nom-exif `Exif::get(tag)` 仅读 IFD0/MAIN；GPS 子 IFD 标签必须用 `Exif::iter()` 按 tag code 匹配
+- **AVI（RIFF）nom-exif 不支持**：老相机（Fujifilm `FinePix` 等）AVI 的拍摄时间在 `LIST hdrl > LIST strl > strd` chunk（`AVIF` 魔数 + 裸 TIFF IFD，offset 基准 = strd+8），由 `entities/riff.rs` 自解析填入 `Exif` 的 `date_time_original`/`create_date`/`make`/`model`（P0/P1 候选 + `{make}/{model}` 复用既有链路，无新增 `Source`）；`exif.rs::from_reader` 按 `video/x-msvideo` 先于泛 video 分流
 
 ## 测试与覆盖率（项目特有；通用套路见 rust-p1 §5）
 - **覆盖率门槛：region / line / branch 三项 MUST 全 100%**（严格口径 + `--branch`，缺一不可；当前缺口见 `TODO.md`）
@@ -33,6 +36,9 @@
 - **`--all-features` 下 `dispatch.rs` 的 `usecases::copy(..)?` Err arm 覆盖**：现有 `tidy_rejects_*` 测试用 `#[cfg(not(feature = "smb-backend"))]` gate，启用全部 feature 跑覆盖率时这些测试不编译 → `?` Err arm miss。用 output 父路径占成普通文件触发 `mkdir_p` Err 兜底（参考 `dispatch_and_cli.rs::tidy_copy_propagates_mkdir_error_when_output_parent_is_file`）
 - **`--all-features` 严格覆盖也须 100%**：feature 启用侧用 `#[cfg(feature = "...")]` gated 测试镜像 `tidy_rejects_*` 系列（`tests/lib_tidy/real_factory.rs`）。标准杠杆：`RealMtpClient::new` 是 stub 必 Err → 确定性触发 `dispatch.rs` 各 `?` Err arm 与 `factory.rs` builder 调用位点；`PavaoClient::new` / `ADBServerDevice::new` 仅初始化不连网可直接断言。`factory.rs::unsupported_backend` 三 feature 全开时 dead → 条件豁免 `cfg_attr(all(coverage_nightly, 三feature), coverage(off))`（与 `allow(dead_code)` 条件镜像）。`mobile.rs` 不可达防御逻辑抽纯 helper（`expect_copy`/`expect_find`/`copy_status`/`stats_from`/`mobile_report_from`）直测；调用点用 `.map` 替代 `?` 消除永不触发的 Err 传播 region
 - **子行 region miss 定位**（lcov `DA`/`BRDA` 不显示，如 `?` Err arm）：`cargo +nightly llvm-cov report --release --text` 复用上次 run 的 profdata（不接 `--all-features`，feature 集随上次 run），输出中 `^0` 标记即未覆盖子行 region
+- **branch miss 精确定位**：`llvm-cov report --release --lcov` 过滤 `BRDA` 行第 4 字段为 0（`--text` 的 `^0` 只标 region，branch 看不到）
+- **逻辑不可达的 `?` 死区消除**：循环边界用 `while let Some(x) = buf.get(start..end)` 替代手写 `off + N <= len` 哨兵（get 成功即界内，省掉一处永不 None 的 `?`）；纯类型安抚用 `unwrap_or(常量)` 替代 `.ok()?`（参考 `entities/riff.rs`）
+- **`Cursor` 的 seek 永不失败**：测 seek Err 传播分支需手写 FailSeek reader（包 Cursor，read 透传、seek 恒 Err，blanket impl 自动满足 `MediaReader`）
 - **mutation testing**：配置在 `.cargo/mutants.toml`（nextest + release + `--all-features`，排除 `*_real.rs`/测试基建；等价/平台 cfg/feature-gate 豁免全在 `exclude_re` 逐条注明 WHY）。日常增量 `cargo mutants --in-diff <(git diff main)`；全量审计 677 mutants / 约 3h（2 核机；2026-06 基线：509 caught / 168 unviable / 0 missed）；定点复验 `cargo mutants -F '<name regex>'`（注意 `-E` 是 exclude）。已沉淀套路：①计数断言 MUST 精确 `==`，`>= 1` 杀不掉 `+=`→`-=`（usize release wrap 成 MAX）；②与被调函数重复的入参 guard 产生等价变异，删冗余 guard 单点校验（DRY）；③`cfg(windows)`/`cfg(not(feature))` 代码在单口径跑必假幸存 → exclude_re；④只进 tracing 字段的取值（如 `summary_result`）抽纯 fn 直测，不靠捕日志；⑤防御性不可达 arm 喂错配变体直测（见上文「`--all-features` 严格覆盖」条的 `mobile.rs` helper 模式）；⑥写 kill 测试前先确认变异行在该输入下**可达**（`create_time` 无 EXIF 时 let-else 早返回，到不了被变异行——曾致 kill 测试绿但 mutant 仍幸存）；⑦`cargo mutants` 启动即快照源树，长跑期间可安全并行写 kill 测试/改源码，不影响进行中的运行；⑧纯移动重构的 `--in-diff` 是假增量（移动行全算 changed → 接近模块全量，105 mutants ≈ 32min），可缩小 diff 到真改逻辑的文件，或信任「移动前 0 missed + 移动后测试全绿」跳过；⑨无返回值的纯 tracing 副作用 fn（如 `log_parse_failure`）`replace X with ()` 等价幸存（规约不捕日志断言）→ exclude_re 豁免并注明 WHY；⑩长跑期间 `mutants.out/*.txt` 增量写入，过早读取会误判已完成——结束判定以 stdout `N mutants tested in X` summary 行为准
 
 ## Fixture
@@ -69,6 +75,7 @@
 - `entities/media_time/` 7 子模块单一职责：`priority`（`Source` + `Priority` 枚举）/ `candidate`（`epoch_to_candidate`：secs==0 视为未填返 None）/ `filename`（P2 启发式：`IMG_`/`DSC_`/`Screenshot_` 前缀 + 13 位毫秒 Unix 戳 + WeChat/WhatsApp/Pixel/裸 YYYYMMDD + 通用 `<任意前缀>YYYY-MM-DD HH-MM-SS` 兜底）/ `filter`（合理性过滤 + `EPOCH_1904` / `SOFT_THRESHOLD_1995` / `FUTURE_TOLERANCE_SECS`）/ `resolve` + `decision`（多候选裁决）/ `fs_time`（P4）
 - P3 sidecar 在 `adapters/sidecar.rs`（Interface Adapter 层，不在 entities）：XMP `photoshop:DateCreated` 纯文本搜索 + Takeout `<media>.<ext>.json` `photoTakenTime.timestamp` 走 `serde_json`；backend-aware，sibling 路径计算当前仅 Local（SMB/ADB 上 sidecar 静默跳过）
 - **P0–P4 全链已接线 `Info::create_time`**：P0/P1 来自 EXIF；P2 由 `candidates_from_filename` 直接消费（文件名 naive 时间按 UTC 解释）；P3 经依赖倒置注入——`dispatch` 把 `adapters::sidecar::discover_with_backend` 传给 `usecases::copy_with_sidecar`，`Index::enrich_candidates` 并行调 provider 填 `Info::add_candidates`；P4 = mtime。**e2e fixture 注意**：含 P2 文件名模式（`IMG_*` 等）或带 `.json`/`.xmp` sidecar 的文件会按文件名/sidecar 时间归档，不再落 mtime 年月；`copy()`（无 provider）是 `#[cfg(test)]` shim，生产只走 `copy_with_sidecar`
+- **相机出厂默认时间陷阱**：EXIF P0 格式合法但值为出厂默认（如 2004-01-01 00:00），且早于机型发布日（FinePix E550 = 2004-07、Casio EX-Z50 = 2004-09）即可断定时钟未设；mtime 通常同错（写卡时间），多数派仲裁救不了，只能 exiftool 数据侧修复后再归档
 - **copy/move 重叠保护**（`copy/run.rs`）：source ⊆ output（canonical 前缀含相等）→ InvalidInput 拒绝（move 会把源判为自身副本删除）；output ⊂ source（就地归档）→ `Index::remove_under_prefix` 把已归档文件从 source 索引剔除。前缀比较用 `entities::common::under_prefix`（分隔符边界），Local 走 `full_path`（绝对路径透传、相对路径才 canonicalize）、远端用 display
 
 ## URI 与 Backend
@@ -103,10 +110,10 @@
 - 运行时配置：`config.yaml`（项目根）+ `src/usecases/config.rs`，`config()` 返 `&'static Config`（`OnceLock`）
 - 切换配置：`TIDYMEDIA_CONFIG=/path/to.yaml`；语法 `${VAR:-default}` 由 `expand_env` 自实现（不引 dotenv）
 - `expand_env` 嵌套 `{}` 默认值按括号配对解析；展开后以 `{` 开头的值（如 `archive_template`）在 yaml 中 MUST 加引号，否则被 YAML 当 flow mapping 致整个配置回退默认
-- 运行时配置非法值校验走 `frameworks/config.rs::sanitize`（warn + 回退默认，与 parse 失败回退 `Config::default` 同哲学；已覆盖 `unique_name_max_attempts==0`、非法 `archive_template`）；新增可校验字段在此加分支，勿在消费点散写
+- 运行时配置非法值校验走 `frameworks/config.rs::sanitize`（warn + 回退默认，与 parse 失败回退 `Config::default` 同哲学；已覆盖 `unique_name_max_attempts==0`、非法 `archive_template`、非法 `log.level`）；新增可校验字段在此加分支，勿在消费点散写
 - 结构化日志字段约定：`feature` / `operation` / `result`（CLI 工具无 request_id/user_id）
 - `UtcOffset::from_whole_seconds` 范围 ±25:59:59，越界返 `None`，用 `.unwrap_or(UtcOffset::UTC)` 兜底
-- **R1 外置**：`copy.{timezone_offset_hours, unique_name_max_attempts, archive_template}` / `exif.valid_date_time_secs` / `backend.smb.{default_user,workgroup}` / `backend.adb.{server_host,server_port}`。曾有的 `*.timeout_secs` 与 `backend.mtp.*` 因无消费点已删（依赖库无 timeout API、MTP 是 stub）——库/实现就绪时随消费链一起加回，勿先加配置占位
+- **R1 外置**：`copy.{timezone_offset_hours, unique_name_max_attempts, archive_template}` / `exif.valid_date_time_secs` / `backend.smb.{default_user,workgroup}` / `backend.adb.{server_host,server_port}` / `log.level`（CLI `--log-level` 缺省值，优先级 `RUST_LOG` > flag > 配置）。曾有的 `*.timeout_secs` 与 `backend.mtp.*` 因无消费点已删（依赖库无 timeout API、MTP 是 stub）——库/实现就绪时随消费链一起加回，勿先加配置占位
 - **不外置的合理例外**：spec §X 算法常量（`EPOCH_1904` / `SOFT_THRESHOLD_1995` / `FUTURE_TOLERANCE_SECS` / `MTIME_VS_P0_HINT_SECS`）/ 协议字面量（`IMG_` / `DSC_` / `Screenshot_` / `XMP_KEY`）/ 日志维度名（`FEATURE_*`）/ lookup 表（`MONTH`）/ 流式哈希（`FAST_READ_SIZE`、`STREAM_CHUNK = 1 MiB`、`MIME_SNIFF_BYTES = 256`）
 - `src/usecases/copy/ops.rs` 的 `println!("\"{}\"\t\"{}\"", src, dst)` 是 CLI 脚本可读输出（dry-run + 完成回执），**不是** R3 日志路径，不要改成 tracing
 
