@@ -329,7 +329,11 @@ fn remove_under_prefix_removes_subtree_and_keeps_outside() {
     assert_eq!(index.files().len(), 2);
 
     let sub_canon = sub.canonicalize().unwrap();
-    let removed = index.remove_under_prefix(sub_canon.to_str().unwrap());
+    // Windows canonicalize 产生 \\?\ verbatim 前缀，索引存的是无前缀绝对路径，
+    // 与生产入口 full_path 的 strip_windows_unc 行为保持一致
+    let sub_canon = sub_canon.to_str().unwrap();
+    let sub_canon = sub_canon.strip_prefix(r"\\?\").unwrap_or(sub_canon);
+    let removed = index.remove_under_prefix(sub_canon);
     assert_eq!(removed, 1);
     assert_eq!(index.files().len(), 1);
 

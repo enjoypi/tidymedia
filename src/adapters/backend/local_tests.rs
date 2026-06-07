@@ -4,7 +4,6 @@ use std::io::Read;
 use std::io::Seek;
 use std::io::SeekFrom;
 use std::io::Write;
-use std::os::unix::fs::PermissionsExt;
 
 use camino::Utf8PathBuf;
 use pretty_assertions::assert_eq;
@@ -113,8 +112,11 @@ fn walk_rejects_non_local_scheme() {
     assert_eq!(first.kind(), io::ErrorKind::InvalidInput);
 }
 
+// Windows 无 POSIX 权限位，chmod 0o000 无法模拟 read_dir 失败
+#[cfg(unix)]
 #[test]
 fn walk_propagates_ignore_io_error() {
+    use std::os::unix::fs::PermissionsExt;
     // 父目录权限 0o000，ignore 会在 read_dir 失败
     let dir = tempdir().unwrap();
     let sub = dir.path().join("locked");

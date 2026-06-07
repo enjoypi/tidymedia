@@ -3,14 +3,15 @@
 
 use std::fs;
 use std::io;
-use std::os::unix::fs::PermissionsExt;
 
 use camino::Utf8PathBuf;
 use pretty_assertions::assert_eq;
 use tempfile::tempdir;
 
 use super::LocalBackend;
-use crate::entities::backend::{Backend, EntryKind};
+use crate::entities::backend::Backend;
+#[cfg(unix)]
+use crate::entities::backend::EntryKind;
 use crate::entities::uri::Location;
 
 fn local(p: impl AsRef<std::path::Path>) -> Location {
@@ -21,6 +22,8 @@ fn smb_uri() -> Location {
     Location::parse("smb://nas/share/x").unwrap()
 }
 
+// Windows 文件名是 UTF-16，无法用任意字节构造非 UTF-8 路径
+#[cfg(unix)]
 #[test]
 fn walk_entry_to_io_non_utf8_path() {
     use std::os::unix::ffi::OsStringExt;
@@ -89,6 +92,8 @@ fn copy_file_mkparents_root_path_no_parent() {
     assert!(!matches!(err.kind(), io::ErrorKind::Unsupported));
 }
 
+// Unix domain socket 仅 Unix 可用
+#[cfg(unix)]
 #[test]
 fn to_metadata_socket_returns_other_kind() {
     // UnixListener::bind 创建一个 socket 文件，is_file=false && is_dir=false
@@ -100,6 +105,7 @@ fn to_metadata_socket_returns_other_kind() {
     assert_eq!(m.kind, EntryKind::Other);
 }
 
+#[cfg(unix)]
 #[test]
 fn walk_socket_entry_kind_other() {
     use std::os::unix::net::UnixListener;
@@ -115,8 +121,11 @@ fn walk_socket_entry_kind_other() {
     assert!(any_other);
 }
 
+// Windows 无 POSIX 权限位，chmod 000 无法模拟 PermissionDenied
+#[cfg(unix)]
 #[test]
 fn open_read_chmod_000_permission_denied() {
+    use std::os::unix::fs::PermissionsExt;
     let dir = tempdir().unwrap();
     let path = dir.path().join("a.bin");
     fs::write(&path, b"data").unwrap();

@@ -116,6 +116,7 @@
 - 实测工具链：JDK 25 (Temurin) + Gradle 9.1 + AGP 8.10 + Kotlin 2.0.21 + NDK r26d + SDK android-35（AGP 8.7 不支持 JDK 25）。`ANDROID_HOME ≠ ANDROID_NDK_HOME`：cargo-ndk 只读 NDK，Gradle build 还需 SDK，两个环境变量都要设
 
 ## 项目 Gotcha
+- **测试 Windows 可移植**：Unix-only API（`PermissionsExt`/`OsStringExt`/`UnixListener`/chmod 类）测试 MUST `#[cfg(unix)]` gate、import 放函数内；测试中 `canonicalize()` 结果做前缀比较须先剥 `\\?\`（对齐生产 `strip_windows_unc`）；find 脚本输出断言用 `cfg!(target_os = "windows")` 选 `DEL `/`:` vs `rm `/`#`
 - Cargo.toml 多数 dep 用 `"*"` 通配；`cargo update` 可能拉到不兼容主版本（sha2 0.10→0.11 已踩坑），主版本升级前先 dry-run
 - **远端 `RemoteClient::read` 整文件入堆**（已知限制，trait 文档有 WHY）：pavao `SmbFile` 借用 client 生命周期装不进 `Box<dyn MediaReader + 'static>`、`adb_client` pull 是回调式写入 API——真正流式需换库或线程+管道，YAGNI 暂不做；大视频在内存受限环境（Android）有 OOM 风险
 - **远端 `mkdir_p` 是真递归**（`remote.rs::mkdir_recursive`）：自底向上 stat 找存在的祖先再逐层 mkdir（`AlreadyExists` 容忍、stat 非 NotFound 直接传播）。远端协议 mkdir 多为 POSIX 单层语义（pavao 父层缺失返 ENOENT）；`FakeRemoteClient::mkdir` 不校验父目录，单层 vs 递归的差异 fake 测不出来，须用「中间层注入错误/断言中间层 metadata」类测试钉行为
