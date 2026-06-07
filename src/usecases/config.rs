@@ -70,6 +70,22 @@ pub fn validate_archive_template(template: &str) -> Result<(), String> {
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(default)]
+pub struct LogConfig {
+    /// 默认日志级别（trace/debug/info/warn/error）；CLI `--log-level` 与
+    /// `RUST_LOG` 均优先于此值。
+    pub level: String,
+}
+
+impl Default for LogConfig {
+    fn default() -> Self {
+        Self {
+            level: "info".into(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(default)]
 pub struct ExifConfig {
     pub valid_date_time_secs: u64,
 }
@@ -133,6 +149,7 @@ pub struct Config {
     pub copy: CopyConfig,
     pub exif: ExifConfig,
     pub backend: BackendConfig,
+    pub log: LogConfig,
 }
 
 #[cfg(test)]
@@ -150,6 +167,7 @@ mod tests {
         assert_eq!(c.backend.smb.workgroup, "WORKGROUP");
         assert_eq!(c.backend.adb.server_host, "127.0.0.1");
         assert_eq!(c.backend.adb.server_port, 5037);
+        assert_eq!(c.log.level, "info");
     }
 
     #[test]

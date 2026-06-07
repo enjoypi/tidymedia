@@ -256,6 +256,30 @@ fn binary_emits_debug_log_to_stderr_when_log_level_debug() {
     );
 }
 
+/// 不带 `--log-level` 时 binary 从 config.yaml `log.level` 取级别：配置 debug
+/// → "cli parsed" debug 日志必须落 stderr。杀 `install_logging` 中
+/// `unwrap_or_else(config_level)` None 侧接线类变异（默认 info 时该日志不输出）。
+#[test]
+fn binary_uses_config_log_level_when_flag_absent() {
+    let src = tempdir().unwrap();
+    seed_fixture(src.path());
+    let cfg_dir = tempdir().unwrap();
+    let cfg_path = cfg_dir.path().join("config.yaml");
+    std::fs::write(&cfg_path, "log:\n  level: debug\n").expect("write test config");
+    let out = std::process::Command::new(env!("CARGO_BIN_EXE_tidymedia"))
+        .args(["find", src.path().to_str().unwrap()])
+        .env_remove("RUST_LOG") // 不让外部 RUST_LOG 干扰 EnvFilter::try_from_default_env
+        .env("TIDYMEDIA_CONFIG", cfg_path.to_str().unwrap())
+        .output()
+        .expect("spawn tidymedia binary");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        out.status.success() && stderr.contains("cli parsed"),
+        "binary must honor config log.level=debug; status: {:?}, stderr: {stderr}",
+        out.status
+    );
+}
+
 /// e2e 走真实 copy 路径验证 `Info::exif_ref` 接线：`{make}/{model}` 必须渲染出
 /// fixture 的真值目录。`exif_ref` 被变异成 `None` 或 `Some(默认 Exif)` 时
 /// 两个占位符都退化为 "unknown"，本断言即失败。

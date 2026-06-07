@@ -12,6 +12,9 @@ copy:
 exif:
   # EXIF 时间戳小于此 UNIX 秒数视为不可信（默认 2000-01-01T00:00:00Z）
   valid_date_time_secs: ${TIDYMEDIA_VALID_DATE_TIME_SECS:-946684800}
+log:
+  # 默认日志级别：trace/debug/info/warn/error；优先级 RUST_LOG > --log-level > 此处
+  level: ${TIDYMEDIA_LOG_LEVEL:-info}
 # Backend Gateway 全局开关：仅放非凭据可调项；
 # SMB 密码经 SMB_PASSWORD env、Kerberos 走 KRB5CCNAME，均不入 yaml
 # 注：timeout_secs（smb/adb）与 mtp.{device_match,storage_match} 已删——依赖库无

@@ -7,7 +7,7 @@ use std::sync::OnceLock;
 use tracing::debug;
 use tracing::warn;
 
-use crate::usecases::config::{Config, CopyConfig, validate_archive_template};
+use crate::usecases::config::{Config, CopyConfig, LogConfig, validate_archive_template};
 
 static CONFIG: OnceLock<Config> = OnceLock::new();
 
@@ -86,6 +86,22 @@ fn sanitize(mut cfg: Config) -> Config {
             "archive_template invalid; falling back to default"
         );
         cfg.copy.archive_template = fallback;
+    }
+    // 非法 level 会让 CLI 端 parse 失败静默退 info；此处统一回退 + 告警。
+    // 注意：未传 --log-level 时 config 在 subscriber 安装前加载，本 warn 不可见
+    //（行为仍安全回退）；显式传 flag 或 RUST_LOG 时可见。
+    if cfg.log.level.parse::<tracing::Level>().is_err() {
+        let fallback = LogConfig::default().level;
+        warn!(
+            feature = "config",
+            operation = "sanitize",
+            result = "invalid_value",
+            field = "log.level",
+            value = %cfg.log.level,
+            fallback = %fallback,
+            "log.level must be one of trace/debug/info/warn/error; falling back to default"
+        );
+        cfg.log.level = fallback;
     }
     cfg
 }
@@ -190,9 +206,7 @@ mod tests {
     #[test]
     fn expand_env_default_with_nested_braces_expands_fully() {
         unsafe { std::env::remove_var("TIDYMEDIA_TEST_NESTED_TMPL") };
-        let s = expand_env(
-            "t: \"${TIDYMEDIA_TEST_NESTED_TMPL:-{year}/{month}/{valuable_name}}\"",
-        );
+        let s = expand_env("t: \"${TIDYMEDIA_TEST_NESTED_TMPL:-{year}/{month}/{valuable_name}}\"");
         assert_eq!(s, "t: \"{year}/{month}/{valuable_name}\"");
     }
 
@@ -345,6 +359,30 @@ mod tests {
         unsafe { std::env::set_var("TIDYMEDIA_CONFIG", path.to_str().unwrap()) };
         let cfg = load();
         assert_eq!(cfg.copy.archive_template, "{year}/{month}/{valuable_name}");
+        unsafe { std::env::remove_var("TIDYMEDIA_CONFIG") };
+    }
+
+    // 非法 log.level 回退 "info"，不让 CLI 端 parse 静默吞掉配置错误。
+    #[test]
+    fn load_sanitizes_invalid_log_level_to_default() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("badlevel.yaml");
+        std::fs::write(&path, "log:\n  level: chatty\n").unwrap();
+        unsafe { std::env::set_var("TIDYMEDIA_CONFIG", path.to_str().unwrap()) };
+        let cfg = load();
+        assert_eq!(cfg.log.level, "info");
+        unsafe { std::env::remove_var("TIDYMEDIA_CONFIG") };
+    }
+
+    // 合法 log.level 不被 sanitize 改写（防无条件重置变异）。
+    #[test]
+    fn load_keeps_valid_log_level_unchanged() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("oklevel.yaml");
+        std::fs::write(&path, "log:\n  level: debug\n").unwrap();
+        unsafe { std::env::set_var("TIDYMEDIA_CONFIG", path.to_str().unwrap()) };
+        let cfg = load();
+        assert_eq!(cfg.log.level, "debug");
         unsafe { std::env::remove_var("TIDYMEDIA_CONFIG") };
     }
 

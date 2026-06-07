@@ -10,14 +10,16 @@ use crate::adapters::dispatch::tidy;
 use crate::entities::common::Error;
 use crate::entities::common::Result;
 use crate::entities::uri::Location;
+use crate::usecases::config::config;
 
 pub(crate) const FEATURE_CLI: &str = "cli";
 
 #[derive(Debug, Parser)]
 #[command(author, version, about, long_about = None)]
 pub struct Cli {
-    #[arg(short, long, default_value = "info")]
-    pub log_level: tracing::Level,
+    /// Log level (trace/debug/info/warn/error); defaults to `log.level` in config.yaml
+    #[arg(short, long)]
+    pub log_level: Option<tracing::Level>,
 
     #[arg(long, default_value = "false")]
     pub log_line_number: bool,
@@ -136,19 +138,26 @@ where
             )));
         }
     };
-    install_logging(&cli);
+    let log_level = install_logging(&cli);
     debug!(
         feature = FEATURE_CLI,
         operation = "parse_args",
         result = "ok",
-        log_level = %cli.log_level,
+        log_level = %log_level,
         command = ?cli.command,
         "cli parsed"
     );
     tidy(cli.command)
 }
 
-fn install_logging(cli: &Cli) {
+fn install_logging(cli: &Cli) -> tracing::Level {
+    // CLI flag 优先；未传时取 config.yaml `log.level`（此路径在 subscriber
+    // 安装前触发 config 首次加载，加载期日志不可见——sanitize 已保证非法
+    // 值安全回退，仅损失加载日志可观测性，不损失行为）。
+    let level = cli
+        .log_level
+        .unwrap_or_else(|| config_level(&config().log.level));
+
     let format = fmt::format()
         .with_ansi(false)
         .with_level(false)
@@ -161,7 +170,7 @@ fn install_logging(cli: &Cli) {
         EnvFilter::new(format!(
             "{}={},nom_exif=error",
             env!("CARGO_PKG_NAME"),
-            cli.log_level
+            level
         ))
     });
 
@@ -170,4 +179,25 @@ fn install_logging(cli: &Cli) {
         .with_writer(std::io::stderr)
         .event_format(format)
         .try_init();
+    level
+}
+
+// sanitize 已兜底非法 level；此处独立纯函数再防一手，便于直测两分支。
+fn config_level(raw: &str) -> tracing::Level {
+    raw.parse().unwrap_or(tracing::Level::INFO)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::config_level;
+
+    #[test]
+    fn config_level_parses_valid_level() {
+        assert_eq!(config_level("debug"), tracing::Level::DEBUG);
+    }
+
+    #[test]
+    fn config_level_falls_back_to_info_on_invalid() {
+        assert_eq!(config_level("chatty"), tracing::Level::INFO);
+    }
 }
