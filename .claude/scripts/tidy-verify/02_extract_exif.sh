@@ -13,7 +13,7 @@ mkdir -p "$WORK"
 # CLAUDE.md 提示中文路径加 `-charset FileName=GBK`；本机 perl 缺 GBK 模块时
 # 该 flag 反而报错，省掉也能正常输出（只是 stderr 多 locale 警告）。
 bin/exiftool/exiftool.exe -r -fast2 -q -T \
-    -p '$Directory/$FileName\t$DateTimeOriginal\t$CreateDate\t$FileModifyDate' \
+    -p $'$Directory/$FileName\t$DateTimeOriginal\t$CreateDate\t$FileModifyDate' \
     "$SOURCE" \
     > "$WORK/exif.tsv" 2> "$WORK/exif.err"
 
