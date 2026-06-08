@@ -76,8 +76,8 @@ fn img_east8_offset_applied() {
 #[case::img_bad_month("IMG_20241332_143000.jpg")]
 // VID bad day 32
 #[case::vid_bad_day("VID_20231532_103000.mp4")]
-// wrong length
-#[case::dsc_too_long("DSC_202405011_143000.jpg")]
+// 注：`DSC_202405011_143000.jpg` 这种「DSC_ 模板坏掉但 stem 含合法 8 位日期」
+// 现在被 `try_loose_yyyymmdd` 兜底命中（见 `loose_yyyymmdd_parsed`），不再返回 None。
 fn camera_phone_rejects(#[case] name: &str) {
     assert!(parse_filename(name, utc_offset()).is_none());
 }
@@ -99,8 +99,8 @@ fn pixel_parsed(#[case] name: &str, #[case] expected_ts: i64) {
 #[rstest]
 // too short after PXL_ prefix
 #[case::pxl_short("PXL_2023061.jpg")]
-// bad hour 99
-#[case::pxl_bad_time("PXL_20230615_993045123.jpg")]
+// 注：`PXL_20230615_993045123.jpg`（坏掉的时分秒 99:30:45）现被 `try_loose_yyyymmdd`
+// 兜底命中为 2023-06-15 仅日期粒度的 candidate，不再返回 None。
 fn pixel_rejects(#[case] name: &str) {
     assert!(parse_filename(name, utc_offset()).is_none());
 }
@@ -300,4 +300,53 @@ fn whatsapp_east8_offset_applied() {
     let c = parse_filename("WhatsApp Image 2023-06-15 at 10.30.45.jpeg", east8()).unwrap();
     let expected = Utc.with_ymd_and_hms(2023, 6, 15, 2, 30, 45).unwrap();
     assert_eq!(c.utc, expected);
+}
+
+#[rstest]
+// stem 开头 8 位日期 + 后续随意 (用户场景：手机相册命名 YYYYMMDD<序号>)
+#[case::head_pure_digits("20061101639532011.jpg", epoch("2006-11-01T00:00:00Z"))]
+// `-` 分隔符后 8 位日期 (用户场景：<编号>-YYYYMMDD_<序号>)
+#[case::dash_anchor("017-20051011_154652482.jpg", epoch("2005-10-11T00:00:00Z"))]
+// `_` 分隔符后 8 位日期 (注：`abc_20060101` 长度 12 ≠ 15，不会被 try_bare_yyyymmdd 拦截)
+#[case::underscore_anchor("abc_20060101.jpg", epoch("2006-01-01T00:00:00Z"))]
+// 空格分隔符后
+#[case::space_anchor("photo 20240315 ok.jpg", epoch("2024-03-15T00:00:00Z"))]
+// 开头位置日期非法 → 跳过第 0 锚点，命中 `-` 后的合法日期
+#[case::first_anchor_invalid_second_ok("99999999-20240315_x.jpg", epoch("2024-03-15T00:00:00Z"))]
+// 「DSC_/PXL_ 严格模板坏掉但 stem 含合法 8 位日期」原来返 None，现兜底命中为日期 candidate
+#[case::dsc_bad_template("DSC_202405011_143000.jpg", epoch("2024-05-01T00:00:00Z"))]
+#[case::pxl_bad_time("PXL_20230615_993045123.jpg", epoch("2023-06-15T00:00:00Z"))]
+fn loose_yyyymmdd_parsed(#[case] name: &str, #[case] expected_ts: i64) {
+    let c = parse_filename(name, utc_offset()).unwrap();
+    assert_eq!(c.source, Source::FilenameBareYyyymmdd);
+    assert_eq!(c.utc.timestamp(), expected_ts);
+    assert!(c.inferred_offset);
+}
+
+#[rstest]
+// 日期数字不在锚点位置 (非分隔符前导)
+#[case::digits_in_middle("abc20060101.jpg")]
+// 月份越界
+#[case::bad_month("20061301_x.jpg")]
+// 日越界
+#[case::bad_day("20060230_x.jpg")]
+// stem 长度 < 8
+#[case::too_short("123.jpg")]
+// 锚点后不足 8 位
+#[case::short_after_anchor("ab-1234.jpg")]
+// 锚点后含非数字
+#[case::non_digit_after_anchor("ab-2006abcd.jpg")]
+// 无前缀且首字符非数字
+#[case::no_anchor("hello.jpg")]
+fn loose_yyyymmdd_rejects(#[case] name: &str) {
+    assert!(parse_filename(name, utc_offset()).is_none());
+}
+
+#[test]
+fn loose_yyyymmdd_east8_offset_applied() {
+    // 文件名仅日期粒度 → 本地 00:00 +08:00 = UTC 前一天 16:00
+    let c = parse_filename("20240315_id.jpg", east8()).unwrap();
+    let expected = Utc.with_ymd_and_hms(2024, 3, 14, 16, 0, 0).unwrap();
+    assert_eq!(c.utc, expected);
+    assert_eq!(c.offset, Some(east8()));
 }

@@ -4,6 +4,7 @@
 
 use chrono::DateTime;
 use chrono::FixedOffset;
+use chrono::NaiveDate;
 use chrono::NaiveDateTime;
 use chrono::TimeDelta;
 use chrono::TimeZone;
@@ -50,6 +51,45 @@ pub fn parse_filename(name: &str, default_offset: FixedOffset) -> Option<Candida
     }
     if let Some(c) = try_generic_dashed(stem, default_offset) {
         return Some(c);
+    }
+    if let Some(c) = try_loose_yyyymmdd(stem, default_offset) {
+        return Some(c);
+    }
+    None
+}
+
+/// 宽松 `YYYYMMDD`：stem 开头或紧跟 `-` / `_` / 空格 之后的 8 位合法日期。
+/// 仅日期粒度（时间 00:00:00），比 [`try_bare_yyyymmdd`] 宽松（后者要求严格
+/// 15 字符 `YYYYMMDD_HHMMSS`），故放在调用链最末位兜底。年份合理性由
+/// `super::filter` 的 `SOFT_THRESHOLD_1995` / `FUTURE_TOLERANCE_SECS` 负责。
+fn try_loose_yyyymmdd(stem: &str, default_offset: FixedOffset) -> Option<Candidate> {
+    let bytes = stem.as_bytes();
+    let anchors = std::iter::once(0_usize).chain(
+        bytes
+            .iter()
+            .enumerate()
+            .filter_map(|(i, &b)| matches!(b, b'-' | b'_' | b' ').then_some(i + 1)),
+    );
+    for start in anchors {
+        let end = start + 8;
+        let Some(window) = bytes.get(start..end) else {
+            continue;
+        };
+        if !window.iter().all(u8::is_ascii_digit) {
+            continue;
+        }
+        // 全 ASCII 数字 → str 切片落在 char 边界
+        let Ok(date) = NaiveDate::parse_from_str(&stem[start..end], "%Y%m%d") else {
+            continue;
+        };
+        let naive = date
+            .and_hms_opt(0, 0, 0)
+            .expect("internal: 00:00:00 is always a valid time-of-day");
+        return Some(naive_to_candidate(
+            naive,
+            default_offset,
+            Source::FilenameBareYyyymmdd,
+        ));
     }
     None
 }
