@@ -1103,8 +1103,7 @@ dependencies = [
 [[package]]
 name = "nom-exif"
 version = "3.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0b1119c4c070d57fc82e59e06b8b995185f38b2afd56d437c88a04f1f233f390"
+source = "git+https://github.com/enjoypi/nom-exif.git?branch=feat%2Flegacy-quicktime-pnot#5f69d0ba11512be191ef5907530654dbbf8a2a39"
 dependencies = [
  "bytes",
  "chrono",

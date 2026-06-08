@@ -25,10 +25,12 @@
 - nom-exif 内部用 `tracing::info!/warn!` 大量输出，`install_logging` 用 EnvFilter 把 `nom_exif=error` 默认压住，保留 `RUST_LOG` 覆盖
 - nom-exif 3.5 把 MKV `DateUTC` 合并到 `TrackInfoTag::CreateDate`（无独立 tag）；区分 MP4/MOV vs MKV/WebM 需 MIME 嗅探（`video/x-matroska` / `video/webm`）分流 `Source::MkvDateUtc` vs `QuickTimeCreateDate`
 - nom-exif `Exif::get(tag)` 仅读 IFD0/MAIN；GPS 子 IFD 标签必须用 `Exif::iter()` 按 tag code 匹配
+- **老 QuickTime `pnot` 起头 MOV**（NIKON COOLPIX S5/P5000、Casio 等 2003-2008 早期机型）nom-exif 3.6.0 `parse_bmff_mime` 拒识：只认 `ftyp`/`wide` 首 box，`HEADER_PARSE_BUF_SIZE=128B` 也扫不到 `mdat` 兜底。当前 fork patch 在入口短路（首 box==pnot 直返 QuickTime mime），`Cargo.toml [patch.crates-io] nom-exif = { git = "https://github.com/enjoypi/nom-exif.git", branch = "feat/legacy-quicktime-pnot" }`；后续 `mov.rs::extract_moov_body_from_buf` atom 扫描与 `mvhd.creation_time` 解析与 ExifTool 同源，无需自写 quicktime.rs。上游 PR 合并发版后切回 `*` 删 patch
+- nom-exif trace 调试：`RUST_LOG=nom_exif=trace`；trace span 名是 `#[tracing::instrument]` 函数名嵌套（`parse_bmff_mime:parse: Got box_type=...` 中 `parse` 是 `BoxHolder::parse` 子 span）
 - **AVI（RIFF）nom-exif 不支持**：老相机（Fujifilm `FinePix` 等）AVI 的拍摄时间在 `LIST hdrl > LIST strl > strd` chunk（`AVIF` 魔数 + 裸 TIFF IFD，offset 基准 = strd+8），由 `entities/riff.rs` 自解析填入 `Exif` 的 `date_time_original`/`create_date`/`make`/`model`（P0/P1 候选 + `{make}/{model}` 复用既有链路，无新增 `Source`）；`exif.rs::from_reader` 按 `video/x-msvideo` 先于泛 video 分流
 
 ## 测试与覆盖率（项目特有；通用套路见 rust-p1 §5）
-- **覆盖率门槛：region / line / branch 三项 MUST 全 100%**（严格口径 + `--branch`，缺一不可；当前缺口见 `TODO.md`）
+- **覆盖率门槛：region / line / branch 三项 MUST 全 100%**（严格口径 + `--branch`，缺一不可）
 - 严格 100%：`RUSTFLAGS="--cfg=coverage_nightly" cargo +nightly llvm-cov --release nextest --summary-only --branch`；`lib.rs` / `bin/tidymedia.rs` 顶部 `#![cfg_attr(coverage_nightly, feature(coverage_attribute))]`；`Cargo.toml [lints.rust] unexpected_cfgs` 注册 `cfg(coverage_nightly)`；不可稳定触发分支用函数级 `#[cfg_attr(coverage_nightly, coverage(off))]`
 - **`--branch` multi-binary instance 陷阱**：lib unit + 集成 binary 各自 codegen 热点 fn 副本，每副本独立计数器；某 binary 未触发即报 instance miss。可行：①重构成 `?`（算 region 不算 branch）；②函数级 `coverage(off)`（用于 hash / file_info / copy / exif 等 hot fn，具体位点 `rg "coverage\(off\)" src/`）
 - 改 `Cargo.toml` / `coverage` 属性后必跑 `cargo +nightly llvm-cov clean --workspace`
@@ -134,6 +136,7 @@
 ## 项目 Gotcha
 - **测试 Windows 可移植**：Unix-only API（`PermissionsExt`/`OsStringExt`/`UnixListener`/chmod 类）测试 MUST `#[cfg(unix)]` gate、import 放函数内；测试中路径前缀比较 MUST 用 `file_info::full_path` 规范化（绝对路径透传），MUST NOT 手动 `canonicalize()`——用户目录为符号链接时（`C:\Users\x` → `D:\Users\x`）canonicalize 解析出不同盘符，与索引存储不匹配（file_index_tests 已踩坑）；find 脚本输出断言用 `cfg!(target_os = "windows")` 选 `DEL `/`:` vs `rm `/`#`
 - Cargo.toml 多数 dep 用 `"*"` 通配；`cargo update` 可能拉到不兼容主版本（sha2 0.10→0.11 已踩坑），主版本升级前先 dry-run
+- **本地 `[patch.crates-io]` 验证依赖 patch**：`cp -r ~/.cargo/registry/src/<idx>/<crate>-<ver>/ <vendor>` + patch + `[patch.crates-io] <crate> = { path = "..." }` → `cargo build` 触发重编。**Cargo.lock 中 patched crate 无 `source =`/`checksum =`** 即生效证据。独立编 patched crate 可能挂 build script（MSVC 链接配置缺失），通过 [patch] 在主项目内编 OK；验证通过后切 git URL 留 PR
 - **远端 `RemoteClient::read` 整文件入堆**（已知限制，trait 文档有 WHY）：pavao `SmbFile` 借用 client 生命周期装不进 `Box<dyn MediaReader + 'static>`、`adb_client` pull 是回调式写入 API——真正流式需换库或线程+管道，YAGNI 暂不做；大视频在内存受限环境（Android）有 OOM 风险
 - **远端 `mkdir_p` 是真递归**（`remote.rs::mkdir_recursive`）：自底向上 stat 找存在的祖先再逐层 mkdir（`AlreadyExists` 容忍、stat 非 NotFound 直接传播）。远端协议 mkdir 多为 POSIX 单层语义（pavao 父层缺失返 ENOENT）；`FakeRemoteClient::mkdir` 不校验父目录，单层 vs 递归的差异 fake 测不出来，须用「中间层注入错误/断言中间层 metadata」类测试钉行为
 - **存在性查询的 Err MUST 传播，MUST NOT `unwrap_or(false)`**：把"查询失败"吞成"不存在"会让后续 open_write truncate 覆盖已有文件、move 模式连源一起删（naming.rs 已踩坑修复）；保守兜底方向是 `true`（多重试）而非 `false`（敢覆盖）
