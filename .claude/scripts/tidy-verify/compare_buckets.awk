@@ -26,6 +26,8 @@ BEGIN { FS = "\t" }
 #   2 DTO  3 QT:CreationDate  4 QT:CreateDate  5 CreateDate  6 FileModifyDate  7 Make  8 Model
 # 扫 2..6 取第一条合法 YYYY:MM 作 expected；标签对齐 from_label[]
 FNR == NR {
+    # exiftool 在 Windows 用 CRLF 行尾，最后一列（Model）会带 \r 污染输出
+    sub(/\r$/, "", $NF)
     p = $1
     gsub("/", "\\", p)
     pick = ""
