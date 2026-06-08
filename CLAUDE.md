@@ -10,6 +10,7 @@
 - **所有 cargo 命令（build/run/nextest/clippy/llvm-cov…）MUST 带 `--release`**：`profile.release` 已设 `opt-level = 0`，编译速度与 debug 相当，统一用一个 target 目录避免双份编译产物
 - MSVC 链接已固化在 `.cargo/config.toml`（linker 绝对路径 + `[env] LIB`；PATH 中 GNU coreutils `link` 会抢占 `link.exe`、vcvars64 在精简 shell 环境下不可用），cargo 直接用；换 MSVC/Windows SDK 版本需同步更新该文件
 - 构建：`cargo build --release`；运行：`cargo run --release -- copy /source -o /output`；dry-run：`cargo run --release -- copy /source -o /output --dry-run`
+- **CLI flag 位置**：`--log-level=debug`（带连字符）是 **全局** flag 放最前；`--dry-run` 是 **子命令级** MUST 放 `copy`/`move` 后；tidymedia debug 走 stderr，`| tail -N` 会截 copy_file 行让 summary `copied=N` 与日志行数对不上 → 重定向到文件再 grep
 - 测试：`cargo nextest run --release`；覆盖率：`cargo llvm-cov --release nextest --summary-only`（stable 够用；nightly 严格 100% 口径见「测试与覆盖率」节）
 - lint：`cargo +nightly fmt && cargo clippy --release --all-targets --all-features --locked -- -D warnings`（默认与 `--all-features` 均 0 warning；**`--all-features` 仅 Linux 可验**——smb-backend→pavao-sys 需 libsmbclient，Windows 编不过，本机验默认 feature 即可）
 - rustup default-host 与全部工具链 MUST 用 `x86_64-pc-windows-msvc`（`+nightly` 按 default-host 解析；gnu 工具链与 MSVC 链接不兼容）；cargo-llvm-cov 安装不带 `--locked`
@@ -18,7 +19,7 @@
 ## 系统依赖与库特性
 - 无外部进程依赖；EXIF/视频元数据走 `nom-exif`（图片+视频）+ `infer`（magic-bytes MIME）
 - `bin/exiftool/exiftool.exe`（仅开发调试，非运行时依赖）：排查/修复 EXIF 时间，如 `-time:all -s <file>` 查全部时间字段、`-P '-AllDates<Filename' -overwrite_original <dir>` 按文件名批量改时间且保 mtime
-  - 中文路径 MUST 加 `-charset FileName=GBK`（否则 warning 且部分文件读不到）；`"-AllDates+=Y:M:D H:M:S"` 日期平移可保组内拍摄顺序；`"-FileModifyDate<DateTimeOriginal"` 把 mtime 同步到 EXIF 时间（只改文件系统属性，对 AVI 等不可写格式也有效）
+  - **中文路径**：本机 portable exiftool 缺 `Win32API::File`，命令行直接传 UTF-8 路径会 `Invalid filename encoding` + 0 文件，`-charset FileName=GBK` 也告警；省掉 `-charset` 让 exiftool 走 ANSI 系统调用反而最稳（stdout 显示乱码不影响 EXIF 抽取）；要 UTF-8 路径必须仿早期 tidymedia（7ea18d7 前）走 **tempfile + `-@ <file>` + `-charset filename=UTF8`**（小写 `filename`，路径写文件而非命令行）；`"-AllDates+=Y:M:D H:M:S"` 日期平移；`"-FileModifyDate<DateTimeOriginal"` mtime 同步 EXIF（对 AVI 等不可写格式也有效）；单文件按值写 `-P -overwrite_original "-AllDates=YYYY:MM:DD HH:MM:SS" "-FileModifyDate=..."` 让 tidymedia 走 P0
   - 写操作默认产生 `<file>_original` 备份，处理完 MUST 清理——magic-bytes 仍是 JPEG，会被 tidymedia 当媒体文件归档
 - nom-exif 内部用 `tracing::info!/warn!` 大量输出，`install_logging` 用 EnvFilter 把 `nom_exif=error` 默认压住，保留 `RUST_LOG` 覆盖
 - nom-exif 3.5 把 MKV `DateUTC` 合并到 `TrackInfoTag::CreateDate`（无独立 tag）；区分 MP4/MOV vs MKV/WebM 需 MIME 嗅探（`video/x-matroska` / `video/webm`）分流 `Source::MkvDateUtc` vs `QuickTimeCreateDate`
@@ -75,6 +76,7 @@
 - `entities/media_time/` 7 子模块单一职责：`priority`（`Source` + `Priority` 枚举）/ `candidate`（`epoch_to_candidate`：secs==0 视为未填返 None）/ `filename`（P2 启发式：`IMG_`/`DSC_`/`Screenshot_` 前缀 + 13 位毫秒 Unix 戳 + WeChat/WhatsApp/Pixel/裸 15 字符 `YYYYMMDD_HHMMSS` + 通用 `<任意前缀>YYYY-MM-DD HH-MM-SS` 19 字节窗口 + **宽松 YYYYMMDD**（stem 开头或 `-`/`_`/空格 后 8 位合法日期，仅日期粒度兜 DSC_/PXL_ 严格模板坏掉但 stem 含合法 8 位日期场景））/ `filter`（合理性过滤 + `EPOCH_1904` / `SOFT_THRESHOLD_1995` / `FUTURE_TOLERANCE_SECS`）/ `resolve` + `decision`（多候选裁决）/ `fs_time`（P4）
 - P3 sidecar 在 `adapters/sidecar.rs`（Interface Adapter 层，不在 entities）：XMP `photoshop:DateCreated` 纯文本搜索 + Takeout `<media>.<ext>.json` `photoTakenTime.timestamp` 走 `serde_json`；backend-aware，sibling 路径计算当前仅 Local（SMB/ADB 上 sidecar 静默跳过）
 - **P0–P4 全链已接线 `Info::create_time`**：P0/P1 来自 EXIF；P2 由 `candidates_from_filename` 直接消费（文件名 naive 时间按 UTC 解释）；P3 经依赖倒置注入——`dispatch` 把 `adapters::sidecar::discover_with_backend` 传给 `usecases::copy_with_sidecar`，`Index::enrich_candidates` 并行调 provider 填 `Info::add_candidates`；P4 = mtime。**e2e fixture 注意**：含 P2 文件名模式（`IMG_*` 等）或带 `.json`/`.xmp` sidecar 的文件会按文件名/sidecar 时间归档，不再落 mtime 年月；`copy()`（无 provider）是 `#[cfg(test)]` shim，生产只走 `copy_with_sidecar`
+- **EXIF vs 归档桶对账**：EXIF naive 时间按 `timezone_offset_hours`（默认 +8）转 epoch、归档再 `.to_offset(+8)` 取年月 → 首尾抵消，**归档桶 = EXIF 字符串前 7 字符 `YYYY:MM`**，对账无需算时区。全流程 slash command `/tidy-verify <source> <output>`（`.claude/commands/tidy-verify.md` + `.claude/scripts/tidy-verify/`）：dry-run → exiftool 抽 → 桶 MISMATCH → 文件名时间 DIFFER → exiftool 修 → 真跑 move
 - **相机出厂默认时间陷阱**：EXIF P0 格式合法但值为出厂默认（如 2004-01-01 00:00），且早于机型发布日（FinePix E550 = 2004-07、Casio EX-Z50 = 2004-09）即可断定时钟未设；mtime 通常同错（写卡时间），多数派仲裁救不了，只能 exiftool 数据侧修复后再归档
 - **copy/move 重叠保护**（`copy/run.rs`）：source ⊆ output（canonical 前缀含相等）→ InvalidInput 拒绝（move 会把源判为自身副本删除）；output ⊂ source（就地归档）→ `Index::remove_under_prefix` 把已归档文件从 source 索引剔除。前缀比较用 `entities::common::under_prefix`（分隔符边界），Local 走 `full_path`（绝对路径透传、相对路径才 canonicalize）、远端用 display
 
