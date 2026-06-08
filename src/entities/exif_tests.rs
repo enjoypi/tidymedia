@@ -416,3 +416,28 @@ fn ascii_datetime_to_epoch_epoch_start_returns_zero() {
         0
     );
 }
+
+// 老 QuickTime `pnot` preview atom 起头的 MOV 文件：infer crate 只认 `ftyp`，
+// 必须靠 fallback 兜底返回 `video/quicktime`，否则 `is_media` 误判致整文件被 ignore。
+#[test]
+fn quicktime_legacy_mime_detects_pnot_atom() {
+    let mut buf = vec![0u8, 0, 0, 0x14];
+    buf.extend_from_slice(b"pnot");
+    assert_eq!(
+        super::quicktime_legacy_mime(&buf),
+        Some("video/quicktime")
+    );
+}
+
+#[test]
+fn quicktime_legacy_mime_unknown_tag_returns_none() {
+    let mut buf = vec![0u8, 0, 0, 0x14];
+    buf.extend_from_slice(b"XXXX");
+    assert!(super::quicktime_legacy_mime(&buf).is_none());
+}
+
+#[test]
+fn quicktime_legacy_mime_too_short_returns_none() {
+    let buf = [0u8; 7];
+    assert!(super::quicktime_legacy_mime(&buf).is_none());
+}

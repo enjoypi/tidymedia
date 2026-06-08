@@ -27,6 +27,7 @@ const META_TYPE_IMAGE: &str = "image/";
 const META_TYPE_VIDEO: &str = "video/";
 /// RIFF AVI 容器；nom-exif 不支持，走 `entities::riff` 自解析内嵌 EXIF。
 const MIME_AVI: &str = "video/x-msvideo";
+const MIME_QUICKTIME: &str = "video/quicktime";
 
 /// MIME sniff 时读取的字节数。`infer` 实际只看前 16-32 字节，256 留点余量
 /// 让边界 case（容器嵌套）的判定更稳。
@@ -165,9 +166,18 @@ fn sniff_mime(reader: &mut dyn MediaReader) -> io::Result<String> {
     let mut buf = [0u8; MIME_SNIFF_BYTES];
     let filled = read_fill(reader, &mut buf)?;
     reader.seek(io::SeekFrom::Start(0))?;
-    Ok(infer::get(&buf[..filled])
+    let head = &buf[..filled];
+    Ok(infer::get(head)
         .map(|t| t.mime_type().to_string())
+        .or_else(|| quicktime_legacy_mime(head).map(str::to_string))
         .unwrap_or_default())
+}
+
+// `infer` 只匹配 `ftyp` brand 的现代 QuickTime/MP4；老 QuickTime（如 NIKON
+// COOLPIX 早期机型）以 `pnot` preview atom 起头，需自查 magic 兜底，否则
+// `is_media` 误判致整段视频被 ignore。
+fn quicktime_legacy_mime(buf: &[u8]) -> Option<&'static str> {
+    (buf.get(4..8) == Some(b"pnot")).then_some(MIME_QUICKTIME)
 }
 
 fn entry_value_to_epoch(v: &EntryValue, local_offset: FixedOffset) -> u64 {
