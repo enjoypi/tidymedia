@@ -21,6 +21,7 @@
 - `bin/exiftool/exiftool.exe`（仅开发调试，非运行时依赖）：排查/修复 EXIF 时间，如 `-time:all -s <file>` 查全部时间字段、`-P '-AllDates<Filename' -overwrite_original <dir>` 按文件名批量改时间且保 mtime
   - **中文路径**：本机 portable exiftool 缺 `Win32API::File`，命令行直接传 UTF-8 路径会 `Invalid filename encoding` + 0 文件，`-charset FileName=GBK` 也告警；省掉 `-charset` 让 exiftool 走 ANSI 系统调用反而最稳（stdout 显示乱码不影响 EXIF 抽取）；要 UTF-8 路径必须仿早期 tidymedia（7ea18d7 前）走 **tempfile + `-@ <file>` + `-charset filename=UTF8`**（小写 `filename`，路径写文件而非命令行）；`"-AllDates+=Y:M:D H:M:S"` 日期平移；`"-FileModifyDate<DateTimeOriginal"` mtime 同步 EXIF（对 AVI 等不可写格式也有效）；单文件按值写 `-P -overwrite_original "-AllDates=YYYY:MM:DD HH:MM:SS" "-FileModifyDate=..."` 让 tidymedia 走 P0
   - 写操作默认产生 `<file>_original` 备份，处理完 MUST 清理——magic-bytes 仍是 JPEG，会被 tidymedia 当媒体文件归档
+  - **`-T` Windows 输出末字段带 `\r`**：exiftool `-T` 在 Windows 走 CRLF 行尾，下游 awk `$NF` 拼出来含 `value\r`；终端 `\r` 回车把后续字段盖回行首致 print 错乱、字符串比较 `$NF=="value"` 永假；awk 处理 MUST 在 pass 入口 `sub(/\r$/, "", $NF)` 剥离（参考 `.claude/scripts/tidy-verify/compare_buckets.awk`）
 - nom-exif 内部用 `tracing::info!/warn!` 大量输出，`install_logging` 用 EnvFilter 把 `nom_exif=error` 默认压住，保留 `RUST_LOG` 覆盖
 - nom-exif 3.5 把 MKV `DateUTC` 合并到 `TrackInfoTag::CreateDate`（无独立 tag）；区分 MP4/MOV vs MKV/WebM 需 MIME 嗅探（`video/x-matroska` / `video/webm`）分流 `Source::MkvDateUtc` vs `QuickTimeCreateDate`
 - nom-exif `Exif::get(tag)` 仅读 IFD0/MAIN；GPS 子 IFD 标签必须用 `Exif::iter()` 按 tag code 匹配
