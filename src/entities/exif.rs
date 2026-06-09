@@ -29,6 +29,9 @@ const META_TYPE_VIDEO: &str = "video/";
 /// RIFF AVI 容器；nom-exif 不支持，走 `entities::riff` 自解析内嵌 EXIF。
 const MIME_AVI: &str = "video/x-msvideo";
 const MIME_QUICKTIME: &str = "video/quicktime";
+/// BDAV MPEG-TS（AVCHD .mts / .m2ts）：4 字节 `TP_extra_header` + 188 字节 TS packet。
+/// nom-exif 不支持，时间走 P2 文件名启发或 P4 mtime 兜底；本常量只为 `is_media` 通过 MIME 嗅探门槛。
+const MIME_M2TS: &str = "video/m2ts";
 
 /// MIME sniff 时读取的字节数。`infer` 实际只看前 16-32 字节，256 留点余量
 /// 让边界 case（容器嵌套）的判定更稳。
@@ -175,6 +178,7 @@ fn sniff_mime(reader: &mut dyn MediaReader) -> io::Result<String> {
     Ok(infer::get(head)
         .map(|t| t.mime_type().to_string())
         .or_else(|| quicktime_legacy_mime(head).map(str::to_string))
+        .or_else(|| m2ts_legacy_mime(head).map(str::to_string))
         .unwrap_or_default())
 }
 
@@ -183,6 +187,13 @@ fn sniff_mime(reader: &mut dyn MediaReader) -> io::Result<String> {
 // `is_media` 误判致整段视频被 ignore。
 fn quicktime_legacy_mime(buf: &[u8]) -> Option<&'static str> {
     (buf.get(4..8) == Some(b"pnot")).then_some(MIME_QUICKTIME)
+}
+
+// BDAV MPEG-TS（AVCHD .mts / .m2ts）：4 字节 TP_extra_header + 188 字节 TS packet。
+// 单 0x47 sync 太弱（H264 SEI / 任意二进制都可能命中），要求 192 byte 间隔连续两个
+// sync 才认。`infer` 0.19 不支持 m2ts；不识别会让 is_media=false 致整段 AVCHD 被 ignore。
+fn m2ts_legacy_mime(buf: &[u8]) -> Option<&'static str> {
+    (buf.get(4) == Some(&0x47) && buf.get(196) == Some(&0x47)).then_some(MIME_M2TS)
 }
 
 fn entry_value_to_epoch(v: &EntryValue, local_offset: FixedOffset) -> u64 {

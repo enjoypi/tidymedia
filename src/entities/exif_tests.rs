@@ -439,6 +439,52 @@ fn quicktime_legacy_mime_too_short_returns_none() {
     assert!(super::quicktime_legacy_mime(&buf).is_none());
 }
 
+// BDAV M2TS（AVCHD .mts/.m2ts）：4-byte TP_extra_header + 188-byte TS packet。
+// `infer` 0.19 不识别；fallback 要求 offset 4 + 196 连续两个 0x47 sync byte。
+#[test]
+fn m2ts_legacy_mime_detects_bdav_sync_pair() {
+    let mut buf = vec![0u8; 256];
+    buf[4] = 0x47;
+    buf[196] = 0x47;
+    assert_eq!(super::m2ts_legacy_mime(&buf), Some("video/m2ts"));
+}
+
+// 单 sync byte 不够 —— 任意二进制都可能在某 offset 命中 0x47。
+#[test]
+fn m2ts_legacy_mime_single_sync_returns_none() {
+    let mut buf = vec![0u8; 256];
+    buf[4] = 0x47;
+    assert!(super::m2ts_legacy_mime(&buf).is_none());
+}
+
+#[test]
+fn m2ts_legacy_mime_too_short_returns_none() {
+    let buf = [0u8; 100];
+    assert!(super::m2ts_legacy_mime(&buf).is_none());
+}
+
+// End-to-end：FakeBackend 喂 BDAV pattern bytes → Exif::open 走 m2ts fallback，
+// 让 is_media() 通过门槛，整段 AVCHD 视频不被 ignore（之前 28 个 .MTS 文件残留场景）。
+#[test]
+fn open_uses_m2ts_legacy_fallback_for_bdav_pattern() {
+    use super::super::uri::Location;
+    use crate::adapters::backend::fake::FakeBackend;
+    use std::sync::Arc;
+
+    let mut bytes = vec![0u8; 256];
+    bytes[4] = 0x47;
+    bytes[196] = 0x47;
+
+    let fake = Arc::new(FakeBackend::new("fake"));
+    let loc = Location::Local(camino::Utf8PathBuf::from("/in-mem/clip.mts"));
+    fake.add_file(loc.clone(), bytes);
+
+    let backend: Arc<dyn super::super::backend::Backend> = fake;
+    let exif = Exif::open(&loc, &backend, utc()).unwrap();
+    assert_eq!(exif.mime_type(), "video/m2ts");
+    assert!(exif.is_media());
+}
+
 // ── XMP-only JPEG fallback（populate_image_xmp_fallback） ──
 
 /// EXIF block 完全无三日期、XMP packet 含 photoshop:DateCreated + xmp:CreateDate
