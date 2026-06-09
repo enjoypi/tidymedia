@@ -23,3 +23,6 @@
 
 # 本地 `cargo vendor` 输出，仅离线构建用
 /pavao/
+
+# exiftool / 某些 Windows 工具未展开 env var 留下的字面目录
+/%SystemDrive%/
