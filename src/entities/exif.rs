@@ -18,6 +18,7 @@ use super::backend::{Backend, MediaReader};
 use super::common;
 use super::file_info::read_fill;
 use super::uri::Location;
+use super::xmp;
 // 测试 helper `Exif::from_path_with_offset` 需要构造 LocalBackend instance。
 // 仅 #[cfg(test)] gate 下引用 adapters，生产代码方向严格内向（CA 规则）。
 #[cfg(test)]
@@ -32,6 +33,10 @@ const MIME_QUICKTIME: &str = "video/quicktime";
 /// MIME sniff 时读取的字节数。`infer` 实际只看前 16-32 字节，256 留点余量
 /// 让边界 case（容器嵌套）的判定更稳。
 const MIME_SNIFF_BYTES: usize = 256;
+
+/// XMP packet fallback 扫描窗口。单段 APP1 最大 65533 字节，64 KB 覆盖单段
+/// XMP packet 起始；ExtendedXMP（跨多 APP1 段）不在范围。
+const XMP_SCAN_BYTES: usize = 64 * 1024;
 
 /// 容器内自带时间字段。文件系统 mtime / btime 不在此结构体里——
 /// Clean Architecture 的边界让 Exif 只持有 EXIF/视频容器数据；
@@ -194,7 +199,20 @@ fn entry_value_to_epoch(v: &EntryValue, local_offset: FixedOffset) -> u64 {
     if secs <= 0 { 0 } else { secs.cast_unsigned() }
 }
 
-fn populate_image_dates(reader: Box<dyn MediaReader>, exif: &mut Exif, local_offset: FixedOffset) {
+fn populate_image_dates(
+    mut reader: Box<dyn MediaReader>,
+    exif: &mut Exif,
+    local_offset: FixedOffset,
+) {
+    // 先 buffer 头部供 XMP fallback；seek 回起点后再喂给 nom-exif。
+    // read/seek 任一失败：head 留空，下面 nom-exif 路径继续跑（与原逻辑等价）。
+    let mut head = vec![0u8; XMP_SCAN_BYTES];
+    let head_len = read_fill(reader.as_mut(), &mut head).unwrap_or(0);
+    head.truncate(head_len);
+    if reader.seek(io::SeekFrom::Start(0)).is_err() {
+        return;
+    }
+
     let Ok(ms) = MediaSource::seekable(reader) else {
         return;
     };
@@ -219,6 +237,32 @@ fn populate_image_dates(reader: Box<dyn MediaReader>, exif: &mut Exif, local_off
     exif.model = parsed
         .get(ExifTag::Model)
         .and_then(|v| v.as_str().map(str::to_owned));
+
+    // XMP fallback：EXIF DTO/CreateDate 均缺（re-tag 后 IFD0 仅剩 ModifyDate 类
+    // 场景）时扫已 buffer 的头部，从 XMP packet 补 P0/P1 候选。
+    if exif.date_time_original == 0 && exif.create_date == 0 {
+        populate_image_xmp_fallback(&head, exif);
+    }
+}
+
+fn populate_image_xmp_fallback(head: &[u8], exif: &mut Exif) {
+    let Some(packet) = xmp::find_xmp_packet(head) else {
+        return;
+    };
+    let dates = xmp::parse_xmp_dates(packet);
+    if let Some(dt) = dates.photoshop_date_created {
+        // XMP 时间带 timezone，DateTime<FixedOffset>::timestamp() 直接是 UTC epoch。
+        let secs = dt.timestamp();
+        if secs > 0 {
+            exif.date_time_original = secs.cast_unsigned();
+        }
+    }
+    if let Some(dt) = dates.xmp_create_date {
+        let secs = dt.timestamp();
+        if secs > 0 {
+            exif.create_date = secs.cast_unsigned();
+        }
+    }
 }
 
 /// 从已解析的 EXIF 读 `GPSDateStamp`（文本 "YYYY:MM:DD"）和

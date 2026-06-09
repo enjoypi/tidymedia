@@ -50,6 +50,14 @@ pub const DATA_JPEG_WITH_GPS: &str = "tests/data/sample-with-gps.jpg";
 /// JPEG 同时含 `Make=TestCam` 和 `Model=TestModel`（由 `exiftool` 写入 sample-with-exif.jpg 生成）。
 /// 用于覆盖 `populate_image_dates` 中 `ExifTag::Model` 的 `and_then` 分支。
 pub const DATA_JPEG_WITH_MAKE_MODEL: &str = "tests/data/sample-with-make-model.jpg";
+/// JPEG EXIF block 完全无三日期，XMP packet 同时含 `photoshop:DateCreated` 与
+/// `xmp:CreateDate=2008-10-31T09:15:01+08:00`（exiftool Shorthand 模式写 attribute 形式）。
+/// 用于验证 `populate_image_xmp_fallback` 路径。
+pub const DATA_JPEG_XMP_ONLY: &str = "tests/data/sample-xmp-only.jpg";
+/// JPEG 仅有 `EXIF:CreateDate=2024:01:02 12:00:00`、无 `DateTimeOriginal`、无 XMP。
+/// 用于覆盖 `populate_image_dates` 中 `dto==0 && cd!=0` 的 XMP fallback 短路 branch
+/// （cd 非 0 时 fallback 不应触发；从 fixture 的真实数据导出 branch 觉醒）。
+pub const DATA_JPEG_ONLY_CREATEDATE: &str = "tests/data/sample-only-createdate.jpg";
 
 // docs/media-time-detection.md spec contract fixture：tests/fixtures/gen.sh 生成，
 // tests/media_time_spec.rs 集成测试通过 tests/media_time/common.rs 内的等价常量引用

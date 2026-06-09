@@ -23,8 +23,8 @@ use crate::entities::backend::Backend;
 use crate::entities::media_time::Candidate;
 use crate::entities::media_time::Source;
 use crate::entities::uri::Location;
+use crate::entities::xmp;
 
-const XMP_KEY: &str = "photoshop:DateCreated=\"";
 const FEATURE_SIDECAR: &str = "sidecar";
 
 /// 旧入口：本地路径 → Local backend shim。便于现有测试与 use case 不引入 backend 类型。
@@ -134,45 +134,11 @@ fn log_parse_failure(operation: &'static str, loc: &Location) {
 }
 
 pub(crate) fn parse_xmp_date(content: &str) -> Option<DateTime<Utc>> {
-    // XML 允许 <!-- ... --> 注释中包含与正文同形态 photoshop:DateCreated 字面量。
-    // 直接 find 首次出现会被注释干扰；先把所有注释体替换为同长度空白，再搜索。
-    let stripped = strip_xml_comments(content);
-    let key_idx = stripped.find(XMP_KEY)?;
-    let start = key_idx + XMP_KEY.len();
-    let rest = &stripped[start..];
-    let end = rest.find('"')?;
-    let raw = &rest[..end];
-    let dt = DateTime::parse_from_rfc3339(raw).ok()?;
-    Some(dt.with_timezone(&Utc))
-}
-
-// 把 `<!-- ... -->` 注释体替换为同字节数的空格，保持偏移与原串一致。
-// XML 注释不可嵌套，按 `<!--`/`-->` 线性配对。注释边界全 ASCII，操作不破坏 UTF-8。
-fn strip_xml_comments(content: &str) -> String {
-    let mut out = String::with_capacity(content.len());
-    let bytes = content.as_bytes();
-    let mut i = 0;
-    while i < bytes.len() {
-        if bytes[i..].starts_with(b"<!--") {
-            let body_start = i + 4;
-            let end = bytes
-                .get(body_start..)
-                .and_then(|tail| tail.windows(3).position(|w| w == b"-->"))
-                .map_or(bytes.len(), |p| body_start + p + 3);
-            for _ in i..end {
-                out.push(' ');
-            }
-            i = end;
-        } else {
-            // 非注释字节按 UTF-8 字符边界推进，避免切到多字节字符内部。
-            let ch_end = (i + 1..=bytes.len())
-                .find(|&j| content.is_char_boundary(j))
-                .unwrap_or(bytes.len());
-            out.push_str(&content[i..ch_end]);
-            i = ch_end;
-        }
-    }
-    out
+    // P3 sidecar 沿用历史语义只取 photoshop:DateCreated。packet 嗅探 + 多键解析
+    // 复用 entities::xmp 同一实现（避免 sidecar / EXIF fallback 两份 XML 解析漂移）。
+    xmp::parse_xmp_dates(content)
+        .photoshop_date_created
+        .map(|dt| dt.with_timezone(&Utc))
 }
 
 #[derive(Deserialize)]

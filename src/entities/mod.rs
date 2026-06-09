@@ -17,3 +17,4 @@ pub(crate) mod riff;
 #[cfg(test)]
 pub(crate) mod test_common;
 pub mod uri;
+pub(crate) mod xmp;
