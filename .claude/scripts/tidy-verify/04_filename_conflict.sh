@@ -9,9 +9,8 @@ SOURCE_ROOT="${1:?missing source root (must end with separator)}"
 WORK="${2:-/tmp/tm}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# SOURCE_ROOT 必须通过 env 传给 awk，不能 `awk -v`：awk -v 会把 `\U`/`\P` 当
-# escape 序列吃掉 Windows 路径反斜杠。
-SOURCE_ROOT="$SOURCE_ROOT" awk -f "$SCRIPT_DIR/filename_conflict.awk" \
+# Python 接 env var；命令行不传路径避免 shell 二次解析 Windows 反斜杠。
+SOURCE_ROOT="$SOURCE_ROOT" uv run "$SCRIPT_DIR/filename_conflict.py" \
     "$WORK/copy_lines.log" > "$WORK/name_result.txt"
 
 echo "---summary---"

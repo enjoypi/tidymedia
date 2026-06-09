@@ -150,7 +150,7 @@ DIFFER 行先收集到候选集，**不**逐条直接拍板；进 Step 5。
 - `--log-level=debug`（带连字符），**不是** `--loglevel`；全局 flag 放最前
 - `--dry-run` 是子命令级，**MUST** 放 `move` / `copy` 后面
 - tidymedia stdout 不能 `| tail -N`：debug 日志走 stderr 一起被砍，summary 与 copy_file 行数对不上
-- `awk -v VAR='D:\\...'` 会把 `\U`/`\P` 当 escape 吃掉反斜杠；Windows 路径**必须**通过环境变量传给 awk（脚本 4 已封装）
-- gawk 变量名禁 `exp` / `log` / `length` 等内建函数名，syntax error 行号会指错
+- Step 3/4 内部逻辑已从 awk 迁到 `uv run *.py`（避 awk `\` regex 二次解析 + Windows 路径 env var 套路）；Windows stdout 用 `sys.stdout.reconfigure(newline='\n')` 强制 LF 与下游 grep/diff 口径一致
+- Python `re` 的 alternation 是 leftmost-first（非 POSIX leftmost-longest）：日期 regex `(0?[1-9]|1[012])` 在 `2008-10` 上会抢吃 `2008-1` → 必须长 token 优先 `(1[012]|0?[1-9])`
 - EXIF naive 时间在 tidymedia 里按 `timezone_offset_hours`（默认 +8）转 epoch，归档桶再 `.to_offset(+8)` 取年月——首尾抵消，等于直接看 EXIF 字符串 `YYYY:MM`
 - exiftool 写默认产生 `<file>_original` 备份，未清会被 tidymedia 当 JPEG 归档；脚本 5 默认 `-overwrite_original`

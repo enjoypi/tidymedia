@@ -6,7 +6,7 @@ set -euo pipefail
 WORK="${1:-/tmp/tm}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-awk -f "$SCRIPT_DIR/compare_buckets.awk" \
+uv run "$SCRIPT_DIR/compare_buckets.py" \
     "$WORK/exif.tsv" "$WORK/copy_lines.log" \
     > "$WORK/bucket_result.txt"
 
