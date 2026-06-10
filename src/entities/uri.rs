@@ -249,7 +249,26 @@ fn split_host_port<'a>(
     hostport: &'a str,
     rest: &str,
 ) -> Result<(&'a str, Option<u16>), ParseError> {
-    match hostport.split_once(':') {
+    // IPv6 字面量带方括号：`[2001:db8::1]` 或 `[::1]:445`。方括号内冒号属于地址，
+    // 不能用 `split_once(':')` 朴素拆。先识别 `[…]` 包裹段，再判可选 `:port`。
+    if let Some(rest_after_bracket) = hostport.strip_prefix('[') {
+        let Some(end) = rest_after_bracket.find(']') else {
+            return Err(ParseError::InvalidPort(format!("{rest}@{hostport}")));
+        };
+        let host = &hostport[..=end + 1]; // 含两端方括号
+        let tail = &rest_after_bracket[end + 1..];
+        if tail.is_empty() {
+            return Ok((host, None));
+        }
+        let Some(port_str) = tail.strip_prefix(':') else {
+            return Err(ParseError::InvalidPort(format!("{rest}@{tail}")));
+        };
+        let port = port_str
+            .parse::<u16>()
+            .map_err(|_| ParseError::InvalidPort(format!("{rest}@{port_str}")))?;
+        return Ok((host, Some(port)));
+    }
+    match hostport.rsplit_once(':') {
         Some((h, p)) => {
             let port = p
                 .parse::<u16>()

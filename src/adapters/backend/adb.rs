@@ -87,8 +87,11 @@ impl RemoteAdapter for AdbAdapter {
     }
 
     /// 把 `adb_client` 报错文案中的常见特征字符串映射成 [`io::ErrorKind`]。
+    /// 同时识别 `Other`（`adb_client` 主要错误类型）与 `BrokenPipe`/`ConnectionReset`
+    /// 等含 "no such file" 文案的链式错误——前者保留原 kind，后者按文案重映射，
+    /// 否则上层 `exists()` 会把"找不到"当作 IO 错误传播。
     fn map_error(e: io::Error) -> io::Error {
-        if e.kind() != io::ErrorKind::Other {
+        if matches!(e.kind(), io::ErrorKind::NotFound | io::ErrorKind::PermissionDenied) {
             return e;
         }
         let msg = e.to_string().to_lowercase();

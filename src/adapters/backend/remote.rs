@@ -128,7 +128,9 @@ fn mkdir_recursive<A: RemoteAdapter>(
     let mut missing: Vec<A::Target> = Vec::new();
     let mut cur = Some(target.clone());
     while let Some(t) = cur {
-        match client.stat(&t) {
+        // pavao/adb_client 可能把"路径不存在"包成 Other("no such file")，必须经
+        // A::map_error 归一成 NotFound 才能正确驱动自底向上的祖先扫描。
+        match client.stat(&t).map_err(A::map_error) {
             Ok(_) => break,
             Err(e) if e.kind() == io::ErrorKind::NotFound => {
                 cur = t.parent();
@@ -138,7 +140,9 @@ fn mkdir_recursive<A: RemoteAdapter>(
         }
     }
     for t in missing.iter().rev() {
-        if let Err(e) = client.mkdir(t)
+        // 并发或重复创建：原始 ErrorKind 已是 AlreadyExists 时不映射也对；但同样
+        // 防御性走一遍映射，避免 Other("File exists") 之类文案被当硬错误传播。
+        if let Err(e) = client.mkdir(t).map_err(A::map_error)
             && e.kind() != io::ErrorKind::AlreadyExists
         {
             return Err(e);

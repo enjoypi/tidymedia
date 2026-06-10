@@ -28,7 +28,8 @@
 - **老 QuickTime `pnot` 起头 MOV**（NIKON COOLPIX S5/P5000、Casio 等 2003-2008 早期机型）nom-exif 3.6.0 `parse_bmff_mime` 拒识：只认 `ftyp`/`wide` 首 box，`HEADER_PARSE_BUF_SIZE=128B` 也扫不到 `mdat` 兜底。当前 fork patch 在入口短路（首 box==pnot 直返 QuickTime mime），`Cargo.toml [patch.crates-io] nom-exif = { git = "https://github.com/enjoypi/nom-exif.git", branch = "feat/legacy-quicktime-pnot" }`；后续 `mov.rs::extract_moov_body_from_buf` atom 扫描与 `mvhd.creation_time` 解析与 ExifTool 同源，无需自写 quicktime.rs。上游 PR 合并发版后切回 `*` 删 patch
 - nom-exif trace 调试：`RUST_LOG=nom_exif=trace`；trace span 名是 `#[tracing::instrument]` 函数名嵌套（`parse_bmff_mime:parse: Got box_type=...` 中 `parse` 是 `BoxHolder::parse` 子 span）
 - **AVI（RIFF）nom-exif 不支持**：老相机（Fujifilm `FinePix` 等）AVI 的拍摄时间在 `LIST hdrl > LIST strl > strd` chunk（`AVIF` 魔数 + 裸 TIFF IFD，offset 基准 = strd+8），由 `entities/riff.rs` 自解析填入 `Exif` 的 `date_time_original`/`create_date`/`make`/`model`（P0/P1 候选 + `{make}/{model}` 复用既有链路，无新增 `Source`）；`exif.rs::from_reader` 按 `video/x-msvideo` 先于泛 video 分流
-- **JPEG/HEIC/TIFF XMP packet 单段 fallback**：相机原拍后被 Lightroom/Bridge/ACR re-tag 的图，EXIF IFD0 可能仅剩 `ModifyDate`，原始拍摄时间落在 XMP `<x:xmpmeta>` packet 的 `photoshop:DateCreated`（→ DTO/P0）与 `xmp:CreateDate`（→ CreateDate/P1）。`populate_image_dates` 在 EXIF DTO+CreateDate 双 0 时扫已 buffer 头部 64 KB（`XMP_SCAN_BYTES`），由 `entities/xmp.rs` 抽 attribute 形式（单/双引号都支持，element 形式 YAGNI、ExtendedXMP YAGNI）；`adapters/sidecar.rs::parse_xmp_date` 复用同实现避免两份漂移。fixture 用 `bin/exiftool -api Compact="Shorthand,NoPadding"` 才出 attribute 形式（默认 element）
+- **JPEG/HEIC/TIFF XMP packet 单段 fallback**：相机原拍后被 Lightroom/Bridge/ACR re-tag 的图，EXIF IFD0 可能仅剩 `ModifyDate`，原始拍摄时间落在 XMP `<x:xmpmeta>` packet 的 `photoshop:DateCreated`（→ DTO/P0）与 `xmp:CreateDate`（→ CreateDate/P1）。`populate_image_dates` 在 EXIF DTO+CreateDate 双 0 时扫已 buffer 头部 64 KB（`XMP_SCAN_BYTES`），由 `entities/xmp.rs` 抽 attribute 形式（单/双引号都支持，element 形式 YAGNI、ExtendedXMP YAGNI）；`adapters/sidecar.rs::parse_xmp_date` 复用同实现避免两份漂移。fixture 用 `bin/exiftool -api Compact="Shorthand,NoPadding"` 才出 attribute 形式（默认 element）。**seek 失败仍跑 XMP fallback**：已读入的 head 不浪费，否则非可寻址 MediaReader 的 re-tag 图退回 mtime 归错桶
+- **XMP 未闭合 `<!--` 按 strict 语义抹至 EOF**（fixture `parse_xmp_date_unterminated_comment_none` 钉死）：lenient（视 `<!--` 为字面量）会把注释中的 `photoshop:DateCreated="OLD"` 误读为合法属性；XMP packet 是 well-formed XML 子集，未闭合注释属 malformed，宁可放弃后续也不冒误读风险
 
 ## 测试与覆盖率（项目特有；通用套路见 rust-p1 §5）
 - **覆盖率门槛：region / line / branch 三项 MUST 全 100%**（严格口径 + `--branch`，缺一不可）
@@ -83,6 +84,8 @@
 - **EXIF vs 归档桶对账**：EXIF naive 时间按 `timezone_offset_hours`（默认 +8）转 epoch、归档再 `.to_offset(+8)` 取年月 → 首尾抵消，**归档桶 = EXIF 字符串前 7 字符 `YYYY:MM`**，对账无需算时区。全流程 slash command `/tidy-verify <source> <output>`（`.claude/commands/tidy-verify.md` + `.claude/scripts/tidy-verify/`）：dry-run → exiftool 抽 → 桶 MISMATCH → 文件名时间 DIFFER → exiftool 修 → 真跑 move
 - **tidy-verify dry-run log 年月归位分析**：直接按 `source=`/`target=` 父目录聚合会把「source/output 根不同」误判成"全部变化"；MUST 剥源/目标根前缀到相对路径再比年月段（绝大多数文件年月一致只是顶层补全 `YYYY\` 段，实质换月/换年通常是少数视频被 EXIF/容器时间归到拍摄真月份）
 - **相机出厂默认时间陷阱**：EXIF P0 格式合法但值为出厂默认（如 2004-01-01 00:00），且早于机型发布日（FinePix E550 = 2004-07、Casio EX-Z50 = 2004-09）即可断定时钟未设；mtime 通常同错（写卡时间），多数派仲裁救不了，只能 exiftool 数据侧修复后再归档
+- **多数派仲裁仅认 `Validity::Valid` 候选**：`apply_filters` 保留 `LowConfidencePre1995` 进 surviving；`majority_override` MUST 显式 `matches!(v, Validity::Valid)` 过滤掉低置信票，否则 1995 前的 filename+mtime 互证可推翻可信 P0（扫描件被批量 touch 出错误年份的场景）
+- **`Screenshot_` 截图两种主流命名**：`yyyy-mm-dd-HH-mm-ss`（19 字符，Windows Snip & Sketch）与 `yyyymmdd_HHMMSS`（15 字符，Samsung/MIUI/原生 Android），`try_screenshot` 都要支持，否则后者退到 `try_loose_yyyymmdd` 兜底会退化为日精度丢时分秒
 - **copy/move 重叠保护**（`copy/run.rs`）：source ⊆ output（canonical 前缀含相等）→ InvalidInput 拒绝（move 会把源判为自身副本删除）；output ⊂ source（就地归档）→ `Index::remove_under_prefix` 把已归档文件从 source 索引剔除。前缀比较用 `entities::common::under_prefix`（分隔符边界），Local 走 `full_path`（绝对路径透传、相对路径才 canonicalize）、远端用 display
 
 ## URI 与 Backend
@@ -95,6 +98,7 @@
   - `adb://[serial]/abs/path` ⇒ `Adb`；serial 为空（`adb:///sdcard/...`）让 client autodetect；path 始终是设备绝对路径
 - 字段内空格/中文/分隔符走 `percent-encoding`，**不引** `url` crate
 - 混合 sources 已支持：`copy smb://a /local/b mtp://c adb:///sdcard/d -o /x` 合法
+- **IPv6 host 用方括号包裹**：`smb://[::1]/share` / `smb://user@[2001:db8::1]:445/share`；`split_host_port` 优先识别 `[...]` 形态，普通 `host:port` 用 `rsplit_once(':')` 避免端口被前段冒号撞（朴素 `split_once(':')` 会把 `[::1]` 错拆成 host=`[` port=`:1]`）
 
 ### 凭据
 - SMB：`SMB_USER` 经 `backend.smb.default_user` 兜底；`SMB_PASSWORD` 在 `build_target` 处读 env；Kerberos 走 `KRB5CCNAME`；`backend.smb.workgroup` 默认 `WORKGROUP`。**密码永远不入 YAML**
@@ -108,6 +112,8 @@
 ### 远端 backend 测试套路（SMB / MTP / ADB 通用）
 - **手写 Fake\<Smb|Mtp|Adb\>Client**：state 用 `Arc<Mutex<HashMap<...>>>`；`inject(*Op::Read, path, ErrorKind::TimedOut)` 注入逐 op + 逐 path 错误，无须 `mockall`
 - 错误文案映射：SMB `map_smb_error` 文案含 `"EACCES"` → `PermissionDenied`；ADB `map_adb_error` 文案含 `"no such file"` / `"device not found"` / `"no devices"` → `NotFound`，`"permission"` → `PermissionDenied`
+- **`map_error` 不能仅判 `kind == Other`**：`adb_client` 等链式错误可能返 `BrokenPipe`/`ConnectionReset` + 文案含 "no such file"；MUST 先放行已正确分类的 kind（`NotFound`/`PermissionDenied`）再按文案重映射其余 kind，否则 `exists()` 会把"找不到"当 IO 错误传播
+- **远端 helper 内调 `client.stat/mkdir/...` 也要 `map_err(A::map_error)`**：错误分类仅靠 `RemoteBackend::map_and_log` 单点不够——`mkdir_recursive` 等 trait 方法外的 helper 内的 raw client 调用未经映射时，pavao 把"路径不存在"包成 `Other("no such file")` 会让 `e.kind() == NotFound` 守卫永远 miss，多层 `{year}/{month}` mkdir_p 必失败
 - 真实 client 适配器（`*_real.rs`）整模块标 `#![cfg_attr(coverage_nightly, coverage(off))]`（需真实服务/设备无法 CI 触发）；调度逻辑（`build_target` / `map_*_error` / `tidy_with` 各分支）走 fake 注入 100% 覆盖
 - 每方法测三类：OK / client Err / 非自家 scheme 返 `InvalidInput`
 - **"未启用 feature 返 Unsupported" 集成测试 MUST `#[cfg(not(feature = "<scheme>-backend"))]` gate**，否则启用 feature 跑 nextest 会 fail
@@ -148,7 +154,9 @@
 - **clippy 1.95 `doc_markdown` 扩大**：含点号的文件名、含下划线的标识符在 `///` 或 `//!` 注释中均需反引号包，否则 `--all-features` 下 `-D warnings` 报 error
 - **`chrono::TimeDelta::seconds(i64)` 会 panic**（secs > ≈ `i64::MAX/1000`），`?` / `.ok()?` 截不住——外部 timestamp（Takeout JSON / 用户输入）解析 MUST 用 `try_seconds()?` + `DateTime::checked_add_signed`
 - **重复组容器 MUST `Vec<DuplicateGroup { size, paths }>`**，MUST NOT `BTreeMap<size, _>`：size 作唯一键会让同 size 不同 content 的两组互相覆盖（`file_index.rs::filter_and_sort`）
-- **路径前缀匹配 MUST 校验分隔符边界**：`"/photos_backup/x".starts_with("/photos")` 会误判为 output 内须保留——见 `find.rs::under_prefix` 已封装
+- **路径前缀匹配 MUST 校验分隔符边界**：`"/photos_backup/x".starts_with("/photos")` 会误判为 output 内须保留——见 `find.rs::under_prefix` 已封装。**prefix 末尾 `/`/`\\` 在 helper 内剥**：dry-run 下 canonical_prefix 保留尾斜杠时朴素 `starts_with` 会让 `rest='img.jpg'` 既非空也不以分隔符开头而误判为不在前缀下
+- **含 secret 字段的 struct MUST 手写 `Debug` 而非 derive**：`SmbTarget.password` 经 `derive(Debug)` 会让 `debug!(target=?t)` 把明文写进日志（P0 §12 违反）；手写 Debug 把 secret 字段渲染成 `Option<&"***">` 占位即可（参考 `adapters/backend/smb.rs::SmbTarget`）
+- **外部 JSON schema 同一字段历史上可能 String 或 Number**：Google Takeout `photoTakenTime.timestamp` 多版本类型不同，单字段严格 `String` 会让 P3 候选静默丢失；用 `serde_json::Value` + 二态 match 比 `deserialize_with` 简洁（参考 `adapters/sidecar.rs::parse_takeout_json`）
 - **`ReportSink` trait 用 `enum Report<'a>` + 单方法 `write(&Report<'_>)`** 收敛多报告类型；对象安全 + 新增 report 变体不强制升级既有 impl（替代旧 `write_copy` / `write_find` 双方法 boilerplate）
 - **同盘 move fast-path**：`do_copy` 在 `opts.remove && src.backend().scheme() == "local" && output_backend.scheme() == "local"` 时走 `Backend::rename`（`LocalBackend::rename` 内部 `fs::rename` 同卷原子 + `CrossesDevices` fallback 到 `fs::copy + remove`）。**MUST NOT** 在 Rust 层用 `metadata().dev()` / `GetVolumeInformationByHandleW` 重复判同卷——OS 内核是 same-volume 判定唯一权威源，能识别 subst/junction/mount point/bind mount/btrfs subvol 等所有边界，自己再判必漏
 - **dry-run log / 路径聚合分析用 Python（heredoc 或 `uv run xxx.py`）**：tidy-verify Step 3/4 已从 awk 迁到 `.claude/scripts/tidy-verify/*.py`（避 awk `\` regex 在 bash 单引号下二次解析致 `unterminated regexp`）；临时一次性分析用 `cat > /tmp/tm/x.py <<'PYEOF' ... PYEOF` + `cd /tmp/tm && uv run x.py`（uv 在 Windows 解析 `/tmp/...` 与 bash 不一致 → 相对路径绕开）。**Windows 输出陷阱**：Python stdout 默认 CRLF 与下游 grep/diff LF 口径不一致 MUST `sys.stdout.reconfigure(newline='\n')`；终端 stdout 默认 GBK 把 UTF-8 中文显示成 `��` 乱码 → 含中文/路径的报告 MUST 写 UTF-8 文件再 `cat` 读；Write 工具落盘含 `'\\'` 的 Python 字符串字面量会吞反斜杠（用 `SEP = chr(92)` 或 heredoc 绕开）；Python `re` alternation 是 leftmost-first 不是 POSIX leftmost-longest，迁 awk regex MUST 把长 token 放前（`(1[012]|0?[1-9])` 而非 `(0?[1-9]|1[012])`，否则 `2008-10` 抢吃成 `2008-1`）

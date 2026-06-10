@@ -20,7 +20,10 @@ use crate::entities::backend::Backend;
 use crate::entities::uri::Location;
 
 /// SMB target 的最小可识别参数集。`SmbClient` 实现按此参数访问远端。
-#[derive(Clone, Debug, PartialEq, Eq)]
+///
+/// Debug 手写而非 derive：password 字段对结构化日志（`debug!(target=?t)`）必须以
+/// `***` 占位，杜绝 `SMB_PASSWORD` 泄漏到 stdout/日志文件。其余字段照常展示。
+#[derive(Clone, PartialEq, Eq)]
 pub struct SmbTarget {
     pub user: Option<String>,
     pub host: String,
@@ -31,6 +34,20 @@ pub struct SmbTarget {
     pub password: Option<String>,
     /// Kerberos ticket cache 路径，对应环境变量 `KRB5CCNAME`。
     pub krb5_ccname: Option<String>,
+}
+
+impl std::fmt::Debug for SmbTarget {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SmbTarget")
+            .field("user", &self.user)
+            .field("host", &self.host)
+            .field("port", &self.port)
+            .field("share", &self.share)
+            .field("path", &self.path)
+            .field("password", &self.password.as_ref().map(|_| "***"))
+            .field("krb5_ccname", &self.krb5_ccname)
+            .finish()
+    }
 }
 
 impl RemoteTarget for SmbTarget {

@@ -88,8 +88,11 @@ pub fn copy(
     )
 }
 
-// 8 个参数源于 CLI 选项的一比一透传；与 make_report 同理 allow。
-#[allow(clippy::too_many_arguments)]
+// 8 个参数源于 CLI 选项的一比一透传；与 make_report 同理。
+#[expect(
+    clippy::too_many_arguments,
+    reason = "CLI 选项 + sidecar provider 一比一透传，折结构体会让 dispatch 调用点同样冗长"
+)]
 pub fn copy_with_sidecar(
     sources: &[Source],
     output: Source,
@@ -132,7 +135,7 @@ pub fn copy_with_sidecar(
             0,
             0,
             0,
-            vec![],
+            Vec::new(),
         );
         emit_report(report_sink, &report);
         return Ok(report);
@@ -293,7 +296,10 @@ fn run_copy_loop(
 
 // 构造 CopyReport 值对象；抽出避免参数列表过长。
 // scanned = 入索引文件数（indexed）+ walker 触达但跳过的（empty/unreadable/walker_errors）。
-#[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "report 字段与 run_copy_loop 返回值一一对应；合并结构体反而在唯一调用点更绕"
+)]
 fn make_report(
     dry_run: bool,
     remove: bool,

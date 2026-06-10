@@ -75,7 +75,10 @@ pub fn tidy_with(factory: &dyn BackendFactory, command: Commands) -> Result<Comm
 }
 
 // Copy / Move 唯一区别是 `remove` 布尔；提到此处避免两个 arm 18 行同体重复。
-#[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "dispatch 单点接 6 个 CLI flag + factory + sources/output；折成结构体会让两个调用点也要先 Build 结构体"
+)]
 fn dispatch_copy_or_move(
     factory: &dyn BackendFactory,
     sources: Vec<Location>,
@@ -114,7 +117,9 @@ fn dispatch_find(
     let src_pairs = build_sources(factory, sources)?;
     let out_pair = output.map(|loc| build_source(factory, loc)).transpose()?;
     let find_report = crate::usecases::find_duplicates(secure, src_pairs, out_pair.as_ref())?;
-    // Find 与 Copy/Move 对称：均通过 ReportSink trait 注入，不再硬编码 JsonFileReportSink。
+    // Find use case 当前不接 sink（report 由 dispatch 层捕获最终结构后落盘），
+    // 与 Copy/Move 把 sink 当参数传给 use case 的形态不对称——find_duplicates
+    // 无 progress 回调需求，单点写盘已够；若未来需要流式输出再改为同 Copy 形态。
     if let Some(path) = report {
         let sink = JsonFileReportSink::new(path);
         sink.write(&Report::Find(&find_report));

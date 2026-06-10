@@ -216,19 +216,23 @@ fn populate_image_dates(
     local_offset: FixedOffset,
 ) {
     // 先 buffer 头部供 XMP fallback；seek 回起点后再喂给 nom-exif。
-    // read/seek 任一失败：head 留空，下面 nom-exif 路径继续跑（与原逻辑等价）。
+    // seek 失败时跳过 nom-exif 主路径但仍尝试 XMP fallback——head 已读入，
+    // 仅靠头部字节即可补 P0/P1 候选，比 mtime 兜底准确得多。
     let mut head = vec![0u8; XMP_SCAN_BYTES];
     let head_len = read_fill(reader.as_mut(), &mut head).unwrap_or(0);
     head.truncate(head_len);
     if reader.seek(io::SeekFrom::Start(0)).is_err() {
+        populate_image_xmp_fallback(&head, exif);
         return;
     }
 
     let Ok(ms) = MediaSource::seekable(reader) else {
+        populate_image_xmp_fallback(&head, exif);
         return;
     };
     let mut parser = MediaParser::new();
     let Ok(iter) = parser.parse_exif(ms) else {
+        populate_image_xmp_fallback(&head, exif);
         return;
     };
     let parsed: nom_exif::Exif = iter.into();

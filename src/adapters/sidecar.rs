@@ -141,9 +141,12 @@ pub(crate) fn parse_xmp_date(content: &str) -> Option<DateTime<Utc>> {
         .map(|dt| dt.with_timezone(&Utc))
 }
 
+// Google Takeout 历史导出多为字符串（如 "1714576200"），近年部分版本输出整数
+// （JSON number），两种都要接住，否则反序列化失败让 P3 候选静默丢失。
+// 用 serde_json::Value 二态匹配比写 deserialize_with 简洁，且不引第三方 helper。
 #[derive(Deserialize)]
 struct TakeoutTime {
-    timestamp: String,
+    timestamp: serde_json::Value,
 }
 
 #[derive(Deserialize)]
@@ -154,7 +157,11 @@ struct TakeoutEnvelope {
 
 pub(crate) fn parse_takeout_json(content: &str) -> Option<DateTime<Utc>> {
     let env: TakeoutEnvelope = serde_json::from_str(content).ok()?;
-    let secs: i64 = env.photo_taken_time.timestamp.parse().ok()?;
+    let secs: i64 = match env.photo_taken_time.timestamp {
+        serde_json::Value::String(s) => s.parse().ok()?,
+        serde_json::Value::Number(n) => n.as_i64()?,
+        _ => return None,
+    };
     // try_seconds 越界返 None；DateTime + TimeDelta 仍可能溢出，用 checked_add_signed 兜底。
     // 防止外部数据 (任意大整数 ≤ i64::MAX) 在 sidecar::discover 公开入口触发 panic。
     let delta = TimeDelta::try_seconds(secs)?;

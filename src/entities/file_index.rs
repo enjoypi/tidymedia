@@ -144,7 +144,10 @@ impl Index {
             .map(|(_, paths)| {
                 let mut same = HashMap::new();
                 for path in paths {
-                    let info = self.files.get(path).unwrap();
+                    let info = self
+                        .files
+                        .get(path)
+                        .expect("internal: similar_files entries must point to a known file");
                     if let Ok(key) = calc(info) {
                         same.entry((info.size, key))
                             .or_insert_with(HashSet::new)

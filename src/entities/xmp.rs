@@ -71,6 +71,9 @@ fn find_attr_rfc3339(haystack: &str, key: &str) -> Option<DateTime<FixedOffset>>
 
 // 把 `<!-- ... -->` 注释体替换为同字节数的空格，保持偏移与原串一致。
 // XML 注释不可嵌套，按 `<!--`/`-->` 线性配对。注释边界全 ASCII，操作不破坏 UTF-8。
+// 未闭合 `<!--` 视为延伸到 EOF 的注释体（与 lenient XML 解析对齐）：避免把注释
+// 中的 `photoshop:DateCreated="OLD"` 字面量误读为合法属性。XMP packet 是 well-formed
+// XML 子集，未闭合注释属 malformed，宁可放弃后续也不冒误读风险。
 pub(crate) fn strip_xml_comments(content: &str) -> String {
     let mut out = String::with_capacity(content.len());
     let bytes = content.as_bytes();

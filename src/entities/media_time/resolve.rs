@@ -81,9 +81,10 @@ fn apply_filters(candidates: Vec<Candidate>, now: DateTime<Utc>) -> Vec<(Candida
         .collect()
 }
 
-/// 多数派仲裁：best 为 P0 时，若存在 filename 候选与某 mtime 候选互证
-/// （差 ≤ `CONFLICT_OVER_DAY_SECS`）且该 filename 与 P0 差 >
-/// `MTIME_VS_P0_HINT_SECS`，返回该 filename 候选作为新 best。
+/// 多数派仲裁：best 为 P0 时，若存在高置信 filename 候选与某高置信 mtime 候选互证
+/// （差 ≤ `CONFLICT_OVER_DAY_SECS`）且 filename 与 P0 差 > `MTIME_VS_P0_HINT_SECS`，
+/// 返回该 filename 候选作为新 best。LowConfidencePre1995 的两票互证不足以撼动 P0
+/// （pre-1995 的 filename + mtime 常见于扫描件被批量 touch，置信度低不应推翻可信 P0）。
 fn majority_override(
     best: &Candidate,
     others: &[(Candidate, Validity)],
@@ -93,11 +94,13 @@ fn majority_override(
     }
     others
         .iter()
-        .find(|(f, _)| {
+        .find(|(f, v)| {
             is_filename_source(f.source)
+                && matches!(v, Validity::Valid)
                 && (best.utc - f.utc).num_seconds().abs() > MTIME_VS_P0_HINT_SECS
-                && others.iter().any(|(m, _)| {
+                && others.iter().any(|(m, mv)| {
                     m.source == Source::FsMtime
+                        && matches!(mv, Validity::Valid)
                         && (f.utc - m.utc).num_seconds().abs() <= CONFLICT_OVER_DAY_SECS
                 })
         })

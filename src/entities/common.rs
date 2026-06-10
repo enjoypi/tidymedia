@@ -11,8 +11,13 @@ pub type Result<T> = std::result::Result<T, Error>;
 /// 判 path 是否在 prefix 目录下（或恰等于 prefix）：纯 `starts_with` 会让
 /// `/photos_backup` 误判为 `/photos` 子目录，必须额外校验 prefix 后紧跟路径
 /// 分隔符。Unix 用 `/`，Windows 兼顾 `\`。
+/// 调用方传 prefix 末尾若已含分隔符（用户带尾斜杠 / dry-run 下原始字符串保留），
+/// 内部剥掉避免 `rest` 既非空又不以分隔符开头的盲区误判。
 #[must_use]
 pub fn under_prefix(path: &str, prefix: &str) -> bool {
+    let prefix = prefix
+        .strip_suffix(['/', '\\'])
+        .unwrap_or(prefix);
     if !path.starts_with(prefix) {
         return false;
     }

@@ -165,11 +165,21 @@ fn try_pixel(stem: &str, default_offset: FixedOffset) -> Option<Candidate> {
 
 fn try_screenshot(stem: &str, default_offset: FixedOffset) -> Option<Candidate> {
     let rest = stem.strip_prefix(SCREENSHOT_PREFIX)?;
-    // 期望格式：yyyy-mm-dd-HH-mm-ss（19 chars）
-    if rest.len() != 19 {
+    // 支持两种主流截图命名（Windows Snip & Sketch / Samsung / MIUI / 原生 Android）：
+    //   - yyyy-mm-dd-HH-mm-ss（19 chars，全 dash）
+    //   - yyyymmdd_HHMMSS（15 chars，与 IMG_/DSC_ 同模板，Samsung/MIUI 常见）
+    // 后者若退到 try_loose_yyyymmdd 兜底会丢失时分秒精度，必须在此显式解析。
+    let naive = if rest.len() >= 19
+        && let Ok(n) = NaiveDateTime::parse_from_str(&rest[..19], "%Y-%m-%d-%H-%M-%S")
+    {
+        n
+    } else if rest.len() >= 15
+        && let Ok(n) = NaiveDateTime::parse_from_str(&rest[..15], "%Y%m%d_%H%M%S")
+    {
+        n
+    } else {
         return None;
-    }
-    let naive = NaiveDateTime::parse_from_str(rest, "%Y-%m-%d-%H-%M-%S").ok()?;
+    };
     Some(naive_to_candidate(
         naive,
         default_offset,
