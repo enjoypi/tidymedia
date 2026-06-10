@@ -12,7 +12,7 @@ fn exif_create_date_picked_when_no_p0() {
         false,
     )
     .unwrap();
-    let d = resolve(vec![c], None, fixed_now()).unwrap();
+    let d = resolve(vec![c], None, None, fixed_now()).unwrap();
     assert_eq!(d.priority, Priority::P1);
     assert_eq!(d.source, Source::ExifCreateDate);
 }
@@ -27,7 +27,7 @@ fn quicktime_create_date_picked_when_no_p0() {
         false,
     )
     .unwrap();
-    let d = resolve(vec![c], None, fixed_now()).unwrap();
+    let d = resolve(vec![c], None, None, fixed_now()).unwrap();
     assert_eq!(d.priority, Priority::P1);
     assert_eq!(d.source, Source::QuickTimeCreateDate);
 }

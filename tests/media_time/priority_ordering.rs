@@ -30,7 +30,7 @@ fn priority_descends_p0_to_p4() {
         )
         .unwrap(),
     ];
-    let d = resolve(cs, None, fixed_now()).unwrap();
+    let d = resolve(cs, None, None, fixed_now()).unwrap();
     assert_eq!(d.priority, Priority::P0);
     assert_eq!(d.source, Source::ExifDateTimeOriginal);
 }
@@ -52,7 +52,7 @@ fn same_priority_takes_earlier() {
         false,
     )
     .unwrap();
-    let d = resolve(vec![later, earlier], None, fixed_now()).unwrap();
+    let d = resolve(vec![later, earlier], None, None, fixed_now()).unwrap();
     assert_eq!(d.priority, Priority::P0);
     assert_eq!(d.utc.timestamp(), 1_700_000_100);
 }
@@ -60,5 +60,5 @@ fn same_priority_takes_earlier() {
 /// 候选全空 → resolve 返回 None。
 #[test]
 fn no_candidates_resolves_to_none() {
-    assert!(resolve(vec![], None, fixed_now()).is_none());
+    assert!(resolve(vec![], None, None, fixed_now()).is_none());
 }

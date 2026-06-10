@@ -139,9 +139,10 @@ fn from_path_reads_jpeg_with_exif() {
     assert_eq!(exif.mime_type(), "image/jpeg");
     assert!(exif.is_media());
     // EXIF: DateTimeOriginal=2024-01-01, CreateDate=2024-01-02 (UTC).
-    // ModifyDate=2024-01-03 在 EXIF block 里存在但故意不读取（避免编辑时间污染）。
+    // ModifyDate=2024-01-03 读取但不进时间候选，仅供多数派仲裁识别 re-save。
     assert_eq!(exif.date_time_original(), 1_704_110_400);
     assert_eq!(exif.exif_create_date(), 1_704_196_800);
+    assert_eq!(exif.exif_modify_date(), 1_704_283_200);
 }
 
 /// 同一张 JPEG，传入 +08:00 时区 → `NaiveDateTime` 按 +08:00 解释，epoch 早 8h。

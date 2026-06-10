@@ -39,7 +39,7 @@ fn epoch_1904_filtered_during_resolve() {
         false,
     )
     .unwrap();
-    let d = resolve(vec![cand, good], None, fixed_now()).unwrap();
+    let d = resolve(vec![cand, good], None, None, fixed_now()).unwrap();
     assert_eq!(d.source, Source::ExifDateTimeOriginal);
 }
 
@@ -56,7 +56,7 @@ fn future_p0_falls_to_valid_p1() {
     let future = (fixed_now().timestamp() + 100 * 86_400).cast_unsigned();
     let bogus = epoch_to_candidate(future, Source::ExifDateTimeOriginal, None, false).unwrap();
     let good = epoch_to_candidate(1_700_000_100, Source::ExifCreateDate, None, false).unwrap();
-    let d = resolve(vec![bogus, good], None, fixed_now()).unwrap();
+    let d = resolve(vec![bogus, good], None, None, fixed_now()).unwrap();
     assert_eq!(d.priority, Priority::P1);
 }
 
@@ -65,7 +65,7 @@ fn future_p0_falls_to_valid_p1() {
 fn pre_1995_kept_but_low_confidence() {
     // 1980-01-01T00:00:00Z = 315532800
     let c = epoch_to_candidate(315_532_800, Source::ExifDateTimeOriginal, None, false).unwrap();
-    let d = resolve(vec![c], None, fixed_now()).unwrap();
+    let d = resolve(vec![c], None, None, fixed_now()).unwrap();
     assert_eq!(d.confidence, Confidence::Low);
 }
 
@@ -103,7 +103,7 @@ fn modifydate_has_no_source_variant() {
 fn screenshot_without_exif_falls_to_filename_p2() {
     use tidymedia::media_time::filename::parse_filename;
     let c = parse_filename("Screenshot_2024-05-17-12-00-00.jpg", utc_offset()).unwrap();
-    let d = resolve(vec![c], None, fixed_now()).unwrap();
+    let d = resolve(vec![c], None, None, fixed_now()).unwrap();
     assert_eq!(d.priority, Priority::P2);
     assert_eq!(d.source, Source::FilenameScreenshot);
 }
@@ -113,7 +113,7 @@ fn screenshot_without_exif_falls_to_filename_p2() {
 fn im_stripped_exif_uses_filename_millis() {
     use tidymedia::media_time::filename::parse_filename;
     let c = parse_filename("1715961600000.jpg", utc_offset()).unwrap();
-    let d = resolve(vec![c], None, fixed_now()).unwrap();
+    let d = resolve(vec![c], None, None, fixed_now()).unwrap();
     assert_eq!(d.priority, Priority::P2);
     assert_eq!(d.source, Source::FilenameUnixMillis);
 }
@@ -129,7 +129,7 @@ fn mtime_never_promoted_to_p0() {
         false,
     )
     .unwrap();
-    let d = resolve(vec![mtime, exif], None, fixed_now()).unwrap();
+    let d = resolve(vec![mtime, exif], None, None, fixed_now()).unwrap();
     assert_eq!(d.priority, Priority::P0);
     assert_eq!(d.source, Source::ExifDateTimeOriginal);
 }

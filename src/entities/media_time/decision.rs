@@ -44,4 +44,8 @@ pub enum ConflictKind {
     /// filename 与 mtime 互证（差≤1天）且都与 P0 差>30天 → 多数派推翻 P0；
     /// `other_*` 记录被推翻的 P0 候选（相机时钟错误的典型痕迹）
     P0OverruledByMajority,
+    /// 多数派互证成立但 EXIF `ModifyDate` 与 filename 候选差≤1天 →
+    /// filename+mtime 被判定为 re-save 时戳（第三方批量 re-save 的典型痕迹），
+    /// 否决推翻、保 P0；`other_*` 记录被否决的 filename 候选
+    MajorityVetoedByModifyDate,
 }

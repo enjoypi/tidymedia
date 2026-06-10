@@ -16,7 +16,7 @@ fn decision_carries_all_seven_fields() {
     )
     .unwrap();
     let gps = ts(1_700_000_100 + 48 * 3600);
-    let d = resolve(vec![p0], Some(gps), fixed_now()).unwrap();
+    let d = resolve(vec![p0], Some(gps), None, fixed_now()).unwrap();
 
     assert_eq!(d.utc.timestamp(), 1_700_000_100);
     assert_eq!(d.offset, Some(utc_offset()));
@@ -36,7 +36,7 @@ fn decision_carries_all_seven_fields() {
 #[test]
 fn confidence_signals_pre_1995_for_human_review() {
     let pre = epoch_to_candidate(315_532_800, Source::ExifDateTimeOriginal, None, false).unwrap();
-    let d = resolve(vec![pre], None, fixed_now()).unwrap();
+    let d = resolve(vec![pre], None, None, fixed_now()).unwrap();
     assert_eq!(d.confidence, Confidence::Low);
 }
 
@@ -58,7 +58,7 @@ fn conflicts_can_carry_multiple_entries() {
     )
     .unwrap();
     let gps = ts(1_700_000_100 + 48 * 3600);
-    let d = resolve(vec![p0, fname], Some(gps), fixed_now()).unwrap();
+    let d = resolve(vec![p0, fname], Some(gps), None, fixed_now()).unwrap();
     assert_eq!(d.conflicts.len(), 2);
 }
 
@@ -79,7 +79,7 @@ fn conflict_carries_other_source_when_internal() {
         false,
     )
     .unwrap();
-    let d = resolve(vec![p0, fname], None, fixed_now()).unwrap();
+    let d = resolve(vec![p0, fname], None, None, fixed_now()).unwrap();
     assert_eq!(d.conflicts.len(), 1);
     assert_eq!(
         d.conflicts[0].other_source,
@@ -98,7 +98,7 @@ fn gps_conflict_has_no_other_source() {
     )
     .unwrap();
     let gps = ts(1_700_000_100 + 48 * 3600);
-    let d = resolve(vec![p0], Some(gps), fixed_now()).unwrap();
+    let d = resolve(vec![p0], Some(gps), None, fixed_now()).unwrap();
     assert_eq!(d.conflicts[0].kind, ConflictKind::GpsOver24h);
     assert_eq!(d.conflicts[0].other_source, None);
 }

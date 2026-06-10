@@ -13,7 +13,7 @@ fn gps_diff_over_24h_recorded_as_conflict() {
     )
     .unwrap();
     let gps = ts(1_700_000_100 + 48 * 3600); // +48h
-    let d = resolve(vec![p0], Some(gps), fixed_now()).unwrap();
+    let d = resolve(vec![p0], Some(gps), None, fixed_now()).unwrap();
     assert_eq!(d.conflicts.len(), 1);
     assert_eq!(d.conflicts[0].kind, ConflictKind::GpsOver24h);
 }
@@ -29,7 +29,7 @@ fn gps_diff_within_24h_no_conflict() {
     )
     .unwrap();
     let gps = ts(1_700_000_100 + 3600); // +1h
-    let d = resolve(vec![p0], Some(gps), fixed_now()).unwrap();
+    let d = resolve(vec![p0], Some(gps), None, fixed_now()).unwrap();
     assert!(d.conflicts.is_empty());
 }
 
@@ -44,7 +44,7 @@ fn gps_diff_exactly_24h_no_conflict() {
     )
     .unwrap();
     let gps = ts(1_700_000_100 + 24 * 3600); // 恰 +24h
-    let d = resolve(vec![p0], Some(gps), fixed_now()).unwrap();
+    let d = resolve(vec![p0], Some(gps), None, fixed_now()).unwrap();
     assert!(d.conflicts.is_empty());
 }
 
@@ -65,7 +65,7 @@ fn filename_diff_over_one_day_recorded_as_conflict() {
         true,
     )
     .unwrap();
-    let d = resolve(vec![p0, fname], None, fixed_now()).unwrap();
+    let d = resolve(vec![p0, fname], None, None, fixed_now()).unwrap();
     assert_eq!(d.conflicts.len(), 1);
     assert_eq!(d.conflicts[0].kind, ConflictKind::FilenameOver1Day);
 }
@@ -87,7 +87,7 @@ fn filename_diff_exactly_one_day_no_conflict() {
         true,
     )
     .unwrap();
-    let d = resolve(vec![p0, fname], None, fixed_now()).unwrap();
+    let d = resolve(vec![p0, fname], None, None, fixed_now()).unwrap();
     assert!(d.conflicts.is_empty());
 }
 
@@ -103,7 +103,7 @@ fn mtime_much_earlier_than_p0_only_hints() {
     .unwrap();
     let mtime =
         epoch_to_candidate(1_700_000_100 - 60 * 86_400, Source::FsMtime, None, false).unwrap();
-    let d = resolve(vec![p0, mtime], None, fixed_now()).unwrap();
+    let d = resolve(vec![p0, mtime], None, None, fixed_now()).unwrap();
     assert_eq!(d.conflicts.len(), 1);
     assert_eq!(d.conflicts[0].kind, ConflictKind::MtimeMuchEarlierThanP0);
 }
@@ -121,7 +121,7 @@ fn mtime_slightly_earlier_than_p0_within_threshold_no_conflict() {
     .unwrap();
     let mtime =
         epoch_to_candidate(1_700_000_100 - 5 * 86_400, Source::FsMtime, None, false).unwrap();
-    let d = resolve(vec![p0, mtime], None, fixed_now()).unwrap();
+    let d = resolve(vec![p0, mtime], None, None, fixed_now()).unwrap();
     assert!(d.conflicts.is_empty());
 }
 
@@ -143,7 +143,7 @@ fn mtime_exactly_threshold_earlier_than_p0_no_conflict() {
         false,
     )
     .unwrap();
-    let d = resolve(vec![p0, mtime], None, fixed_now()).unwrap();
+    let d = resolve(vec![p0, mtime], None, None, fixed_now()).unwrap();
     assert!(d.conflicts.is_empty());
 }
 
@@ -159,7 +159,7 @@ fn mtime_later_than_p0_no_conflict() {
     .unwrap();
     let mtime =
         epoch_to_candidate(1_700_000_100 + 60 * 86_400, Source::FsMtime, None, false).unwrap();
-    let d = resolve(vec![p0, mtime], None, fixed_now()).unwrap();
+    let d = resolve(vec![p0, mtime], None, None, fixed_now()).unwrap();
     assert!(d.conflicts.is_empty());
 }
 
@@ -175,6 +175,6 @@ fn non_p0_best_skips_cross_validation() {
     .unwrap();
     let mtime =
         epoch_to_candidate(1_700_000_100 - 60 * 86_400, Source::FsMtime, None, false).unwrap();
-    let d = resolve(vec![p2, mtime], None, fixed_now()).unwrap();
+    let d = resolve(vec![p2, mtime], None, None, fixed_now()).unwrap();
     assert!(d.conflicts.is_empty());
 }

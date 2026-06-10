@@ -8,6 +8,7 @@ use std::time::SystemTime;
 use camino::Utf8Path;
 use camino::Utf8PathBuf;
 use chrono::FixedOffset;
+use chrono::TimeZone;
 use chrono::Utc;
 use parking_lot::Mutex;
 use tracing::warn;
@@ -207,6 +208,14 @@ impl Info {
         // P0/P1 的 epoch 已在 EXIF 解析层（from_path_with_offset）按配置时区转换完毕，
         // 这里的 offset 对其仅作候选元数据。
         let gps_utc = self.exif.as_ref().and_then(exif::Exif::gps_utc);
+        // ModifyDate 不进候选，仅作多数派仲裁的 re-save 旁证；epoch 已在
+        // EXIF 解析层按配置时区转换，0 = 缺失。
+        let modify_date_utc = self
+            .exif
+            .as_ref()
+            .map(exif::Exif::exif_modify_date)
+            .filter(|&s| s > 0)
+            .and_then(|s| Utc.timestamp_opt(s.cast_signed(), 0).single());
         let mut candidates = match self.exif.as_ref() {
             Some(exif) => media_time::candidates_from_exif(exif, default_offset),
             None => Vec::new(),
@@ -223,7 +232,7 @@ impl Info {
 
         // resolve 返回 None（候选全部被过滤）与"低于阈值"走同一条 fallback 路径，
         // 避免在 create_time 里多一条不可稳定触发的分支。
-        let decision = media_time::resolve(candidates, gps_utc, Utc::now());
+        let decision = media_time::resolve(candidates, gps_utc, modify_date_utc, Utc::now());
         // 冲突优先告警，不静默修正。
         if let Some(ref d) = decision
             && !d.conflicts.is_empty()

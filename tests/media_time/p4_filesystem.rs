@@ -28,7 +28,7 @@ fn p4_lowest_priority() {
         false,
     )
     .unwrap();
-    let d = resolve(vec![p4, p0], None, fixed_now()).unwrap();
+    let d = resolve(vec![p4, p0], None, None, fixed_now()).unwrap();
     assert_eq!(d.priority, Priority::P0);
     assert_eq!(d.utc.timestamp(), 1_700_000_000);
 }
@@ -37,7 +37,7 @@ fn p4_lowest_priority() {
 #[test]
 fn mtime_only_picked_when_nothing_else() {
     let p4 = epoch_to_candidate(1_714_545_000, Source::FsMtime, None, false).unwrap();
-    let d = resolve(vec![p4], None, fixed_now()).unwrap();
+    let d = resolve(vec![p4], None, None, fixed_now()).unwrap();
     assert_eq!(d.priority, Priority::P4);
     assert_eq!(d.utc.timestamp(), 1_714_545_000);
 }

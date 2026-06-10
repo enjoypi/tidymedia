@@ -48,13 +48,16 @@ const XMP_SCAN_BYTES: usize = 64 * 1024;
 /// 容器内自带时间字段。文件系统 mtime / btime 不在此结构体里——
 /// Clean Architecture 的边界让 Exif 只持有 EXIF/视频容器数据；
 /// 文件系统时间由 `entities::media_time::fs_time` 直接从 `fs::Metadata` 取。
-/// EXIF `ModifyDate` 故意不解析，避免编辑/导出时间污染判定。
+/// EXIF `ModifyDate` 解析但**不进时间候选**（编辑/导出时间会污染判定），
+/// 仅供多数派仲裁识别 re-save 痕迹：filename+mtime 与 `ModifyDate` 三方互证
+/// 时说明三者都是 re-save 时戳，不构成推翻 P0 的证据。
 #[derive(Clone, Debug, Default)]
 pub struct Exif {
     mime_type: String,
 
     create_date: u64,
     date_time_original: u64,
+    modify_date: u64,
 
     // 视频容器（QuickTime / MP4 / MKV）创建时间。
     // iPhone 的 `com.apple.quicktime.creationdate`（带时区）被 nom-exif
@@ -127,6 +130,12 @@ impl Exif {
 
     pub fn exif_create_date(&self) -> u64 {
         self.create_date
+    }
+
+    /// EXIF `ModifyDate`（编辑/导出时间）。不进时间候选，仅供多数派仲裁
+    /// 识别 re-save 痕迹；0 = 缺失。
+    pub fn exif_modify_date(&self) -> u64 {
+        self.modify_date
     }
 
     pub fn date_time_original(&self) -> u64 {
@@ -255,7 +264,11 @@ fn populate_image_dates(
     }
     // GPSDateStamp + GPSTimeStamp 合成 GPS UTC 作校验锚点。
     exif.gps_utc = parse_gps_utc(&parsed);
-    // ExifTag::ModifyDate 故意不读，避免被编辑/导出时间污染判定。
+    // ModifyDate 不进时间候选（编辑/导出时间会污染判定），仅供多数派仲裁
+    // 识别 re-save 痕迹（filename+mtime+ModifyDate 三方互证 → 否决推翻 P0）。
+    if let Some(v) = parsed.get(ExifTag::ModifyDate) {
+        exif.modify_date = entry_value_to_epoch(v, local_offset);
+    }
     // Make / Model：仅在 EXIF 存在时读取；用于 archive_template 占位符。
     exif.make = parsed
         .get(ExifTag::Make)

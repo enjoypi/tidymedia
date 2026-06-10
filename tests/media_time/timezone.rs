@@ -37,7 +37,7 @@ fn candidate_with_native_offset_not_marked_inferred() {
         false, // 来源含原生 offset → not inferred
     )
     .unwrap();
-    let d = resolve(vec![c], None, fixed_now()).unwrap();
+    let d = resolve(vec![c], None, None, fixed_now()).unwrap();
     assert_eq!(d.offset, Some(east8()));
     assert!(!d.inferred_offset);
 }
@@ -46,7 +46,7 @@ fn candidate_with_native_offset_not_marked_inferred() {
 #[test]
 fn decision_propagates_offset_from_best() {
     let c = epoch_to_candidate(1_700_000_000, Source::MkvDateUtc, None, false).unwrap();
-    let d = resolve(vec![c], None, fixed_now()).unwrap();
+    let d = resolve(vec![c], None, None, fixed_now()).unwrap();
     assert_eq!(d.offset, None);
 
     let c2 = epoch_to_candidate(
@@ -56,6 +56,6 @@ fn decision_propagates_offset_from_best() {
         false,
     )
     .unwrap();
-    let d2 = resolve(vec![c2], None, fixed_now()).unwrap();
+    let d2 = resolve(vec![c2], None, None, fixed_now()).unwrap();
     assert_eq!(d2.offset, Some(utc_offset()));
 }

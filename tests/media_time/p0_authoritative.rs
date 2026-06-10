@@ -12,7 +12,7 @@ fn exif_datetimeoriginal_yields_p0() {
         false,
     )
     .unwrap();
-    let d = resolve(vec![c], None, fixed_now()).unwrap();
+    let d = resolve(vec![c], None, None, fixed_now()).unwrap();
     assert_eq!(d.priority, Priority::P0);
     assert_eq!(d.source, Source::ExifDateTimeOriginal);
     assert_eq!(d.utc.timestamp(), 1_714_545_000);
@@ -28,7 +28,7 @@ fn quicktime_creationdate_yields_p0() {
         false,
     )
     .unwrap();
-    let d = resolve(vec![c], None, fixed_now()).unwrap();
+    let d = resolve(vec![c], None, None, fixed_now()).unwrap();
     assert_eq!(d.priority, Priority::P0);
     assert_eq!(d.source, Source::QuickTimeCreationDate);
 }
@@ -37,7 +37,7 @@ fn quicktime_creationdate_yields_p0() {
 #[test]
 fn mkv_dateutc_yields_p0() {
     let c = epoch_to_candidate(1_714_545_000, Source::MkvDateUtc, None, false).unwrap();
-    let d = resolve(vec![c], None, fixed_now()).unwrap();
+    let d = resolve(vec![c], None, None, fixed_now()).unwrap();
     assert_eq!(d.priority, Priority::P0);
     assert_eq!(d.source, Source::MkvDateUtc);
 }
@@ -59,7 +59,7 @@ fn p0_beats_p1_even_if_later() {
         false,
     )
     .unwrap();
-    let d = resolve(vec![earlier_p1, later_p0], None, fixed_now()).unwrap();
+    let d = resolve(vec![earlier_p1, later_p0], None, None, fixed_now()).unwrap();
     assert_eq!(d.priority, Priority::P0);
     assert_eq!(d.utc.timestamp(), 1_700_000_200);
 }

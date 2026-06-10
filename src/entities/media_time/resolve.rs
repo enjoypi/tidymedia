@@ -2,6 +2,7 @@
 //   - 按 Priority 升序排序（P0 优先），同优先级取较早 utc
 //   - 1904 / 未来时间过滤，1995 之前降置信
 //   - 当 best.priority == P0 时做交叉校验：GPS、filename、mtime
+//   - 多数派仲裁可被 EXIF ModifyDate 三方互证否决（re-save 痕迹识别）
 
 use chrono::DateTime;
 use chrono::Utc;
@@ -27,6 +28,7 @@ const CONFLICT_OVER_DAY_SECS: i64 = 86_400;
 pub fn resolve(
     candidates: Vec<Candidate>,
     gps_utc: Option<DateTime<Utc>>,
+    modify_date_utc: Option<DateTime<Utc>>,
     now: DateTime<Utc>,
 ) -> Option<MediaTimeDecision> {
     let mut surviving = apply_filters(candidates, now);
@@ -44,16 +46,32 @@ pub fn resolve(
     // 多数派仲裁：P0 错误（相机时钟未调）的典型痕迹是 filename 与 mtime
     // 互证一致却与 P0 相差悬殊；两票对一票，推翻 P0 并记冲突（不静默）。
     let mut conflicts = Vec::new();
-    if let Some((winner, v)) = majority_override(&best, &surviving[1..]) {
-        conflicts.push(Conflict {
-            kind: ConflictKind::P0OverruledByMajority,
-            other_utc: best.utc,
-            other_source: Some(best.source),
-            diff_secs: (best.utc - winner.utc).num_seconds(),
-        });
-        (best, validity) = (winner, v);
-    } else if best.priority() == Priority::P0 {
-        conflicts = detect_conflicts(&best, &surviving[1..], gps_utc);
+    match majority_verdict(&best, &surviving[1..], modify_date_utc) {
+        MajorityVerdict::Override(winner, v) => {
+            conflicts.push(Conflict {
+                kind: ConflictKind::P0OverruledByMajority,
+                other_utc: best.utc,
+                other_source: Some(best.source),
+                diff_secs: (best.utc - winner.utc).num_seconds(),
+            });
+            (best, validity) = (winner, v);
+        }
+        MajorityVerdict::Vetoed(loser) => {
+            // 否决可观测：记被否决的 filename 票，再走常规冲突检测
+            //（filename 与 P0 差>30天必然附带 FilenameOver1Day 提示）。
+            conflicts.push(Conflict {
+                kind: ConflictKind::MajorityVetoedByModifyDate,
+                other_utc: loser.utc,
+                other_source: Some(loser.source),
+                diff_secs: (best.utc - loser.utc).num_seconds(),
+            });
+            conflicts.extend(detect_conflicts(&best, &surviving[1..], gps_utc));
+        }
+        MajorityVerdict::NoQuorum => {
+            if best.priority() == Priority::P0 {
+                conflicts = detect_conflicts(&best, &surviving[1..], gps_utc);
+            }
+        }
     }
     let confidence = match validity {
         Validity::LowConfidencePre1995 => Confidence::Low,
@@ -81,30 +99,54 @@ fn apply_filters(candidates: Vec<Candidate>, now: DateTime<Utc>) -> Vec<(Candida
         .collect()
 }
 
+/// 多数派仲裁结论。`Vetoed` 仅在互证成立但被 `ModifyDate` 否决时出现，
+/// 携带被否决的 filename 票供调用方记冲突（不静默）。
+enum MajorityVerdict {
+    Override(Candidate, Validity),
+    Vetoed(Candidate),
+    NoQuorum,
+}
+
 /// 多数派仲裁：best 为 P0 时，若存在高置信 filename 候选与某高置信 mtime 候选互证
 /// （差 ≤ `CONFLICT_OVER_DAY_SECS`）且 filename 与 P0 差 > `MTIME_VS_P0_HINT_SECS`，
-/// 返回该 filename 候选作为新 best。LowConfidencePre1995 的两票互证不足以撼动 P0
+/// 该 filename 候选成为新 best。LowConfidencePre1995 的两票互证不足以撼动 P0
 /// （pre-1995 的 filename + mtime 常见于扫描件被批量 touch，置信度低不应推翻可信 P0）。
-fn majority_override(
+///
+/// `ModifyDate` 否决：互证成立但 filename 票与 EXIF `ModifyDate` 差 ≤ 1 天时，
+/// filename+mtime+`ModifyDate` 三方吻合说明三者都是 re-save 时戳（第三方批量
+/// re-save 保留 DTO、刷新 `ModifyDate`+mtime 并按 re-save 时间命名的典型痕迹），
+/// 不构成推翻 P0 的证据。无需再比 `ModifyDate` 与 P0 的距离——filename 与 P0
+/// 差>30天是互证前提，filename≈`ModifyDate` 已蕴含 `ModifyDate` 远离 P0。
+fn majority_verdict(
     best: &Candidate,
     others: &[(Candidate, Validity)],
-) -> Option<(Candidate, Validity)> {
+    modify_date_utc: Option<DateTime<Utc>>,
+) -> MajorityVerdict {
     if best.priority() != Priority::P0 {
-        return None;
+        return MajorityVerdict::NoQuorum;
     }
-    others
-        .iter()
-        .find(|(f, v)| {
-            is_filename_source(f.source)
-                && matches!(v, Validity::Valid)
-                && (best.utc - f.utc).num_seconds().abs() > MTIME_VS_P0_HINT_SECS
-                && others.iter().any(|(m, mv)| {
-                    m.source == Source::FsMtime
-                        && matches!(mv, Validity::Valid)
-                        && (f.utc - m.utc).num_seconds().abs() <= CONFLICT_OVER_DAY_SECS
-                })
-        })
-        .copied()
+    let quorum = others.iter().find(|(f, v)| {
+        is_filename_source(f.source)
+            && matches!(v, Validity::Valid)
+            && (best.utc - f.utc).num_seconds().abs() > MTIME_VS_P0_HINT_SECS
+            && others.iter().any(|(m, mv)| {
+                m.source == Source::FsMtime
+                    && matches!(mv, Validity::Valid)
+                    && (f.utc - m.utc).num_seconds().abs() <= CONFLICT_OVER_DAY_SECS
+            })
+    });
+    match quorum {
+        Some(&(winner, v)) => {
+            let vetoed = modify_date_utc
+                .is_some_and(|md| (winner.utc - md).num_seconds().abs() <= CONFLICT_OVER_DAY_SECS);
+            if vetoed {
+                MajorityVerdict::Vetoed(winner)
+            } else {
+                MajorityVerdict::Override(winner, v)
+            }
+        }
+        None => MajorityVerdict::NoQuorum,
+    }
 }
 
 fn detect_conflicts(
@@ -182,7 +224,7 @@ mod tests {
 
     #[test]
     fn empty_returns_none() {
-        assert!(resolve(vec![], None, now()).is_none());
+        assert!(resolve(vec![], None, None, now()).is_none());
     }
 
     #[test]
@@ -192,6 +234,7 @@ mod tests {
                 cand(Source::ExifCreateDate, 1_700_000_100), // P1 更早
                 cand(Source::ExifDateTimeOriginal, 1_700_000_200), // P0 更晚但优先级更高
             ],
+            None,
             None,
             now(),
         )
@@ -209,6 +252,7 @@ mod tests {
                 cand(Source::QuickTimeCreationDate, 1_700_000_100),
             ],
             None,
+            None,
             now(),
         )
         .unwrap();
@@ -223,6 +267,7 @@ mod tests {
                 cand(Source::QuickTimeCreateDate, epoch),
                 cand(Source::ExifCreateDate, 1_700_000_100),
             ],
+            None,
             None,
             now(),
         )
@@ -239,6 +284,7 @@ mod tests {
                 cand(Source::ExifCreateDate, 1_700_000_100),
             ],
             None,
+            None,
             now(),
         )
         .unwrap();
@@ -249,7 +295,13 @@ mod tests {
     fn pre_1995_kept_with_low_confidence() {
         // 1980-01-01
         let pre = 315_532_800;
-        let d = resolve(vec![cand(Source::ExifDateTimeOriginal, pre)], None, now()).unwrap();
+        let d = resolve(
+            vec![cand(Source::ExifDateTimeOriginal, pre)],
+            None,
+            None,
+            now(),
+        )
+        .unwrap();
         assert_eq!(d.confidence, Confidence::Low);
     }
 
@@ -257,6 +309,7 @@ mod tests {
     fn confidence_high_when_no_pre_1995() {
         let d = resolve(
             vec![cand(Source::ExifDateTimeOriginal, 1_700_000_100)],
+            None,
             None,
             now(),
         )
@@ -271,6 +324,7 @@ mod tests {
         let d = resolve(
             vec![cand(Source::ExifDateTimeOriginal, p0)],
             Some(gps),
+            None,
             now(),
         )
         .unwrap();
@@ -285,6 +339,7 @@ mod tests {
         let d = resolve(
             vec![cand(Source::ExifDateTimeOriginal, p0)],
             Some(gps),
+            None,
             now(),
         )
         .unwrap();
@@ -299,6 +354,7 @@ mod tests {
                 cand(Source::ExifDateTimeOriginal, p0),
                 cand(Source::FilenamePhone, p0 + 2 * 86_400),
             ],
+            None,
             None,
             now(),
         )
@@ -316,6 +372,7 @@ mod tests {
                 cand(Source::FsMtime, p0 - 60 * 86_400),
             ],
             None,
+            None,
             now(),
         )
         .unwrap();
@@ -332,6 +389,7 @@ mod tests {
                 cand(Source::FsMtime, p0 + 60 * 86_400),
             ],
             None,
+            None,
             now(),
         )
         .unwrap();
@@ -347,6 +405,7 @@ mod tests {
                 cand(Source::FilenamePhone, 1_700_000_100),
                 cand(Source::FsMtime, 1_700_000_100 - 60 * 86_400),
             ],
+            None,
             None,
             now(),
         )
@@ -368,6 +427,7 @@ mod tests {
                 cand(Source::FilenameDashedDateTime, real),
                 cand(Source::FsMtime, real + 3600),
             ],
+            None,
             None,
             now(),
         )
@@ -397,6 +457,7 @@ mod tests {
                 cand(Source::FsMtime, f + 3 * 86_400),
             ],
             None,
+            None,
             now(),
         )
         .unwrap();
@@ -413,6 +474,7 @@ mod tests {
                 cand(Source::ExifDateTimeOriginal, p0),
                 cand(Source::FilenameDashedDateTime, p0 + 600 * 86_400),
             ],
+            None,
             None,
             now(),
         )
@@ -432,6 +494,7 @@ mod tests {
                 cand(Source::FsMtime, f),
             ],
             None,
+            None,
             now(),
         )
         .unwrap();
@@ -440,11 +503,121 @@ mod tests {
         assert_eq!(d.conflicts[0].kind, ConflictKind::FilenameOver1Day);
     }
 
+    // ── ModifyDate 三方互证否决：filename+mtime 与 ModifyDate 吻合 = re-save 痕迹 ──
+    // 典型场景：第三方批量 re-save 保留 DTO、刷新 ModifyDate+mtime 并按
+    // re-save 时间命名（2009\02\2009-10-08 20-15-19.JPG，DTO=2009-02-13 真拍摄）。
+
+    #[test]
+    fn p0_kept_when_modify_date_corroborates_majority() {
+        let p0 = 1_000_000_000;
+        let resave = p0 + 600 * 86_400;
+        let md = Utc.timestamp_opt(resave + 1800, 0).single().unwrap();
+        let d = resolve(
+            vec![
+                cand(Source::ExifDateTimeOriginal, p0),
+                cand(Source::FilenameDashedDateTime, resave),
+                cand(Source::FsMtime, resave + 3600),
+            ],
+            None,
+            Some(md),
+            now(),
+        )
+        .unwrap();
+        assert_eq!(d.priority, Priority::P0);
+        assert_eq!(d.utc.timestamp(), p0);
+        // 否决可观测：veto 冲突在前，常规 FilenameOver1Day 提示随后
+        assert_eq!(d.conflicts.len(), 2);
+        assert_eq!(
+            d.conflicts[0].kind,
+            ConflictKind::MajorityVetoedByModifyDate
+        );
+        assert_eq!(d.conflicts[0].other_utc.timestamp(), resave);
+        assert_eq!(
+            d.conflicts[0].other_source,
+            Some(Source::FilenameDashedDateTime)
+        );
+        assert_eq!(d.conflicts[0].diff_secs, p0 - resave);
+        assert_eq!(d.conflicts[1].kind, ConflictKind::FilenameOver1Day);
+    }
+
+    #[test]
+    fn majority_overrules_when_modify_date_missing() {
+        // 回归：无 ModifyDate 时维持原推翻行为
+        let p0 = 1_000_000_000;
+        let real = p0 + 600 * 86_400;
+        let d = resolve(
+            vec![
+                cand(Source::ExifDateTimeOriginal, p0),
+                cand(Source::FilenameDashedDateTime, real),
+                cand(Source::FsMtime, real + 3600),
+            ],
+            None,
+            None,
+            now(),
+        )
+        .unwrap();
+        assert_eq!(d.priority, Priority::P2);
+        assert_eq!(d.conflicts[0].kind, ConflictKind::P0OverruledByMajority);
+    }
+
+    #[test]
+    fn majority_overrules_when_modify_date_far_from_filename() {
+        // ModifyDate 与 filename 票差 1 天 + 1 秒：相机时钟错场景照常推翻
+        let p0 = 1_000_000_000;
+        let real = p0 + 600 * 86_400;
+        let md = Utc
+            .timestamp_opt(real + CONFLICT_OVER_DAY_SECS + 1, 0)
+            .single()
+            .unwrap();
+        let d = resolve(
+            vec![
+                cand(Source::ExifDateTimeOriginal, p0),
+                cand(Source::FilenameDashedDateTime, real),
+                cand(Source::FsMtime, real + 3600),
+            ],
+            None,
+            Some(md),
+            now(),
+        )
+        .unwrap();
+        assert_eq!(d.priority, Priority::P2);
+        assert_eq!(d.utc.timestamp(), real);
+        assert_eq!(d.conflicts[0].kind, ConflictKind::P0OverruledByMajority);
+    }
+
+    #[test]
+    fn modify_date_at_exactly_one_day_still_vetoes() {
+        // 边界：差恰好 1 天（含）→ 否决生效
+        let p0 = 1_000_000_000;
+        let resave = p0 + 600 * 86_400;
+        let md = Utc
+            .timestamp_opt(resave + CONFLICT_OVER_DAY_SECS, 0)
+            .single()
+            .unwrap();
+        let d = resolve(
+            vec![
+                cand(Source::ExifDateTimeOriginal, p0),
+                cand(Source::FilenameDashedDateTime, resave),
+                cand(Source::FsMtime, resave),
+            ],
+            None,
+            Some(md),
+            now(),
+        )
+        .unwrap();
+        assert_eq!(d.priority, Priority::P0);
+        assert_eq!(
+            d.conflicts[0].kind,
+            ConflictKind::MajorityVetoedByModifyDate
+        );
+    }
+
     #[test]
     fn surviving_includes_low_confidence_path() {
         // 全部 pre-1995 → best 是 pre-1995，confidence = Low
         let d = resolve(
             vec![cand(Source::ExifDateTimeOriginal, 315_532_800)],
+            None,
             None,
             now(),
         )
@@ -461,7 +634,7 @@ mod tests {
             source: Source::FilenamePhone,
             inferred_offset: true,
         };
-        let d = resolve(vec![c], None, now()).unwrap();
+        let d = resolve(vec![c], None, None, now()).unwrap();
         assert_eq!(d.offset, Some(east8));
         assert!(d.inferred_offset);
     }
