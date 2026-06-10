@@ -185,30 +185,36 @@ impl Info {
     /// 候选（P3，见 [`Self::add_candidates`]）、文件 mtime（P4）一起喂给
     /// `media_time::resolve`，decision 时间若小于 `valid_threshold_secs`
     ///（配置层的"软阈值"）则回退到 fs 兜底。
-    /// `valid_threshold_secs` 由 Use Case 层从配置读入；Entity 不直接依赖配置加载。
+    /// `valid_threshold_secs` 与 `default_offset`（naive 时间的解释时区）由
+    /// Use Case 层从配置读入；Entity 不直接依赖配置加载。
     //
     // `coverage(off)`：内含 `if secs > 0 && ...` boundary branch；集成 test binary
     //（lib_tidy / cli_smoke）的 source 永远 secs>0，LLVM multi-binary inline 副本上
     // False 分支永远不触发。语义由 create_time_no_exif_uses_meta /
     // create_time_falls_back_when_exif_below_threshold 等单元测试断言。
     #[cfg_attr(coverage_nightly, coverage(off))]
-    pub fn create_time(&self, valid_threshold_secs: u64) -> SystemTime {
+    pub fn create_time(
+        &self,
+        valid_threshold_secs: u64,
+        default_offset: FixedOffset,
+    ) -> SystemTime {
         let modified = self.meta.modified;
         let created = self.meta.created;
         let fs_fallback = pick_fs_fallback(modified, created);
 
-        // P2 文件名中的 naive 时间统一按 UTC 解释；P0/P1 的 epoch 已在 EXIF
-        // 解析层（from_path_with_offset）按配置时区转换完毕。
-        let utc_offset = FixedOffset::east_opt(0).expect("0 offset is valid");
+        // P2 文件名中的 naive 时间按 default_offset（配置时区）解释，与 EXIF naive
+        // 同口径——按 UTC 解释会让月末晚间拍摄的文件 +offset 后跨月归错桶；
+        // P0/P1 的 epoch 已在 EXIF 解析层（from_path_with_offset）按配置时区转换完毕，
+        // 这里的 offset 对其仅作候选元数据。
         let gps_utc = self.exif.as_ref().and_then(exif::Exif::gps_utc);
         let mut candidates = match self.exif.as_ref() {
-            Some(exif) => media_time::candidates_from_exif(exif, utc_offset),
+            Some(exif) => media_time::candidates_from_exif(exif, default_offset),
             None => Vec::new(),
         };
         // P2：文件名启发式（IMG_/DSC_/Screenshot_/毫秒戳等）。
         candidates.extend(media_time::candidates_from_filename(
             Utf8Path::new(self.full_path.as_str()),
-            utc_offset,
+            default_offset,
         ));
         // P3：adapters 层发现并注入的 sidecar 候选（XMP / Google Takeout）。
         candidates.extend(self.extra_candidates.iter().copied());

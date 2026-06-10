@@ -53,9 +53,9 @@ pub(super) fn offset_from_hours(hours: i8) -> UtcOffset {
     UtcOffset::from_whole_seconds(i32::from(hours) * 3600).unwrap_or(UtcOffset::UTC)
 }
 
-// chrono::FixedOffset 用于把 EXIF 内无时区的 NaiveDateTime 当相机本地时间解释；
-// 与 time::UtcOffset 共用同一份 timezone_offset_hours 配置。
-fn configured_chrono_offset() -> FixedOffset {
+// chrono::FixedOffset 用于把 EXIF / 文件名内无时区的 NaiveDateTime 当相机本地时间
+// 解释；与 time::UtcOffset 共用同一份 timezone_offset_hours 配置。
+pub(super) fn configured_chrono_offset() -> FixedOffset {
     chrono_offset_from_hours(config().copy.timezone_offset_hours)
 }
 

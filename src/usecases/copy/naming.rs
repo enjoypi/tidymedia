@@ -7,7 +7,7 @@ use camino::Utf8Component;
 use camino::Utf8Path;
 use time::OffsetDateTime;
 
-use super::run::{MONTH, configured_offset};
+use super::run::{MONTH, configured_chrono_offset, configured_offset};
 use crate::entities::backend::Backend;
 use crate::entities::file_info::Info;
 use crate::entities::uri::Location;
@@ -30,7 +30,10 @@ pub(super) fn generate_unique_name(
         .to_string();
     let ext = display_path.extension().unwrap_or("").to_string();
 
-    let create_time = src_file.create_time(config().exif.valid_date_time_secs);
+    let create_time = src_file.create_time(
+        config().exif.valid_date_time_secs,
+        configured_chrono_offset(),
+    );
     let dt = OffsetDateTime::from(create_time).to_offset(configured_offset());
     let year = dt.year().to_string();
     let month = MONTH[dt.month() as usize];

@@ -226,10 +226,15 @@ fn info_from_missing_path_errors() {
 // 测试用阈值：2000-01-01T00:00:00Z（与配置默认值一致）。
 const TEST_VALID_THRESHOLD_SECS: u64 = 946_684_800;
 
+// naive 时间按 UTC 解释（offset=0），既有断言基线。
+fn utc0() -> chrono::FixedOffset {
+    chrono::FixedOffset::east_opt(0).unwrap()
+}
+
 #[test]
 fn create_time_no_exif_uses_meta() {
     let info = Info::from(common::DATA_SMALL).unwrap();
-    let t = info.create_time(TEST_VALID_THRESHOLD_SECS);
+    let t = info.create_time(TEST_VALID_THRESHOLD_SECS, utc0());
     let secs = t.duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
     assert!(secs > 0);
 }
@@ -240,7 +245,7 @@ fn create_time_uses_exif_when_valid() {
     let exif =
         super::super::exif::Exif::with_mime("image/png").with_date_time_original(1_700_000_000);
     info.set_exif(exif);
-    let t = info.create_time(TEST_VALID_THRESHOLD_SECS);
+    let t = info.create_time(TEST_VALID_THRESHOLD_SECS, utc0());
     let secs = t.duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
     assert_eq!(secs, 1_700_000_000);
 }
@@ -250,7 +255,7 @@ fn create_time_falls_back_when_exif_below_threshold() {
     let mut info = Info::from(common::DATA_SMALL).unwrap();
     let exif = super::super::exif::Exif::with_mime("image/png").with_date_time_original(100);
     info.set_exif(exif);
-    let t = info.create_time(TEST_VALID_THRESHOLD_SECS);
+    let t = info.create_time(TEST_VALID_THRESHOLD_SECS, utc0());
     let secs = t.duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
     assert!(
         secs > TEST_VALID_THRESHOLD_SECS,
@@ -266,7 +271,7 @@ fn create_time_uses_modify_when_smaller_than_create() {
     let early = filetime::FileTime::from_unix_time(631_152_000, 0);
     filetime::set_file_mtime(&path, early).unwrap();
     let info = Info::from(path.to_str().unwrap()).unwrap();
-    let t = info.create_time(TEST_VALID_THRESHOLD_SECS);
+    let t = info.create_time(TEST_VALID_THRESHOLD_SECS, utc0());
     let secs = t.duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
     assert_eq!(secs, 631_152_000);
 }
@@ -284,10 +289,25 @@ fn create_time_uses_filename_candidate_without_exif() {
     let path = dir.path().join("IMG_20240501_143000.jpg");
     fs::write(&path, b"not-really-a-jpeg").unwrap();
     let info = Info::from(path.to_str().unwrap()).unwrap();
-    let t = info.create_time(TEST_VALID_THRESHOLD_SECS);
+    let t = info.create_time(TEST_VALID_THRESHOLD_SECS, utc0());
     let secs = t.duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
-    // 文件名 naive 时间按 UTC 解释：2024-05-01T14:30:00Z
+    // utc0() 下文件名 naive 时间按 UTC 解释：2024-05-01T14:30:00Z
     assert_eq!(secs, 1_714_573_800);
+}
+
+// P2 文件名 naive 时间按传入时区（非 UTC）解释：月末晚间 + 东八区若按 UTC
+// 解释会 +8h 跨月归错桶（2010-08-31 23:05 当 UTC → 归 9 月）。
+#[test]
+fn create_time_filename_candidate_respects_tz_offset() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("2010-08-31 23-05-36.jpg");
+    fs::write(&path, b"not-really-a-jpeg").unwrap();
+    let info = Info::from(path.to_str().unwrap()).unwrap();
+    let east8 = chrono::FixedOffset::east_opt(8 * 3600).unwrap();
+    let t = info.create_time(TEST_VALID_THRESHOLD_SECS, east8);
+    let secs = t.duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
+    // 2010-08-31 23:05:36 +08:00 = 2010-08-31T15:05:36Z
+    assert_eq!(secs, 1_283_267_136);
 }
 
 // P0（EXIF DateTimeOriginal）必须压过 P2（文件名）。
@@ -300,7 +320,7 @@ fn create_time_prefers_exif_over_filename() {
     let exif =
         super::super::exif::Exif::with_mime("image/jpeg").with_date_time_original(1_700_000_000);
     info.set_exif(exif);
-    let t = info.create_time(TEST_VALID_THRESHOLD_SECS);
+    let t = info.create_time(TEST_VALID_THRESHOLD_SECS, utc0());
     let secs = t.duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
     assert_eq!(secs, 1_700_000_000);
 }
@@ -316,7 +336,7 @@ fn create_time_uses_injected_sidecar_candidate() {
     let c = epoch_to_candidate(1_600_000_000, Source::XmpSidecar, None, false)
         .expect("non-zero epoch yields candidate");
     info.add_candidates(vec![c]);
-    let t = info.create_time(TEST_VALID_THRESHOLD_SECS);
+    let t = info.create_time(TEST_VALID_THRESHOLD_SECS, utc0());
     let secs = t.duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
     assert_eq!(secs, 1_600_000_000);
 }

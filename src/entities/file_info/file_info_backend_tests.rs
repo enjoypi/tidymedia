@@ -139,7 +139,7 @@ fn create_time_emits_warn_when_mtime_much_earlier_than_p0() {
 
     let subscriber = tracing_subscriber::registry().with(ConflictDetector);
     tracing::subscriber::with_default(subscriber, || {
-        let _ = info.create_time(946_684_800);
+        let _ = info.create_time(946_684_800, chrono::FixedOffset::east_opt(0).unwrap());
     });
 
     assert!(
@@ -207,7 +207,7 @@ fn create_time_no_warn_when_mtime_close_to_p0() {
 
     let subscriber = tracing_subscriber::registry().with(ConflictDetector2);
     tracing::subscriber::with_default(subscriber, || {
-        let _ = info.create_time(946_684_800);
+        let _ = info.create_time(946_684_800, chrono::FixedOffset::east_opt(0).unwrap());
     });
 
     assert!(
@@ -259,7 +259,10 @@ fn create_time_zero_threshold_without_candidates_uses_fs_fallback() {
     let mut info = super::Info::open(&loc, fake).unwrap();
     // 无日期字段的 EXIF：candidates_from_exif 产出为空，decision → None → secs=0
     info.set_exif(crate::entities::exif::Exif::with_mime("image/png"));
-    assert_eq!(info.create_time(0), created);
+    assert_eq!(
+        info.create_time(0, chrono::FixedOffset::east_opt(0).unwrap()),
+        created
+    );
 }
 
 /// 缓冲区填满后 `read_fill` 不得再发起额外 read：用「数据尽即 Err」的 reader
