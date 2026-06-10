@@ -405,6 +405,50 @@ fn from_reader_avi_without_strd_leaves_fields_zero() {
 }
 
 #[test]
+fn from_path_reads_canon_m2ts_mdpm_date() {
+    let exif = Exif::from_path(Utf8Path::new(common::DATA_M2TS_CANON)).unwrap();
+    assert_eq!(exif.mime_type(), "video/m2ts");
+    assert!(exif.is_media());
+    // fixture MDPM "2011:10:01 10:35:57"，按 UTC 解释
+    let want = chrono::NaiveDate::from_ymd_opt(2011, 10, 1)
+        .unwrap()
+        .and_hms_opt(10, 35, 57)
+        .unwrap()
+        .and_utc()
+        .timestamp()
+        .cast_unsigned();
+    assert_eq!(exif.date_time_original(), want);
+    // MDPM 是单一拍摄时刻：不伪造 P1 / 容器时间
+    assert_eq!(exif.exif_create_date(), 0);
+    assert_eq!(exif.qt_create_date(), 0);
+}
+
+#[test]
+fn m2ts_offset_shifts_epoch() {
+    // 同一 MDPM naive 时间按 +8 解释应比 UTC 提前 8 小时。
+    let east8 = FixedOffset::east_opt(8 * 3600).unwrap();
+    let f = || std::fs::File::open(common::DATA_M2TS_CANON).unwrap();
+    let utc_exif = Exif::from_reader(Box::new(f()), "video/m2ts", utc());
+    let east_exif = Exif::from_reader(Box::new(f()), "video/m2ts", east8);
+    assert_eq!(
+        utc_exif.date_time_original() - east_exif.date_time_original(),
+        8 * 3600
+    );
+}
+
+#[test]
+fn from_reader_m2ts_without_mdpm_leaves_fields_zero() {
+    // BDAV sync pattern 通过嗅探但无 MDPM SEI：let-else 早返回。
+    let mut bytes = vec![0u8; 384];
+    bytes[4] = 0x47;
+    bytes[196] = 0x47;
+    let reader: Box<dyn super::MediaReader> = Box::new(std::io::Cursor::new(bytes));
+    let exif = Exif::from_reader(reader, "video/m2ts", utc());
+    assert_eq!(exif.date_time_original(), 0);
+    assert_eq!(exif.exif_create_date(), 0);
+}
+
+#[test]
 fn ascii_datetime_to_epoch_invalid_format_returns_zero() {
     assert_eq!(super::ascii_datetime_to_epoch("not a date", utc()), 0);
 }

@@ -118,6 +118,9 @@ impl Exif {
         } else if mime_type.starts_with(MIME_AVI) {
             // AVI 先于泛 video 分流：nom-exif 不认 RIFF，时间在 strd 内嵌 EXIF。
             populate_avi_dates(reader, &mut exif, local_offset);
+        } else if mime_type.starts_with(MIME_M2TS) {
+            // M2TS 先于泛 video 分流：nom-exif 不认 MPEG-TS，时间在 H.264 SEI MDPM。
+            populate_m2ts_dates(reader, &mut exif, local_offset);
         } else if mime_type.starts_with(META_TYPE_VIDEO) {
             populate_video_dates(reader, &mut exif, local_offset);
         }
@@ -393,6 +396,20 @@ fn populate_avi_dates(
         .map_or(0, |s| ascii_datetime_to_epoch(s, local_offset));
     exif.make = avi.make;
     exif.model = avi.model;
+}
+
+// M2TS（BDAV MPEG-TS）路径：`entities::m2ts` 提取 H.264 SEI MDPM 拍摄时间
+// 后在此转 epoch。MDPM 只有单一拍摄时刻，仅填 P0（date_time_original），
+// 不伪造 P1；时区口径与图片 EXIF / AVI 一致（naive + 配置时区）。
+fn populate_m2ts_dates(
+    mut reader: Box<dyn MediaReader>,
+    exif: &mut Exif,
+    local_offset: FixedOffset,
+) {
+    let Some(dt) = crate::entities::m2ts::parse_m2ts_datetime(reader.as_mut()) else {
+        return;
+    };
+    exif.date_time_original = ascii_datetime_to_epoch(&dt, local_offset);
 }
 
 // EXIF ASCII 日期（"YYYY:MM:DD HH:MM:SS"）转 epoch；非法格式 / 1970 前返回 0

@@ -58,6 +58,9 @@ pub const DATA_JPEG_XMP_ONLY: &str = "tests/data/sample-xmp-only.jpg";
 /// 用于覆盖 `populate_image_dates` 中 `dto==0 && cd!=0` 的 XMP fallback 短路 branch
 /// （cd 非 0 时 fallback 不应触发；从 fixture 的真实数据导出 branch 觉醒）。
 pub const DATA_JPEG_ONLY_CREATEDATE: &str = "tests/data/sample-only-createdate.jpg";
+/// 真实 Canon AVCHD（BDAV M2TS）前 1024 字节截断；H.264 SEI MDPM 含
+/// `2011-10-01 10:35:57`（时区字节忽略，按调用方 offset 解释）。
+pub const DATA_M2TS_CANON: &str = "tests/data/sample-canon-avchd.m2ts";
 
 // docs/media-time-detection.md spec contract fixture：tests/fixtures/gen.sh 生成，
 // tests/media_time_spec.rs 集成测试通过 tests/media_time/common.rs 内的等价常量引用

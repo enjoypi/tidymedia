@@ -12,6 +12,7 @@ pub mod common;
 pub(crate) mod exif;
 pub mod file_index;
 pub mod file_info;
+pub(crate) mod m2ts;
 pub mod media_time;
 pub(crate) mod riff;
 #[cfg(test)]
