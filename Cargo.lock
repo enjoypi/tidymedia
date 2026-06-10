@@ -1103,7 +1103,7 @@ dependencies = [
 [[package]]
 name = "nom-exif"
 version = "3.6.0"
-source = "git+https://github.com/enjoypi/nom-exif.git?branch=feat%2Flegacy-quicktime-pnot#5f69d0ba11512be191ef5907530654dbbf8a2a39"
+source = "git+https://github.com/enjoypi/nom-exif.git?branch=feat%2Flegacy-quicktime-pnot#8ed581b7bb1511cf3638d2399482cdb9dd09f993"
 dependencies = [
  "bytes",
  "chrono",

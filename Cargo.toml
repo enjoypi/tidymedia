@@ -79,10 +79,12 @@ redundant_clone = "deny"
 [profile.release]
 opt-level = 0
 
-# 临时 patch：nom-exif 3.6.0 入口 MIME gate（file.rs:114 parse_bmff_mime）
-# 不识别 pnot 起头的老 QuickTime MOV（NIKON COOLPIX S5/P5000、Casio 等早期机型），
-# 直接返 UnsupportedFormat。fork 在 parse_bmff_mime 入口短路：若首 box 为 pnot 即返
-# QuickTime mime；mov.rs::extract_moov_body_from_buf 后续 atom 扫描已能正确处理。
+# 临时 patch：nom-exif 3.6.0 入口 MIME gate（file.rs parse_bmff_mime）只认 ftyp/wide
+# 起头，不识别老 QuickTime MOV 的两种变体：pnot 起头（NIKON COOLPIX S5/P5000、Casio
+# 等早期机型）与 mdat 起头（无任何头 atom、moov 在文件末尾），直接返 UnsupportedFormat。
+# fork 在 parse_bmff_mime 入口按首 box header（仅 header——mdat body 远超 128B 解析
+# buffer）短路返 QuickTime mime；mov.rs::extract_moov_body_from_buf 经 ClearAndSkip
+# 跳过任意大小 mdat 后解析 moov。
 # 上游 PR: https://github.com/mindeng/nom-exif/pulls （feat/legacy-quicktime-pnot）
 # 合并发版后切回 crates.io。
 [patch.crates-io]
