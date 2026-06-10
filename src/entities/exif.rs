@@ -32,6 +32,10 @@ const MIME_QUICKTIME: &str = "video/quicktime";
 /// BDAV MPEG-TS（AVCHD .mts / .m2ts）：4 字节 `TP_extra_header` + 188 字节 TS packet。
 /// nom-exif 不支持，时间走 P2 文件名启发或 P4 mtime 兜底；本常量只为 `is_media` 通过 MIME 嗅探门槛。
 const MIME_M2TS: &str = "video/m2ts";
+/// 3GPP 手机视频（BMFF `ftyp` brand `3gp*`，常伪装 `.mp4` 扩展名）。
+/// `infer` 0.19 的 MP4 matcher 不认 `3gp*` brand；容器本身是 BMFF，
+/// 泛 video 路径交 nom-exif 解析 `mvhd.creation_time` 即可。
+const MIME_3GPP: &str = "video/3gpp";
 
 /// MIME sniff 时读取的字节数。`infer` 实际只看前 16-32 字节，256 留点余量
 /// 让边界 case（容器嵌套）的判定更稳。
@@ -179,6 +183,7 @@ fn sniff_mime(reader: &mut dyn MediaReader) -> io::Result<String> {
         .map(|t| t.mime_type().to_string())
         .or_else(|| quicktime_legacy_mime(head).map(str::to_string))
         .or_else(|| m2ts_legacy_mime(head).map(str::to_string))
+        .or_else(|| bmff_3gpp_mime(head).map(str::to_string))
         .unwrap_or_default())
 }
 
@@ -194,6 +199,12 @@ fn quicktime_legacy_mime(buf: &[u8]) -> Option<&'static str> {
 // sync 才认。`infer` 0.19 不支持 m2ts；不识别会让 is_media=false 致整段 AVCHD 被 ignore。
 fn m2ts_legacy_mime(buf: &[u8]) -> Option<&'static str> {
     (buf.get(4) == Some(&0x47) && buf.get(196) == Some(&0x47)).then_some(MIME_M2TS)
+}
+
+// 标准 BMFF `ftyp` 但 brand 是 `3gp4`/`3gp5` 等：`infer` 0.19 的 MP4 matcher
+// 不认 `3gp*` brand，不识别会让 is_media=false 致整段 3GP 手机视频被 ignore。
+fn bmff_3gpp_mime(buf: &[u8]) -> Option<&'static str> {
+    (buf.get(4..8) == Some(b"ftyp") && buf.get(8..11) == Some(b"3gp")).then_some(MIME_3GPP)
 }
 
 fn entry_value_to_epoch(v: &EntryValue, local_offset: FixedOffset) -> u64 {
