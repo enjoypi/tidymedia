@@ -91,7 +91,10 @@ impl RemoteAdapter for AdbAdapter {
     /// 等含 "no such file" 文案的链式错误——前者保留原 kind，后者按文案重映射，
     /// 否则上层 `exists()` 会把"找不到"当作 IO 错误传播。
     fn map_error(e: io::Error) -> io::Error {
-        if matches!(e.kind(), io::ErrorKind::NotFound | io::ErrorKind::PermissionDenied) {
+        if matches!(
+            e.kind(),
+            io::ErrorKind::NotFound | io::ErrorKind::PermissionDenied
+        ) {
             return e;
         }
         let msg = e.to_string().to_lowercase();

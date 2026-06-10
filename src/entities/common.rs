@@ -15,9 +15,7 @@ pub type Result<T> = std::result::Result<T, Error>;
 /// 内部剥掉避免 `rest` 既非空又不以分隔符开头的盲区误判。
 #[must_use]
 pub fn under_prefix(path: &str, prefix: &str) -> bool {
-    let prefix = prefix
-        .strip_suffix(['/', '\\'])
-        .unwrap_or(prefix);
+    let prefix = prefix.strip_suffix(['/', '\\']).unwrap_or(prefix);
     if !path.starts_with(prefix) {
         return false;
     }
