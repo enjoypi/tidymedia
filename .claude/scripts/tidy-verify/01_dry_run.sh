@@ -8,13 +8,9 @@ OUTPUT="${2:?missing output dir}"
 WORK="${3:-/tmp/tm}"
 mkdir -p "$WORK"
 
-# 新一轮对账开始：清掉上一轮全流程产物（含 06 真跑日志），避免旧 source 的
-# exif.tsv/bucket_result.txt 等残留被后续步骤误读。只删已知产物不 rm -rf 整目录，
-# WORK 目录兼作临时 Python 脚本工作区（CLAUDE.md heredoc 套路）。
-rm -f "$WORK/run.log" "$WORK/copy_lines.log" \
-    "$WORK/exif.tsv" "$WORK/exif.err" \
-    "$WORK/bucket_result.txt" "$WORK/name_result.txt" \
-    "$WORK/run_real.log"
+# 新一轮对账开始：清空 WORK 目录，避免上一轮的 exif.tsv/bucket_result.txt
+# 及手工分析残留（*.old.txt、临时 py 等）被后续步骤或人误读。
+rm -rf "${WORK:?}"/*
 
 # 重定向到文件而非 | tail：dry-run 逐文件 debug 日志体量大，pipe 截断会让
 # copy_file 行数 < summary.copied，对账时一头雾水。
