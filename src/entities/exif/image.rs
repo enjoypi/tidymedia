@@ -1,0 +1,165 @@
+use std::io;
+
+use chrono::DateTime;
+use chrono::FixedOffset;
+use chrono::NaiveDate;
+use chrono::Utc;
+use nom_exif::ExifTag;
+use nom_exif::MediaParser;
+use nom_exif::MediaSource;
+use nom_exif::URational;
+
+use super::super::backend::MediaReader;
+use super::super::file_info::read_fill;
+use super::super::xmp;
+use super::types::Exif;
+use super::types::entry_value_to_epoch;
+
+/// XMP packet fallback 扫描窗口。单段 APP1 最大 65533 字节，64 KB 覆盖单段
+/// XMP packet 起始；ExtendedXMP（跨多 APP1 段）不在范围。
+const XMP_SCAN_BYTES: usize = 64 * 1024;
+
+pub(super) fn populate_image_dates(
+    mut reader: Box<dyn MediaReader>,
+    exif: &mut Exif,
+    local_offset: FixedOffset,
+) {
+    // 先 buffer 头部供 XMP fallback；seek 回起点后再喂给 nom-exif。
+    // seek 失败时跳过 nom-exif 主路径但仍尝试 XMP fallback——head 已读入，
+    // 仅靠头部字节即可补 P0/P1 候选，比 mtime 兜底准确得多。
+    let mut head = vec![0u8; XMP_SCAN_BYTES];
+    let head_len = read_fill(reader.as_mut(), &mut head).unwrap_or(0);
+    head.truncate(head_len);
+    if reader.seek(io::SeekFrom::Start(0)).is_err() {
+        populate_image_xmp_fallback(&head, exif);
+        return;
+    }
+
+    let Ok(ms) = MediaSource::seekable(reader) else {
+        populate_image_xmp_fallback(&head, exif);
+        return;
+    };
+    let mut parser = MediaParser::new();
+    let Ok(iter) = parser.parse_exif(ms) else {
+        populate_image_xmp_fallback(&head, exif);
+        return;
+    };
+    let parsed: nom_exif::Exif = iter.into();
+    if let Some(v) = parsed.get(ExifTag::DateTimeOriginal) {
+        exif.date_time_original = entry_value_to_epoch(v, local_offset);
+    }
+    if let Some(v) = parsed.get(ExifTag::CreateDate) {
+        exif.create_date = entry_value_to_epoch(v, local_offset);
+    }
+    // GPSDateStamp + GPSTimeStamp 合成 GPS UTC 作校验锚点。
+    exif.gps_utc = parse_gps_utc(&parsed);
+    // ModifyDate 不进时间候选（编辑/导出时间会污染判定），仅供多数派仲裁
+    // 识别 re-save 痕迹（filename+mtime+ModifyDate 三方互证 → 否决推翻 P0）。
+    if let Some(v) = parsed.get(ExifTag::ModifyDate) {
+        exif.modify_date = entry_value_to_epoch(v, local_offset);
+    }
+    // Make / Model：仅在 EXIF 存在时读取；用于 archive_template 占位符。
+    exif.make = parsed
+        .get(ExifTag::Make)
+        .and_then(|v| v.as_str().map(str::to_owned));
+    exif.model = parsed
+        .get(ExifTag::Model)
+        .and_then(|v| v.as_str().map(str::to_owned));
+
+    // XMP fallback：EXIF DTO/CreateDate 均缺（re-tag 后 IFD0 仅剩 ModifyDate 类
+    // 场景）时扫已 buffer 的头部，从 XMP packet 补 P0/P1 候选。
+    if exif.date_time_original == 0 && exif.create_date == 0 {
+        populate_image_xmp_fallback(&head, exif);
+    }
+}
+
+pub(super) fn populate_image_xmp_fallback(head: &[u8], exif: &mut Exif) {
+    let Some(packet) = xmp::find_xmp_packet(head) else {
+        return;
+    };
+    let dates = xmp::parse_xmp_dates(packet);
+    if let Some(dt) = dates.photoshop_date_created {
+        // XMP 时间带 timezone，DateTime<FixedOffset>::timestamp() 直接是 UTC epoch。
+        let secs = dt.timestamp();
+        if secs > 0 {
+            exif.date_time_original = secs.cast_unsigned();
+        }
+    }
+    if let Some(dt) = dates.xmp_create_date {
+        let secs = dt.timestamp();
+        if secs > 0 {
+            exif.create_date = secs.cast_unsigned();
+        }
+    }
+}
+
+/// 从已解析的 EXIF 读 `GPSDateStamp`（文本 "YYYY:MM:DD"）和
+/// `GPSTimeStamp`（3 元素 `URationalArray`：[时, 分, 秒]），合成 GPS UTC。
+/// GPS 时间永远是 UTC。任一字段缺失或格式非法均返回 None。
+///
+/// nom-exif 把 GPS 子 IFD 条目按 IFD 索引 ≥ 2 存入 `Exif`，无法用 `get()`
+/// 直接读；改用 `iter()` 遍历所有 IFD 条目按 tag code 匹配。
+///
+/// 内部分支（unrecognized GPS tag code / `GPSTimeStamp` 非 `URationalArray` /
+/// 元素数 != 3）需要特殊构造的 EXIF fixture 才能稳定触发，标 `coverage(off)`；
+/// 语义由 `parse_gps_date` / `rational_to_u32` / `build_gps_utc` 单元测试断言。
+#[cfg_attr(coverage_nightly, coverage(off))]
+fn parse_gps_utc(parsed: &nom_exif::Exif) -> Option<DateTime<Utc>> {
+    let mut date_str: Option<String> = None;
+    let mut time_rationals: Option<[URational; 3]> = None;
+
+    for entry in parsed.iter() {
+        let Some(tag) = entry.tag.tag() else {
+            continue;
+        };
+        if tag == ExifTag::GPSDateStamp {
+            date_str = entry.value.as_str().map(str::to_owned);
+        } else if tag == ExifTag::GPSTimeStamp
+            && let Some(slice) = entry.value.as_urational_slice()
+            && let [h, m, s] = slice
+        {
+            time_rationals = Some([*h, *m, *s]);
+        }
+    }
+
+    build_gps_utc(date_str.as_deref(), time_rationals)
+}
+
+/// `date_str` = "YYYY:MM:DD", `time` = [hour, min, sec] Rational。
+/// 全部转为整秒（纳秒丢弃），合成 `DateTime<Utc>`。
+pub(super) fn build_gps_utc(
+    date_str: Option<&str>,
+    time: Option<[URational; 3]>,
+) -> Option<DateTime<Utc>> {
+    let date = parse_gps_date(date_str?)?;
+    let [h, m, s] = time?;
+    let hour = rational_to_u32(h)?;
+    let min = rational_to_u32(m)?;
+    let sec = rational_to_u32(s)?;
+    date.and_hms_opt(hour, min, sec).map(|ndt| ndt.and_utc())
+}
+
+// parse_gps_date 与 rational_to_u32 仅被 parse_gps_utc（已标 coverage(off)）调用。
+// 单元测试 binary 直接调用它们（branch 已覆盖），但集成 binary 不调用，导致
+// LLVM multi-instance branch miss。整体标 coverage(off)；语义由对应单元测试保证不退化。
+#[cfg_attr(coverage_nightly, coverage(off))]
+pub(super) fn parse_gps_date(s: &str) -> Option<NaiveDate> {
+    // GPSDateStamp 格式 "YYYY:MM:DD"（exiftool/EXIF spec 2.31）
+    let parts: Vec<&str> = s.splitn(3, ':').collect();
+    if parts.len() < 3 {
+        return None;
+    }
+    let y: i32 = parts[0].trim().parse().ok()?;
+    let mo: u32 = parts[1].trim().parse().ok()?;
+    let d: u32 = parts[2].trim().parse().ok()?;
+    NaiveDate::from_ymd_opt(y, mo, d)
+}
+
+#[cfg_attr(coverage_nightly, coverage(off))]
+pub(super) fn rational_to_u32(r: URational) -> Option<u32> {
+    let denom = r.denominator();
+    if denom == 0 {
+        return None;
+    }
+    Some(r.numerator() / denom)
+}
