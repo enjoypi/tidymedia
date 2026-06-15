@@ -185,5 +185,17 @@ fn u32le(b: &[u8], off: usize) -> Option<u32> {
 }
 
 #[cfg(test)]
-#[path = "riff_tests.rs"]
-mod tests;
+#[path = "riff_tests_common.rs"]
+mod tests_common;
+
+#[cfg(test)]
+#[path = "riff_structure_tests.rs"]
+mod structure_tests;
+
+#[cfg(test)]
+#[path = "riff_ifd_tests.rs"]
+mod ifd_tests;
+
+#[cfg(test)]
+#[path = "riff_io_tests.rs"]
+mod io_tests;
