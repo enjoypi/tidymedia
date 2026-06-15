@@ -73,6 +73,11 @@ pub trait RemoteAdapter: Send + Sync + 'static {
     fn client(&self) -> &Arc<dyn RemoteClient<Self::Target>>;
 }
 
+/// 远端 sidecar 文本文件大小上限（防 `OOM`）：`sidecar.rs::read_to_string` 唯一消费者，
+/// XMP / Takeout JSON 实测 < 10 KiB；8 MiB 给极端 Takeout 复合 export 留足空间，
+/// 同时把恶意/损坏远端文件的内存放大封顶在常数倍。
+pub(crate) const MAX_REMOTE_TEXT_BYTES: u64 = 8 << 20;
+
 /// 泛型远端 Backend：对任意 [`RemoteAdapter`] 实现 [`Backend`] trait 的全部 12 个方法。
 /// SMB / ADB / MTP 三套实现收敛到此单一泛型。
 pub struct RemoteBackend<A: RemoteAdapter> {
@@ -238,13 +243,29 @@ impl<A: RemoteAdapter> Backend for RemoteBackend<A> {
     }
 
     fn read_to_string(&self, loc: &Location) -> io::Result<String> {
-        let bytes = {
-            let target = self.build_target(loc)?;
-            self.adapter
-                .client()
-                .read(&target)
-                .map_err(|e| map_and_log(A::scheme(), "read", target.path(), A::map_error, e))?
-        };
+        let target = self.build_target(loc)?;
+        // 远端 client.read 一次性把整文件入堆；read_to_string 唯一调用方是 sidecar
+        // 发现（XMP / Takeout JSON），典型 < 10 KiB。先 stat 做大小封顶，防止
+        // 不受信远端共享上一个 N GB 的 .json/.xmp 拖爆进程内存。
+        let meta = self
+            .adapter
+            .client()
+            .stat(&target)
+            .map_err(|e| map_and_log(A::scheme(), "stat", target.path(), A::map_error, e))?;
+        if meta.size > MAX_REMOTE_TEXT_BYTES {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "remote text file too large: {} bytes (limit {MAX_REMOTE_TEXT_BYTES})",
+                    meta.size
+                ),
+            ));
+        }
+        let bytes = self
+            .adapter
+            .client()
+            .read(&target)
+            .map_err(|e| map_and_log(A::scheme(), "read", target.path(), A::map_error, e))?;
         String::from_utf8(bytes).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
     }
 

@@ -471,6 +471,18 @@ fn quicktime_legacy_mime_detects_pnot_atom() {
     assert_eq!(super::quicktime_legacy_mime(&buf), Some("video/quicktime"));
 }
 
+// mdat-first MOV 变体（无任何头 atom、moov 在文件末尾的早期 QuickTime）：
+// `infer` 0.19 不识别 (无 ftyp)；旧实现仅查 pnot 也漏识 → MIME 为空 →
+// from_reader 不调 populate_video_dates → fork 后的 nom-exif 永远拿不到执行机会
+// → is_media() false，整段视频被 ignore（CLAUDE.md「项目 Gotcha」mdat-first 条）。
+#[test]
+fn quicktime_legacy_mime_detects_mdat_atom() {
+    let mut buf = vec![0u8, 0x10, 0, 0]; // mdat 大 box size
+    buf.extend_from_slice(b"mdat");
+    buf.extend_from_slice(&[0u8; 32]); // 后续 body 字节（数 MB-级，此处仅占位）
+    assert_eq!(super::quicktime_legacy_mime(&buf), Some("video/quicktime"));
+}
+
 #[test]
 fn quicktime_legacy_mime_unknown_tag_returns_none() {
     let mut buf = vec![0u8, 0, 0, 0x14];

@@ -124,8 +124,14 @@ fn read_to_string_invalid_utf8() {
     #[derive(Debug)]
     struct BadUtf8Client;
     impl RemoteClient<DummyTarget> for BadUtf8Client {
+        // read_to_string 现在 stat-then-read：先 stat 做大小封顶后再读字节
         fn stat(&self, _t: &DummyTarget) -> io::Result<Metadata> {
-            unreachable!()
+            Ok(Metadata {
+                size: 2,
+                kind: crate::entities::backend::EntryKind::File,
+                modified: None,
+                created: None,
+            })
         }
         fn list(&self, _t: &DummyTarget) -> io::Result<Vec<Entry>> {
             unreachable!()
@@ -148,6 +154,55 @@ fn read_to_string_invalid_utf8() {
     };
     let e = b.read_to_string(&loc()).unwrap_err();
     assert_eq!(e.kind(), io::ErrorKind::InvalidData);
+}
+
+// 远端 sidecar 体积上限：stat 报告超过 `MAX_REMOTE_TEXT_BYTES` 必须直接 Err，
+// 不进 client.read 一次性入堆，防不受信远端共享拖爆内存。
+#[test]
+fn read_to_string_rejects_file_above_size_cap() {
+    use crate::entities::backend::EntryKind;
+    #[derive(Debug)]
+    struct HugeStatClient;
+    impl RemoteClient<DummyTarget> for HugeStatClient {
+        fn stat(&self, _t: &DummyTarget) -> io::Result<Metadata> {
+            Ok(Metadata {
+                size: super::MAX_REMOTE_TEXT_BYTES + 1,
+                kind: EntryKind::File,
+                modified: None,
+                created: None,
+            })
+        }
+        fn list(&self, _t: &DummyTarget) -> io::Result<Vec<Entry>> {
+            unreachable!()
+        }
+        fn read(&self, _t: &DummyTarget) -> io::Result<Vec<u8>> {
+            // 超限时不应到此：unreachable 既验证短路也用作 mutation kill。
+            unreachable!("read must not be called when stat exceeds MAX_REMOTE_TEXT_BYTES")
+        }
+        fn write(&self, _t: &DummyTarget, _data: &[u8]) -> io::Result<u64> {
+            unreachable!()
+        }
+        fn unlink(&self, _t: &DummyTarget) -> io::Result<()> {
+            unreachable!()
+        }
+        fn mkdir(&self, _t: &DummyTarget) -> io::Result<()> {
+            unreachable!()
+        }
+    }
+    let b = RemoteBackend {
+        adapter: DummyAdapter::with_client(Arc::new(HugeStatClient)),
+    };
+    let e = b.read_to_string(&loc()).unwrap_err();
+    assert_eq!(e.kind(), io::ErrorKind::InvalidData);
+    assert!(format!("{e}").contains("too large"), "got: {e}");
+}
+
+#[test]
+fn read_to_string_stat_err_propagates() {
+    // stat 失败必须直接 Err，不进 read（read_to_string 现在依赖 stat 做大小封顶）。
+    let b = backend_with_client(DummyClient::with_stat_err(io::ErrorKind::ConnectionRefused));
+    let e = b.read_to_string(&loc()).unwrap_err();
+    assert_eq!(e.kind(), io::ErrorKind::ConnectionRefused);
 }
 
 #[test]

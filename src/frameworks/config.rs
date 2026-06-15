@@ -162,11 +162,26 @@ fn resolve_var(body: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    #![allow(unsafe_code)]
+
     use super::*;
+
+    // SAFETY: nextest 默认每测试独立进程；测试期不存在并发读 env 的其他线程。
+    // 把 Rust 2024 unsafe std::env::{set_var, remove_var} 收敛到 set_env_var /
+    // remove_env_var 单一调用点，让 P0 §13 要求的 SAFETY 注释只需一份，
+    // 同时避免散在各测试体内的 unsafe 块拖低可读性（CLAUDE.md「DRY」）。
+    fn set_env_var(name: &str, value: &str) {
+        // SAFETY: see module-level invariant above
+        unsafe { std::env::set_var(name, value) };
+    }
+    fn remove_env_var(name: &str) {
+        // SAFETY: see module-level invariant above
+        unsafe { std::env::remove_var(name) };
+    }
 
     #[test]
     fn expand_env_substitutes_default_when_var_missing() {
-        unsafe { std::env::remove_var("TIDYMEDIA_TEST_MISSING_VAR_X") };
+        remove_env_var("TIDYMEDIA_TEST_MISSING_VAR_X");
         let s = expand_env("a: ${TIDYMEDIA_TEST_MISSING_VAR_X:-7}");
         assert_eq!(s, "a: 7");
     }
@@ -176,24 +191,24 @@ mod tests {
     /// i=0 时 usize 下溢 → 越界 panic）。
     #[test]
     fn expand_env_placeholder_at_string_start_expands() {
-        unsafe { std::env::remove_var("TIDYMEDIA_TEST_START_VAR") };
+        remove_env_var("TIDYMEDIA_TEST_START_VAR");
         assert_eq!(expand_env("${TIDYMEDIA_TEST_START_VAR:-dft}"), "dft");
     }
 
     #[test]
     fn expand_env_uses_env_value_when_set() {
-        unsafe { std::env::set_var("TIDYMEDIA_TEST_SET_VAR_Y", "42") };
+        set_env_var("TIDYMEDIA_TEST_SET_VAR_Y", "42");
         let s = expand_env("a: ${TIDYMEDIA_TEST_SET_VAR_Y:-0}");
         assert_eq!(s, "a: 42");
-        unsafe { std::env::remove_var("TIDYMEDIA_TEST_SET_VAR_Y") };
+        remove_env_var("TIDYMEDIA_TEST_SET_VAR_Y");
     }
 
     #[test]
     fn expand_env_resolves_bare_name_without_default() {
-        unsafe { std::env::set_var("TIDYMEDIA_TEST_BARE_Z", "hi") };
+        set_env_var("TIDYMEDIA_TEST_BARE_Z", "hi");
         let s = expand_env("k: ${TIDYMEDIA_TEST_BARE_Z}");
         assert_eq!(s, "k: hi");
-        unsafe { std::env::remove_var("TIDYMEDIA_TEST_BARE_Z") };
+        remove_env_var("TIDYMEDIA_TEST_BARE_Z");
     }
 
     #[test]
@@ -205,7 +220,7 @@ mod tests {
     // 闭合 `}`，否则截断成 `{year` 产生非法 YAML（真实 config.yaml:10 的回归）。
     #[test]
     fn expand_env_default_with_nested_braces_expands_fully() {
-        unsafe { std::env::remove_var("TIDYMEDIA_TEST_NESTED_TMPL") };
+        remove_env_var("TIDYMEDIA_TEST_NESTED_TMPL");
         let s = expand_env("t: \"${TIDYMEDIA_TEST_NESTED_TMPL:-{year}/{month}/{valuable_name}}\"");
         assert_eq!(s, "t: \"{year}/{month}/{valuable_name}\"");
     }
@@ -236,15 +251,15 @@ mod tests {
     // 防御 UTF-8 字符被逐字节降级为 Latin-1（旧实现 `bytes[i] as char` 的 bug）。
     #[test]
     fn expand_env_preserves_multibyte_chars() {
-        unsafe { std::env::set_var("TIDYMEDIA_TEST_UTF8_K", "值") };
+        set_env_var("TIDYMEDIA_TEST_UTF8_K", "值");
         let s = expand_env("# 目标文件 \nk: ${TIDYMEDIA_TEST_UTF8_K:-默认}");
         assert_eq!(s, "# 目标文件 \nk: 值");
-        unsafe { std::env::remove_var("TIDYMEDIA_TEST_UTF8_K") };
+        remove_env_var("TIDYMEDIA_TEST_UTF8_K");
     }
 
     #[test]
     fn expand_env_preserves_multibyte_default() {
-        unsafe { std::env::remove_var("TIDYMEDIA_TEST_UTF8_MISS") };
+        remove_env_var("TIDYMEDIA_TEST_UTF8_MISS");
         let s = expand_env("k: ${TIDYMEDIA_TEST_UTF8_MISS:-默认值}");
         assert_eq!(s, "k: 默认值");
     }
@@ -253,24 +268,24 @@ mod tests {
     // 既验证两次替换都生效，也防御「第二个 `${` 起点定位」回归。
     #[test]
     fn expand_env_handles_multiple_placeholders_on_same_line() {
-        unsafe { std::env::remove_var("TIDYMEDIA_TEST_MULTI_HOST") };
-        unsafe { std::env::remove_var("TIDYMEDIA_TEST_MULTI_PORT") };
+        remove_env_var("TIDYMEDIA_TEST_MULTI_HOST");
+        remove_env_var("TIDYMEDIA_TEST_MULTI_PORT");
         let both_missing = expand_env(
             "host: ${TIDYMEDIA_TEST_MULTI_HOST:-127.0.0.1} port: ${TIDYMEDIA_TEST_MULTI_PORT:-5037}",
         );
         assert_eq!(both_missing, "host: 127.0.0.1 port: 5037");
 
-        unsafe { std::env::set_var("TIDYMEDIA_TEST_MULTI_HOST", "example.com") };
+        set_env_var("TIDYMEDIA_TEST_MULTI_HOST", "example.com");
         let host_set = expand_env(
             "host: ${TIDYMEDIA_TEST_MULTI_HOST:-127.0.0.1} port: ${TIDYMEDIA_TEST_MULTI_PORT:-5037}",
         );
         assert_eq!(host_set, "host: example.com port: 5037");
-        unsafe { std::env::remove_var("TIDYMEDIA_TEST_MULTI_HOST") };
+        remove_env_var("TIDYMEDIA_TEST_MULTI_HOST");
     }
 
     #[test]
     fn resolve_var_missing_no_default_returns_empty() {
-        unsafe { std::env::remove_var("TIDYMEDIA_TEST_NO_DEFAULT_W") };
+        remove_env_var("TIDYMEDIA_TEST_NO_DEFAULT_W");
         assert_eq!(resolve_var("TIDYMEDIA_TEST_NO_DEFAULT_W"), "");
     }
 
@@ -285,21 +300,21 @@ mod tests {
             "backend:\n  smb:\n    default_user: alice\n    workgroup: HOME\n    timeout_secs: 60\n  mtp:\n    device_match: exact\n    storage_match: exact\n  adb:\n    server_host: 10.0.0.5\n    server_port: 15037\n    timeout_secs: 90\n",
         )
         .unwrap();
-        unsafe { std::env::set_var("TIDYMEDIA_CONFIG", path.to_str().unwrap()) };
+        set_env_var("TIDYMEDIA_CONFIG", path.to_str().unwrap());
         let cfg = load();
         assert_eq!(cfg.backend.smb.default_user, "alice");
         assert_eq!(cfg.backend.smb.workgroup, "HOME");
         assert_eq!(cfg.backend.adb.server_host, "10.0.0.5");
         assert_eq!(cfg.backend.adb.server_port, 15037);
-        unsafe { std::env::remove_var("TIDYMEDIA_CONFIG") };
+        remove_env_var("TIDYMEDIA_CONFIG");
     }
 
     #[test]
     fn load_falls_back_when_file_missing() {
-        unsafe { std::env::set_var("TIDYMEDIA_CONFIG", "/no/such/file/xyz.yaml") };
+        set_env_var("TIDYMEDIA_CONFIG", "/no/such/file/xyz.yaml");
         let cfg = load();
         assert_eq!(cfg.copy.timezone_offset_hours, 8);
-        unsafe { std::env::remove_var("TIDYMEDIA_CONFIG") };
+        remove_env_var("TIDYMEDIA_CONFIG");
     }
 
     #[test]
@@ -307,10 +322,10 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("bad.yaml");
         std::fs::write(&path, "::: not yaml :::").unwrap();
-        unsafe { std::env::set_var("TIDYMEDIA_CONFIG", path.to_str().unwrap()) };
+        set_env_var("TIDYMEDIA_CONFIG", path.to_str().unwrap());
         let cfg = load();
         assert_eq!(cfg.copy.unique_name_max_attempts, 10);
-        unsafe { std::env::remove_var("TIDYMEDIA_CONFIG") };
+        remove_env_var("TIDYMEDIA_CONFIG");
     }
 
     #[test]
@@ -322,12 +337,12 @@ mod tests {
             "copy:\n  timezone_offset_hours: 0\n  unique_name_max_attempts: 5\nexif:\n  valid_date_time_secs: 100\n",
         )
         .unwrap();
-        unsafe { std::env::set_var("TIDYMEDIA_CONFIG", path.to_str().unwrap()) };
+        set_env_var("TIDYMEDIA_CONFIG", path.to_str().unwrap());
         let cfg = load();
         assert_eq!(cfg.copy.timezone_offset_hours, 0);
         assert_eq!(cfg.copy.unique_name_max_attempts, 5);
         assert_eq!(cfg.exif.valid_date_time_secs, 100);
-        unsafe { std::env::remove_var("TIDYMEDIA_CONFIG") };
+        remove_env_var("TIDYMEDIA_CONFIG");
     }
 
     #[test]
@@ -344,10 +359,10 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("zero.yaml");
         std::fs::write(&path, "copy:\n  unique_name_max_attempts: 0\n").unwrap();
-        unsafe { std::env::set_var("TIDYMEDIA_CONFIG", path.to_str().unwrap()) };
+        set_env_var("TIDYMEDIA_CONFIG", path.to_str().unwrap());
         let cfg = load();
         assert_eq!(cfg.copy.unique_name_max_attempts, 10);
-        unsafe { std::env::remove_var("TIDYMEDIA_CONFIG") };
+        remove_env_var("TIDYMEDIA_CONFIG");
     }
 
     // yaml 内非法模板（结构错配）回退默认模板，不让渲染产生字面 '{' 目录。
@@ -356,10 +371,10 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("badtmpl.yaml");
         std::fs::write(&path, "copy:\n  archive_template: \"{year/{month}}\"\n").unwrap();
-        unsafe { std::env::set_var("TIDYMEDIA_CONFIG", path.to_str().unwrap()) };
+        set_env_var("TIDYMEDIA_CONFIG", path.to_str().unwrap());
         let cfg = load();
         assert_eq!(cfg.copy.archive_template, "{year}/{month}/{valuable_name}");
-        unsafe { std::env::remove_var("TIDYMEDIA_CONFIG") };
+        remove_env_var("TIDYMEDIA_CONFIG");
     }
 
     // 非法 log.level 回退 "info"，不让 CLI 端 parse 静默吞掉配置错误。
@@ -368,10 +383,10 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("badlevel.yaml");
         std::fs::write(&path, "log:\n  level: chatty\n").unwrap();
-        unsafe { std::env::set_var("TIDYMEDIA_CONFIG", path.to_str().unwrap()) };
+        set_env_var("TIDYMEDIA_CONFIG", path.to_str().unwrap());
         let cfg = load();
         assert_eq!(cfg.log.level, "info");
-        unsafe { std::env::remove_var("TIDYMEDIA_CONFIG") };
+        remove_env_var("TIDYMEDIA_CONFIG");
     }
 
     // 合法 log.level 不被 sanitize 改写（防无条件重置变异）。
@@ -380,10 +395,10 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("oklevel.yaml");
         std::fs::write(&path, "log:\n  level: debug\n").unwrap();
-        unsafe { std::env::set_var("TIDYMEDIA_CONFIG", path.to_str().unwrap()) };
+        set_env_var("TIDYMEDIA_CONFIG", path.to_str().unwrap());
         let cfg = load();
         assert_eq!(cfg.log.level, "debug");
-        unsafe { std::env::remove_var("TIDYMEDIA_CONFIG") };
+        remove_env_var("TIDYMEDIA_CONFIG");
     }
 
     // 端到端回归：真实 config.yaml 写法（带引号 + 嵌套占位符默认值）必须
@@ -397,13 +412,13 @@ mod tests {
             "copy:\n  archive_template: \"${TIDYMEDIA_TEST_LOAD_TMPL:-{year}/{day}}\"\n  unique_name_max_attempts: 4\n",
         )
         .unwrap();
-        unsafe { std::env::remove_var("TIDYMEDIA_TEST_LOAD_TMPL") };
-        unsafe { std::env::set_var("TIDYMEDIA_CONFIG", path.to_str().unwrap()) };
+        remove_env_var("TIDYMEDIA_TEST_LOAD_TMPL");
+        set_env_var("TIDYMEDIA_CONFIG", path.to_str().unwrap());
         let cfg = load();
         assert_eq!(cfg.copy.archive_template, "{year}/{day}");
         // 同文件其余字段未因 parse_error 丢失
         assert_eq!(cfg.copy.unique_name_max_attempts, 4);
-        unsafe { std::env::remove_var("TIDYMEDIA_CONFIG") };
+        remove_env_var("TIDYMEDIA_CONFIG");
     }
 
     // 合法配置不被 sanitize 改写（防 sanitize 被变异成无条件重置）。
@@ -416,10 +431,10 @@ mod tests {
             "copy:\n  unique_name_max_attempts: 3\n  archive_template: \"{year}/{day}\"\n",
         )
         .unwrap();
-        unsafe { std::env::set_var("TIDYMEDIA_CONFIG", path.to_str().unwrap()) };
+        set_env_var("TIDYMEDIA_CONFIG", path.to_str().unwrap());
         let cfg = load();
         assert_eq!(cfg.copy.unique_name_max_attempts, 3);
         assert_eq!(cfg.copy.archive_template, "{year}/{day}");
-        unsafe { std::env::remove_var("TIDYMEDIA_CONFIG") };
+        remove_env_var("TIDYMEDIA_CONFIG");
     }
 }

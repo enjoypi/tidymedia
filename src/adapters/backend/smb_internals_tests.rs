@@ -106,6 +106,74 @@ fn map_smb_error_passthrough_other_without_eacces() {
     assert!(format!("{mapped}").contains("disk full"));
 }
 
+// pavao 把"路径不存在"包成 `io::Error::other("pavao: ENOENT ...")`：map_error 必须
+// 把这种文本错误归一为 NotFound，否则 mkdir_recursive 的 NotFound guard 永不触发
+// → 多层归档目录创建必败（生产场景 fake 返干净 NotFound 掩盖该缺陷）。
+#[test]
+fn map_smb_error_other_with_enoent_text_to_notfound() {
+    let e = io::Error::other("pavao: ENOENT No such file or directory");
+    let mapped = SmbAdapter::map_error(e);
+    assert_eq!(mapped.kind(), io::ErrorKind::NotFound);
+}
+
+#[test]
+fn map_smb_error_other_with_no_such_file_text_to_notfound() {
+    let e = io::Error::other("smb: no such file");
+    let mapped = SmbAdapter::map_error(e);
+    assert_eq!(mapped.kind(), io::ErrorKind::NotFound);
+}
+
+#[test]
+fn map_smb_error_other_with_does_not_exist_text_to_notfound() {
+    let e = io::Error::other("share does not exist on host");
+    let mapped = SmbAdapter::map_error(e);
+    assert_eq!(mapped.kind(), io::ErrorKind::NotFound);
+}
+
+#[test]
+fn map_smb_error_other_with_permission_text_to_permission_denied() {
+    let e = io::Error::other("permission denied while opening share");
+    let mapped = SmbAdapter::map_error(e);
+    assert_eq!(mapped.kind(), io::ErrorKind::PermissionDenied);
+}
+
+// 已正确分类的 kind 必须直接放行；防 future pavao 版本提前归一时被文案重映射
+// 误覆盖（与 AdbAdapter::map_error 同一守门策略）。
+#[test]
+fn map_smb_error_already_notfound_passthrough() {
+    let e = io::Error::from(io::ErrorKind::NotFound);
+    let mapped = SmbAdapter::map_error(e);
+    assert_eq!(mapped.kind(), io::ErrorKind::NotFound);
+}
+
+#[test]
+fn map_smb_error_already_permission_denied_passthrough() {
+    let e = io::Error::from(io::ErrorKind::PermissionDenied);
+    let mapped = SmbAdapter::map_error(e);
+    assert_eq!(mapped.kind(), io::ErrorKind::PermissionDenied);
+}
+
+// mkdir_p 端到端：pavao 风格 ENOENT 文案的 stat 错误必须被 map_error 归一为
+// NotFound，让 mkdir_recursive 自底向上扫描祖先后逐层 mkdir 成功。该测试覆盖
+// 生产 SMB 多层归档目录创建路径，弥补既有 fake_client 干净 NotFound 的覆盖盲区。
+#[test]
+fn mkdir_p_succeeds_when_stat_returns_pavao_style_enoent_text() {
+    let client = Arc::new(FakeClient::with_error_factory(|k| match k {
+        io::ErrorKind::NotFound => io::Error::other("pavao: ENOENT No such file or directory"),
+        other => io::Error::from(other),
+    }));
+    let backend = backend_with(client.clone());
+    backend.mkdir_p(&smb("2024/01")).unwrap();
+    let parent = client
+        .get_metadata("2024")
+        .expect("parent layer must be created");
+    assert_eq!(parent.kind, EntryKind::Dir);
+    let leaf = client
+        .get_metadata("2024/01")
+        .expect("leaf layer must be created");
+    assert_eq!(leaf.kind, EntryKind::Dir);
+}
+
 #[test]
 fn smb_buffered_writer_debug_format() {
     use std::io::Write;

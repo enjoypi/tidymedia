@@ -130,6 +130,15 @@ fn compute_output_prefix(output: Option<&Source>) -> Option<String> {
     })
 }
 
+// `\r` 仅 Windows：让生成的脚本在 cmd.exe 用 CRLF 行尾，Linux/macOS sh 走 LF。
+// 旧实现硬编码 `\r` 在所有平台 → Linux 下输出 CRLF，下游 `tidymedia find | sh`
+// 时 shell 把尾随 CR 当路径字符的一部分 → `rm "foo.jpg"^M` 触发
+// "rm: cannot remove 'foo.jpg<CR>': No such file or directory"，所有删除静默失败。
+#[cfg(target_os = "windows")]
+pub(crate) const SCRIPT_LINE_TAIL: &str = "\r";
+#[cfg(not(target_os = "windows"))]
+pub(crate) const SCRIPT_LINE_TAIL: &str = "";
+
 pub(crate) fn render_script(
     same: &[DuplicateGroup],
     output_prefix: Option<&str>,
@@ -139,14 +148,17 @@ pub(crate) fn render_script(
 ) {
     // 输入已按 size 降序（DuplicateGroup filter_and_sort 内部约定）；直接顺序遍历。
     for group in same {
-        let _ = writeln!(sink, "{comment_token}SIZE {}\r", group.size);
+        let _ = writeln!(sink, "{comment_token}SIZE {}{SCRIPT_LINE_TAIL}", group.size);
         for path in &group.paths {
             let path_str = path.as_str();
             let starts = output_prefix.is_some_and(|p| under_prefix(path_str, p));
             if output_prefix.is_some() && !starts {
-                let _ = writeln!(sink, "{rm_token} \"{path}\"\r");
+                let _ = writeln!(sink, "{rm_token} \"{path}\"{SCRIPT_LINE_TAIL}");
             } else {
-                let _ = writeln!(sink, "{comment_token}{rm_token} \"{path}\"\r");
+                let _ = writeln!(
+                    sink,
+                    "{comment_token}{rm_token} \"{path}\"{SCRIPT_LINE_TAIL}"
+                );
             }
         }
         let _ = writeln!(sink);

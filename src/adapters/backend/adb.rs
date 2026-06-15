@@ -97,7 +97,9 @@ impl RemoteAdapter for AdbAdapter {
         ) {
             return e;
         }
-        let msg = e.to_string().to_lowercase();
+        // 错误文案为 ASCII；用 to_ascii_lowercase 避免 Unicode full-case folding
+        // 在非 ASCII 设备消息上字节布局漂移导致 contains 匹配丢失。
+        let msg = e.to_string().to_ascii_lowercase();
         if msg.contains("no such file")
             || msg.contains("does not exist")
             || msg.contains("device not found")

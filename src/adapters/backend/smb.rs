@@ -122,9 +122,26 @@ impl RemoteAdapter for SmbAdapter {
         "smb"
     }
 
-    /// EACCES → PermissionDenied；其他 `ErrorKind` 透传。
+    /// pavao 把所有错误包成 `io::Error::other("pavao: ...")`：`mkdir_recursive` 的
+    /// `NotFound` 守卫必须靠文案重映射触发，否则多层归档目录创建必败。
+    /// 与 `AdbAdapter::map_error` 同构：先放行已正确分类的 `NotFound` / `PermissionDenied`
+    /// kind（防 future pavao 版本提前归一时被重复包装丢失分类），再按 ASCII 文案
+    /// 重映射 `Other` / `BrokenPipe` 等链式错误。
     fn map_error(e: io::Error) -> io::Error {
-        if e.kind() == io::ErrorKind::Other && e.to_string().contains("EACCES") {
+        if matches!(
+            e.kind(),
+            io::ErrorKind::NotFound | io::ErrorKind::PermissionDenied
+        ) {
+            return e;
+        }
+        // pavao 文案为 ASCII；to_ascii_lowercase 比 to_lowercase 快且不做 Unicode
+        // full-case folding（参考 adb.rs 同一处理）。
+        let msg = e.to_string().to_ascii_lowercase();
+        if msg.contains("enoent") || msg.contains("no such file") || msg.contains("does not exist")
+        {
+            return io::Error::new(io::ErrorKind::NotFound, e.to_string());
+        }
+        if msg.contains("eacces") || msg.contains("permission") {
             return io::Error::new(io::ErrorKind::PermissionDenied, e.to_string());
         }
         e

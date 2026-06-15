@@ -12,6 +12,7 @@ use camino::Utf8PathBuf;
 use super::remote::RemoteClient;
 use super::remote::RemoteTarget;
 use crate::entities::backend::{Entry, EntryKind, Metadata};
+use crate::entities::common::under_prefix;
 
 /// Client 操作的错误注入键。
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
@@ -148,10 +149,13 @@ impl<T: RemoteTarget> RemoteClient<T> for FakeRemoteClient<T> {
         self.check(RemoteFakeOp::List, target.path())?;
         let s = self.files.lock().unwrap();
         let parent = target.path().as_str();
+        // 空 parent 是 "list 全部" 的快捷：under_prefix 对空前缀返 false（要求 path
+        // 以分隔符开头），与"列根目录"语义相反，需要显式短路。非空 parent 走
+        // under_prefix 复用生产代码同一前缀语义（剥尾分隔符 + 边界校验）。
         Ok(s.keys()
             .filter(|p| {
                 let child = p.as_str();
-                parent.is_empty() || child == parent || child.starts_with(&format!("{parent}/"))
+                parent.is_empty() || under_prefix(child, parent)
             })
             .map(|p| {
                 let m = &s[p].meta;

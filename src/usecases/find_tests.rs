@@ -3,6 +3,7 @@ use std::sync::Arc;
 use camino::Utf8PathBuf;
 use tempfile::tempdir;
 
+use super::SCRIPT_LINE_TAIL;
 use super::comment;
 use super::find_duplicates;
 use super::render_script;
@@ -12,6 +13,10 @@ use crate::entities::backend::Backend;
 use crate::entities::file_index::DuplicateGroup;
 use crate::entities::test_common as tc;
 use crate::entities::uri::Location;
+
+// 平台条件行尾常量的别名：`CR` 在 Windows 解析为 "\r"，其他平台为 ""，
+// 让平台分支共用断言模板。
+const CR: &str = SCRIPT_LINE_TAIL;
 
 fn local_data_dir() -> (Location, Arc<dyn Backend>) {
     (
@@ -57,8 +62,10 @@ fn sample_two_groups() -> Vec<DuplicateGroup> {
 fn render_script_unix_tokens_no_output() {
     let same = sample_two_groups();
     let out = run_render(&same, None, "#", "rm");
-    let expected = "#SIZE 200\r\n#rm \"/data/big_a\"\r\n#rm \"/data/big_b\"\r\n\n\
-                    #SIZE 100\r\n#rm \"/data/small_a\"\r\n#rm \"/data/small_b\"\r\n\n";
+    let expected = format!(
+        "#SIZE 200{CR}\n#rm \"/data/big_a\"{CR}\n#rm \"/data/big_b\"{CR}\n\n\
+         #SIZE 100{CR}\n#rm \"/data/small_a\"{CR}\n#rm \"/data/small_b\"{CR}\n\n"
+    );
     assert_eq!(out, expected);
 }
 
@@ -66,8 +73,32 @@ fn render_script_unix_tokens_no_output() {
 fn render_script_windows_tokens_no_output() {
     let same = sample_two_groups();
     let out = run_render(&same, None, ":", "DEL");
-    assert!(out.contains(":SIZE 200\r\n"));
-    assert!(out.contains(":DEL \"/data/big_a\"\r\n"));
+    assert!(out.contains(&format!(":SIZE 200{CR}\n")));
+    assert!(out.contains(&format!(":DEL \"/data/big_a\"{CR}\n")));
+}
+
+// 平台分支显式锚定：Linux/macOS 输出 LF 行尾（无 `\r`）以保下游 `| sh` 可用；
+// Windows 输出 CRLF（含 `\r`）以保 cmd.exe 风格脚本可用。
+#[cfg(not(target_os = "windows"))]
+#[test]
+fn render_script_non_windows_uses_lf_line_endings() {
+    let same = sample_two_groups();
+    let out = run_render(&same, None, "#", "rm");
+    assert!(
+        !out.contains('\r'),
+        "non-Windows output must not contain CR: {out:?}"
+    );
+}
+
+#[cfg(target_os = "windows")]
+#[test]
+fn render_script_windows_uses_crlf_line_endings() {
+    let same = sample_two_groups();
+    let out = run_render(&same, None, "#", "rm");
+    assert!(
+        out.contains("\r\n"),
+        "Windows output must contain CRLF: {out:?}"
+    );
 }
 
 #[test]
@@ -75,12 +106,12 @@ fn render_script_uncommments_paths_outside_output_prefix() {
     let same = sample_two_groups();
     let out = run_render(&same, Some("/keepers"), "#", "rm");
     for line in [
-        "rm \"/data/big_a\"\r",
-        "rm \"/data/big_b\"\r",
-        "rm \"/data/small_a\"\r",
-        "rm \"/data/small_b\"\r",
+        format!("rm \"/data/big_a\"{CR}"),
+        format!("rm \"/data/big_b\"{CR}"),
+        format!("rm \"/data/small_a\"{CR}"),
+        format!("rm \"/data/small_b\"{CR}"),
     ] {
-        assert!(out.contains(line), "missing line: {line}\nfull:\n{out}");
+        assert!(out.contains(&line), "missing line: {line}\nfull:\n{out}");
     }
     assert!(!out.contains("#rm \"/data/"));
 }
@@ -98,9 +129,9 @@ fn render_script_prefix_does_not_match_sibling_with_same_prefix() {
     }];
     let out = run_render(&groups, Some("/photos"), "#", "rm");
     // /photos/img.jpg 在 output 下 → 被注释保护
-    assert!(out.contains("#rm \"/photos/img.jpg\"\r"));
+    assert!(out.contains(&format!("#rm \"/photos/img.jpg\"{CR}")));
     // /photos_backup/img.jpg 不在 output 下 → 待删（非注释）
-    assert!(out.contains("rm \"/photos_backup/img.jpg\"\r"));
+    assert!(out.contains(&format!("rm \"/photos_backup/img.jpg\"{CR}")));
     assert!(!out.contains("#rm \"/photos_backup/img.jpg\""));
 }
 
@@ -112,7 +143,7 @@ fn render_script_path_exactly_equal_prefix_is_under() {
         paths: vec![Utf8PathBuf::from("/keepers"), Utf8PathBuf::from("/other/x")],
     }];
     let out = run_render(&groups, Some("/keepers"), "#", "rm");
-    assert!(out.contains("#rm \"/keepers\"\r"));
+    assert!(out.contains(&format!("#rm \"/keepers\"{CR}")));
 }
 
 #[test]
@@ -125,8 +156,8 @@ fn render_script_keeps_paths_under_output_prefix_commented() {
         ],
     }];
     let out = run_render(&groups, Some("/keepers"), "#", "rm");
-    assert!(out.contains("#rm \"/keepers/a\"\r"));
-    assert!(out.contains("rm \"/other/b\"\r"));
+    assert!(out.contains(&format!("#rm \"/keepers/a\"{CR}")));
+    assert!(out.contains(&format!("rm \"/other/b\"{CR}")));
     assert!(!out.contains("#rm \"/other/b\""));
 }
 

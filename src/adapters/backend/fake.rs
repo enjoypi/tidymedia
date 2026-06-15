@@ -14,6 +14,7 @@ use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
 
 use crate::entities::backend::{Backend, Entry, EntryKind, MediaReader, MediaWriter, Metadata};
+use crate::entities::common::under_prefix;
 use crate::entities::uri::Location;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -283,14 +284,13 @@ impl MediaWriter for FakeWriter {
 }
 
 /// Location 是否位于 root 之下：scheme 必须相同；root 是 dir 等价匹配整段
-/// 字符串前缀（用 [`Location::display`] 比较以避免按字段类型穷举）。
+/// 字符串前缀。沿用 [`entities::common::under_prefix`] 的分隔符边界 + 尾分隔符
+/// 剥离语义，避免与生产代码两份 prefix 检查实现漂移。
 fn loc_is_under(child: &Location, root: &Location) -> bool {
     if child.scheme() != root.scheme() {
         return false;
     }
-    let child_s = child.display();
-    let root_s = root.display();
-    child_s == root_s || child_s.starts_with(&format!("{root_s}/"))
+    under_prefix(&child.display(), &root.display())
 }
 
 #[cfg(test)]

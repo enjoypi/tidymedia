@@ -137,6 +137,41 @@ fn walk_socket_entry_kind_other() {
     assert!(any_other);
 }
 
+// 把 parent dir chmod 0 让 try_exists 报 PermissionDenied：旧实现用 path.exists()
+// 把 IO 错吞成 Ok(false)，naming::generate_unique_name 接 ?，误判目标不存在 →
+// move 模式下覆盖现有归档文件 + 源被删 = 永久数据丢失（CLAUDE.md「Gotcha」R3）。
+// 修复后必须把 Err 直接传播给调用方。root 用户因 DAC override 仍能 stat，与
+// 同文件 `open_read_chmod_000_permission_denied` 同假设：CI 跑非 root。
+#[cfg(unix)]
+#[test]
+fn exists_propagates_permission_denied_from_unreadable_parent() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = tempdir().unwrap();
+    let subdir = dir.path().join("blocked");
+    fs::create_dir(&subdir).unwrap();
+    let path = subdir.join("a.bin");
+    fs::write(&path, b"x").unwrap();
+
+    let mut perms = fs::metadata(&subdir).unwrap().permissions();
+    let original = perms.mode();
+    perms.set_mode(0o000);
+    fs::set_permissions(&subdir, perms).unwrap();
+
+    let res = LocalBackend::new().exists(&local(&path));
+
+    let mut restore = fs::metadata(&subdir).unwrap().permissions();
+    restore.set_mode(original);
+    fs::set_permissions(&subdir, restore).unwrap();
+
+    // 旧实现：Ok(false)；修复后必须 Err。kind 接 PermissionDenied / Other 二态，
+    // 与既有 chmod 000 测试套路同口径。
+    let err = res.unwrap_err();
+    assert!(matches!(
+        err.kind(),
+        io::ErrorKind::PermissionDenied | io::ErrorKind::Other
+    ));
+}
+
 // Windows 无 POSIX 权限位，chmod 000 无法模拟 PermissionDenied
 #[cfg(unix)]
 #[test]

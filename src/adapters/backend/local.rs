@@ -48,7 +48,10 @@ impl Backend for LocalBackend {
 
     fn exists(&self, loc: &Location) -> io::Result<bool> {
         let path = local_path(loc)?;
-        Ok(path.exists())
+        // 必须用 try_exists：path.exists() 把 PermissionDenied 等 IO 错误吞成 false，
+        // 让 naming::generate_unique_name 误判目标不存在 → open_write 覆盖现有文件，
+        // move 模式下源随后被删即永久数据丢失（CLAUDE.md「Gotcha」R3 守门）。
+        path.as_std_path().try_exists()
     }
 
     fn walk<'a>(

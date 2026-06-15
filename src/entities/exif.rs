@@ -199,11 +199,16 @@ fn sniff_mime(reader: &mut dyn MediaReader) -> io::Result<String> {
         .unwrap_or_default())
 }
 
-// `infer` 只匹配 `ftyp` brand 的现代 QuickTime/MP4；老 QuickTime（如 NIKON
-// COOLPIX 早期机型）以 `pnot` preview atom 起头，需自查 magic 兜底，否则
-// `is_media` 误判致整段视频被 ignore。
+// `infer` 只匹配 `ftyp` brand 的现代 QuickTime/MP4；老 QuickTime 有两种变体：
+//   - `pnot` preview atom 起头（NIKON COOLPIX S5/P5000、Casio 早期机型）
+//   - `mdat` 直接起头（无任何头 atom、moov 在文件末尾的 mdat-first 变体）
+// 两种 nom-exif 入口 `parse_bmff_mime` 都拒识（只认 ftyp/wide），上游 fork patch
+// 在 nom-exif 内部短路；但 sniff_mime 是路由 gate——MIME 为空则 from_reader 不会
+// 调 populate_video_dates，fork 永远拿不到执行机会。两种 first-atom 必须都识别
+// 为 video/quicktime，否则整段老 QuickTime MOV 被 `is_media` 当作非媒体 ignore。
 fn quicktime_legacy_mime(buf: &[u8]) -> Option<&'static str> {
-    (buf.get(4..8) == Some(b"pnot")).then_some(MIME_QUICKTIME)
+    let head = buf.get(4..8)?;
+    (head == b"pnot" || head == b"mdat").then_some(MIME_QUICKTIME)
 }
 
 // BDAV MPEG-TS（AVCHD .mts / .m2ts）：4 字节 TP_extra_header + 188 字节 TS packet。
