@@ -156,6 +156,47 @@ fn read_to_string_invalid_utf8() {
     assert_eq!(e.kind(), io::ErrorKind::InvalidData);
 }
 
+// 边界值：size 恰等 cap 时应被**接受**（`>` cap 检查的 inclusive 边界）。
+// 杀变异：`>` → `>=` 让 size==cap 被错拒；该测试断言 size==cap 路径通畅。
+#[test]
+fn read_to_string_accepts_size_exactly_at_cap() {
+    use crate::entities::backend::EntryKind;
+    #[derive(Debug)]
+    struct AtCapClient;
+    impl RemoteClient<DummyTarget> for AtCapClient {
+        fn stat(&self, _t: &DummyTarget) -> io::Result<Metadata> {
+            Ok(Metadata {
+                size: super::MAX_REMOTE_TEXT_BYTES,
+                kind: EntryKind::File,
+                modified: None,
+                created: None,
+            })
+        }
+        fn list(&self, _t: &DummyTarget) -> io::Result<Vec<Entry>> {
+            unreachable!()
+        }
+        fn read(&self, _t: &DummyTarget) -> io::Result<Vec<u8>> {
+            // 真实远端 read 返回的字节数不必与 stat 报告的 size 一致；上限检查仅看
+            // stat 报告值，read 返回少量字节用于断言路径未被错拒。
+            Ok(b"ok".to_vec())
+        }
+        fn write(&self, _t: &DummyTarget, _data: &[u8]) -> io::Result<u64> {
+            unreachable!()
+        }
+        fn unlink(&self, _t: &DummyTarget) -> io::Result<()> {
+            unreachable!()
+        }
+        fn mkdir(&self, _t: &DummyTarget) -> io::Result<()> {
+            unreachable!()
+        }
+    }
+    let b = RemoteBackend {
+        adapter: DummyAdapter::with_client(Arc::new(AtCapClient)),
+    };
+    let s = b.read_to_string(&loc()).unwrap();
+    assert_eq!(s, "ok");
+}
+
 // 远端 sidecar 体积上限：stat 报告超过 `MAX_REMOTE_TEXT_BYTES` 必须直接 Err，
 // 不进 client.read 一次性入堆，防不受信远端共享拖爆内存。
 #[test]
