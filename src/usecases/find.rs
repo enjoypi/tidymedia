@@ -26,7 +26,6 @@ const FEATURE_FIND: &str = "find";
 //
 // output 路径不存在或不是目录时返回 `Err`：空报告 + exit 0 与"无重复"不可区分，
 // 会误导基于退出码/空脚本做删除决策的调用方。
-#[cfg_attr(coverage_nightly, coverage(off))]
 pub(crate) fn find_duplicates(
     secure: bool,
     sources: Vec<Source>,
@@ -119,7 +118,6 @@ pub(crate) fn find_duplicates(
 // 上方 is_dir 断言已经过滤掉非目录；到这里 output 必然是 (Location, Backend) 形态。
 // Local 走 full_path canonicalize（兼容旧 prefix 字符串语义）；远端走 Location::display。
 // expect 的 panic 边永远不被触发，被 LLVM 当作 region miss，故抽出后标 coverage(off)。
-#[cfg_attr(coverage_nightly, coverage(off))]
 fn compute_output_prefix(output: Option<&Source>) -> Option<String> {
     output.map(|(loc, _)| match loc {
         Location::Local(p) => file_info::full_path(p.as_str())

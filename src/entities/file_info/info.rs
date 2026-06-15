@@ -127,7 +127,6 @@ impl Info {
     // profile codegen-units = 1 / `#[inline(never)]` 均无效——属 LLVM 多 binary
     // 实例化限制。直接整 fn off。语义由 info_open_calc_full_hash_caches_on_
     // second_call 单元测试断言不退化。
-    #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn calc_full_hash(&self) -> io::Result<u64> {
         let mut l = self.lazy.lock();
         if l.full {
@@ -147,7 +146,6 @@ impl Info {
 
     // 同 calc_full_hash：cache-hit 跨 test binary 多 instance，整 fn 标 off。
     // 语义由 info_open_secure_hash_caches_on_second_call 单元测试断言。
-    #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn secure_hash(&self) -> io::Result<SecureHash> {
         let mut l = self.lazy.lock();
         if l.secure_hash != SecureHash::default() {
@@ -193,7 +191,6 @@ impl Info {
     //（lib_tidy / cli_smoke）的 source 永远 secs>0，LLVM multi-binary inline 副本上
     // False 分支永远不触发。语义由 create_time_no_exif_uses_meta /
     // create_time_falls_back_when_exif_below_threshold 等单元测试断言。
-    #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn create_time(
         &self,
         valid_threshold_secs: u64,
@@ -263,7 +260,6 @@ impl Info {
 // 让 lib_tidy / cli_smoke 等永远不传 directory / empty fixture 的副本出现
 // 伪 miss。语义由单元测试 info_open_rejects_directory_* / info_open_rejects_
 // empty_* 直接断言保证不退化。
-#[cfg_attr(coverage_nightly, coverage(off))]
 fn ensure_hashable(meta: &crate::entities::backend::Metadata, loc: &Location) -> io::Result<()> {
     if meta.kind != EntryKind::File {
         return Err(io::Error::other(format!(
@@ -297,7 +293,6 @@ impl PartialEq for Info {
     // `coverage(off)`：尾段 `&& self.full_hash() == other.full_hash()` 在多个 test
     // binary 中无 fast_hash 相等而 full_hash 不等的 fixture（实际上要稳定造此
     // case 需要 xxh3 碰撞）。短路 && 的 False 分支在所有 instance 上都为 0。
-    #[cfg_attr(coverage_nightly, coverage(off))]
     fn eq(&self, other: &Self) -> bool {
         self.size == other.size
             && self.fast_hash == other.fast_hash

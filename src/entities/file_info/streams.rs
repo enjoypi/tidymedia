@@ -80,7 +80,6 @@ pub(crate) fn read_fill(r: &mut dyn MediaReader, buf: &mut [u8]) -> io::Result<u
 // 测试专用 path-only 哈希实现：file_info_tests 用作 stream 版的对照基线。
 
 #[cfg(test)]
-#[cfg_attr(coverage_nightly, coverage(off))]
 pub(super) fn fast_hash(path: &str) -> io::Result<(usize, u64, u64)> {
     use std::io::Read;
     let mut file = std::fs::File::open(path)?;
@@ -92,7 +91,6 @@ pub(super) fn fast_hash(path: &str) -> io::Result<(usize, u64, u64)> {
 }
 
 #[cfg(test)]
-#[cfg_attr(coverage_nightly, coverage(off))]
 pub(super) fn full_hash(path: &str) -> io::Result<(usize, u64)> {
     let file = std::fs::File::open(path)?;
     // SAFETY: file 句柄仍持有；测试用辅助，运行期外部进程不会并发改写。
@@ -101,7 +99,6 @@ pub(super) fn full_hash(path: &str) -> io::Result<(usize, u64)> {
 }
 
 #[cfg(test)]
-#[cfg_attr(coverage_nightly, coverage(off))]
 pub(super) fn secure_hash(path: &str) -> io::Result<(usize, SecureHash)> {
     let file = std::fs::File::open(path)?;
     // SAFETY: file 句柄仍持有；测试用辅助，运行期外部进程不会并发改写。

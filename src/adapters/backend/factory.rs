@@ -69,7 +69,6 @@ fn unsupported_backend(loc: &Location, feature: &str) -> Error {
 }
 
 #[cfg(feature = "smb-backend")]
-#[cfg_attr(coverage_nightly, coverage(off))]
 fn build_smb_backend(loc: &Location) -> Result<Arc<dyn Backend>> {
     use crate::adapters::backend::smb::SmbBackend;
     use crate::adapters::backend::smb::SmbTarget;
@@ -105,7 +104,6 @@ fn build_smb_backend(loc: &Location) -> Result<Arc<dyn Backend>> {
 }
 
 #[cfg(feature = "mtp-backend")]
-#[cfg_attr(coverage_nightly, coverage(off))]
 fn build_mtp_backend(loc: &Location) -> Result<Arc<dyn Backend>> {
     use crate::adapters::backend::mtp::real::RealMtpClient;
     // stub 期 RealMtpClient::new() 必 Err，? 自然传播。
@@ -121,7 +119,6 @@ fn build_mtp_backend(loc: &Location) -> Result<Arc<dyn Backend>> {
 }
 
 #[cfg(feature = "adb-backend")]
-#[cfg_attr(coverage_nightly, coverage(off))]
 fn build_adb_backend(loc: &Location) -> Result<Arc<dyn Backend>> {
     use crate::adapters::backend::adb::AdbBackend;
     use crate::adapters::backend::adb::real::RealAdbClient;

@@ -71,7 +71,6 @@ pub const FIXED_MEDIA_MTIME: i64 = 1_704_110_400;
 
 // 测试 fixture helper：fs::copy 的 Err 已在 L41 通过 missing 目录测试覆盖；
 // set_file_mtime 在 fs::copy 成功后立即调用，Err 分支不可稳定触发。整体标 coverage(off)。
-#[cfg_attr(coverage_nightly, coverage(off))]
 pub fn copy_png_to(
     target_dir: &std::path::Path,
     name: &str,

@@ -19,7 +19,6 @@ use crate::entities::uri::Location;
 // 积太大，每个集成 binary 只走部分 case）。语义由现有 lib_tidy 集成测试
 // （tidy_with_move_local_*、tidy_move_dry_run_with_duplicate_*、
 // tidy_move_with_duplicate_removes_src_when_not_dry_run 等）联合断言。
-#[cfg_attr(coverage_nightly, coverage(off))]
 pub(super) fn do_copy(
     src: &Info,
     output_dir: &Location,
@@ -120,7 +119,6 @@ pub(super) fn do_copy(
 /// 后三者在 `LocalBackend` 下要构造 disk-full / 父目录在 `mkdir_p` 后被外部抢删等
 /// 不可稳定的场景，整函数随 CLAUDE.md「不可稳定触发」套路标 coverage(off)；
 /// 剩余分支由 `FakeBackend` reader/writer error 注入的集成测试覆盖。
-#[cfg_attr(coverage_nightly, coverage(off))]
 fn stream_copy(src: &Info, target: &Location, out_be: &dyn Backend) -> common::Result<()> {
     let src_be = src.backend();
     let mut reader = src_be.open_read(src.location())?;

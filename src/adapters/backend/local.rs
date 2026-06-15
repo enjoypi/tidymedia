@@ -139,7 +139,6 @@ fn local_path(loc: &Location) -> io::Result<&Utf8Path> {
 /// 尝试 `fs::rename`；跨设备（`CrossesDevices`）时 fallback 到 copy + remove 两步。
 /// `CrossesDevices` 需要真实跨设备挂载点才能触发，在单测 tempdir 里不可稳定复现，
 /// 整函数标 `coverage(off)`，语义由 `rename_same_dir_moves_file_atomically` 等断言不退化。
-#[cfg_attr(coverage_nightly, coverage(off))]
 fn rename_or_fallback(from: &std::path::Path, to: &std::path::Path) -> io::Result<()> {
     match fs::rename(from, to) {
         Ok(()) => Ok(()),
@@ -189,7 +188,6 @@ fn kind_from_file_type(t: Option<std::fs::FileType>) -> EntryKind {
 /// `ignore::Error` → `io::Error`。`io_error()` 返回 None 的分支（如 ignore 自身
 /// 的 `GitIgnore` 解析错误、symlink 循环）需要构造复杂场景才能稳定触发，
 /// 整函数走 coverage(off)。
-#[cfg_attr(coverage_nightly, coverage(off))]
 fn ignore_to_io(e: &ignore::Error) -> io::Error {
     if let Some(io) = e.io_error() {
         io::Error::new(io.kind(), e.to_string())
@@ -227,7 +225,6 @@ impl Seek for MmapReader {
 
 /// 打开本地文件并 mmap。所有 unsafe / syscall 集中在这里，单测靠"chmod 000"
 /// 之类的真实文件操作触发 Err 分支。
-#[cfg_attr(coverage_nightly, coverage(off))]
 fn open_read_inner(path: &Path) -> io::Result<Box<dyn MediaReader>> {
     let file = fs::File::open(path)?;
     // SAFETY: file 句柄刚由 fs::File::open 创建且仍持有；本进程不会并发 truncate
@@ -253,7 +250,6 @@ impl Write for LocalWriter {
 impl MediaWriter for LocalWriter {
     // fs::File::flush 在正常关闭路径上几乎不会 Err（disk-full 等场景不可稳定触发）；
     // 整方法标 coverage(off)，参照 CLAUDE.md「不可稳定触发」套路。
-    #[cfg_attr(coverage_nightly, coverage(off))]
     fn finish(self: Box<Self>) -> io::Result<()> {
         let mut me = *self;
         me.file.flush()?;

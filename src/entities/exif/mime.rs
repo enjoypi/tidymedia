@@ -25,7 +25,6 @@ const MIME_SNIFF_BYTES: usize = 256;
 ///
 /// 内部 read / seek 的 `?` Err 分支在 `LocalBackend` 下不可稳定触发，整体标 coverage(off)
 /// 沿用 `file_info` 旧 path-only 哈希函数的策略；Backend 调度逻辑由 [`super::Exif::open`] 单测兜底。
-#[cfg_attr(coverage_nightly, coverage(off))]
 pub(super) fn sniff_mime(reader: &mut dyn MediaReader) -> io::Result<String> {
     let mut buf = [0u8; MIME_SNIFF_BYTES];
     let filled = read_fill(reader, &mut buf)?;
