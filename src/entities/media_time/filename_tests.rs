@@ -108,6 +108,11 @@ fn pixel_rejects(#[case] name: &str) {
 #[rstest]
 #[case::screenshot_basic("Screenshot_2024-05-17-12-00-00.jpg", epoch("2024-05-17T12:00:00Z"))]
 #[case::screenshot_no_ext("Screenshot_2024-05-17-12-00-00", epoch("2024-05-17T12:00:00Z"))]
+// Samsung / MIUI / 原生 Android 15-char 模板：`Screenshot_yyyymmdd_HHMMSS`
+// 命中 try_screenshot 第二个 else if 分支（rest.len() >= 15 && parse Ok），
+// 旧测试集只覆盖 19-char dash 形式，导致 BRDA:177,0,0 永不命中。
+#[case::screenshot_samsung_15char("Screenshot_20240517_120000.jpg", epoch("2024-05-17T12:00:00Z"))]
+#[case::screenshot_samsung_15char_no_ext("Screenshot_20240517_120000", epoch("2024-05-17T12:00:00Z"))]
 fn screenshot_parsed(#[case] name: &str, #[case] expected_ts: i64) {
     let c = parse_filename(name, utc_offset()).unwrap();
     assert_eq!(c.source, Source::FilenameScreenshot);

@@ -234,3 +234,81 @@ fn mtp_percent_decode_invalid_in_storage() {
         Err(ParseError::PercentDecode(_))
     ));
 }
+
+// ── IPv6 bracket host parsing ──
+// CLAUDE.md「URI 格式」明确支持 `smb://[::1]/share` 与 `smb://[2001:db8::1]:445/share`
+// 形态，但旧测试集无任何 IPv6 用例，让 `split_host_port` 的 `[...]` 分支全部
+// branch-uncovered。下述用例锚定 bracket 分支：成功/缺右括号/无端口/有端口/
+// 端口前缺冒号/端口非法 6 路径，杀 uri.rs:254-263 整段 BRDA 0 簇。
+
+#[test]
+fn smb_ipv6_bracket_no_port() {
+    let loc = Location::parse("smb://[::1]/share/path").unwrap();
+    let Location::Smb {
+        host, port, share, path, ..
+    } = loc
+    else {
+        panic!("expected Smb");
+    };
+    assert_eq!(host, "[::1]");
+    assert!(port.is_none());
+    assert_eq!(share, "share");
+    assert_eq!(path.as_str(), "path");
+}
+
+#[test]
+fn smb_ipv6_bracket_with_port() {
+    let loc = Location::parse("smb://[2001:db8::1]:445/share").unwrap();
+    let Location::Smb {
+        host, port, share, ..
+    } = loc
+    else {
+        panic!("expected Smb");
+    };
+    assert_eq!(host, "[2001:db8::1]");
+    assert_eq!(port, Some(445));
+    assert_eq!(share, "share");
+}
+
+#[test]
+fn smb_ipv6_bracket_with_user_and_port() {
+    let loc = Location::parse("smb://alice@[::1]:445/share/path").unwrap();
+    let Location::Smb {
+        user, host, port, ..
+    } = loc
+    else {
+        panic!("expected Smb");
+    };
+    assert_eq!(user.as_deref(), Some("alice"));
+    assert_eq!(host, "[::1]");
+    assert_eq!(port, Some(445));
+}
+
+// `[` 开头但缺右括号 → `split_host_port` 走 `let Some(end) = find(']') else` 早返
+// InvalidPort。覆盖 BRDA:255,0,0(none) + 254,0,0(some) 两端。
+#[test]
+fn smb_ipv6_bracket_missing_close_bracket_is_invalid_port() {
+    assert!(matches!(
+        Location::parse("smb://[::1/share"),
+        Err(ParseError::InvalidPort(_))
+    ));
+}
+
+// 右括号后非空且不以 `:` 起头 → strip_prefix(':') = None → InvalidPort，
+// 覆盖 BRDA:263,0,0/1。
+#[test]
+fn smb_ipv6_bracket_trailing_non_colon_is_invalid_port() {
+    assert!(matches!(
+        Location::parse("smb://[::1]x/share"),
+        Err(ParseError::InvalidPort(_))
+    ));
+}
+
+// 端口位非数字 → `port_str.parse::<u16>()` Err → InvalidPort。
+#[test]
+fn smb_ipv6_bracket_non_numeric_port_is_invalid_port() {
+    assert!(matches!(
+        Location::parse("smb://[::1]:abc/share"),
+        Err(ParseError::InvalidPort(_))
+    ));
+}
