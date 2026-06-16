@@ -340,8 +340,10 @@ pub(super) fn summary_result(failed: usize) -> &'static str {
 // 即规范形（scheme/host 不同自然不构成前缀关系）。
 pub(super) fn canonical_prefix(loc: &Location) -> String {
     match loc {
-        Location::Local(p) => file_info::full_path(p.as_str())
-            .map_or_else(|_| p.as_str().to_string(), |fp| fp.as_str().to_string()),
+        Location::Local(p) => match file_info::full_path(p.as_str()) {
+            Ok(fp) => fp.as_str().to_string(),
+            Err(_) => p.as_str().to_string(),
+        },
         other => other.display(),
     }
 }

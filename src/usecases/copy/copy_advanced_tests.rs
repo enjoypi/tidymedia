@@ -358,6 +358,103 @@ mod test_advanced {
         assert!(parsed["scanned"].as_u64().unwrap() >= 1);
     }
 
+    // 触发 ops.rs:71 `output_backend.mkdir_p(&target_dir_loc)?` Err arm：
+    // out_dir 可读但 chmod 555 → generate_unique_name 的 exists(out/2024/01/photo.png)
+    // 在不存在路径上返 Ok(false)（try_exists 沿路径 stat 找不到即返 false 而非 Err），
+    // 进入 line 71 mkdir_p out/2024/01；out_dir 无写权限 → mkdir_p Err。
+    #[test]
+    #[cfg(unix)]
+    fn do_copy_propagates_mkdir_error_when_archive_year_is_blocked() {
+        use std::os::unix::fs::PermissionsExt;
+        let out_dir = tempdir().unwrap();
+        // chmod 555：read+execute 但不能写入 → mkdir 2024/01 fail
+        let mut perm = fs::metadata(out_dir.path()).unwrap().permissions();
+        perm.set_mode(0o555);
+        fs::set_permissions(out_dir.path(), perm).unwrap();
+
+        let src_dir = tempdir().unwrap();
+        let info = make_media_info(src_dir.path(), "photo.png");
+        let mut idx = crate::entities::file_index::Index::new();
+
+        let err = do_copy(
+            &info,
+            &local_loc(out_dir.path()),
+            &local_arc(),
+            &mut idx,
+            &default_opts(DEFAULT_TMPL),
+        )
+        .unwrap_err();
+        let _ = err;
+
+        // 还原权限便于 tempdir 清理
+        let mut perm = fs::metadata(out_dir.path()).unwrap().permissions();
+        perm.set_mode(0o755);
+        fs::set_permissions(out_dir.path(), perm).unwrap();
+    }
+
+    // 触发 ops.rs:122 stream_copy 内 `if let Err(e) = result` 的 Err arm：
+    // FakeBackend output_backend 注入 OpenWrite Err 让 stream_copy 写阶段失败。
+    #[test]
+    fn do_copy_propagates_stream_copy_error_when_open_write_fails() {
+        use crate::adapters::backend::fake::{FakeBackend, Op};
+        use std::io::ErrorKind;
+
+        let src_dir = tempdir().unwrap();
+        let info = make_media_info(src_dir.path(), "photo.png");
+
+        let fake_out = std::sync::Arc::new(FakeBackend::new("local"));
+        let out_loc = Location::Local(Utf8PathBuf::from("/fake_out"));
+        fake_out.add_file(out_loc.clone(), vec![]);
+        let target_loc = Location::Local(Utf8PathBuf::from("/fake_out/2024/01/photo.png"));
+        // 让 open_write target 失败 → stream_copy 内 `if let Err(e) = result` 触发
+        fake_out.inject_error(target_loc, Op::OpenWrite, ErrorKind::PermissionDenied);
+
+        let mut idx = crate::entities::file_index::Index::new();
+        let backend_arc: std::sync::Arc<dyn Backend> = fake_out;
+        let err = do_copy(
+            &info,
+            &out_loc,
+            &backend_arc,
+            &mut idx,
+            &default_opts(DEFAULT_TMPL),
+        )
+        .unwrap_err();
+        let _ = err;
+    }
+
+    // 触发 ops.rs:101 `Info::open(...)?` Err arm：stream_copy 成功后 Info::open
+    // 通过 output_backend 再 open_read 时失败。FakeBackend output_backend 注入
+    // OpenRead Err 在 target_loc 上模拟该场景（race 删除 / 反病毒抢占等）。
+    #[test]
+    fn do_copy_propagates_info_open_error_after_transfer() {
+        use crate::adapters::backend::fake::{FakeBackend, Op};
+        use std::io::ErrorKind;
+
+        let src_dir = tempdir().unwrap();
+        let info = make_media_info(src_dir.path(), "photo.png");
+
+        let fake_out = std::sync::Arc::new(FakeBackend::new("local"));
+        let out_loc = Location::Local(Utf8PathBuf::from("/fake_out"));
+        // 预先把 fake_out 注册为 dir 让 mkdir_p 等不报错
+        fake_out.add_file(out_loc.clone(), vec![]);
+
+        let target_loc = Location::Local(Utf8PathBuf::from("/fake_out/2024/01/photo.png"));
+        // 等 stream_copy 完成后 Info::open 会调 backend.open_read(target) → 注入 Err
+        fake_out.inject_error(target_loc, Op::OpenRead, ErrorKind::Interrupted);
+
+        let mut idx = crate::entities::file_index::Index::new();
+        let backend_arc: std::sync::Arc<dyn Backend> = fake_out;
+        let err = do_copy(
+            &info,
+            &out_loc,
+            &backend_arc,
+            &mut idx,
+            &default_opts(DEFAULT_TMPL),
+        )
+        .unwrap_err();
+        let _ = err;
+    }
+
     #[test]
     fn copy_empty_source_with_report_writes_zero_counts() {
         let src = tempdir().unwrap();

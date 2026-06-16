@@ -259,7 +259,10 @@ impl Index {
     #[cfg(test)]
     pub fn visit_dir(&mut self, path: &str) {
         // canonicalize 失败（路径不存在）回退到原字符串，让 walker 自身报 walker_error
-        let root = super::file_info::full_path(path).unwrap_or_else(|_| Utf8PathBuf::from(path));
+        let root = match super::file_info::full_path(path) {
+            Ok(p) => p,
+            Err(_) => Utf8PathBuf::from(path),
+        };
         let backend = LocalBackend::arc();
         self.visit_location(&Location::Local(root), &backend);
     }
@@ -281,11 +284,12 @@ impl Index {
                 Ok(e) => e,
                 Err(e) => {
                     self.stats.walker_errors += 1;
+                    let root_str = root.display();
                     warn!(
                         feature = FEATURE_INDEX,
                         operation = "walk",
                         result = "walker_error",
-                        root = %root.display(),
+                        root = %root_str,
                         error = %e,
                         "walker reported an error entry",
                     );
@@ -318,11 +322,12 @@ impl Index {
                 Ok(info) => _ = self.add(info),
                 Err(e) => {
                     self.stats.skipped_unreadable += 1;
+                    let loc_str = loc.display();
                     warn!(
                         feature = FEATURE_INDEX,
                         operation = "walk",
                         result = "skipped_unreadable",
-                        location = %loc.display(),
+                        location = %loc_str,
                         error = %e,
                         "file could not be indexed",
                     );

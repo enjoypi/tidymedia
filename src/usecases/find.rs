@@ -35,16 +35,17 @@ pub(crate) fn find_duplicates(
             .metadata(loc)
             .is_ok_and(|m| m.kind == EntryKind::Dir);
         if !is_dir {
+            let loc_str = loc.display();
             error!(
                 feature = FEATURE_FIND,
                 operation = "validate_output",
                 result = "not_a_directory",
-                output = %loc.display(),
+                output = %loc_str,
                 "output path is not a directory"
             );
             return Err(common::Error::Io(std::io::Error::new(
                 std::io::ErrorKind::InvalidInput,
-                format!("output path is not a directory: {}", loc.display()),
+                format!("output path is not a directory: {loc_str}"),
             )));
         }
     }

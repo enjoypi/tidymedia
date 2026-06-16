@@ -15,6 +15,7 @@ use crate::entities::uri::Location;
 
 // 语义由 lib_tidy 集成测试（tidy_with_move_local_*、tidy_move_dry_run_with_duplicate_*、
 // tidy_move_with_duplicate_removes_src_when_not_dry_run 等）联合断言。
+#[inline(never)]
 pub(super) fn do_copy(
     src: &Info,
     output_dir: &Location,
@@ -85,12 +86,13 @@ pub(super) fn do_copy(
                 src.backend().remove_file(&src_loc)?;
             }
         }
+        let target_display = target_loc.display();
         debug!(
             feature,
             operation = "copy_file",
             result = "ok",
             source = %src_display,
-            target = %target_loc.display(),
+            target = %target_display,
             "file transferred"
         );
 
@@ -111,6 +113,7 @@ pub(super) fn do_copy(
 /// 等价；不同实例（跨 scheme）时仍工作。`open_read` Err 由
 /// `do_copy_file_copy_fails_when_source_unreadable` 覆盖；其余 Err 分支由
 /// `FakeBackend` reader/writer 注入的集成测试覆盖。
+#[inline(never)]
 fn stream_copy(src: &Info, target: &Location, out_be: &dyn Backend) -> common::Result<()> {
     let src_be = src.backend();
     let mut reader = src_be.open_read(src.location())?;

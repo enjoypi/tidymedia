@@ -151,6 +151,14 @@ fn canonical_prefix_falls_back_for_missing_local_path() {
     assert_eq!(canonical_prefix(&loc), "/no/such/dir/xyz");
 }
 
+// full_path 对绝对路径直接返 Ok（不 canonicalize），相对路径才调 canonicalize_utf8()；
+// 相对路径不存在 → canonicalize Err → Err arm 回退原始串。
+#[test]
+fn canonical_prefix_falls_back_for_relative_missing_path() {
+    let loc = Location::Local(Utf8PathBuf::from("relative/missing/xyz"));
+    assert_eq!(canonical_prefix(&loc), "relative/missing/xyz");
+}
+
 #[test]
 fn canonical_prefix_uses_display_for_remote() {
     let loc = Location::Smb {
