@@ -365,19 +365,14 @@ fn binary_find_with_output_emits_rm_for_outside_and_comment_for_inside() {
         .expect("spawn tidymedia binary");
     assert!(out.status.success());
     let stdout = String::from_utf8_lossy(&out.stdout);
-    // 删除命令按平台渲染：Windows 输出 `DEL ...`（`:` 注释），Unix 输出 `rm ...`（`#` 注释）
-    let rm_prefix = if cfg!(target_os = "windows") {
-        "DEL "
-    } else {
-        "rm "
-    };
+    // Python 删除脚本统一格式：`os.remove("...")` 未注释 = 待删；`# os.remove("...")` 已注释保护
     let rm_outside = stdout
         .lines()
-        .any(|l| l.starts_with(rm_prefix) && l.contains("b.jpg"));
+        .any(|l| l.starts_with("os.remove(") && l.contains("b.jpg"));
     let kept_commented = stdout
         .lines()
         .filter(|l| l.contains("a.jpg"))
-        .all(|l| !l.starts_with(rm_prefix));
+        .all(|l| !l.starts_with("os.remove("));
     assert!(
         rm_outside && kept_commented,
         "outside dup must be rm'd, kept copy commented; stdout:\n{stdout}"

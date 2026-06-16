@@ -3,20 +3,13 @@ use std::sync::Arc;
 use camino::Utf8PathBuf;
 use tempfile::tempdir;
 
-use super::SCRIPT_LINE_TAIL;
-use super::comment;
 use super::find_duplicates;
 use super::render_script;
-use super::rm;
 use crate::adapters::backend::local::LocalBackend;
 use crate::entities::backend::Backend;
 use crate::entities::file_index::DuplicateGroup;
 use crate::entities::test_common as tc;
 use crate::entities::uri::Location;
-
-// 平台条件行尾常量的别名：`CR` 在 Windows 解析为 "\r"，其他平台为 ""，
-// 让平台分支共用断言模板。
-const CR: &str = SCRIPT_LINE_TAIL;
 
 fn local_data_dir() -> (Location, Arc<dyn Backend>) {
     (
@@ -32,9 +25,9 @@ fn local_dir(p: &std::path::Path) -> (Location, Arc<dyn Backend>) {
     )
 }
 
-fn run_render(same: &[DuplicateGroup], prefix: Option<&str>, c: &str, r: &str) -> String {
+fn run_render(same: &[DuplicateGroup], prefix: Option<&str>) -> String {
     let mut sink: Vec<u8> = Vec::new();
-    render_script(same, prefix, c, r, &mut sink);
+    render_script(same, prefix, &mut sink);
     String::from_utf8(sink).unwrap()
 }
 
@@ -59,61 +52,38 @@ fn sample_two_groups() -> Vec<DuplicateGroup> {
 }
 
 #[test]
-fn render_script_unix_tokens_no_output() {
+fn render_script_python_no_output_all_commented() {
     let same = sample_two_groups();
-    let out = run_render(&same, None, "#", "rm");
-    let expected = format!(
-        "#SIZE 200{CR}\n#rm \"/data/big_a\"{CR}\n#rm \"/data/big_b\"{CR}\n\n\
-         #SIZE 100{CR}\n#rm \"/data/small_a\"{CR}\n#rm \"/data/small_b\"{CR}\n\n"
-    );
-    assert_eq!(out, expected);
-}
-
-#[test]
-fn render_script_windows_tokens_no_output() {
-    let same = sample_two_groups();
-    let out = run_render(&same, None, ":", "DEL");
-    assert!(out.contains(&format!(":SIZE 200{CR}\n")));
-    assert!(out.contains(&format!(":DEL \"/data/big_a\"{CR}\n")));
-}
-
-// 平台分支显式锚定：Linux/macOS 输出 LF 行尾（无 `\r`）以保下游 `| sh` 可用；
-// Windows 输出 CRLF（含 `\r`）以保 cmd.exe 风格脚本可用。
-#[cfg(not(target_os = "windows"))]
-#[test]
-fn render_script_non_windows_uses_lf_line_endings() {
-    let same = sample_two_groups();
-    let out = run_render(&same, None, "#", "rm");
-    assert!(
-        !out.contains('\r'),
-        "non-Windows output must not contain CR: {out:?}"
-    );
-}
-
-#[cfg(target_os = "windows")]
-#[test]
-fn render_script_windows_uses_crlf_line_endings() {
-    let same = sample_two_groups();
-    let out = run_render(&same, None, "#", "rm");
-    assert!(
-        out.contains("\r\n"),
-        "Windows output must contain CRLF: {out:?}"
-    );
+    let out = run_render(&same, None);
+    // 头部 shebang + import
+    assert!(out.starts_with("#!/usr/bin/env python3\n"));
+    assert!(out.contains("import os\n"));
+    // 无 output prefix → 所有 os.remove 都注释保护
+    assert!(out.contains("# SIZE 200\n"));
+    assert!(out.contains("# os.remove(\"/data/big_a\")\n"));
+    assert!(out.contains("# os.remove(\"/data/big_b\")\n"));
+    assert!(out.contains("# SIZE 100\n"));
+    assert!(out.contains("# os.remove(\"/data/small_a\")\n"));
+    assert!(out.contains("# os.remove(\"/data/small_b\")\n"));
+    // 不应出现未注释的 os.remove
+    for line in out.lines() {
+        assert!(
+            !line.starts_with("os.remove"),
+            "no-prefix mode must comment all: {line}"
+        );
+    }
 }
 
 #[test]
 fn render_script_uncommments_paths_outside_output_prefix() {
     let same = sample_two_groups();
-    let out = run_render(&same, Some("/keepers"), "#", "rm");
-    for line in [
-        format!("rm \"/data/big_a\"{CR}"),
-        format!("rm \"/data/big_b\"{CR}"),
-        format!("rm \"/data/small_a\"{CR}"),
-        format!("rm \"/data/small_b\"{CR}"),
-    ] {
+    let out = run_render(&same, Some("/keepers"));
+    // /data/* 不在 /keepers 下 → 待删（无注释）
+    for path in ["/data/big_a", "/data/big_b", "/data/small_a", "/data/small_b"] {
+        let line = format!("os.remove(\"{path}\")");
         assert!(out.contains(&line), "missing line: {line}\nfull:\n{out}");
     }
-    assert!(!out.contains("#rm \"/data/"));
+    assert!(!out.contains("# os.remove(\"/data/"));
 }
 
 /// `/photos_backup` 不应被 `/photos` prefix 误判为「在 output 内须保留」。
@@ -127,12 +97,12 @@ fn render_script_prefix_does_not_match_sibling_with_same_prefix() {
             Utf8PathBuf::from("/photos_backup/img.jpg"),
         ],
     }];
-    let out = run_render(&groups, Some("/photos"), "#", "rm");
+    let out = run_render(&groups, Some("/photos"));
     // /photos/img.jpg 在 output 下 → 被注释保护
-    assert!(out.contains(&format!("#rm \"/photos/img.jpg\"{CR}")));
+    assert!(out.contains("# os.remove(\"/photos/img.jpg\")\n"));
     // /photos_backup/img.jpg 不在 output 下 → 待删（非注释）
-    assert!(out.contains(&format!("rm \"/photos_backup/img.jpg\"{CR}")));
-    assert!(!out.contains("#rm \"/photos_backup/img.jpg\""));
+    assert!(out.contains("os.remove(\"/photos_backup/img.jpg\")\n"));
+    assert!(!out.contains("# os.remove(\"/photos_backup/img.jpg\")"));
 }
 
 /// path 恰等 prefix（虽极不常见但 `under_prefix` 的 `rest.is_empty()` 分支需覆盖）。
@@ -142,8 +112,8 @@ fn render_script_path_exactly_equal_prefix_is_under() {
         size: 1,
         paths: vec![Utf8PathBuf::from("/keepers"), Utf8PathBuf::from("/other/x")],
     }];
-    let out = run_render(&groups, Some("/keepers"), "#", "rm");
-    assert!(out.contains(&format!("#rm \"/keepers\"{CR}")));
+    let out = run_render(&groups, Some("/keepers"));
+    assert!(out.contains("# os.remove(\"/keepers\")\n"));
 }
 
 #[test]
@@ -155,16 +125,16 @@ fn render_script_keeps_paths_under_output_prefix_commented() {
             Utf8PathBuf::from("/other/b"),
         ],
     }];
-    let out = run_render(&groups, Some("/keepers"), "#", "rm");
-    assert!(out.contains(&format!("#rm \"/keepers/a\"{CR}")));
-    assert!(out.contains(&format!("rm \"/other/b\"{CR}")));
-    assert!(!out.contains("#rm \"/other/b\""));
+    let out = run_render(&groups, Some("/keepers"));
+    assert!(out.contains("# os.remove(\"/keepers/a\")\n"));
+    assert!(out.contains("os.remove(\"/other/b\")\n"));
+    assert!(!out.contains("# os.remove(\"/other/b\")"));
 }
 
 #[test]
 fn render_script_descending_size_order() {
     let same = sample_two_groups();
-    let out = run_render(&same, None, "#", "rm");
+    let out = run_render(&same, None);
     let idx_200 = out.find("SIZE 200").unwrap();
     let idx_100 = out.find("SIZE 100").unwrap();
     assert!(idx_200 < idx_100);
@@ -173,8 +143,36 @@ fn render_script_descending_size_order() {
 #[test]
 fn render_script_empty_input_writes_nothing() {
     let empty: Vec<DuplicateGroup> = Vec::new();
-    let out = run_render(&empty, None, "#", "rm");
-    assert!(out.is_empty());
+    let out = run_render(&empty, None);
+    assert!(out.is_empty(), "empty input must skip header: {out:?}");
+}
+
+/// Windows 路径（含 `\`）必须按 Python 字符串字面量正确转义。
+#[test]
+fn render_script_escapes_windows_backslash_path() {
+    let groups = vec![DuplicateGroup {
+        size: 1,
+        paths: vec![Utf8PathBuf::from(r"C:\Users\u\dup.jpg")],
+    }];
+    let out = run_render(&groups, None);
+    assert!(
+        out.contains(r#"# os.remove("C:\\Users\\u\\dup.jpg")"#),
+        "windows backslash must escape to \\\\: {out}"
+    );
+}
+
+/// 路径含 `"` 双引号也按 `\"` 转义，避免破坏 Python 字面量。
+#[test]
+fn render_script_escapes_double_quote_in_path() {
+    let groups = vec![DuplicateGroup {
+        size: 1,
+        paths: vec![Utf8PathBuf::from(r#"/tmp/with"quote.jpg"#)],
+    }];
+    let out = run_render(&groups, None);
+    assert!(
+        out.contains(r#"# os.remove("/tmp/with\"quote.jpg")"#),
+        "double-quote must escape: {out}"
+    );
 }
 
 /// 同 size 不同 content 的两组重复集必须独立保留（旧 `BTreeMap<size, _>` 实现会覆盖）。
@@ -220,20 +218,6 @@ fn search_same_preserves_distinct_groups_with_identical_size() {
     }
 }
 
-#[test]
-#[cfg(not(target_os = "windows"))]
-fn comment_and_rm_unix_tokens() {
-    assert_eq!(comment(), "#");
-    assert_eq!(rm(), "rm");
-}
-
-#[test]
-#[cfg(target_os = "windows")]
-fn comment_and_rm_windows_tokens() {
-    assert_eq!(comment(), ":");
-    assert_eq!(rm(), "DEL");
-}
-
 // output 指向文件（非目录）必须返回 Err：旧实现返回空报告 + exit 0，
 // 与"无重复"不可区分，误导基于退出码做删除决策的脚本。
 #[test]
@@ -262,5 +246,26 @@ fn find_duplicates_no_output_branch_runs() {
 fn find_duplicates_with_output_branch_runs() {
     let dir = tempdir().unwrap();
     let out_pair = local_dir(dir.path());
+    find_duplicates(false, vec![local_data_dir()], Some(&out_pair)).unwrap();
+}
+
+/// `compute_output_prefix` 的 `other => other.display()` arm：
+/// 远端 Location 走 Display 而非 full_path canonicalize。FakeBackend 模拟
+/// SMB 目录让 is_dir check 通过、进入 compute_output_prefix 后命中 other arm。
+#[test]
+fn find_duplicates_remote_output_uses_display_for_prefix() {
+    use crate::adapters::backend::fake::FakeBackend;
+
+    let fake = Arc::new(FakeBackend::new("smb"));
+    let remote_dir = Location::Smb {
+        user: None,
+        host: "nas".into(),
+        port: None,
+        share: "photos".into(),
+        path: Utf8PathBuf::from("out"),
+    };
+    fake.add_dir(remote_dir.clone());
+    let backend: Arc<dyn Backend> = fake;
+    let out_pair = (remote_dir, backend);
     find_duplicates(false, vec![local_data_dir()], Some(&out_pair)).unwrap();
 }

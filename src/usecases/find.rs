@@ -89,13 +89,7 @@ pub(crate) fn find_duplicates(
 
     let prefix_owned = compute_output_prefix(output);
 
-    render_script(
-        &groups,
-        prefix_owned.as_deref(),
-        comment(),
-        rm(),
-        &mut std::io::stdout(),
-    );
+    render_script(&groups, prefix_owned.as_deref(), &mut std::io::stdout());
 
     debug!(
         feature = FEATURE_FIND,
@@ -128,59 +122,44 @@ fn compute_output_prefix(output: Option<&Source>) -> Option<String> {
     })
 }
 
-// `\r` 仅 Windows：让生成的脚本在 cmd.exe 用 CRLF 行尾，Linux/macOS sh 走 LF。
-// 旧实现硬编码 `\r` 在所有平台 → Linux 下输出 CRLF，下游 `tidymedia find | sh`
-// 时 shell 把尾随 CR 当路径字符的一部分 → `rm "foo.jpg"^M` 触发
-// "rm: cannot remove 'foo.jpg<CR>': No such file or directory"，所有删除静默失败。
-#[cfg(target_os = "windows")]
-pub(crate) const SCRIPT_LINE_TAIL: &str = "\r";
-#[cfg(not(target_os = "windows"))]
-pub(crate) const SCRIPT_LINE_TAIL: &str = "";
+/// 输出 Python 删除脚本：跨平台单一格式，消除 sh/cmd 双轨。
+/// 用户审查后取消 `# os.remove(...)` 注释，`python3 script.py` 执行；
+/// windows 路径含 `\` 在 Python 字面量按 `\\` 转义，避免 sh 风格 `\` 歧义。
+const SCRIPT_HEADER: &str = "#!/usr/bin/env python3\n\
+\"\"\"tidymedia find 删除脚本：审查后取消注释 os.remove() 行后 `python3 <file>` 执行。\"\"\"\n\
+import os\n\n";
 
 pub(crate) fn render_script(
     same: &[DuplicateGroup],
     output_prefix: Option<&str>,
-    comment_token: &str,
-    rm_token: &str,
     sink: &mut impl Write,
 ) {
+    if same.is_empty() {
+        return;
+    }
+    let _ = sink.write_all(SCRIPT_HEADER.as_bytes());
     // 输入已按 size 降序（DuplicateGroup filter_and_sort 内部约定）；直接顺序遍历。
     for group in same {
-        let _ = writeln!(sink, "{comment_token}SIZE {}{SCRIPT_LINE_TAIL}", group.size);
+        let _ = writeln!(sink, "# SIZE {}", group.size);
         for path in &group.paths {
             let path_str = path.as_str();
             let starts = output_prefix.is_some_and(|p| under_prefix(path_str, p));
+            let escaped = escape_py_string(path_str);
             if output_prefix.is_some() && !starts {
-                let _ = writeln!(sink, "{rm_token} \"{path}\"{SCRIPT_LINE_TAIL}");
+                let _ = writeln!(sink, "os.remove(\"{escaped}\")");
             } else {
-                let _ = writeln!(
-                    sink,
-                    "{comment_token}{rm_token} \"{path}\"{SCRIPT_LINE_TAIL}"
-                );
+                // 在 output prefix 下或未指定 prefix → 注释保护，需手动取消注释才会删
+                let _ = writeln!(sink, "# os.remove(\"{escaped}\")");
             }
         }
         let _ = writeln!(sink);
     }
 }
 
-#[cfg(target_os = "windows")]
-pub(crate) fn comment() -> &'static str {
-    ":"
-}
-
-#[cfg(not(target_os = "windows"))]
-pub(crate) fn comment() -> &'static str {
-    "#"
-}
-
-#[cfg(target_os = "windows")]
-pub(crate) fn rm() -> &'static str {
-    "DEL"
-}
-
-#[cfg(not(target_os = "windows"))]
-pub(crate) fn rm() -> &'static str {
-    "rm"
+/// Python 字符串字面量转义：`\` → `\\`、`"` → `\"`。
+/// 路径含 `\n` 等控制字符极罕见，转 `\xNN` 留给后续如有需要再加。
+fn escape_py_string(s: &str) -> String {
+    s.replace('\\', "\\\\").replace('"', "\\\"")
 }
 
 #[cfg(test)]
