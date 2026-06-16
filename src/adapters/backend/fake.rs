@@ -407,9 +407,12 @@ mod tests {
         let err = b.rename(&src, &dst, false).unwrap_err();
         assert_eq!(err.kind(), io::ErrorKind::PermissionDenied);
         let msg = err.to_string();
+        // 拆成两条 assert：单 contains 让 LLVM 不为 `&&` 子分支拆 BR，避免 False
+        // 路径（assert 失败即 test 失败）必然 0 hit 导致 branch coverage miss。
+        assert!(msg.contains("copied"), "must mention 'copied', got: {msg}");
         assert!(
-            msg.contains("copied") && msg.contains("but cannot remove source"),
-            "default rename half-state must be labelled, got: {msg}"
+            msg.contains("but cannot remove source"),
+            "must label half-state, got: {msg}"
         );
     }
 }

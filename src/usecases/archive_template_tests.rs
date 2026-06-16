@@ -132,4 +132,12 @@ mod test_render {
         let result = render("{make}", &c);
         assert_eq!(result, "a_b_c");
     }
+
+    /// 空字符串直通：`!cleaned.is_empty()` False arm 命中，避免 `&&` 短路让该子分支
+    /// 0-hit。read_exif_field 永远传非空（fallback "unknown"），但 helper 自身应防御
+    /// 性处理空入参。
+    #[test]
+    fn sanitize_path_segment_passes_empty_through() {
+        assert_eq!(super::super::sanitize_path_segment(""), "");
+    }
 }

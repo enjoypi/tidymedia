@@ -3,6 +3,7 @@ use std::sync::Arc;
 use camino::Utf8PathBuf;
 use tempfile::tempdir;
 
+use super::compute_output_prefix;
 use super::find_duplicates;
 use super::render_script;
 use crate::adapters::backend::local::LocalBackend;
@@ -282,6 +283,17 @@ fn find_duplicates_propagates_non_notfound_metadata_error() {
         !err.to_string().contains("not a directory"),
         "PermissionDenied must propagate, got: {err}"
     );
+}
+
+/// `compute_output_prefix` 中 Local 分支 canonicalize 失败 → fallback 到原路径字符串。
+/// `full_path` 仅对相对路径调 canonicalize；传一个不存在的相对路径稳定触发 Err。
+/// 绝对路径会被 `full_path` 直接透传（不走 canonicalize），不会进 Err arm。
+#[test]
+fn compute_output_prefix_local_falls_back_when_canonicalize_fails() {
+    let out_loc = Location::Local(Utf8PathBuf::from("no_such_relative_dir_xyz_abc"));
+    let pair = (out_loc, LocalBackend::arc());
+    let prefix = compute_output_prefix(Some(&pair)).expect("Some");
+    assert_eq!(prefix, "no_such_relative_dir_xyz_abc");
 }
 
 /// `compute_output_prefix` 的 `other => other.display()` arm：

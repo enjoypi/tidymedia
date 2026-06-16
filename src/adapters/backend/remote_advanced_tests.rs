@@ -251,3 +251,83 @@ fn dummy_client_mkdir_returns_injected_err() {
     let err = RemoteClient::<DummyTarget>::mkdir(&c, &target).unwrap_err();
     assert_eq!(err.kind(), io::ErrorKind::PermissionDenied);
 }
+
+// walk_recursive 的 Dir 分支：list 返 Dir entry → 递归进入子目录。
+// 覆盖 `if entry.kind == EntryKind::Dir` True 分支 + `match A::Target::from_location` Ok arm。
+#[derive(Debug)]
+struct DirListThenEmpty {
+    calls: std::sync::atomic::AtomicUsize,
+}
+
+impl RemoteClient<DummyTarget> for DirListThenEmpty {
+    fn stat(&self, _t: &DummyTarget) -> io::Result<crate::entities::backend::Metadata> {
+        unreachable!()
+    }
+    fn list(&self, _t: &DummyTarget) -> io::Result<Vec<crate::entities::backend::Entry>> {
+        use crate::entities::backend::{Entry, EntryKind};
+        let n = self
+            .calls
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        if n == 0 {
+            Ok(vec![
+                Entry {
+                    location: crate::entities::uri::Location::Local(camino::Utf8PathBuf::from(
+                        "/dummy/subdir",
+                    )),
+                    size: 0,
+                    kind: EntryKind::Dir,
+                },
+                Entry {
+                    location: crate::entities::uri::Location::Local(camino::Utf8PathBuf::from(
+                        "/dummy/file.bin",
+                    )),
+                    size: 4,
+                    kind: EntryKind::File,
+                },
+            ])
+        } else {
+            Ok(vec![])
+        }
+    }
+    fn read(&self, _t: &DummyTarget) -> io::Result<Vec<u8>> {
+        unreachable!()
+    }
+    fn write(&self, _t: &DummyTarget, _data: &[u8]) -> io::Result<u64> {
+        unreachable!()
+    }
+    fn unlink(&self, _t: &DummyTarget) -> io::Result<()> {
+        unreachable!()
+    }
+    fn mkdir(&self, _t: &DummyTarget) -> io::Result<()> {
+        unreachable!()
+    }
+}
+
+#[test]
+fn walk_recurses_into_dir_entries() {
+    use crate::entities::backend::EntryKind;
+    let client: Arc<dyn RemoteClient<DummyTarget>> = Arc::new(DirListThenEmpty {
+        calls: std::sync::atomic::AtomicUsize::new(0),
+    });
+    let b = RemoteBackend {
+        adapter: DummyAdapter::with_client(client),
+    };
+    let entries: Vec<_> = b.walk(&loc()).filter_map(Result::ok).collect();
+    assert!(entries.iter().any(|e| e.kind == EntryKind::Dir));
+    assert!(entries.iter().any(|e| e.kind == EntryKind::File));
+}
+
+// walk_recursive 中 from_location 对 Dir entry 失败 → 走 line 183 `Err(e) => out.push(Err(e))` arm。
+// ctx 设 fail_after(1)：第 1 次 build_target(root) 成功，第 2 次（处理 Dir entry 时）失败。
+#[test]
+fn walk_recursive_pushes_err_when_subdir_from_location_fails() {
+    let client: Arc<dyn RemoteClient<DummyTarget>> = Arc::new(DirListThenEmpty {
+        calls: std::sync::atomic::AtomicUsize::new(0),
+    });
+    let b = RemoteBackend {
+        adapter: DummyAdapter::with_client_and_ctx(client, DummyCtx::fail_after(1)),
+    };
+    let entries: Vec<_> = b.walk(&loc()).collect();
+    let err_count = entries.iter().filter(|r| r.is_err()).count();
+    assert!(err_count > 0, "subdir from_location err must surface");
+}

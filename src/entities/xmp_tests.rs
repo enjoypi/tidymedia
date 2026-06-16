@@ -119,9 +119,19 @@ fn parse_xmp_dates_unterminated_quote_returns_none() {
 }
 
 /// key 在串尾出现（key+`=` 后已无内容）→ `after_eq.chars().next()` None → None。
+/// 这里 `aaa` 前缀让 boundary 失败 → 走 `if !matches!(prev, ...)` continue arm；不到
+/// `let Some(quote) = ... else continue` 的 None continue。
 #[test]
-fn parse_xmp_dates_key_at_end_returns_none() {
+fn parse_xmp_dates_key_at_end_with_non_boundary_prefix_returns_none() {
     let xml = "aaaphotoshop:DateCreated=";
+    assert!(parse_xmp_dates(xml).photoshop_date_created.is_none());
+}
+
+/// key 在串尾出现且前缀是 boundary（空格）→ boundary check 通过、`after_eq` 空、
+/// `chars().next()` None → 触发 `let Some(quote) ... else continue;` arm。
+#[test]
+fn parse_xmp_dates_key_at_end_with_boundary_prefix_returns_none() {
+    let xml = " photoshop:DateCreated=";
     assert!(parse_xmp_dates(xml).photoshop_date_created.is_none());
 }
 

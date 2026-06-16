@@ -2,6 +2,12 @@
 // trait 定义 + 值类型留在 entities::backend；本目录只放实现。
 pub mod adb;
 pub mod factory;
+#[cfg(any(
+    feature = "smb-backend",
+    feature = "mtp-backend",
+    feature = "adb-backend"
+))]
+mod factory_real;
 #[cfg(test)]
 pub(crate) mod fake_remote;
 pub mod local;

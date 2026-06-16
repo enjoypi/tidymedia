@@ -328,6 +328,61 @@ fn rename_or_fallback_propagates_copy_err_in_fallback() {
     assert!(err.to_string().contains("inject copy fail"), "{err}");
 }
 
+// walk_entry_to_io 中 entry.metadata() Err 触发 "metadata failed" 文案。
+// 真实 ignore::DirEntry.metadata() 仅在并发删除等罕见情况失败，用 fn pointer 注入 mock。
+fn meta_fail_mock(_entry: &ignore::DirEntry) -> Result<std::fs::Metadata, ignore::Error> {
+    Err(ignore::Error::Io(io::Error::other("inject meta fail")))
+}
+
+#[test]
+fn walk_entry_to_io_propagates_metadata_failure() {
+    let dir = tempdir().unwrap();
+    fs::write(dir.path().join("a.bin"), b"x").unwrap();
+    let entry = ignore::WalkBuilder::new(dir.path())
+        .build()
+        .filter_map(Result::ok)
+        .find(|e| e.file_type().is_some_and(|t| t.is_file()))
+        .expect("real DirEntry");
+    let err = super::walk_entry_to_io_with(Ok(entry), meta_fail_mock).unwrap_err();
+    let msg = err.to_string();
+    assert!(msg.contains("metadata failed for"), "got: {msg}");
+    assert!(
+        msg.contains("inject meta fail"),
+        "must wrap inner err: {msg}"
+    );
+}
+
+// CrossesDevices fallback 中 copy 成功但 remove 失败：触发 `remove(from).map_err(|re| ...)`
+// 闭包，验证 "copied … but cannot remove source" 半态文案。
+fn remove_fails_mock(_: &std::path::Path) -> io::Result<()> {
+    Err(io::Error::other("inject remove fail"))
+}
+
+#[test]
+fn rename_or_fallback_marks_half_state_when_remove_fails_in_fallback() {
+    let dir = tempdir().unwrap();
+    let src = dir.path().join("src.txt");
+    let dst = dir.path().join("dst.txt");
+    fs::write(&src, b"hello").unwrap();
+    let err = super::rename_or_fallback_with(
+        &src,
+        &dst,
+        rename_cross_devices_mock,
+        super::real_copy,
+        remove_fails_mock,
+    )
+    .unwrap_err();
+    let msg = err.to_string();
+    assert!(
+        msg.contains("copied") && msg.contains("but cannot remove source"),
+        "half-state must be labelled, got: {msg}"
+    );
+    assert!(
+        msg.contains("inject remove fail"),
+        "must wrap original error: {msg}"
+    );
+}
+
 // `ignore_to_io` 处理 ignore::Error 的 io_error()==None 分支（如 Loop variant，
 // symlink loop 不易在 CI 稳定触发；直接构造 enum variant 测 helper）。
 #[test]

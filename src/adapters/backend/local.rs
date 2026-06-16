@@ -207,12 +207,26 @@ fn to_metadata(m: &fs::Metadata) -> Metadata {
 /// 会让该 entry 落入 `skipped_empty` 路径，与真正 0 字节文件混淆，运维诊断时
 /// `skipped_empty` 虚高、`walker_errors` 漏报。
 fn walk_entry_to_io(e: Result<ignore::DirEntry, ignore::Error>) -> io::Result<Entry> {
+    walk_entry_to_io_with(e, real_dir_entry_metadata)
+}
+
+pub(super) fn real_dir_entry_metadata(
+    entry: &ignore::DirEntry,
+) -> Result<std::fs::Metadata, ignore::Error> {
+    entry.metadata()
+}
+
+/// 参数化版本：让单测可注入 mock `get_meta` 返 Err 触发"metadata failed" `?` 路径
+/// （`ignore::DirEntry` 的 metadata 仅在文件被并发删除等罕见情况下失败，CI 不可稳定真触发）。
+pub(super) fn walk_entry_to_io_with(
+    e: Result<ignore::DirEntry, ignore::Error>,
+    get_meta: fn(&ignore::DirEntry) -> Result<std::fs::Metadata, ignore::Error>,
+) -> io::Result<Entry> {
     let entry = e.map_err(|e| ignore_to_io(&e))?;
     let path = entry.path().to_path_buf();
     let utf8 = camino::Utf8PathBuf::from_path_buf(path)
         .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "non-UTF8 path"))?;
-    let size = entry
-        .metadata()
+    let size = get_meta(&entry)
         .map_err(|e| io::Error::other(format!("metadata failed for {utf8}: {e}")))?
         .len();
     Ok(Entry {

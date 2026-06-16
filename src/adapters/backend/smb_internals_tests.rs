@@ -130,6 +130,29 @@ fn map_smb_error_other_with_does_not_exist_text_to_notfound() {
     assert_eq!(mapped.kind(), io::ErrorKind::NotFound);
 }
 
+// 三个 `contains` 子分支各自 True 路径覆盖：EEXIST / file exists / already exists 文案
+// → AlreadyExists kind。避免 `||` 短路让首个 contains 永远先命中、后两个子分支 0 hit。
+#[test]
+fn map_smb_error_other_with_eexist_text_to_already_exists() {
+    let e = io::Error::other("pavao: EEXIST resource already there");
+    let mapped = SmbAdapter::map_error(e);
+    assert_eq!(mapped.kind(), io::ErrorKind::AlreadyExists);
+}
+
+#[test]
+fn map_smb_error_other_with_file_exists_text_to_already_exists() {
+    let e = io::Error::other("smb: File exists");
+    let mapped = SmbAdapter::map_error(e);
+    assert_eq!(mapped.kind(), io::ErrorKind::AlreadyExists);
+}
+
+#[test]
+fn map_smb_error_other_with_already_exists_text_to_already_exists() {
+    let e = io::Error::other("smb client: object Already Exists");
+    let mapped = SmbAdapter::map_error(e);
+    assert_eq!(mapped.kind(), io::ErrorKind::AlreadyExists);
+}
+
 #[test]
 fn map_smb_error_other_with_permission_text_to_permission_denied() {
     let e = io::Error::other("permission denied while opening share");

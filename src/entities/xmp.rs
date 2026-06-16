@@ -22,8 +22,9 @@ const KEY_PHOTOSHOP_DATE_CREATED: &str = "photoshop:DateCreated=";
 const KEY_XMP_CREATE_DATE: &str = "xmp:CreateDate=";
 
 /// XMP packet 内的两个候选时间。两键互独立，可能同时为 Some/None。
+#[doc(hidden)]
 #[derive(Debug, Default, PartialEq, Eq)]
-pub(crate) struct XmpDates {
+pub struct XmpDates {
     /// `photoshop:DateCreated`：等价 EXIF `DateTimeOriginal`（P0）。
     pub photoshop_date_created: Option<DateTime<FixedOffset>>,
     /// `xmp:CreateDate`：等价 EXIF `CreateDate`（P1）。
@@ -47,7 +48,9 @@ pub(crate) fn find_xmp_packet(buf: &[u8]) -> Option<&str> {
 
 /// 解析 XMP packet 子串，返回 photoshop:DateCreated 与 xmp:CreateDate 两键
 /// 的 attribute 值（RFC3339）。仅 attribute 形态；element 形态 YAGNI。
-pub(crate) fn parse_xmp_dates(content: &str) -> XmpDates {
+#[doc(hidden)]
+#[must_use]
+pub fn parse_xmp_dates(content: &str) -> XmpDates {
     let stripped = strip_xml_comments(content);
     XmpDates {
         photoshop_date_created: find_attr_rfc3339(&stripped, KEY_PHOTOSHOP_DATE_CREATED),
@@ -65,7 +68,9 @@ fn find_attr_rfc3339(haystack: &str, key: &str) -> Option<DateTime<FixedOffset>>
     let key_bytes = key.as_bytes();
     let mut search_from = 0usize;
     loop {
-        let rel = haystack.get(search_from..)?.find(key)?;
+        // search_from 不变量：每轮推进 = key_idx + key_bytes.len() ≤ haystack.len()，
+        // 故 `&haystack[search_from..]` 永不越界（直接切片省一处不可达的 `?` 死区）。
+        let rel = haystack[search_from..].find(key)?;
         let key_idx = search_from + rel;
         // 推进 cursor 前置：所有 continue 路径共享同一更新无遗漏死循环。
         // find 已确保 key_idx + key_bytes.len() ≤ haystack.len()，切片不越界。

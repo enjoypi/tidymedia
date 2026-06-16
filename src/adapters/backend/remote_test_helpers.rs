@@ -15,36 +15,43 @@ use crate::entities::uri::Location;
 // ── DummyTarget ──────────────────────────────────────────────
 
 /// Ctx 携带可选的 `from_location` 注入错误和路径覆写。
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub(super) struct DummyCtx {
     from_loc_err: Option<io::ErrorKind>,
     /// 覆写 `from_location` 返回的路径；None 时默认 "/dummy"
     path_override: Option<Utf8PathBuf>,
+    /// 测试用：`from_location` 第 N 次调用之后开始返 Err，让 `walk_recursive` 的
+    /// 子项 `from_location` Err arm 在根 `build_target` 成功的前提下被命中。
+    fail_after_n_calls: Option<usize>,
+    call_count: std::sync::Arc<std::sync::atomic::AtomicUsize>,
 }
 
 impl DummyCtx {
     pub(super) fn ok_with_path(p: &str) -> Self {
         Self {
-            from_loc_err: None,
             path_override: Some(Utf8PathBuf::from(p)),
+            ..Self::default()
         }
     }
     pub(super) fn ok() -> Self {
-        Self {
-            from_loc_err: None,
-            path_override: None,
-        }
+        Self::default()
     }
     pub(super) fn with_err(kind: io::ErrorKind) -> Self {
         Self {
             from_loc_err: Some(kind),
-            path_override: None,
+            ..Self::default()
         }
     }
     pub(super) fn with_root_path() -> Self {
         Self {
-            from_loc_err: None,
             path_override: Some(Utf8PathBuf::from("/")),
+            ..Self::default()
+        }
+    }
+    pub(super) fn fail_after(n: usize) -> Self {
+        Self {
+            fail_after_n_calls: Some(n),
+            ..Self::default()
         }
     }
 }
@@ -74,6 +81,16 @@ impl RemoteTarget for DummyTarget {
                 kind,
                 format!("injected from_location error: {kind:?}"),
             ));
+        }
+        if let Some(n) = ctx.fail_after_n_calls {
+            let prev = ctx
+                .call_count
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            if prev >= n {
+                return Err(io::Error::other(format!(
+                    "injected from_location err after {n} calls"
+                )));
+            }
         }
         let path = ctx
             .path_override

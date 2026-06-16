@@ -105,3 +105,12 @@ fn ifd_entry_truncated_at_cnt_returns_none() {
 fn ifd_entry_truncated_at_val_returns_none() {
     assert_eq!(parse_avif_ifd(&avif_truncated_entry(9)), None);
 }
+
+// strd 头部即截断（IFD count u16le 都不够读）→ scan_ifd 首句 u16le(base, 0)? 返 None。
+// 这是 line 156 `let count = u16le(base, ifd_off)? as usize;` 的 ? Err arm。
+#[test]
+fn ifd_count_truncated_returns_none() {
+    // AVIF magic(4) + reserved(4) + 1 字节（不够 u16 count）= 9 字节
+    let strd = vec![b'A', b'V', b'I', b'F', 0, 0, 0, 0, 0];
+    assert_eq!(parse_avif_ifd(&strd), None);
+}

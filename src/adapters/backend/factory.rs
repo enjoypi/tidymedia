@@ -2,6 +2,11 @@ use std::sync::Arc;
 
 use crate::adapters::backend::local::LocalBackend;
 use crate::entities::backend::Backend;
+#[cfg(not(all(
+    feature = "smb-backend",
+    feature = "mtp-backend",
+    feature = "adb-backend"
+)))]
 use crate::entities::common::Error;
 use crate::entities::common::Result;
 use crate::entities::uri::Location;
@@ -37,35 +42,7 @@ impl BackendFactory for DefaultBackendFactory {
 }
 
 #[cfg(feature = "smb-backend")]
-fn build_smb_backend(loc: &Location) -> Result<Arc<dyn Backend>> {
-    use crate::adapters::backend::smb::SmbBackend;
-    use crate::adapters::backend::smb::SmbTarget;
-    use crate::adapters::backend::smb::real::RealSmbClient;
-    // 调度层保证只把 Location::Smb 路由到此处；let-else 仅在重构破坏不变量时触发。
-    let Location::Smb {
-        user,
-        host,
-        port,
-        share,
-        ..
-    } = loc
-    else {
-        unreachable!("DefaultBackendFactory routes only Location::Smb here")
-    };
-    let target = SmbTarget {
-        user: user.clone(),
-        host: host.clone(),
-        port: *port,
-        share: share.clone(),
-        path: camino::Utf8PathBuf::default(),
-        password: std::env::var("SMB_PASSWORD").ok(),
-        krb5_ccname: std::env::var("KRB5CCNAME").ok(),
-    };
-    let cfg = &crate::frameworks::config::config().backend.smb;
-    let client =
-        RealSmbClient::new(&target, &cfg.default_user, &cfg.workgroup).map_err(Error::Io)?;
-    Ok(SmbBackend::arc_with_client(Arc::new(client)))
-}
+use super::factory_real::build_smb_backend;
 
 #[cfg(not(feature = "smb-backend"))]
 fn build_smb_backend(_loc: &Location) -> Result<Arc<dyn Backend>> {
@@ -76,18 +53,7 @@ fn build_smb_backend(_loc: &Location) -> Result<Arc<dyn Backend>> {
 }
 
 #[cfg(feature = "mtp-backend")]
-fn build_mtp_backend(_loc: &Location) -> Result<Arc<dyn Backend>> {
-    use crate::adapters::backend::mtp::real::RealMtpClient;
-    // stub 期 RealMtpClient::new() 必 Err，? 自然传播。
-    // 真实实现完成时改为 wrap 成 Backend 返回；当前 fallthrough 报 Unsupported
-    // 但消息明确"实现尚未提供"——勿沿用"rebuild with --features mtp-backend"
-    // 的复制黏贴，用户已启用 feature 收到该指引会以为编译方式不对。
-    let _client = RealMtpClient::new()?;
-    Err(Error::Io(std::io::Error::new(
-        std::io::ErrorKind::Unsupported,
-        "mtp backend feature enabled but real client is not yet implemented",
-    )))
-}
+use super::factory_real::build_mtp_backend;
 
 #[cfg(not(feature = "mtp-backend"))]
 fn build_mtp_backend(_loc: &Location) -> Result<Arc<dyn Backend>> {
@@ -98,17 +64,7 @@ fn build_mtp_backend(_loc: &Location) -> Result<Arc<dyn Backend>> {
 }
 
 #[cfg(feature = "adb-backend")]
-fn build_adb_backend(loc: &Location) -> Result<Arc<dyn Backend>> {
-    use crate::adapters::backend::adb::AdbBackend;
-    use crate::adapters::backend::adb::real::RealAdbClient;
-    let Location::Adb { serial, .. } = loc else {
-        unreachable!("DefaultBackendFactory routes only Location::Adb here")
-    };
-    let cfg = &crate::frameworks::config::config().backend.adb;
-    let client =
-        RealAdbClient::new(serial.clone(), &cfg.server_host, cfg.server_port).map_err(Error::Io)?;
-    Ok(AdbBackend::arc_with_client(Arc::new(client)))
-}
+use super::factory_real::build_adb_backend;
 
 #[cfg(not(feature = "adb-backend"))]
 fn build_adb_backend(_loc: &Location) -> Result<Arc<dyn Backend>> {

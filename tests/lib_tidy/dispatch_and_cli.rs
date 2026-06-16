@@ -320,6 +320,27 @@ fn tidy_find_propagates_error_when_output_missing() {
     assert!(err.to_string().contains("not a directory"), "got: {err}");
 }
 
+// 直接调 internal helper 让 lib_tidy binary instance 也触发覆盖率敏感分支
+// （multi-binary instance 下避免 0-hit region miss）。两条都是 lib unit 已覆盖、
+// 仅 lib_tidy binary instance 缺 hit 的 region。
+#[test]
+fn compute_output_prefix_local_fallback_hits_lib_tidy_instance() {
+    // 相对路径 + 不存在 → `full_path` 走 canonicalize_utf8 失败 → Err arm 触发。
+    let pair: (tidymedia::Location, std::sync::Arc<dyn tidymedia::Backend>) = (
+        tidymedia::Location::Local(camino::Utf8PathBuf::from("no_such_relative_dir_xyz_abc2")),
+        tidymedia::LocalBackend::arc(),
+    );
+    let prefix = tidymedia::__compute_output_prefix(Some(&pair)).expect("Some");
+    assert_eq!(prefix, "no_such_relative_dir_xyz_abc2");
+}
+
+#[test]
+fn parse_xmp_dates_key_at_end_hits_lib_tidy_instance() {
+    // 触发 find_attr_rfc3339 中 `let Some(quote) = chars().next() else continue;` arm。
+    let xml = " photoshop:DateCreated=";
+    let _ = tidymedia::__parse_xmp_dates(xml);
+}
+
 // output metadata 返非 NotFound 错误（PermissionDenied / 网络等）→ find 必须传播
 // 原 Err，不被吞成 "not a directory"。FakeBackend inject_error 模拟该情况。
 // 覆盖 lib_tidy binary instance 中 find_duplicates Err(other) arm，消除 multi-
