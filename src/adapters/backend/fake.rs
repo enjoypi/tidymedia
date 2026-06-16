@@ -42,6 +42,9 @@ struct State {
     /// 内容。覆盖 `sniff_mime` 等 "read OK 后 seek 失败" 的 Err 分支
     /// （Cursor seek 永不失败，CLAUDE.md「Cursor 的 seek 永不失败」套路）。
     seek_errors: HashMap<Location, io::ErrorKind>,
+    /// 让 `open_write` 成功但返回的 writer 在 `write` 时立即报错。覆盖
+    /// `stream_copy` 中 `std::io::copy` 阶段失败（区别于 `Op::OpenWrite` 早返）。
+    writer_errors: HashMap<Location, io::ErrorKind>,
 }
 
 pub struct FakeBackend {
@@ -122,6 +125,13 @@ impl FakeBackend {
         self.state.lock().unwrap().seek_errors.insert(loc, kind);
     }
 
+    /// 让针对 `loc` 的 `open_write` 返回的 writer 在 `write` 时立即抛 `kind`。
+    /// 覆盖 `stream_copy` 内 `std::io::copy` 写阶段失败的 Err arm，区别于
+    /// `inject_error(loc, Op::OpenWrite, ..)` 让 `open_write` 自身早返。
+    pub fn inject_writer_error(&self, loc: Location, kind: io::ErrorKind) {
+        self.state.lock().unwrap().writer_errors.insert(loc, kind);
+    }
+
     fn check_error(&self, loc: &Location, op: Op) -> io::Result<()> {
         let s = self.state.lock().unwrap();
         if let Some(kind) = s.errors.get(&(loc.clone(), op)) {
@@ -200,10 +210,12 @@ impl Backend for FakeBackend {
 
     fn open_write(&self, loc: &Location, _mkparents: bool) -> io::Result<Box<dyn MediaWriter>> {
         self.check_error(loc, Op::OpenWrite)?;
+        let write_error = self.state.lock().unwrap().writer_errors.get(loc).copied();
         Ok(Box::new(FakeWriter {
             target: loc.clone(),
             buffer: Vec::new(),
             state: Arc::clone(&self.state),
+            write_error,
         }))
     }
 
@@ -296,10 +308,14 @@ struct FakeWriter {
     target: Location,
     buffer: Vec<u8>,
     state: Arc<Mutex<State>>,
+    write_error: Option<io::ErrorKind>,
 }
 
 impl Write for FakeWriter {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        if let Some(kind) = self.write_error {
+            return Err(io::Error::new(kind, "injected FakeWriter::write"));
+        }
         self.buffer.extend_from_slice(buf);
         Ok(buf.len())
     }

@@ -455,6 +455,47 @@ mod test_advanced {
         let _ = err;
     }
 
+    // 跨 backend + remove=true：local src → FakeBackend(scheme!=local) dst。
+    // 走 stream_copy 路径（line 74 三 condition 不全 True，绕过 rename fast-path）
+    // 后 line 85 `if opts.remove` True arm 触发 → line 86 调 `src.backend().remove_file`
+    // 删 src。本测试钉 lib unit binary 的 do_copy instance 覆盖该 True arm。
+    #[test]
+    fn do_copy_cross_backend_move_removes_src_after_stream_copy() {
+        use crate::adapters::backend::fake::FakeBackend;
+        use std::sync::Arc;
+
+        let src_dir = tempdir().unwrap();
+        let info = make_media_info(src_dir.path(), "photo.png");
+        let src_path = src_dir.path().join("photo.png");
+
+        // scheme="smb" 让 output_backend.scheme() != "local" → 绕开 rename fast-path
+        // 走 stream_copy。FakeBackend 接收 mkdir_p / open_write / FakeWriter.finish 全 OK。
+        let fake_out = Arc::new(FakeBackend::new("smb"));
+        let out_loc = Location::Smb {
+            user: None,
+            host: "nas".into(),
+            port: None,
+            share: "photos".into(),
+            path: Utf8PathBuf::from("out"),
+        };
+        fake_out.add_dir(out_loc.clone());
+
+        let mut idx = crate::entities::file_index::Index::new();
+        let backend_arc: Arc<dyn Backend> = fake_out;
+        let opts = CopyOpts {
+            dry_run: false,
+            remove: true,
+            include_non_media: false,
+            template: DEFAULT_TMPL,
+        };
+        let ok = do_copy(&info, &out_loc, &backend_arc, &mut idx, &opts).unwrap();
+        assert!(ok, "stream_copy should succeed");
+        assert!(
+            !src_path.exists(),
+            "src must be removed after cross-backend move"
+        );
+    }
+
     #[test]
     fn copy_empty_source_with_report_writes_zero_counts() {
         let src = tempdir().unwrap();

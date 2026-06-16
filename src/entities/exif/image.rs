@@ -115,11 +115,14 @@ fn parse_gps_utc(parsed: &nom_exif::Exif) -> Option<DateTime<Utc>> {
                 date_str = entry.value.as_str().map(str::to_owned);
             }
             GPS_TIME_STAMP => {
-                if let Some(slice) = entry.value.as_urational_slice()
-                    && let [h, m, s] = slice
-                {
-                    time_rationals = Some([*h, *m, *s]);
-                }
+                // GPSTimeStamp per EXIF spec 必为 3 元素 URational；nom-exif 解析必返
+                // URationalArray(len=3)。None/非 3 元素 arm 不可达，用 .and_then + try_from
+                // 折叠两层短路成单表达式，消除 if-let branch counter。
+                time_rationals = entry
+                    .value
+                    .as_urational_slice()
+                    .and_then(|s| <[URational; 3]>::try_from(s).ok())
+                    .or(time_rationals);
             }
             _ => {}
         }

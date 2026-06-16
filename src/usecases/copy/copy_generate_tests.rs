@@ -130,6 +130,38 @@ fn do_copy_stream_failure_removes_partial_target() {
     assert!(!partial.exists(), "partial target must be cleaned up");
 }
 
+// stream_copy 内 `src_be.open_read(src.location())?` Err arm：Info::open 完成后注入
+// Op::OpenRead Err，让 stream_copy 第二次调 open_read 时整体失败（区别于
+// inject_reader_error 让 read 阶段失败、open_read 自身仍成功）。本测试钉 lib unit
+// instance 的 stream_copy L120 `?` Err region 命中。
+#[test]
+fn do_copy_propagates_stream_open_read_error() {
+    let fake = Arc::new(crate::FakeBackend::new("local"));
+    let src_loc = Location::Local(Utf8PathBuf::from("/src/photo.png"));
+    fake.add_file(src_loc.clone(), b"data".to_vec());
+    let mut info = Info::open(&src_loc, Arc::clone(&fake) as Arc<dyn Backend>).unwrap();
+    info.set_exif(crate::entities::exif::Exif::with_mime("image/png"));
+    // Info::open 已读完 fast hash + mime sniff；此后注入 OpenRead Err 让 stream_copy
+    // 调 src.backend().open_read(src.location()) 时直接失败。
+    fake.inject_error(
+        src_loc,
+        crate::FakeOp::OpenRead,
+        std::io::ErrorKind::Interrupted,
+    );
+
+    let out = tempdir().unwrap();
+    let mut idx = crate::entities::file_index::Index::new();
+    let err = do_copy(
+        &info,
+        &local_loc(out.path()),
+        &local_arc(),
+        &mut idx,
+        &default_opts(DEFAULT_TMPL),
+    )
+    .expect_err("stream_copy open_read must propagate Err");
+    let _ = err;
+}
+
 // exists 的 IO 错误必须传播而非被当作"不存在"：吞错会让 stream_copy 覆盖已存在目标。
 #[test]
 fn generate_unique_name_propagates_exists_error() {

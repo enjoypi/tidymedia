@@ -15,7 +15,11 @@ use crate::entities::uri::Location;
 
 // 语义由 lib_tidy 集成测试（tidy_with_move_local_*、tidy_move_dry_run_with_duplicate_*、
 // tidy_move_with_duplicate_removes_src_when_not_dry_run 等）联合断言。
+// multi-binary instance：lib unit 与 lib_tidy 集成 binary 各 codegen 副本；某些 `?` Err
+// arm 仅在一边触发（功能行为已由两 binary 联合测试覆盖），cov(off) 把该 fn 从 region
+// 分母剔除（CLAUDE.md「multi-binary instance 陷阱」套路），换得严格 100% 门槛。
 #[inline(never)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub(super) fn do_copy(
     src: &Info,
     output_dir: &Location,
@@ -58,12 +62,13 @@ pub(super) fn do_copy(
         generate_unique_name(src, output_dir, output_backend, opts.template)?
     {
         if opts.dry_run {
+            let target_display = target_loc.display();
             debug!(
                 feature,
                 operation = "copy_file",
                 result = "dry_run",
                 source = %src_display,
-                target = %target_loc.display(),
+                target = %target_display,
                 "would transfer file"
             );
             return Ok(true);

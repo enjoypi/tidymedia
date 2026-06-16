@@ -69,6 +69,9 @@ rstest = "*"
 [lints.rust]
 future-incompatible = { level = "warn", priority = -2 }
 nonstandard_style = { level = "deny", priority = -1 }
+# 严格覆盖率 nightly 口径用 `--cfg=coverage_nightly` 启用 `feature(coverage_attribute)`
+# + `#[coverage(off)]`；非 coverage 编译时该 cfg 缺失 → 注册为已知避免 unexpected_cfgs。
+unexpected_cfgs = { level = "deny", check-cfg = ['cfg(coverage_nightly)'] }
 
 [lints.clippy]
 all = { level = "deny", priority = -2 }
