@@ -23,6 +23,12 @@ pub(super) struct DummyCtx {
 }
 
 impl DummyCtx {
+    pub(super) fn ok_with_path(p: &str) -> Self {
+        Self {
+            from_loc_err: None,
+            path_override: Some(Utf8PathBuf::from(p)),
+        }
+    }
     pub(super) fn ok() -> Self {
         Self {
             from_loc_err: None,

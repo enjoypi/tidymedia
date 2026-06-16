@@ -134,11 +134,33 @@ fn local_path(loc: &Location) -> io::Result<&Utf8Path> {
 /// 尝试 `fs::rename`；跨设备（`CrossesDevices`）时 fallback 到 copy + remove 两步。
 /// 语义由 `rename_same_dir_moves_file_atomically` 等断言不退化。
 fn rename_or_fallback(from: &std::path::Path, to: &std::path::Path) -> io::Result<()> {
-    match fs::rename(from, to) {
+    rename_or_fallback_with(from, to, real_rename, real_copy, real_remove)
+}
+
+pub(super) fn real_rename(a: &std::path::Path, b: &std::path::Path) -> io::Result<()> {
+    fs::rename(a, b)
+}
+pub(super) fn real_copy(a: &std::path::Path, b: &std::path::Path) -> io::Result<u64> {
+    fs::copy(a, b)
+}
+pub(super) fn real_remove(a: &std::path::Path) -> io::Result<()> {
+    fs::remove_file(a)
+}
+
+/// 参数化版本：让单测可注入 mock rename 返 `CrossesDevices` 触发 fallback
+/// （Linux 容器内 cross-mount tmpfs 需 root 不可在 ecs-user 触发）。
+pub(super) fn rename_or_fallback_with(
+    from: &std::path::Path,
+    to: &std::path::Path,
+    rename: fn(&std::path::Path, &std::path::Path) -> io::Result<()>,
+    copy: fn(&std::path::Path, &std::path::Path) -> io::Result<u64>,
+    remove: fn(&std::path::Path) -> io::Result<()>,
+) -> io::Result<()> {
+    match rename(from, to) {
         Ok(()) => Ok(()),
         Err(e) if e.kind() == io::ErrorKind::CrossesDevices => {
-            fs::copy(from, to)?;
-            fs::remove_file(from)
+            copy(from, to)?;
+            remove(from)
         }
         Err(e) => Err(e),
     }
@@ -219,10 +241,23 @@ impl Seek for MmapReader {
 /// 打开本地文件并 mmap。所有 unsafe / syscall 集中在这里，单测靠"chmod 000"
 /// 之类的真实文件操作触发 Err 分支。
 fn open_read_inner(path: &Path) -> io::Result<Box<dyn MediaReader>> {
-    let file = fs::File::open(path)?;
+    open_read_inner_with(path, real_mmap)
+}
+
+fn real_mmap(file: &fs::File) -> io::Result<Mmap> {
     // SAFETY: file 句柄刚由 fs::File::open 创建且仍持有；本进程不会并发 truncate
     // 该文件；外部进程修改虽可能产生未定义内容但不会破坏内存安全（memmap2 文档保证）。
-    let mmap = unsafe { Mmap::map(&file)? };
+    unsafe { Mmap::map(file) }
+}
+
+/// 参数化版本：让单测可注入 mock `mmap_fn` 返 Err 触发 `?` Err arm
+/// （memmap2 在 Linux 上对 0 字节文件不返 Err，无法稳定真触发）。
+pub(super) fn open_read_inner_with(
+    path: &Path,
+    mmap_fn: fn(&fs::File) -> io::Result<Mmap>,
+) -> io::Result<Box<dyn MediaReader>> {
+    let file = fs::File::open(path)?;
+    let mmap = mmap_fn(&file)?;
     Ok(Box::new(MmapReader::new(mmap)))
 }
 
@@ -241,10 +276,11 @@ impl Write for LocalWriter {
 }
 
 impl MediaWriter for LocalWriter {
-    // fs::File::flush 在正常关闭路径上几乎不会 Err（disk-full 等不可稳定触发）。
+    // fs::File::flush 对未 BufWriter 包装的 std::fs::File 是 noop；这里 best-effort
+    // 调用并忽略可能的 Err（disk-full 等场景测试不可稳定触发）。
     fn finish(self: Box<Self>) -> io::Result<()> {
         let mut me = *self;
-        me.file.flush()?;
+        me.file.flush().ok();
         Ok(())
     }
 }

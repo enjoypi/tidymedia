@@ -5,8 +5,8 @@ use std::io;
 use std::sync::Arc;
 
 use super::test_helpers::{
-    DummyAdapter, DummyClient, DummyTarget, backend_with_client, backend_with_from_loc_err,
-    backend_with_root_ctx, loc,
+    DummyAdapter, DummyClient, DummyCtx, DummyTarget, backend_with_client,
+    backend_with_from_loc_err, backend_with_root_ctx, loc,
 };
 use super::*;
 
@@ -204,4 +204,50 @@ fn open_write_mkparents_invokes_mkdir_when_parent_missing() {
         .mkdir_calls
         .load(std::sync::atomic::Ordering::Relaxed);
     assert_eq!(calls, 1, "missing parent must trigger exactly one mkdir");
+}
+
+// DummyTarget::parent() 直接单测覆盖三条 None 退出路径：
+// (a) is_root=true 早返（path="/"）。
+// (b) self.path.parent() == None（相对路径无父）。
+// (c) parent.as_str().is_empty()（如 "x" 的 parent 是 ""）。
+#[test]
+fn dummy_target_parent_none_when_root() {
+    let ctx = DummyCtx::ok_with_path("/");
+    let root_target = <DummyTarget as RemoteTarget>::from_location(&loc(), &ctx).unwrap();
+    assert!(RemoteTarget::parent(&root_target).is_none());
+}
+
+#[test]
+fn dummy_target_parent_none_when_path_has_no_parent() {
+    // path="" → .parent() = None
+    let t = DummyTarget::new("");
+    assert!(RemoteTarget::parent(&t).is_none());
+}
+
+#[test]
+fn dummy_target_parent_none_when_parent_is_empty_string() {
+    // path="x"（相对单段）→ .parent() = Some("") → empty arm
+    let t = DummyTarget::new("x");
+    assert!(RemoteTarget::parent(&t).is_none());
+}
+
+// DummyTarget::entry_location 直接单测覆盖（生产 walk 路径未稳定触发）。
+#[test]
+fn dummy_target_entry_location_returns_local() {
+    let t = DummyTarget::new("/x");
+    let utf8 = camino::Utf8PathBuf::from("/x/sub");
+    let loc_out = RemoteTarget::entry_location(&t, utf8.clone());
+    assert_eq!(loc_out, Location::Local(utf8));
+}
+
+// DummyClient::mkdir 直接调用注入 Err 触发 if let Some(k) Err arm。
+#[test]
+fn dummy_client_mkdir_returns_injected_err() {
+    let c = DummyClient {
+        mkdir: Some(io::ErrorKind::PermissionDenied),
+        ..Default::default()
+    };
+    let target = DummyTarget::new("/p");
+    let err = RemoteClient::<DummyTarget>::mkdir(&c, &target).unwrap_err();
+    assert_eq!(err.kind(), io::ErrorKind::PermissionDenied);
 }

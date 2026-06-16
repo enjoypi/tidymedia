@@ -24,6 +24,25 @@ fn open_propagates_sniff_mime_io_error() {
     assert!(msg.contains("IO"), "got: {msg}");
 }
 
+/// `sniff_mime` 中 `reader.seek(SeekFrom::Start(0))?` Err arm：read OK 完成嗅探后
+/// 试图 seek 回起点失败。FakeBackend `inject_seek_error` 让 reader 在 seek 时报错。
+#[test]
+fn open_propagates_sniff_mime_seek_error() {
+    use super::super::uri::Location;
+    use crate::adapters::backend::fake::FakeBackend;
+    use std::sync::Arc;
+
+    let fake = Arc::new(FakeBackend::new("fake"));
+    let loc = Location::Local(camino::Utf8PathBuf::from("/in-mem/y.bin"));
+    fake.add_file(loc.clone(), vec![0u8; 32]);
+    fake.inject_seek_error(loc.clone(), std::io::ErrorKind::Interrupted);
+
+    let backend: Arc<dyn super::super::backend::Backend> = fake;
+    let err = Exif::open(&loc, &backend, utc()).unwrap_err();
+    let msg = format!("{err}");
+    assert!(msg.contains("IO"), "got: {msg}");
+}
+
 // ── AVI（RIFF strd 内嵌 EXIF）分流 ──
 
 const DATA_FUJI_AVI: &str = "tests/data/sample-fuji-strd.avi";

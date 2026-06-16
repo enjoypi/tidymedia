@@ -38,6 +38,10 @@ struct State {
     /// 让 `open_read` 成功但返回的 reader 在 read 时立即报错；用于覆盖
     /// 调用方在 stream hash / 解析阶段的 `?` Err 分支。
     reader_errors: HashMap<Location, io::ErrorKind>,
+    /// 让 `open_read` 成功但返回的 reader 在 seek 时立即报错；read 仍透传
+    /// 内容。覆盖 `sniff_mime` 等 "read OK 后 seek 失败" 的 Err 分支
+    /// （Cursor seek 永不失败，CLAUDE.md「Cursor 的 seek 永不失败」套路）。
+    seek_errors: HashMap<Location, io::ErrorKind>,
 }
 
 pub struct FakeBackend {
@@ -112,6 +116,12 @@ impl FakeBackend {
         self.state.lock().unwrap().reader_errors.insert(loc, kind);
     }
 
+    /// 让针对 `loc` 的 reader 在 `seek` 时立即抛 `kind`；read 透传内容。
+    /// Cursor seek 永不失败，需该 helper 覆盖 `sniff_mime` 等的 seek `?` Err arm。
+    pub fn inject_seek_error(&self, loc: Location, kind: io::ErrorKind) {
+        self.state.lock().unwrap().seek_errors.insert(loc, kind);
+    }
+
     fn check_error(&self, loc: &Location, op: Op) -> io::Result<()> {
         let s = self.state.lock().unwrap();
         if let Some(kind) = s.errors.get(&(loc.clone(), op)) {
@@ -179,6 +189,12 @@ impl Backend for FakeBackend {
             .get(loc)
             .cloned()
             .ok_or_else(|| io::Error::from(io::ErrorKind::NotFound))?;
+        if let Some(kind) = s.seek_errors.get(loc) {
+            return Ok(Box::new(SeekFailingReader {
+                kind: *kind,
+                inner: Cursor::new(bytes),
+            }));
+        }
         Ok(Box::new(Cursor::new(bytes)))
     }
 
@@ -253,6 +269,25 @@ impl io::Read for FailingReader {
 impl io::Seek for FailingReader {
     fn seek(&mut self, _: io::SeekFrom) -> io::Result<u64> {
         Ok(0)
+    }
+}
+
+/// read 透传 Cursor 内容；seek 立即按 `kind` 报错。
+#[derive(Debug)]
+struct SeekFailingReader {
+    kind: io::ErrorKind,
+    inner: Cursor<Vec<u8>>,
+}
+
+impl io::Read for SeekFailingReader {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        self.inner.read(buf)
+    }
+}
+
+impl io::Seek for SeekFailingReader {
+    fn seek(&mut self, _: io::SeekFrom) -> io::Result<u64> {
+        Err(io::Error::from(self.kind))
     }
 }
 
