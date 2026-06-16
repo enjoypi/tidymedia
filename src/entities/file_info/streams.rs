@@ -78,30 +78,40 @@ pub(crate) fn read_fill(r: &mut dyn MediaReader, buf: &mut [u8]) -> io::Result<u
 }
 
 // 测试专用 path-only 哈希实现：file_info_tests 用作 stream 版的对照基线。
+// helper 内 IO 失败直接 panic（测试 fixture 必须存在；P0 §13 允许测试 expect）。
 
 #[cfg(test)]
-pub(super) fn fast_hash(path: &str) -> io::Result<(usize, u64, u64)> {
+pub(super) fn fast_hash(path: &str) -> (usize, u64, u64) {
     use std::io::Read;
-    let mut file = std::fs::File::open(path)?;
+    let mut file =
+        std::fs::File::open(path).expect("test helper: fixture file must open for fast_hash");
     let mut buffer = [0; FAST_READ_SIZE];
-    let bytes_read = file.read(&mut buffer)?;
+    let bytes_read = file
+        .read(&mut buffer)
+        .expect("test helper: fixture file must read for fast_hash");
     let short = wyhash::wyhash(&(buffer[..bytes_read]), 0);
     let full = xxhash_rust::xxh3::xxh3_64(&(buffer[..bytes_read]));
-    Ok((bytes_read, short, full))
+    (bytes_read, short, full)
 }
 
 #[cfg(test)]
-pub(super) fn full_hash(path: &str) -> io::Result<(usize, u64)> {
-    let file = std::fs::File::open(path)?;
+pub(super) fn full_hash(path: &str) -> (usize, u64) {
+    let file =
+        std::fs::File::open(path).expect("test helper: fixture file must open for full_hash");
     // SAFETY: file 句柄仍持有；测试用辅助，运行期外部进程不会并发改写。
-    let mmap = unsafe { memmap2::Mmap::map(&file)? };
-    Ok((mmap.len(), xxhash_rust::xxh3::xxh3_64(&mmap)))
+    let mmap = unsafe {
+        memmap2::Mmap::map(&file).expect("test helper: fixture file must mmap for full_hash")
+    };
+    (mmap.len(), xxhash_rust::xxh3::xxh3_64(&mmap))
 }
 
 #[cfg(test)]
-pub(super) fn secure_hash(path: &str) -> io::Result<(usize, SecureHash)> {
-    let file = std::fs::File::open(path)?;
+pub(super) fn secure_hash(path: &str) -> (usize, SecureHash) {
+    let file =
+        std::fs::File::open(path).expect("test helper: fixture file must open for secure_hash");
     // SAFETY: file 句柄仍持有；测试用辅助，运行期外部进程不会并发改写。
-    let mmap = unsafe { memmap2::Mmap::map(&file)? };
-    Ok((mmap.len(), Sha512::digest(&mmap)))
+    let mmap = unsafe {
+        memmap2::Mmap::map(&file).expect("test helper: fixture file must mmap for secure_hash")
+    };
+    (mmap.len(), Sha512::digest(&mmap))
 }

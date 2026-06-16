@@ -195,3 +195,60 @@ fn modify_date_at_exactly_one_day_still_vetoes() {
         ConflictKind::MajorityVetoedByModifyDate
     );
 }
+
+// 触发 majority_verdict line 130 `matches!(v, Validity::Valid)` 的 false arm：
+// filename 候选 utc 在 pre-1995（LowConfidencePre1995 validity）时，多数派仲裁
+// 必须拒绝它推翻 P0（CLAUDE.md「多数派仲裁仅认 Validity::Valid」）。
+#[test]
+fn pre_1995_filename_low_confidence_does_not_overrule_p0() {
+    let p0 = Utc
+        .with_ymd_and_hms(2024, 1, 1, 0, 0, 0)
+        .unwrap()
+        .timestamp();
+    let pre_1995 = Utc
+        .with_ymd_and_hms(1990, 6, 15, 0, 0, 0)
+        .unwrap()
+        .timestamp();
+    let d = resolve(
+        vec![
+            cand(Source::ExifDateTimeOriginal, p0),
+            cand(Source::FilenameDashedDateTime, pre_1995),
+            cand(Source::FsMtime, pre_1995 + 3600),
+        ],
+        None,
+        None,
+        now(),
+    )
+    .unwrap();
+    assert_eq!(d.priority, Priority::P0);
+    assert_eq!(d.utc.timestamp(), p0);
+}
+
+// 触发 inner closure line 134 `matches!(mv, Validity::Valid)` 的 false arm：
+// 只有一个 mtime 候选且其 utc 是 pre-1995（LowConfidencePre1995 validity）时，
+// inner any() 找不到 valid mtime 互证 → quorum=None → P0 保留。
+#[test]
+fn p0_kept_when_only_mtime_candidate_is_pre_1995_low_confidence() {
+    let p0 = Utc
+        .with_ymd_and_hms(2024, 1, 1, 0, 0, 0)
+        .unwrap()
+        .timestamp();
+    let f = p0 + 60 * CONFLICT_OVER_DAY_SECS;
+    let pre_1995_mtime = Utc
+        .with_ymd_and_hms(1990, 6, 15, 0, 0, 0)
+        .unwrap()
+        .timestamp();
+    let d = resolve(
+        vec![
+            cand(Source::ExifDateTimeOriginal, p0),
+            cand(Source::FilenameDashedDateTime, f),
+            cand(Source::FsMtime, pre_1995_mtime),
+        ],
+        None,
+        None,
+        now(),
+    )
+    .unwrap();
+    assert_eq!(d.priority, Priority::P0);
+    assert_eq!(d.utc.timestamp(), p0);
+}

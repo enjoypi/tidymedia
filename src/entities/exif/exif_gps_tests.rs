@@ -35,6 +35,22 @@ fn parse_gps_date_invalid_returns_none() {
     assert!(super::parse_gps_date("2024:05").is_none());
 }
 
+/// `parse_gps_date`：三段齐全但各段 parse 失败 → 各自 `ok()?` 命中 None 分支。
+#[test]
+fn parse_gps_date_non_numeric_year_returns_none() {
+    assert!(super::parse_gps_date("ABCD:05:01").is_none());
+}
+
+#[test]
+fn parse_gps_date_non_numeric_month_returns_none() {
+    assert!(super::parse_gps_date("2024:XX:01").is_none());
+}
+
+#[test]
+fn parse_gps_date_non_numeric_day_returns_none() {
+    assert!(super::parse_gps_date("2024:05:DD").is_none());
+}
+
 /// `rational_to_u32`：denominator=0 → None。
 #[test]
 fn rational_to_u32_zero_denominator_returns_none() {

@@ -116,6 +116,15 @@ fn visit_dir_handles_nonexistent_path() {
     assert_eq!(index.files().len(), 0);
 }
 
+// full_path 仅在相对路径上调 canonicalize_utf8()，绝对路径直接返 Ok。
+// 此用例用相对路径触发 canonicalize 失败 → 走 Err arm 回退到原字符串。
+#[test]
+fn visit_dir_falls_back_when_relative_path_cannot_canonicalize() {
+    let mut index = Index::new();
+    index.visit_dir("relative/path/that/does/not/exist/xyz123");
+    assert_eq!(index.files().len(), 0);
+}
+
 #[test]
 fn visit_dir_skips_empty_files() {
     let dir = tempdir().unwrap();

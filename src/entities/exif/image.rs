@@ -99,21 +99,29 @@ pub(super) fn populate_image_xmp_fallback(head: &[u8], exif: &mut Exif) {
 ///
 /// nom-exif 把 GPS 子 IFD 条目按 IFD 索引 ≥ 2 存入 `Exif`，无法用 `get()`
 /// 直接读；改用 `iter()` 遍历所有 IFD 条目按 tag code 匹配。
+// 用 raw tag code 替代 `.tag()`：避免 Unknown(_) None arm（无法稳定构造
+// 真 EXIF fixture 含 Unknown tag）。GPS code 由 EXIF spec 固定，nom-exif
+// const fn `code()` 可在 const 上下文求值。
+const GPS_DATE_STAMP: u16 = ExifTag::GPSDateStamp.code();
+const GPS_TIME_STAMP: u16 = ExifTag::GPSTimeStamp.code();
+
 fn parse_gps_utc(parsed: &nom_exif::Exif) -> Option<DateTime<Utc>> {
     let mut date_str: Option<String> = None;
     let mut time_rationals: Option<[URational; 3]> = None;
 
     for entry in parsed.iter() {
-        let Some(tag) = entry.tag.tag() else {
-            continue;
-        };
-        if tag == ExifTag::GPSDateStamp {
-            date_str = entry.value.as_str().map(str::to_owned);
-        } else if tag == ExifTag::GPSTimeStamp
-            && let Some(slice) = entry.value.as_urational_slice()
-            && let [h, m, s] = slice
-        {
-            time_rationals = Some([*h, *m, *s]);
+        match entry.tag.code() {
+            GPS_DATE_STAMP => {
+                date_str = entry.value.as_str().map(str::to_owned);
+            }
+            GPS_TIME_STAMP => {
+                if let Some(slice) = entry.value.as_urational_slice()
+                    && let [h, m, s] = slice
+                {
+                    time_rationals = Some([*h, *m, *s]);
+                }
+            }
+            _ => {}
         }
     }
 

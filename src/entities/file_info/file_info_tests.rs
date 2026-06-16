@@ -101,10 +101,10 @@ fn bytes_read() {
     let meta = fs::metadata(common::DATA_LARGE).unwrap();
 
     {
-        let (bytes_read, _fast, _full) = super::fast_hash(common::DATA_LARGE).unwrap();
+        let (bytes_read, _fast, _full) = super::fast_hash(common::DATA_LARGE);
         assert_eq!(bytes_read, super::FAST_READ_SIZE);
 
-        let (bytes_read, full) = super::full_hash(common::DATA_LARGE).unwrap();
+        let (bytes_read, full) = super::full_hash(common::DATA_LARGE);
         assert_eq!(bytes_read as u64, meta.len());
         assert_eq!(full, common::DATA_LARGE_XXHASH);
     }
@@ -353,6 +353,25 @@ fn partial_eq_differs_when_size_differs() {
     let small = Info::from(common::DATA_SMALL).unwrap();
     let large = Info::from(common::DATA_LARGE).unwrap();
     assert_ne!(small, large);
+}
+
+// 触发 `Info::eq` line 283 `self.fast_hash == other.fast_hash` 的 false arm：
+// 两个文件 size 相等但内容（fast_hash）不同。
+#[test]
+fn partial_eq_differs_when_fast_hash_differs_with_same_size() {
+    let dir = tempfile::tempdir().unwrap();
+    let a = dir.path().join("a.bin");
+    let b = dir.path().join("b.bin");
+    let mut data_a = vec![0u8; 1024];
+    data_a[0] = b'A';
+    let mut data_b = vec![0u8; 1024];
+    data_b[0] = b'B';
+    fs::write(&a, &data_a).unwrap();
+    fs::write(&b, &data_b).unwrap();
+    let info_a = Info::from(a.to_str().unwrap()).unwrap();
+    let info_b = Info::from(b.to_str().unwrap()).unwrap();
+    assert_eq!(info_a.size, info_b.size);
+    assert_ne!(info_a, info_b);
 }
 
 #[test]

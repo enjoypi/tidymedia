@@ -77,7 +77,10 @@ pub fn copy_png_to(
     let dst = target_dir.join(name);
     std::fs::copy(DATA_DNS_BENCHMARK, &dst)?;
     let ts = filetime::FileTime::from_unix_time(FIXED_MEDIA_MTIME, 0);
-    filetime::set_file_mtime(&dst, ts)?;
+    // utimes 失败极罕见（owner 总能 utimes）；测试 helper 直接 expect 让覆盖率工具
+    // 不再要求构造无法稳定触发的 fail 场景。
+    filetime::set_file_mtime(&dst, ts)
+        .expect("test helper: set_file_mtime on freshly copied file must succeed");
     Ok(dst)
 }
 

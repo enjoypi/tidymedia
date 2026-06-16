@@ -58,6 +58,28 @@ fn parse_takeout_json_overflow_returns_none() {
     assert!(parse_takeout_json(s).is_none());
 }
 
+/// Number variant：历史上某些版本 timestamp 字段是裸数字而非字符串字面量。
+#[test]
+fn parse_takeout_json_number_variant_ok() {
+    let s = r#"{"photoTakenTime":{"timestamp":1714576200}}"#;
+    let utc = parse_takeout_json(s).unwrap();
+    assert_eq!(utc.timestamp(), 1_714_576_200);
+}
+
+/// Number 但溢出 i64 → `as_i64()` 返 None → 整体 None。
+#[test]
+fn parse_takeout_json_number_overflow_none() {
+    let s = r#"{"photoTakenTime":{"timestamp":1e30}}"#;
+    assert!(parse_takeout_json(s).is_none());
+}
+
+/// 非 String/Number variant（Bool 等）走 `_ => return None` fallback。
+#[test]
+fn parse_takeout_json_non_numeric_variant_none() {
+    let s = r#"{"photoTakenTime":{"timestamp":true}}"#;
+    assert!(parse_takeout_json(s).is_none());
+}
+
 /// 真实场景下注释先于属性出现：`parse_xmp_date` 应解析正文属性而非注释里的字面量。
 #[test]
 fn parse_xmp_date_skips_xml_comment() {

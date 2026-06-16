@@ -71,7 +71,7 @@ fn whole_file_bytes(path: &str) -> Vec<u8> {
 #[test]
 fn fast_hash_stream_matches_path_version_small() {
     let bytes = whole_file_bytes(common::DATA_SMALL);
-    let (path_n, path_w, path_x) = super::fast_hash(common::DATA_SMALL).unwrap();
+    let (path_n, path_w, path_x) = super::fast_hash(common::DATA_SMALL);
     let mut r = Cursor::new(bytes);
     let (sn, sw, sx) = super::fast_hash_stream(&mut r).unwrap();
     assert_eq!((sn, sw, sx), (path_n, path_w, path_x));
@@ -80,7 +80,7 @@ fn fast_hash_stream_matches_path_version_small() {
 #[test]
 fn fast_hash_stream_matches_path_version_large() {
     let bytes = whole_file_bytes(common::DATA_LARGE);
-    let (path_n, path_w, path_x) = super::fast_hash(common::DATA_LARGE).unwrap();
+    let (path_n, path_w, path_x) = super::fast_hash(common::DATA_LARGE);
     let mut r = Cursor::new(bytes);
     let (sn, sw, sx) = super::fast_hash_stream(&mut r).unwrap();
     assert_eq!((sn, sw, sx), (path_n, path_w, path_x));
@@ -90,7 +90,7 @@ fn fast_hash_stream_matches_path_version_large() {
 fn fast_hash_stream_handles_chunked_reader() {
     // ChunkedReader 单次最多 32 字节：read_fill 必须循环多次填满 buffer
     let bytes = whole_file_bytes(common::DATA_LARGE);
-    let (path_n, path_w, path_x) = super::fast_hash(common::DATA_LARGE).unwrap();
+    let (path_n, path_w, path_x) = super::fast_hash(common::DATA_LARGE);
     let mut r = ChunkedReader::new(bytes);
     let (sn, sw, sx) = super::fast_hash_stream(&mut r).unwrap();
     assert_eq!((sn, sw, sx), (path_n, path_w, path_x));
@@ -116,7 +116,7 @@ fn fast_hash_stream_io_error_propagates() {
 #[test]
 fn full_hash_stream_matches_path_version() {
     let bytes = whole_file_bytes(common::DATA_LARGE);
-    let (_, path_full) = super::full_hash(common::DATA_LARGE).unwrap();
+    let (_, path_full) = super::full_hash(common::DATA_LARGE);
     let mut r = Cursor::new(bytes.clone());
     let (sn, sh) = super::full_hash_stream(&mut r).unwrap();
     assert_eq!(sh, path_full);
@@ -126,7 +126,7 @@ fn full_hash_stream_matches_path_version() {
 #[test]
 fn full_hash_stream_chunked_matches() {
     let bytes = whole_file_bytes(common::DATA_LARGE);
-    let (_, path_full) = super::full_hash(common::DATA_LARGE).unwrap();
+    let (_, path_full) = super::full_hash(common::DATA_LARGE);
     let mut r = ChunkedReader::new(bytes.clone());
     let (sn, sh) = super::full_hash_stream(&mut r).unwrap();
     assert_eq!(sh, path_full);
@@ -153,7 +153,7 @@ fn full_hash_stream_io_error_propagates() {
 #[test]
 fn secure_hash_stream_matches_path_version() {
     let bytes = whole_file_bytes(common::DATA_LARGE);
-    let (_, path_secure) = super::secure_hash(common::DATA_LARGE).unwrap();
+    let (_, path_secure) = super::secure_hash(common::DATA_LARGE);
     let mut r = Cursor::new(bytes);
     let (_, sh) = super::secure_hash_stream(&mut r).unwrap();
     assert_eq!(sh, path_secure);
