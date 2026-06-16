@@ -36,33 +36,12 @@ impl BackendFactory for DefaultBackendFactory {
     }
 }
 
-// 仅被各 `#[cfg(not(feature = "*-backend"))]` 分支调用；三个 backend feature 全开时
-// 没有任何 not(feature) 分支编译，此 helper 即 dead。跨 feature 组合差异 → 用 allow
-// 而非 expect（未触发的 feature 组合会让 expect 报 unfulfilled，见 rust-p0 §1）。
-#[cfg_attr(
-    all(
-        feature = "smb-backend",
-        feature = "mtp-backend",
-        feature = "adb-backend"
-    ),
-    allow(dead_code)
-)]
-fn unsupported_backend(loc: &Location, feature: &str) -> Error {
-    Error::Io(std::io::Error::new(
-        std::io::ErrorKind::Unsupported,
-        format!(
-            "{} backend not enabled in this build; rebuild with --features {}",
-            loc.scheme(),
-            feature,
-        ),
-    ))
-}
-
 #[cfg(feature = "smb-backend")]
 fn build_smb_backend(loc: &Location) -> Result<Arc<dyn Backend>> {
     use crate::adapters::backend::smb::SmbBackend;
     use crate::adapters::backend::smb::SmbTarget;
     use crate::adapters::backend::smb::real::RealSmbClient;
+    // 调度层保证只把 Location::Smb 路由到此处；let-else 仅在重构破坏不变量时触发。
     let Location::Smb {
         user,
         host,
@@ -89,23 +68,32 @@ fn build_smb_backend(loc: &Location) -> Result<Arc<dyn Backend>> {
 }
 
 #[cfg(not(feature = "smb-backend"))]
-fn build_smb_backend(loc: &Location) -> Result<Arc<dyn Backend>> {
-    Err(unsupported_backend(loc, "smb-backend"))
+fn build_smb_backend(_loc: &Location) -> Result<Arc<dyn Backend>> {
+    Err(Error::Io(std::io::Error::new(
+        std::io::ErrorKind::Unsupported,
+        "smb backend not enabled in this build; rebuild with --features smb-backend",
+    )))
 }
 
 #[cfg(feature = "mtp-backend")]
-fn build_mtp_backend(loc: &Location) -> Result<Arc<dyn Backend>> {
+fn build_mtp_backend(_loc: &Location) -> Result<Arc<dyn Backend>> {
     use crate::adapters::backend::mtp::real::RealMtpClient;
     // stub 期 RealMtpClient::new() 必 Err，? 自然传播。
     // 真实实现完成时改为 wrap 成 Backend 返回；当前 fallthrough 报 Unsupported，
     // 避免原 unreachable!() 在 stub 成为可用时变成运行期 panic。
     let _client = RealMtpClient::new()?;
-    Err(unsupported_backend(loc, "mtp-backend"))
+    Err(Error::Io(std::io::Error::new(
+        std::io::ErrorKind::Unsupported,
+        "mtp backend not enabled in this build; rebuild with --features mtp-backend",
+    )))
 }
 
 #[cfg(not(feature = "mtp-backend"))]
-fn build_mtp_backend(loc: &Location) -> Result<Arc<dyn Backend>> {
-    Err(unsupported_backend(loc, "mtp-backend"))
+fn build_mtp_backend(_loc: &Location) -> Result<Arc<dyn Backend>> {
+    Err(Error::Io(std::io::Error::new(
+        std::io::ErrorKind::Unsupported,
+        "mtp backend not enabled in this build; rebuild with --features mtp-backend",
+    )))
 }
 
 #[cfg(feature = "adb-backend")]
@@ -122,6 +110,9 @@ fn build_adb_backend(loc: &Location) -> Result<Arc<dyn Backend>> {
 }
 
 #[cfg(not(feature = "adb-backend"))]
-fn build_adb_backend(loc: &Location) -> Result<Arc<dyn Backend>> {
-    Err(unsupported_backend(loc, "adb-backend"))
+fn build_adb_backend(_loc: &Location) -> Result<Arc<dyn Backend>> {
+    Err(Error::Io(std::io::Error::new(
+        std::io::ErrorKind::Unsupported,
+        "adb backend not enabled in this build; rebuild with --features adb-backend",
+    )))
 }
