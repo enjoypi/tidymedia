@@ -56,9 +56,8 @@ pub(super) fn ascii_datetime_to_epoch(s: &str, local_offset: FixedOffset) -> u64
         })
 }
 
-// parse_track 内部 Err 需要构造"header 通过 sniff 但容器结构损坏"的特殊视频 fixture，
-// 实务里不可稳定触发；整体标 coverage(off) 与 populate_image_dates 用 nom-exif 库的
-// 失败路径同源（image 路径下 PNG without EXIF 走 Some/None 分支已天然覆盖）。
+// parse_track 内部 Err 需要"header 通过 sniff 但容器结构损坏"的特殊视频 fixture 才能触发，
+// 实务里不可稳定；populate_image_dates 的 PNG without EXIF 分支已天然覆盖同源 nom-exif Err 路径。
 pub(super) fn populate_video_dates(
     reader: Box<dyn MediaReader>,
     exif: &mut Exif,

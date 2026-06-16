@@ -13,11 +13,7 @@ use crate::entities::file_index::Index;
 use crate::entities::file_info::Info;
 use crate::entities::uri::Location;
 
-// `coverage(off)`：内含 duplicate 检测 + `if remove && !dry_run` 等多条 branch；
-// lib_tidy / lib unit 两个 binary 的 LLVM monomorphization 副本无法同时让某一
-// instance 覆盖所有 (T,F) 组合（dry_run / remove / include_non_media 三态笛卡尔
-// 积太大，每个集成 binary 只走部分 case）。语义由现有 lib_tidy 集成测试
-// （tidy_with_move_local_*、tidy_move_dry_run_with_duplicate_*、
+// 语义由 lib_tidy 集成测试（tidy_with_move_local_*、tidy_move_dry_run_with_duplicate_*、
 // tidy_move_with_duplicate_removes_src_when_not_dry_run 等）联合断言。
 pub(super) fn do_copy(
     src: &Info,
@@ -112,13 +108,9 @@ pub(super) fn do_copy(
 }
 
 /// 用源 Info 的 backend 读 + 输出 backend 写。两个 backend 同一实例时与 `copy_file`
-/// 等价；不同实例（跨 scheme）时仍工作。
-///
-/// 内部 4 个 `?` Err `分支（open_read` / `open_write` / `io::copy` / writer.finish）中，
-/// `open_read` Err 已被 `do_copy_file_copy_fails_when_source_unreadable` 稳定覆盖；
-/// 后三者在 `LocalBackend` 下要构造 disk-full / 父目录在 `mkdir_p` 后被外部抢删等
-/// 不可稳定的场景，整函数随 CLAUDE.md「不可稳定触发」套路标 coverage(off)；
-/// 剩余分支由 `FakeBackend` reader/writer error 注入的集成测试覆盖。
+/// 等价；不同实例（跨 scheme）时仍工作。`open_read` Err 由
+/// `do_copy_file_copy_fails_when_source_unreadable` 覆盖；其余 Err 分支由
+/// `FakeBackend` reader/writer 注入的集成测试覆盖。
 fn stream_copy(src: &Info, target: &Location, out_be: &dyn Backend) -> common::Result<()> {
     let src_be = src.backend();
     let mut reader = src_be.open_read(src.location())?;

@@ -274,8 +274,6 @@ impl Index {
     /// - 0 字节文件 → `skipped_empty += 1`
     /// - `Info::open` 失败（chmod 000 / 中途删除等）→ `skipped_unreadable += 1`
     ///
-    /// 函数体内分支多数依赖文件系统状态构造，且 `warn!` 字段表达式要求安装
-    /// subscriber 才被求值。整体标 coverage(off)，沿用旧 `visit_dir` 的覆盖率策略。
     pub fn visit_location(&mut self, root: &Location, backend: &Arc<dyn Backend>) {
         let mut locs: Vec<Location> = Vec::new();
         for entry_res in backend.walk(root) {

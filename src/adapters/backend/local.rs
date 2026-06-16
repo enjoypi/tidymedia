@@ -1,11 +1,6 @@
 //! Local Backend：`std::fs` + [`ignore::WalkBuilder`] + [`memmap2::Mmap`] 实现。
 //!
-//! 关键边界：
-//! - mmap unsafe / `WalkBuilder` 闭包 / `fs::File::open` 的 IO Err 在 stable 测试里
-//!   也能稳定触发（见 CLAUDE.md「IO Err 分支测试套路」），无需 `coverage(off)`。
-//! - 唯一 `coverage(off)` 是 `MmapReader` 上 `Read for Cursor<Mmap>` 的 blanket 实现
-//!   被 LLVM 误算的内部 panic 边——通过包一层 [`Cursor`] 接 `memmap2::Mmap` 的 `Deref<Target=[u8]>`
-//!   避免。
+//! mmap unsafe 通过 `Cursor<Mmap>` 借 `Mmap: Deref<Target=[u8]>` 收敛在 [`MmapReader::new`]。
 
 use std::fs;
 use std::io::{self, Cursor, Read, Seek, SeekFrom, Write};
@@ -137,8 +132,7 @@ fn local_path(loc: &Location) -> io::Result<&Utf8Path> {
 }
 
 /// 尝试 `fs::rename`；跨设备（`CrossesDevices`）时 fallback 到 copy + remove 两步。
-/// `CrossesDevices` 需要真实跨设备挂载点才能触发，在单测 tempdir 里不可稳定复现，
-/// 整函数标 `coverage(off)`，语义由 `rename_same_dir_moves_file_atomically` 等断言不退化。
+/// 语义由 `rename_same_dir_moves_file_atomically` 等断言不退化。
 fn rename_or_fallback(from: &std::path::Path, to: &std::path::Path) -> io::Result<()> {
     match fs::rename(from, to) {
         Ok(()) => Ok(()),
@@ -185,9 +179,8 @@ fn kind_from_file_type(t: Option<std::fs::FileType>) -> EntryKind {
     }
 }
 
-/// `ignore::Error` → `io::Error`。`io_error()` 返回 None 的分支（如 ignore 自身
-/// 的 `GitIgnore` 解析错误、symlink 循环）需要构造复杂场景才能稳定触发，
-/// 整函数走 coverage(off)。
+/// `ignore::Error` → `io::Error`。`io_error()` None 的分支（GitIgnore 解析错误、symlink 循环）
+/// 在 stable test 里不可稳定触发。
 fn ignore_to_io(e: &ignore::Error) -> io::Error {
     if let Some(io) = e.io_error() {
         io::Error::new(io.kind(), e.to_string())
@@ -248,8 +241,7 @@ impl Write for LocalWriter {
 }
 
 impl MediaWriter for LocalWriter {
-    // fs::File::flush 在正常关闭路径上几乎不会 Err（disk-full 等场景不可稳定触发）；
-    // 整方法标 coverage(off)，参照 CLAUDE.md「不可稳定触发」套路。
+    // fs::File::flush 在正常关闭路径上几乎不会 Err（disk-full 等不可稳定触发）。
     fn finish(self: Box<Self>) -> io::Result<()> {
         let mut me = *self;
         me.file.flush()?;

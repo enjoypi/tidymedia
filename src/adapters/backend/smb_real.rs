@@ -1,7 +1,6 @@
 //! `RealSmbClient`：pavao + libsmbclient 适配器。
 //!
-//! 仅在 `--features smb-backend` 启用时编译。**整模块标 `#[cfg_attr(coverage_nightly,
-//! coverage(off))]`**：真实 SMB 调用需要 share 服务器才能稳定触发，CI 无法覆盖。
+//! 仅在 `--features smb-backend` 启用时编译。真实 SMB 调用需要 share 服务器，CI 不验证；
 //! 调度层的 OK / Err 分支由 [`super::SmbBackend::with_client`] + `FakeSmbClient` 覆盖。
 //!
 //! ## 线程安全
@@ -17,8 +16,6 @@
 //!   走环境变量由 libsmbclient 自动拾取，无显式 API。
 //! - timeout：`SmbOptions` 没显式 timeout；对应配置字段已删（杜绝哑配置），
 //!   pavao 支持后随消费链一起加回。
-
-#![cfg_attr(coverage_nightly, coverage(off))]
 
 use std::io;
 

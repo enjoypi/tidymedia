@@ -1,10 +1,7 @@
 //! `remote.rs` 测试共享 helpers：`DummyTarget` / `DummyClient` / `DummyAdapter` +
 //! `backend()` / `loc()` / `backend_with_client` / `backend_with_from_loc_err`。
 //! 从 `remote_tests.rs` 抽出避免单文件 > 512 行（P0 §6），同时让 IO 与 advanced 测试共用。
-//! 文件名不以 `_tests.rs` 结尾，`cargo-llvm-cov` 默认排除规则不命中——整文件 `coverage(off)`，
 //! 业务覆盖由 `remote_tests.rs` / `remote_advanced_tests.rs` 通过 helper 调用透传到 `remote.rs`。
-
-#![cfg_attr(coverage_nightly, coverage(off))]
 
 use std::io;
 use std::sync::Arc;

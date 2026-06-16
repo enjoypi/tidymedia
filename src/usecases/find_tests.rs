@@ -79,7 +79,12 @@ fn render_script_uncommments_paths_outside_output_prefix() {
     let same = sample_two_groups();
     let out = run_render(&same, Some("/keepers"));
     // /data/* 不在 /keepers 下 → 待删（无注释）
-    for path in ["/data/big_a", "/data/big_b", "/data/small_a", "/data/small_b"] {
+    for path in [
+        "/data/big_a",
+        "/data/big_b",
+        "/data/small_a",
+        "/data/small_b",
+    ] {
         let line = format!("os.remove(\"{path}\")");
         assert!(out.contains(&line), "missing line: {line}\nfull:\n{out}");
     }
@@ -250,8 +255,8 @@ fn find_duplicates_with_output_branch_runs() {
 }
 
 /// `compute_output_prefix` 的 `other => other.display()` arm：
-/// 远端 Location 走 Display 而非 full_path canonicalize。FakeBackend 模拟
-/// SMB 目录让 is_dir check 通过、进入 compute_output_prefix 后命中 other arm。
+/// 远端 `Location` 走 `Display` 而非 `full_path` canonicalize。`FakeBackend` 模拟
+/// SMB 目录让 `is_dir` check 通过、进入 `compute_output_prefix` 后命中 other arm。
 #[test]
 fn find_duplicates_remote_output_uses_display_for_prefix() {
     use crate::adapters::backend::fake::FakeBackend;

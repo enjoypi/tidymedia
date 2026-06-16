@@ -5,7 +5,10 @@ use super::tests_common::fixture_bytes;
 use super::tests_common::list;
 use super::tests_common::parse;
 use super::tests_common::riff_avi;
-use super::{FOURCC_HDRL, FOURCC_LIST, FOURCC_STRD, FOURCC_STRL, MAX_HDRL_BYTES, MAX_LIST_DEPTH, MAX_TOP_CHUNKS};
+use super::{
+    FOURCC_HDRL, FOURCC_LIST, FOURCC_STRD, FOURCC_STRL, MAX_HDRL_BYTES, MAX_LIST_DEPTH,
+    MAX_TOP_CHUNKS,
+};
 
 // ── happy path：真实 Fujifilm fixture ──
 

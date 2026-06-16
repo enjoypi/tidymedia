@@ -18,17 +18,17 @@ use self::image::populate_image_xmp_fallback;
 #[cfg(test)]
 use self::image::rational_to_u32;
 #[cfg(test)]
-use self::types::entry_value_to_epoch;
-#[cfg(test)]
-use self::video::ascii_datetime_to_epoch;
-#[cfg(test)]
-use self::video::populate_video_dates;
-#[cfg(test)]
 use self::mime::bmff_3gpp_mime;
 #[cfg(test)]
 use self::mime::m2ts_legacy_mime;
 #[cfg(test)]
 use self::mime::quicktime_legacy_mime;
+#[cfg(test)]
+use self::types::entry_value_to_epoch;
+#[cfg(test)]
+use self::video::ascii_datetime_to_epoch;
+#[cfg(test)]
+use self::video::populate_video_dates;
 #[cfg(test)]
 use super::backend::MediaReader;
 

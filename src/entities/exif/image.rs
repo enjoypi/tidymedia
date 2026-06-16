@@ -99,10 +99,6 @@ pub(super) fn populate_image_xmp_fallback(head: &[u8], exif: &mut Exif) {
 ///
 /// nom-exif 把 GPS 子 IFD 条目按 IFD 索引 ≥ 2 存入 `Exif`，无法用 `get()`
 /// 直接读；改用 `iter()` 遍历所有 IFD 条目按 tag code 匹配。
-///
-/// 内部分支（unrecognized GPS tag code / `GPSTimeStamp` 非 `URationalArray` /
-/// 元素数 != 3）需要特殊构造的 EXIF fixture 才能稳定触发，标 `coverage(off)`；
-/// 语义由 `parse_gps_date` / `rational_to_u32` / `build_gps_utc` 单元测试断言。
 fn parse_gps_utc(parsed: &nom_exif::Exif) -> Option<DateTime<Utc>> {
     let mut date_str: Option<String> = None;
     let mut time_rationals: Option<[URational; 3]> = None;
@@ -138,9 +134,6 @@ pub(super) fn build_gps_utc(
     date.and_hms_opt(hour, min, sec).map(|ndt| ndt.and_utc())
 }
 
-// parse_gps_date 与 rational_to_u32 仅被 parse_gps_utc（已标 coverage(off)）调用。
-// 单元测试 binary 直接调用它们（branch 已覆盖），但集成 binary 不调用，导致
-// LLVM multi-instance branch miss。整体标 coverage(off)；语义由对应单元测试保证不退化。
 pub(super) fn parse_gps_date(s: &str) -> Option<NaiveDate> {
     // GPSDateStamp 格式 "YYYY:MM:DD"（exiftool/EXIF spec 2.31）
     let parts: Vec<&str> = s.splitn(3, ':').collect();

@@ -1,8 +1,7 @@
 //! `RealAdbClient`：`adb_client` crate 适配器。
 //!
-//! 仅在 `--features adb-backend` 启用时编译。**整模块标 `#[cfg_attr(coverage_nightly,
-//! coverage(off))]`**：真实 adb 调用需 adb-server 守护 + Android 设备才能稳定触发，
-//! CI 无法覆盖。调度层（[`super::AdbBackend::with_client`] + FakeAdbClient）已覆盖
+//! 仅在 `--features adb-backend` 启用时编译。真实 adb 调用需 adb-server 守护 + Android 设备，
+//! CI 不验证；调度层（[`super::AdbBackend::with_client`] + FakeAdbClient）已覆盖
 //! Target 翻译、错误映射、buffered writer 等全部 dispatch 分支。
 //!
 //! ## 线程安全
@@ -25,8 +24,6 @@
 //!   多设备时上层 URI 必须带 serial
 //! - timeout：`adb_client` 暂无显式 timeout API；对应配置字段已删（杜绝哑配置），
 //!   库支持后随消费链一起加回
-
-#![cfg_attr(coverage_nightly, coverage(off))]
 
 use std::io::{self, Cursor};
 use std::net::{Ipv4Addr, SocketAddrV4};

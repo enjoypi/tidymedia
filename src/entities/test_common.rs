@@ -69,8 +69,7 @@ pub const DATA_M2TS_CANON: &str = "tests/data/sample-canon-avchd.m2ts";
 /// 2024-01-01 12:00:00 UTC，用于固定 PNG 复制目标的 mtime
 pub const FIXED_MEDIA_MTIME: i64 = 1_704_110_400;
 
-// 测试 fixture helper：fs::copy 的 Err 已在 L41 通过 missing 目录测试覆盖；
-// set_file_mtime 在 fs::copy 成功后立即调用，Err 分支不可稳定触发。整体标 coverage(off)。
+// 测试 fixture helper：fs::copy + set_file_mtime 钉 FIXED_MEDIA_MTIME，保证时间相关测试可重复。
 pub fn copy_png_to(
     target_dir: &std::path::Path,
     name: &str,

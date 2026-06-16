@@ -47,16 +47,6 @@ impl BackendFactory for DefaultBackendFactory {
     ),
     allow(dead_code)
 )]
-// dead 时同样从严格覆盖率剔除，否则 --all-features 统计报 DA:0（条件与上面 allow 镜像）。
-#[cfg_attr(
-    all(
-        coverage_nightly,
-        feature = "smb-backend",
-        feature = "mtp-backend",
-        feature = "adb-backend"
-    ),
-    coverage(off)
-)]
 fn unsupported_backend(loc: &Location, feature: &str) -> Error {
     Error::Io(std::io::Error::new(
         std::io::ErrorKind::Unsupported,

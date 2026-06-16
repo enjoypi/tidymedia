@@ -51,8 +51,7 @@ fn write_report_json<T: serde::Serialize>(path: &str, report: &T, feature: &str)
     }
 }
 
-// write_all / flush / persist の `?` Err 分支在普通文件系统下不可稳定触发；
-// 整体标 coverage(off)，语义由 sink_writes_valid_copy_json 断言。
+// 写临时文件 + rename 原子替换；语义由 sink_writes_valid_copy_json 断言。
 fn try_write_report_json<T: serde::Serialize>(path: &str, report: &T) -> common::Result<()> {
     use std::io::Write;
 

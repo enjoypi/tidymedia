@@ -245,7 +245,11 @@ fn mtp_percent_decode_invalid_in_storage() {
 fn smb_ipv6_bracket_no_port() {
     let loc = Location::parse("smb://[::1]/share/path").unwrap();
     let Location::Smb {
-        host, port, share, path, ..
+        host,
+        port,
+        share,
+        path,
+        ..
     } = loc
     else {
         panic!("expected Smb");

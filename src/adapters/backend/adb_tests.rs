@@ -1,6 +1,5 @@
 //! `AdbBackend` 测试：FakeRemoteClient<AdbTarget> 注入 + 调度逻辑 100% 覆盖。
-//! 真实 `adb_client` 适配器（RealAdbClient）需 adb-server + 真机才能稳定触发，
-//! 整模块 coverage(off)；本测试不依赖 adb daemon。
+//! 真实 `adb_client` 适配器（RealAdbClient）需 adb-server + 真机才能稳定触发，本测试不依赖 adb daemon。
 //! 迁移到统一 FakeRemoteClient；协议特异断言通过 spy 读出。
 
 use std::io;

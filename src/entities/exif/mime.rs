@@ -22,9 +22,6 @@ const MIME_SNIFF_BYTES: usize = 256;
 
 /// 读首 [`MIME_SNIFF_BYTES`] 字节交给 `infer::get` 推断 MIME；之后 seek 回起点。
 /// 调用方需保证 reader 一开始已位于 0；这里 seek(0) 仅作"完成消费后还原"的保险。
-///
-/// 内部 read / seek 的 `?` Err 分支在 `LocalBackend` 下不可稳定触发，整体标 coverage(off)
-/// 沿用 `file_info` 旧 path-only 哈希函数的策略；Backend 调度逻辑由 [`super::Exif::open`] 单测兜底。
 pub(super) fn sniff_mime(reader: &mut dyn MediaReader) -> io::Result<String> {
     let mut buf = [0u8; MIME_SNIFF_BYTES];
     let filled = read_fill(reader, &mut buf)?;

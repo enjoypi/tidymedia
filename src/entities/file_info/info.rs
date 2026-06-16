@@ -121,12 +121,8 @@ impl Info {
         Arc::clone(&self.backend)
     }
 
-    // `coverage(off)`：cache-hit 的 `if l.full` 跨多个 test binary 出现 LLVM
-    // multi-instance branch 报告（lib_tidy / cli_smoke 等集成 test binary 永远不
-    // 触发 cache hit 路径）。`if let` 拆 helper 仍会在主 fn 留 branch；test
-    // profile codegen-units = 1 / `#[inline(never)]` 均无效——属 LLVM 多 binary
-    // 实例化限制。直接整 fn off。语义由 info_open_calc_full_hash_caches_on_
-    // second_call 单元测试断言不退化。
+    // cache-hit 走 `if l.full` 短路，二次调用直接复用 lazy.hash。
+    // 语义由 info_open_calc_full_hash_caches_on_second_call 单元测试断言。
     pub fn calc_full_hash(&self) -> io::Result<u64> {
         let mut l = self.lazy.lock();
         if l.full {
@@ -186,11 +182,6 @@ impl Info {
     ///（配置层的"软阈值"）则回退到 fs 兜底。
     /// `valid_threshold_secs` 与 `default_offset`（naive 时间的解释时区）由
     /// Use Case 层从配置读入；Entity 不直接依赖配置加载。
-    //
-    // `coverage(off)`：内含 `if secs > 0 && ...` boundary branch；集成 test binary
-    //（lib_tidy / cli_smoke）的 source 永远 secs>0，LLVM multi-binary inline 副本上
-    // False 分支永远不触发。语义由 create_time_no_exif_uses_meta /
-    // create_time_falls_back_when_exif_below_threshold 等单元测试断言。
     pub fn create_time(
         &self,
         valid_threshold_secs: u64,
@@ -255,11 +246,8 @@ impl Info {
     }
 }
 
-// `Info::open` 的 boundary check helper：把 "目录 / 0 字节" 两个 if 抽出来
-// 标 coverage(off)，避免跨 test binary 的 LLVM monomorphization 多 instance
-// 让 lib_tidy / cli_smoke 等永远不传 directory / empty fixture 的副本出现
-// 伪 miss。语义由单元测试 info_open_rejects_directory_* / info_open_rejects_
-// empty_* 直接断言保证不退化。
+// `Info::open` 的 boundary check helper：拒 "目录 / 0 字节"。
+// 语义由 info_open_rejects_directory_* / info_open_rejects_empty_* 单元测试断言。
 fn ensure_hashable(meta: &crate::entities::backend::Metadata, loc: &Location) -> io::Result<()> {
     if meta.kind != EntryKind::File {
         return Err(io::Error::other(format!(
@@ -290,9 +278,6 @@ pub(super) fn pick_fs_fallback(
 }
 
 impl PartialEq for Info {
-    // `coverage(off)`：尾段 `&& self.full_hash() == other.full_hash()` 在多个 test
-    // binary 中无 fast_hash 相等而 full_hash 不等的 fixture（实际上要稳定造此
-    // case 需要 xxh3 碰撞）。短路 && 的 False 分支在所有 instance 上都为 0。
     fn eq(&self, other: &Self) -> bool {
         self.size == other.size
             && self.fast_hash == other.fast_hash

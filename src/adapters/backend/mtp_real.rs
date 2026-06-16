@@ -18,8 +18,6 @@
 //! 完整验证；本 stub 仅占位 lib.rs `DefaultBackendFactory::for_location` 的
 //! feature-gated 分支语义对称。
 
-#![cfg_attr(coverage_nightly, coverage(off))]
-
 use std::io;
 
 pub struct RealMtpClient;

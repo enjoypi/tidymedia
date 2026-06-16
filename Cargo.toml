@@ -69,7 +69,6 @@ rstest = "*"
 [lints.rust]
 future-incompatible = { level = "warn", priority = -2 }
 nonstandard_style = { level = "deny", priority = -1 }
-unexpected_cfgs = { level = "warn", check-cfg = ['cfg(coverage_nightly)'] }
 
 [lints.clippy]
 all = { level = "deny", priority = -2 }
