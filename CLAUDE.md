@@ -22,7 +22,7 @@
 - `bin/exiftool/exiftool.exe`（仅开发调试）：常用 `-time:all -s <f>` 查时间字段、`-P '-AllDates<Filename' -overwrite_original <dir>` 按文件名批量改时间保 mtime；单文件按值写 `-P -overwrite_original "-AllDates=YYYY:MM:DD HH:MM:SS" "-FileModifyDate=..."`
   - **中文路径**：portable exiftool 缺 `Win32API::File`，命令行 UTF-8 直传 0 文件；要 UTF-8 路径走 **tempfile + `-@ <file>` + `-charset filename=UTF8`**（小写 `filename`）；省掉 `-charset` 走 ANSI 系统调用也稳（stdout 乱码不影响 EXIF 抽取）
   - 写操作默认产 `<file>_original` 备份，MUST 清理（magic-bytes 仍 JPEG 会被 tidymedia 当媒体归档）
-  - **`-T` Windows 末字段带 `\r`**：CRLF 让 awk `$NF` 拼成 `value\r`，终端 `\r` 盖行首致 print 错乱、`$NF=="value"` 永假；awk 入口 MUST `sub(/\r$/, "", $NF)`（参考 `.claude/scripts/tidy-verify/compare_buckets.awk`）
+  - **`-T` Windows 末字段带 `\r`**：CRLF 让 awk `$NF` 拼成 `value\r`，终端 `\r` 盖行首致 print 错乱、`$NF=="value"` 永假；awk 入口 MUST `sub(/\r$/, "", $NF)`。**项目内已统一迁 Python**（见末节「dry-run log / 路径聚合用 Python」），此坑仅在临时手写 awk 调试时遇到
 - nom-exif 内部 `tracing::info!/warn!` 大量输出，`install_logging` 用 EnvFilter 默认压 `nom_exif=error`，保留 `RUST_LOG` 覆盖；trace 调试 `RUST_LOG=nom_exif=trace`，span 名是 `#[tracing::instrument]` 函数名嵌套
 - nom-exif 3.5 把 MKV `DateUTC` 合并到 `TrackInfoTag::CreateDate`（无独立 tag）；MP4/MOV vs MKV/WebM 走 MIME 嗅探（`video/x-matroska` / `video/webm`）分流 `Source::MkvDateUtc` vs `QuickTimeCreateDate`
 - nom-exif `Exif::get(tag)` 仅读 IFD0/MAIN；GPS 子 IFD 标签必须 `Exif::iter()` 按 tag code 匹配
@@ -78,7 +78,7 @@
 - **新增配置字段** → `usecases/config.rs` 结构体 + `config.yaml` + `validate_*` 校验或被消费（杜绝哑配置）；secret 加 `.env.example`（值 `changeme`）+ 确认 `.env` 已 gitignore
 - **新增 CLI flag** → `adapters/dispatch.rs` 调度透传 + **每子命令路径（copy/move/find）独立 e2e 触发 Some/None 两边**，否则 LLVM branch miss；e2e MUST 含 `run_cli(["tidymedia", ...])` 字符串形式（clap flag 名映射只有该形式能验证）
 - **新增 `media_time` 候选 / 调整 P0–P4** → `entities/media_time/priority.rs::Source`/`Priority` → 对应解析模块 → `resolve`/`decision` 裁决 → 补 fixture
-- **新增 archive_template 占位符** → `archive_template.rs::render` 替换分支 + 同文件 `PLACEHOLDERS` 常量 + `config.rs::validate_archive_template` 测试三处同步
+- **新增 archive_template 占位符** → `usecases/archive_template.rs::render` 替换分支 + 同文件 `PLACEHOLDERS` 常量（当前 6 项）+ `usecases/config.rs::validate_archive_template`（在 `frameworks/config.rs::sanitize` 被调用）三处同步
 
 ## 项目分层（Clean Architecture）
 - 四层（自外向内）：`src/frameworks/` → `src/adapters/` → `src/usecases/` → `src/entities/`
