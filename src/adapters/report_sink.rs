@@ -36,7 +36,10 @@ impl ReportSink for JsonFileReportSink {
 }
 
 fn write_report_json<T: serde::Serialize>(path: &str, report: &T, feature: &str) {
-    match try_write_report_json(path, report) {
+    // CopyReport / FindReport 均为纯字段 derive(Serialize) 结构体，序列化不可能失败。
+    let json = serde_json::to_string_pretty(report)
+        .expect("internal error: serializing CopyReport/FindReport must not fail");
+    match try_write_report_json(path, json.as_bytes()) {
         Ok(()) => {}
         Err(e) => {
             warn!(
@@ -51,21 +54,46 @@ fn write_report_json<T: serde::Serialize>(path: &str, report: &T, feature: &str)
     }
 }
 
-// 写临时文件 + rename 原子替换；语义由 sink_writes_valid_copy_json 断言。
-fn try_write_report_json<T: serde::Serialize>(path: &str, report: &T) -> common::Result<()> {
-    use std::io::Write;
+// 临时文件 + 原子 persist 的 object-safe 抽象：让 try_write_report_json 不再硬编码
+// NamedTempFile，单测可注入 mock 实现触发 write/flush/persist 各自的 Err arm（real
+// NamedTempFile 写盘失败在测试环境不可稳定触发）。`self: Box<Self>` 让 trait 对象
+// 持有 sole ownership 并消耗 self（NamedTempFile::persist 签名要求）。
+pub(crate) trait TempPersist {
+    fn write_all(&mut self, buf: &[u8]) -> std::io::Result<()>;
+    fn flush(&mut self) -> std::io::Result<()>;
+    fn persist_to(self: Box<Self>, path: &str) -> std::io::Result<()>;
+}
 
-    // 写到同目录下的临时文件，再 rename 原子替换。
+impl TempPersist for tempfile::NamedTempFile {
+    fn write_all(&mut self, buf: &[u8]) -> std::io::Result<()> {
+        std::io::Write::write_all(self, buf)
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        std::io::Write::flush(self)
+    }
+    fn persist_to(self: Box<Self>, path: &str) -> std::io::Result<()> {
+        (*self).persist(path).map(|_| ()).map_err(|e| e.error)
+    }
+}
+
+// 非泛型：所有调用方共享一份 instance，避免 generic monomorphization 让 llvm-cov
+// 每份独立计 region 出现虚报。
+fn try_write_report_json(path: &str, bytes: &[u8]) -> common::Result<()> {
     let parent = std::path::Path::new(path)
         .parent()
         .unwrap_or(std::path::Path::new("."));
-    let mut tmp = tempfile::NamedTempFile::new_in(parent)?;
-    let json =
-        serde_json::to_string_pretty(report).map_err(|e| std::io::Error::other(e.to_string()))?;
-    tmp.write_all(json.as_bytes())?;
+    let tmp = tempfile::NamedTempFile::new_in(parent)?;
+    write_and_persist(path, bytes, Box::new(tmp))
+}
+
+fn write_and_persist(
+    path: &str,
+    bytes: &[u8],
+    mut tmp: Box<dyn TempPersist>,
+) -> common::Result<()> {
+    tmp.write_all(bytes)?;
     tmp.flush()?;
-    // persist 内部做 rename；跨设备 rename 失败时回退到 copy+delete。
-    tmp.persist(path).map_err(|e| common::Error::Io(e.error))?;
+    tmp.persist_to(path).map_err(common::Error::Io)?;
     Ok(())
 }
 
