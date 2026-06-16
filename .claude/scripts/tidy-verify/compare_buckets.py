@@ -57,7 +57,13 @@ def _qt_bucket(v, tz_hours):
     if m.group(7):  # 带 ±HH:MM 后缀
         sign = 1 if m.group(7) == "+" else -1
         src_off_min = sign * (int(m.group(8)) * 60 + int(m.group(9)))
-    naive = datetime.datetime(year, mon, day, hour, minute, sec)
+    # 相机时钟未设时 QT 值可能是 0000:00:00（year/month=0），datetime 构造会抛
+    # ValueError；此类非法日期回退前 7 字符，让其作为 0000:00 桶被 MISMATCH 检出
+    # （CameraClockUnset 可疑文件应被暴露而非让整条流水线崩溃）。
+    try:
+        naive = datetime.datetime(year, mon, day, hour, minute, sec)
+    except ValueError:
+        return v[:7]
     local = naive + datetime.timedelta(minutes=tz_hours * 60 - src_off_min)
     return f"{local.year:04d}:{local.month:02d}"
 
