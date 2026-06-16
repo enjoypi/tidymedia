@@ -101,10 +101,11 @@ pub(super) fn do_copy(
             "file transferred"
         );
 
-        // target 是刚刚 copy 成功的产物，正常 FS 下必然存在；但 NFS/SMB 上偶发 ESTALE、
-        // 反病毒/索引器抢占等场景仍可能让 metadata 失败。P0 §2 禁止生产代码 unwrap/expect，
-        // 此处用 ? 传播 IO 错误，归入循环外的 failed 统计。
-        _ = output_index.add(Info::open(&target_loc, Arc::clone(output_backend))?);
+        // dst 内容与 src 字节等同，复用 src 的 hash / size / EXIF 入 output_index，
+        // 避免对刚写完的 dst 重新 stat + 读 4 KiB（远端额外一次 RTT）；同时消除
+        // 旧实现 Info::open(dst) 在 NFS ESTALE / 防病毒抢占下失败 → dst 已写但未
+        // 入索引 → 后续同 hash 源文件 unique-name 再写一份 → 输出目录重复副本的漏洞。
+        _ = output_index.add(src.cloned_at(target_loc, Arc::clone(output_backend)));
 
         Ok(true)
     } else {

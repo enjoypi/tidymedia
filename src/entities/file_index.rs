@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use camino::Utf8PathBuf;
 use chrono::FixedOffset;
-use rayon::prelude::*;
+use rayon::iter::{IntoParallelRefIterator, IntoParallelRefMutIterator, ParallelIterator};
 use tracing::warn;
 
 use super::backend::{Backend, EntryKind};

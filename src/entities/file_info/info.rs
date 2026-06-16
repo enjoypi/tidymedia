@@ -175,6 +175,30 @@ impl Info {
         self.extra_candidates.extend(candidates);
     }
 
+    /// 把当前 Info 的 hash / size / EXIF / 候选状态复制到新 location + backend。
+    /// 用于 copy/move 完成后向 `output_index` 注册 dst 副本——dst 内容与 src 字节
+    /// 等同，hash 直接复用避免对 dst 重新 stat + 读 4 KiB，也消除 `Info::open(dst)`
+    /// 失败（NFS ESTALE / 防病毒抢占）→ dst 已写但未入索引 → 后续同 hash 源文件
+    /// 被再次写入的语义漏洞。
+    pub fn cloned_at(&self, new_loc: Location, new_backend: Arc<dyn Backend>) -> Self {
+        let new_full_path: Utf8PathBuf = match &new_loc {
+            Location::Local(p) => p.clone(),
+            other => other.display().into(),
+        };
+        let lazy_snapshot = *self.lazy.lock();
+        Self {
+            fast_hash: self.fast_hash,
+            full_path: new_full_path,
+            size: self.size,
+            location: new_loc,
+            backend: new_backend,
+            exif: self.exif.clone(),
+            extra_candidates: self.extra_candidates.clone(),
+            lazy: Mutex::new(lazy_snapshot),
+            meta: self.meta.clone(),
+        }
+    }
+
     /// 计算创建时间。走 docs/media-time-detection.md 的 P0→P4 优先级判定：
     /// 把 EXIF/视频容器字段（P0/P1）、文件名启发式（P2）、外部注入的 sidecar
     /// 候选（P3，见 [`Self::add_candidates`]）、文件 mtime（P4）一起喂给

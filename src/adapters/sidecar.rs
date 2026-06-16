@@ -35,8 +35,8 @@ pub fn discover(media_path: &Utf8Path) -> Vec<Candidate> {
 }
 
 /// Backend Gateway 入口：以 [`Location`] + [`Backend`] 在 backend 上读 sibling sidecar。
-/// 当前 sibling 路径计算仅 Local 实现（[`with_extension`] / [`append_suffix`] 对非 Local
-/// 返回 None），SMB/MTP 接入时再扩展。
+/// 跨 scheme（Local/SMB/ADB/MTP）走 [`Location::with_path`] 同口径构造 sibling URI，
+/// 远端 backend 读 sidecar 与本地等价（路径相对算法与 backend 无关）。
 pub fn discover_with_backend(media_loc: &Location, backend: &Arc<dyn Backend>) -> Vec<Candidate> {
     let mut out = Vec::new();
     if let Some(c) = try_xmp(media_loc, backend.as_ref()) {
@@ -49,7 +49,7 @@ pub fn discover_with_backend(media_loc: &Location, backend: &Arc<dyn Backend>) -
 }
 
 fn try_xmp(media_loc: &Location, backend: &dyn Backend) -> Option<Candidate> {
-    let xmp_loc = with_extension(media_loc, "xmp")?;
+    let xmp_loc = with_extension(media_loc, "xmp");
     let content = read_sidecar(&xmp_loc, backend, "read_xmp")?;
     let Some(utc) = parse_xmp_date(&content) else {
         log_parse_failure("parse_xmp", &xmp_loc);
@@ -66,7 +66,7 @@ fn try_xmp(media_loc: &Location, backend: &dyn Backend) -> Option<Candidate> {
 fn try_takeout(media_loc: &Location, backend: &dyn Backend) -> Option<Candidate> {
     // Takeout 同目录文件：<media-full-name>.json（例如 photo.jpg.json）。
     // 直接拼后缀，避免 with_extension 在无扩展名时产生 `photo..json`（多一个点）。
-    let json_loc = append_suffix(media_loc, ".json")?;
+    let json_loc = append_suffix(media_loc, ".json");
     let content = read_sidecar(&json_loc, backend, "read_takeout")?;
     let Some(utc) = parse_takeout_json(&content) else {
         log_parse_failure("parse_takeout", &json_loc);
@@ -80,18 +80,18 @@ fn try_takeout(media_loc: &Location, backend: &dyn Backend) -> Option<Candidate>
     })
 }
 
-/// 同 stem 替换扩展名。仅 Local case，其他 backend 暂返 None。
-fn with_extension(loc: &Location, ext: &str) -> Option<Location> {
-    let Location::Local(p) = loc else { return None };
-    let mut pp = p.clone();
+/// 同 stem 替换扩展名。复用 [`Location::with_path`]，跨 Local/SMB/ADB/MTP 等价。
+fn with_extension(loc: &Location, ext: &str) -> Location {
+    let mut pp = loc.path().to_path_buf();
     pp.set_extension(ext);
-    Some(Location::Local(pp))
+    loc.with_path(pp)
 }
 
 /// 在原 path 末尾追加后缀，等价于 Takeout 的 `<media-full>.json`。
-fn append_suffix(loc: &Location, sfx: &str) -> Option<Location> {
-    let Location::Local(p) = loc else { return None };
-    Some(Location::Local(Utf8PathBuf::from(format!("{p}{sfx}"))))
+/// 复用 [`Location::with_path`]，跨 Local/SMB/ADB/MTP 等价。
+fn append_suffix(loc: &Location, sfx: &str) -> Location {
+    let p = loc.path();
+    loc.with_path(Utf8PathBuf::from(format!("{p}{sfx}")))
 }
 
 /// 读 sidecar 内容；失败时按需输出诊断日志（R3：外部读取不静默）。

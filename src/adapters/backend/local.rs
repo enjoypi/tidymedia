@@ -149,6 +149,9 @@ pub(super) fn real_remove(a: &std::path::Path) -> io::Result<()> {
 
 /// 参数化版本：让单测可注入 mock rename 返 `CrossesDevices` 触发 fallback
 /// （Linux 容器内 cross-mount tmpfs 需 root 不可在 ecs-user 触发）。
+/// 跨设备 fallback 是 copy + remove 两步，非原子；copy 成功但 remove 失败时，
+/// 文件存在于 src 与 dst 两处，Err 包裹该半态以便上层（`do_copy` / failed 计数）
+/// 与 copy 也失败的场景区分，避免用户误判后再次执行致丢源。
 pub(super) fn rename_or_fallback_with(
     from: &std::path::Path,
     to: &std::path::Path,
@@ -160,7 +163,16 @@ pub(super) fn rename_or_fallback_with(
         Ok(()) => Ok(()),
         Err(e) if e.kind() == io::ErrorKind::CrossesDevices => {
             copy(from, to)?;
-            remove(from)
+            remove(from).map_err(|re| {
+                io::Error::new(
+                    re.kind(),
+                    format!(
+                        "cross-device rename: copied {} -> {} but cannot remove source: {re}",
+                        from.display(),
+                        to.display()
+                    ),
+                )
+            })
         }
         Err(e) => Err(e),
     }

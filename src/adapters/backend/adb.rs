@@ -100,15 +100,22 @@ impl RemoteAdapter for AdbAdapter {
         // 错误文案为 ASCII；用 to_ascii_lowercase 避免 Unicode full-case folding
         // 在非 ASCII 设备消息上字节布局漂移导致 contains 匹配丢失。
         let msg = e.to_string().to_ascii_lowercase();
-        if msg.contains("no such file")
+        if msg.contains("enoent")
+            || msg.contains("no such file")
             || msg.contains("does not exist")
             || msg.contains("device not found")
             || msg.contains("no devices")
         {
             return io::Error::new(io::ErrorKind::NotFound, e.to_string());
         }
-        if msg.contains("permission") {
+        if msg.contains("eacces") || msg.contains("permission") {
             return io::Error::new(io::ErrorKind::PermissionDenied, e.to_string());
+        }
+        // 并发 mkdir / 重复创建：pavao/adb_client 可能把 EEXIST 包成 Other("File exists")
+        // 等文案；mkdir_recursive 的 AlreadyExists 容忍依赖此重映射，否则多 source
+        // 并发归档到同 {year}/{month} 桶时硬失败。
+        if msg.contains("eexist") || msg.contains("file exists") || msg.contains("already exists") {
+            return io::Error::new(io::ErrorKind::AlreadyExists, e.to_string());
         }
         e
     }

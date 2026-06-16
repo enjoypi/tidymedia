@@ -236,12 +236,12 @@ fn move_keeps_src_when_target_write_fails() {
     );
 }
 
-// 跨 backend copy 成功后 `Info::open(target, output_backend)?` Err arm：
-// fake_smb 注入 target 路径 OpenRead Err，stream_copy 先写入完成 → Info::open 失败。
-// 本测试在集成 binary 触发 ops.rs L103 `?` Err region（lib unit 已有同语义测试，
-// 缺集成 instance 让 region phantom 在集成 codegen 副本也 hit）。
+// ops.rs:107 修复后：dst 入 output_index 改用 src.cloned_at 复用 src hash，
+// 不再调 backend.open_read(dst)。本集成测试钉新不变量：注入 OpenRead Err 在
+// target_loc 不应让 copy 失败（race 删除 / NFS ESTALE / 防病毒抢占等场景对
+// "已成功写入"的 dst 不应误判为传输失败）。
 #[test]
-fn copy_reports_failure_when_info_open_after_transfer_fails() {
+fn copy_succeeds_when_dst_open_read_would_fail_after_transfer() {
     let src_dir = tempdir().unwrap();
     let src_file = src_dir.path().join("photo.bin");
     std::fs::write(&src_file, vec![0xDD; 4096]).unwrap();
@@ -252,8 +252,6 @@ fn copy_reports_failure_when_info_open_after_transfer_fails() {
 
     let fake_smb = Arc::new(FakeBackend::new("smb"));
     fake_smb.add_dir(smb_root.clone());
-    // stream_copy 先调 out_be.open_write 成功 → FakeWriter.finish 写入 → 然后
-    // do_copy 末尾 Info::open 经 backend.open_read(target) 时注入 Err。
     fake_smb.inject_error(dst_loc, FakeOp::OpenRead, std::io::ErrorKind::Interrupted);
 
     let mut factory = FakeBackendFactory::new();
@@ -270,14 +268,15 @@ fn copy_reports_failure_when_info_open_after_transfer_fails() {
             report: None,
         },
     )
-    .expect("copy returns Ok with per-file failure");
+    .expect("copy returns Ok");
     let CommandResult::Copy(report) = result else {
         panic!("expected Copy report");
     };
     assert_eq!(
-        report.failed, 1,
-        "Info::open after-transfer failure must be counted as one failure: {report:?}"
+        report.copied, 1,
+        "copy 应成功，dst OpenRead 注入不再让传输失败: {report:?}"
     );
+    assert_eq!(report.failed, 0);
 }
 
 // generate_unique_name 耗尽：output 子桶预先塞满同名 + 9 个 _i 变体（max_attempts=10），

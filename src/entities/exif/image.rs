@@ -8,6 +8,7 @@ use nom_exif::ExifTag;
 use nom_exif::MediaParser;
 use nom_exif::MediaSource;
 use nom_exif::URational;
+use tracing::debug;
 
 use super::super::backend::MediaReader;
 use super::super::file_info::read_fill;
@@ -80,15 +81,35 @@ pub(super) fn populate_image_xmp_fallback(head: &[u8], exif: &mut Exif) {
     let dates = xmp::parse_xmp_dates(packet);
     if let Some(dt) = dates.photoshop_date_created {
         // XMP 时间带 timezone，DateTime<FixedOffset>::timestamp() 直接是 UTC epoch。
+        // Exif 字段为 u64 不能存 1970 前的负值（数字摄影几乎不涉及，扫描件 XMP
+        // 偶有 1960s 标注会落入此分支）；丢弃前发 debug 让缺口可见。
         let secs = dt.timestamp();
         if secs > 0 {
             exif.date_time_original = secs.cast_unsigned();
+        } else {
+            debug!(
+                feature = "exif",
+                operation = "xmp_fallback",
+                field = "DateTimeOriginal",
+                value = %dt,
+                secs,
+                "xmp date predates Unix epoch; cannot encode in u64 field"
+            );
         }
     }
     if let Some(dt) = dates.xmp_create_date {
         let secs = dt.timestamp();
         if secs > 0 {
             exif.create_date = secs.cast_unsigned();
+        } else {
+            debug!(
+                feature = "exif",
+                operation = "xmp_fallback",
+                field = "CreateDate",
+                value = %dt,
+                secs,
+                "xmp date predates Unix epoch; cannot encode in u64 field"
+            );
         }
     }
 }

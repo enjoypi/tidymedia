@@ -56,17 +56,35 @@ pub(crate) fn parse_xmp_dates(content: &str) -> XmpDates {
 }
 
 fn find_attr_rfc3339(haystack: &str, key: &str) -> Option<DateTime<FixedOffset>> {
-    let key_idx = haystack.find(key)?;
-    // key_idx 来自 find，加 key.len() 后仍在 haystack 字符边界内（key 是 ASCII）。
-    let after_eq = &haystack[key_idx + key.len()..];
-    let quote = after_eq.chars().next()?;
-    if quote != '"' && quote != '\'' {
-        return None;
+    // XML attribute 边界：key 必须紧跟 whitespace 或 packet/element 起始（'<'），
+    // 否则 `dc:description="...xmp:CreateDate='OLD'..."` 这类属性值内子串会
+    // 抢在真实属性前命中。线性扫描多次 find，命中即返；性能足够（XMP packet
+    // 实测 < 4 KB、命中通常在前 1 KB 内）。
+    let bytes = haystack.as_bytes();
+    let key_bytes = key.as_bytes();
+    let mut search_from = 0usize;
+    loop {
+        let rel = haystack.get(search_from..)?.find(key)?;
+        let key_idx = search_from + rel;
+        let prev = if key_idx == 0 { b' ' } else { bytes[key_idx - 1] };
+        // 边界字符 = ASCII 单字节即可：whitespace（space/tab/LF/CR）或 '<' 起始
+        // attribute（针对 element 形态 <ns:Key>... 不命中，YAGNI 保持单段属性）。
+        let is_boundary = prev == b' '
+            || prev == b'\t'
+            || prev == b'\n'
+            || prev == b'\r'
+            || prev == b'<';
+        if is_boundary {
+            let after_eq = haystack.get(key_idx + key_bytes.len()..)?;
+            let quote = after_eq.chars().next()?;
+            if quote == '"' || quote == '\'' {
+                let rest = &after_eq[quote.len_utf8()..];
+                let end = rest.find(quote)?;
+                return DateTime::parse_from_rfc3339(&rest[..end]).ok();
+            }
+        }
+        search_from = key_idx + key_bytes.len();
     }
-    // 引号是 ASCII 单字节字符，切片后 rest 起点对齐 UTF-8 边界。
-    let rest = &after_eq[quote.len_utf8()..];
-    let end = rest.find(quote)?;
-    DateTime::parse_from_rfc3339(&rest[..end]).ok()
 }
 
 // 把 `<!-- ... -->` 注释体替换为同字节数的空格，保持偏移与原串一致。

@@ -79,12 +79,13 @@ fn build_smb_backend(_loc: &Location) -> Result<Arc<dyn Backend>> {
 fn build_mtp_backend(_loc: &Location) -> Result<Arc<dyn Backend>> {
     use crate::adapters::backend::mtp::real::RealMtpClient;
     // stub 期 RealMtpClient::new() 必 Err，? 自然传播。
-    // 真实实现完成时改为 wrap 成 Backend 返回；当前 fallthrough 报 Unsupported，
-    // 避免原 unreachable!() 在 stub 成为可用时变成运行期 panic。
+    // 真实实现完成时改为 wrap 成 Backend 返回；当前 fallthrough 报 Unsupported
+    // 但消息明确"实现尚未提供"——勿沿用"rebuild with --features mtp-backend"
+    // 的复制黏贴，用户已启用 feature 收到该指引会以为编译方式不对。
     let _client = RealMtpClient::new()?;
     Err(Error::Io(std::io::Error::new(
         std::io::ErrorKind::Unsupported,
-        "mtp backend not enabled in this build; rebuild with --features mtp-backend",
+        "mtp backend feature enabled but real client is not yet implemented",
     )))
 }
 

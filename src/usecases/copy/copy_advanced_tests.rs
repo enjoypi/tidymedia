@@ -422,11 +422,12 @@ mod test_advanced {
         let _ = err;
     }
 
-    // 触发 ops.rs:101 `Info::open(...)?` Err arm：stream_copy 成功后 Info::open
-    // 通过 output_backend 再 open_read 时失败。FakeBackend output_backend 注入
-    // OpenRead Err 在 target_loc 上模拟该场景（race 删除 / 反病毒抢占等）。
+    // ops.rs:107 修复后：dst 入 output_index 改用 src.cloned_at 复用 src 已算好的
+    // hash / size / EXIF，不再对 dst 调 backend.open_read。本测试钉新不变量：
+    // 即使注入 OpenRead Err 在 target_loc 上（race 删除 / NFS ESTALE / 反病毒抢占），
+    // do_copy 也应成功，dst 仍入索引。
     #[test]
-    fn do_copy_propagates_info_open_error_after_transfer() {
+    fn do_copy_succeeds_when_dst_open_read_would_fail() {
         use crate::adapters::backend::fake::{FakeBackend, Op};
         use std::io::ErrorKind;
 
@@ -435,24 +436,22 @@ mod test_advanced {
 
         let fake_out = std::sync::Arc::new(FakeBackend::new("local"));
         let out_loc = Location::Local(Utf8PathBuf::from("/fake_out"));
-        // 预先把 fake_out 注册为 dir 让 mkdir_p 等不报错
         fake_out.add_file(out_loc.clone(), vec![]);
 
         let target_loc = Location::Local(Utf8PathBuf::from("/fake_out/2024/01/photo.png"));
-        // 等 stream_copy 完成后 Info::open 会调 backend.open_read(target) → 注入 Err
         fake_out.inject_error(target_loc, Op::OpenRead, ErrorKind::Interrupted);
 
         let mut idx = crate::entities::file_index::Index::new();
         let backend_arc: std::sync::Arc<dyn Backend> = fake_out;
-        let err = do_copy(
+        let ok = do_copy(
             &info,
             &out_loc,
             &backend_arc,
             &mut idx,
             &default_opts(DEFAULT_TMPL),
         )
-        .unwrap_err();
-        let _ = err;
+        .expect("dst OpenRead Err 不再阻断 copy（cloned_at 路径零 IO）");
+        assert!(ok, "do_copy 应报告 copy 成功");
     }
 
     // 跨 backend + remove=true：local src → FakeBackend(scheme!=local) dst。

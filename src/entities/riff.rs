@@ -128,17 +128,25 @@ fn parse_avif_ifd(strd: &[u8]) -> Option<AviExif> {
     }
     let base = strd.get(IFD_BASE..)?;
     let mut out = AviExif::default();
-    let exif_ifd = scan_ifd(base, 0, &mut out)?;
-    scan_ifd(base, exif_ifd, &mut out);
+    let mut exif_ifd: Option<usize> = None;
+    scan_ifd(base, 0, &mut out, &mut exif_ifd)?;
+    if let Some(off) = exif_ifd {
+        // ExifIFD 扫描失败不影响已收集的 Make/Model/DTO；忽略其 Option 返回。
+        let _ = scan_ifd(base, off, &mut out, &mut exif_ifd);
+    }
     Some(out)
 }
 
-// 扫单个 IFD 填充 out；返回 `ExifOffset` 指针（无该标签时返回 Some(0) 哨兵
-// 不行——0 是合法偏移；用 Option 表达"IFD 本身可读"，指针缺失时返回 usize::MAX
-// 让第二趟扫描自然越界空转）。
-fn scan_ifd(base: &[u8], ifd_off: usize, out: &mut AviExif) -> Option<usize> {
+// 扫单个 IFD 填充 out；外参 `exif_ifd` 在命中 ExifOffset tag 时被写入。
+// 返回 `Option<()>` 表达"IFD 本身可读"——旧实现以 usize::MAX 作"指针缺失"
+// 哨兵会在 debug 构建触发 u16le(off=usize::MAX) → off + 2 算术溢出 panic。
+fn scan_ifd(
+    base: &[u8],
+    ifd_off: usize,
+    out: &mut AviExif,
+    exif_ifd: &mut Option<usize>,
+) -> Option<()> {
     let count = u16le(base, ifd_off)? as usize;
-    let mut exif_ifd = usize::MAX;
     for i in 0..count {
         let e = ifd_off + 2 + i * 12;
         let tag = u16le(base, e)?;
@@ -146,7 +154,7 @@ fn scan_ifd(base: &[u8], ifd_off: usize, out: &mut AviExif) -> Option<usize> {
         let cnt = u32le(base, e + 4)? as usize;
         let val = u32le(base, e + 8)? as usize;
         match (tag, typ) {
-            (TAG_EXIF_OFFSET, TYPE_LONG) => exif_ifd = val,
+            (TAG_EXIF_OFFSET, TYPE_LONG) => *exif_ifd = Some(val),
             (TAG_MAKE, TYPE_ASCII) => out.make = read_ascii(base, val, cnt),
             (TAG_MODEL, TYPE_ASCII) => out.model = read_ascii(base, val, cnt),
             (TAG_DATE_TIME_ORIGINAL, TYPE_ASCII) => {
@@ -156,7 +164,7 @@ fn scan_ifd(base: &[u8], ifd_off: usize, out: &mut AviExif) -> Option<usize> {
             _ => {}
         }
     }
-    Some(exif_ifd)
+    Some(())
 }
 
 // ASCII 字段读取：目标标签（日期 20 字节、Make/Model >4 字节）均走 offset

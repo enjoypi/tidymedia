@@ -9,6 +9,10 @@ use chrono::Utc;
 
 /// 1904-01-01T00:00:00Z 的 epoch（QuickTime 零点占位）。
 const EPOCH_1904: i64 = -2_082_844_800;
+/// 占位日窗口：少数编码器把 `mvhd.creation_time` 写 1/2/... 而非 0，
+/// 对应 1904-01-01T00:00:01Z 等微秒差变体；按整天窗口兜住而不仅
+/// 精确等值，避免漏过 1 秒级偏移的占位时间。
+const EPOCH_1904_WINDOW_SECS: i64 = 86_400;
 
 /// 1995-01-01T00:00:00Z 的 epoch（数码摄影合理下限）。
 const SOFT_THRESHOLD_1995: i64 = 788_918_400;
@@ -30,7 +34,7 @@ pub enum Validity {
 #[must_use]
 pub fn classify(utc: DateTime<Utc>, now: DateTime<Utc>) -> Validity {
     let ts = utc.timestamp();
-    if ts == EPOCH_1904 {
+    if (EPOCH_1904..EPOCH_1904 + EPOCH_1904_WINDOW_SECS).contains(&ts) {
         return Validity::RejectEpoch1904;
     }
     if ts > now.timestamp().saturating_add(FUTURE_TOLERANCE_SECS) {

@@ -48,11 +48,15 @@ pub fn resolve(
     let mut conflicts = Vec::new();
     match majority_verdict(&best, &surviving[1..], modify_date_utc) {
         MajorityVerdict::Override(winner, v) => {
+            // diff_secs 约定 = chosen - other_utc（与 detect_conflicts 各分支一致）：
+            // 这里 chosen=winner、other_utc=原 P0=best，故 winner.utc - best.utc。
+            // 颠倒会让下游脚本（tidy-verify 等）按"diff = chosen - other"解读相机
+            // 时钟偏差方向时正负相反。
             conflicts.push(Conflict {
                 kind: ConflictKind::P0OverruledByMajority,
                 other_utc: best.utc,
                 other_source: Some(best.source),
-                diff_secs: (best.utc - winner.utc).num_seconds(),
+                diff_secs: (winner.utc - best.utc).num_seconds(),
             });
             (best, validity) = (winner, v);
         }

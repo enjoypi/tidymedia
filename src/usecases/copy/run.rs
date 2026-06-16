@@ -106,7 +106,6 @@ pub fn copy_with_sidecar(
     let (output_loc, output_backend) = output;
     let template = archive_template.unwrap_or(&config().copy.archive_template);
 
-    // 重叠保护（先于扫描，fail fast）。
     let output_prefix = canonical_prefix(&output_loc);
     ensure_sources_outside_output(sources, &output_prefix)?;
     let feature = feature_of(remove);
@@ -114,31 +113,15 @@ pub fn copy_with_sidecar(
 
     let total_files = source.files().len();
     let scan_stats = source.stats();
-    debug!(
-        feature,
-        operation = "scan_sources",
-        result = "ok",
-        total_files,
-        skipped_empty = scan_stats.skipped_empty,
-        skipped_unreadable = scan_stats.skipped_unreadable,
-        walker_errors = scan_stats.walker_errors,
-        "scanned source files"
-    );
+    log_scan_summary(feature, total_files, scan_stats);
 
+    let flags = ReportFlags {
+        dry_run,
+        remove,
+        include_non_media,
+    };
     if total_files == 0 {
-        // walker 触达 0 文件，但 scan_stats 仍可能含 walker_errors / skipped_*：纳入 scanned。
-        let report = make_report(
-            dry_run,
-            remove,
-            include_non_media,
-            scan_stats,
-            0,
-            0,
-            0,
-            Vec::new(),
-        );
-        emit_report(report_sink, &report);
-        return Ok(report);
+        return Ok(finalize(report_sink, flags, scan_stats, 0, 0, 0, Vec::new()));
     }
 
     trace!(
@@ -161,36 +144,86 @@ pub fn copy_with_sidecar(
     let (copied, ignored, failed, errors) =
         run_copy_loop(&source, &output_loc, &output_backend, &opts);
 
-    let result = summary_result(failed);
-    debug!(
-        feature,
-        operation = "summary",
-        result,
-        total = total_files,
-        copied,
-        ignored,
-        failed,
-        dry_run,
-        remove,
-        include_non_media,
-        skipped_empty = scan_stats.skipped_empty,
-        skipped_unreadable = scan_stats.skipped_unreadable,
-        walker_errors = scan_stats.walker_errors,
-        "operation summary"
-    );
-
-    let report = make_report(
-        dry_run,
-        remove,
-        include_non_media,
+    log_operation_summary(feature, total_files, copied, ignored, failed, flags, scan_stats);
+    Ok(finalize(
+        report_sink,
+        flags,
         scan_stats,
         copied,
         ignored,
         failed,
         errors,
+    ))
+}
+
+#[derive(Clone, Copy)]
+struct ReportFlags {
+    dry_run: bool,
+    remove: bool,
+    include_non_media: bool,
+}
+
+fn log_scan_summary(feature: &'static str, total_files: usize, stats: VisitStats) {
+    debug!(
+        feature,
+        operation = "scan_sources",
+        result = "ok",
+        total_files,
+        skipped_empty = stats.skipped_empty,
+        skipped_unreadable = stats.skipped_unreadable,
+        walker_errors = stats.walker_errors,
+        "scanned source files"
     );
-    emit_report(report_sink, &report);
-    Ok(report)
+}
+
+fn log_operation_summary(
+    feature: &'static str,
+    total: usize,
+    copied: usize,
+    ignored: usize,
+    failed: usize,
+    flags: ReportFlags,
+    stats: VisitStats,
+) {
+    debug!(
+        feature,
+        operation = "summary",
+        result = summary_result(failed),
+        total,
+        copied,
+        ignored,
+        failed,
+        dry_run = flags.dry_run,
+        remove = flags.remove,
+        include_non_media = flags.include_non_media,
+        skipped_empty = stats.skipped_empty,
+        skipped_unreadable = stats.skipped_unreadable,
+        walker_errors = stats.walker_errors,
+        "operation summary"
+    );
+}
+
+fn finalize(
+    sink: Option<&dyn ReportSink>,
+    flags: ReportFlags,
+    stats: VisitStats,
+    copied: usize,
+    ignored: usize,
+    failed: usize,
+    errors: Vec<ReportError>,
+) -> CopyReport {
+    let report = make_report(
+        flags.dry_run,
+        flags.remove,
+        flags.include_non_media,
+        stats,
+        copied,
+        ignored,
+        failed,
+        errors,
+    );
+    emit_report(sink, &report);
+    report
 }
 
 // 重叠保护：source ⊆ output（canonical 前缀含相等）时，dedup 会把每个源文件判为

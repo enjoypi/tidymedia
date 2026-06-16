@@ -107,14 +107,13 @@ pub(crate) fn find_duplicates(
     })
 }
 
-// 上方 is_dir 断言已经过滤掉非目录；到这里 output 必然是 (Location, Backend) 形态。
-// Local 走 full_path canonicalize（兼容旧 prefix 字符串语义）；远端走 Location::display。
+// 上方 is_dir 断言已过滤非目录；canonicalize 仍可能因 TOCTOU（验证后被外部
+// 删除）失败。与 copy/run.rs::canonical_prefix 同口径回退原路径，避免 expect
+// 触发进程崩溃（并发 cleanup / 自动备份脚本下可复现）。
 fn compute_output_prefix(output: Option<&Source>) -> Option<String> {
     output.map(|(loc, _)| match loc {
         Location::Local(p) => file_info::full_path(p.as_str())
-            .expect("output path validated as directory above")
-            .as_str()
-            .to_string(),
+            .map_or_else(|_| p.as_str().to_string(), |fp| fp.as_str().to_string()),
         other => other.display(),
     })
 }

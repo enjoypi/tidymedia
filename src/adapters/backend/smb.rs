@@ -144,6 +144,12 @@ impl RemoteAdapter for SmbAdapter {
         if msg.contains("eacces") || msg.contains("permission") {
             return io::Error::new(io::ErrorKind::PermissionDenied, e.to_string());
         }
+        // 并发 mkdir / 重复创建：pavao 把 EEXIST 包成 Other("File exists") 等文案；
+        // mkdir_recursive 的 AlreadyExists 容忍依赖此重映射，否则多 source 并发归档
+        // 到同 {year}/{month} 桶时硬失败。
+        if msg.contains("eexist") || msg.contains("file exists") || msg.contains("already exists") {
+            return io::Error::new(io::ErrorKind::AlreadyExists, e.to_string());
+        }
         e
     }
 

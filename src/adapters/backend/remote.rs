@@ -10,7 +10,7 @@ use std::sync::Arc;
 use camino::{Utf8Path, Utf8PathBuf};
 use tracing::debug;
 
-use crate::entities::backend::{Backend, Entry, MediaReader, MediaWriter, Metadata};
+use crate::entities::backend::{Backend, Entry, EntryKind, MediaReader, MediaWriter, Metadata};
 use crate::entities::uri::Location;
 
 /// 远端存储目标的协议相关参数（host/path/凭据等）。
@@ -121,6 +121,35 @@ fn mkparent<A: RemoteAdapter>(target: &A::Target, client: &Arc<dyn RemoteClient<
     }
 }
 
+/// 递归扫描远端目录树，把所有 entry（含 Dir，与 `LocalBackend::walk` 行为对齐）收集到 `out`。
+/// 单 list 失败即记 Err 不再下钻该子树；其余子树继续以"尽力而为"语义扫描。
+fn walk_recursive<A: RemoteAdapter>(
+    adapter: &A,
+    target: &A::Target,
+    out: &mut Vec<io::Result<Entry>>,
+) {
+    let listed = adapter
+        .client()
+        .list(target)
+        .map_err(|e| map_and_log(A::scheme(), "list", target.path(), A::map_error, e));
+    let entries = match listed {
+        Ok(v) => v,
+        Err(e) => {
+            out.push(Err(e));
+            return;
+        }
+    };
+    for entry in entries {
+        if entry.kind == EntryKind::Dir {
+            match A::Target::from_location(&entry.location, adapter.ctx()) {
+                Ok(sub) => walk_recursive::<A>(adapter, &sub, out),
+                Err(e) => out.push(Err(e)),
+            }
+        }
+        out.push(Ok(entry));
+    }
+}
+
 /// 远端 mkdir-p：自底向上用 stat 找到第一个已存在的祖先，再自浅入深逐层 mkdir。
 /// 远端协议的 mkdir 多为 POSIX 单层语义（父层缺失返回 ENOENT，如 pavao SMB），
 /// 叶节点单次 mkdir 对 `{year}/{month}` 等多层 archive 模板必败。
@@ -194,16 +223,14 @@ impl<A: RemoteAdapter> Backend for RemoteBackend<A> {
             Ok(t) => t,
             Err(e) => return Box::new(std::iter::once(Err(e))),
         };
-        let listed = self
-            .adapter
-            .client()
-            .list(&target)
-            .map_err(|e| map_and_log(A::scheme(), "list", target.path(), A::map_error, e));
-        let entries = match listed {
-            Ok(v) => v,
-            Err(e) => return Box::new(std::iter::once(Err(e))),
-        };
-        Box::new(entries.into_iter().map(Ok))
+        // 与 LocalBackend WalkBuilder 同口径递归扫描子目录：单层 list 会让
+        // SMB/ADB/MTP source 下子目录的全部媒体文件被 visit_location 静默丢失
+        //（visit 仅消费 EntryKind::File，Dir entry 不会被递归驱动）。
+        // 远端 list 是同步 IO，eager 收集所有 entry 后一次性返回——sources 实测
+        // ≤ 数万文件，远小于 hash/EXIF 阶段的内存峰值，无需引入懒迭代复杂度。
+        let mut out: Vec<io::Result<Entry>> = Vec::new();
+        walk_recursive::<A>(&self.adapter, &target, &mut out);
+        Box::new(out.into_iter())
     }
 
     fn open_read(&self, loc: &Location) -> io::Result<Box<dyn MediaReader>> {
