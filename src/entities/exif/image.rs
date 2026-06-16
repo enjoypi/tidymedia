@@ -12,9 +12,12 @@ use tracing::debug;
 
 use super::super::backend::MediaReader;
 use super::super::file_info::read_fill;
+use super::super::tiff_ifd::TiffIfd;
 use super::super::xmp;
+use super::image_jpeg::parse_jpeg_app1_exif;
 use super::types::Exif;
 use super::types::entry_value_to_epoch;
+use super::video::ascii_datetime_to_epoch;
 
 /// XMP packet fallback 扫描窗口。单段 APP1 最大 65533 字节，64 KB 覆盖单段
 /// XMP packet 起始；ExtendedXMP（跨多 APP1 段）不在范围。
@@ -42,7 +45,13 @@ pub(super) fn populate_image_dates(
     };
     let mut parser = MediaParser::new();
     let Ok(iter) = parser.parse_exif(ms) else {
-        populate_image_xmp_fallback(&head, exif);
+        // nom-exif 整体 Err（如 Canon EOS 7D MakerNotes 偏移异常）→ 先试 JPEG APP1
+        // 裸 IFD 自解析；再无 EXIF 落回 XMP packet 兜底。
+        if let Some(tiff) = parse_jpeg_app1_exif(&head) {
+            apply_tiff_ifd(exif, tiff, local_offset);
+        } else {
+            populate_image_xmp_fallback(&head, exif);
+        }
         return;
     };
     let parsed: nom_exif::Exif = iter.into();
@@ -72,6 +81,22 @@ pub(super) fn populate_image_dates(
     if exif.date_time_original == 0 && exif.create_date == 0 {
         populate_image_xmp_fallback(&head, exif);
     }
+}
+
+/// 把裸 TIFF IFD 解析结果写入 `Exif`（ASCII 日期按 `local_offset` 转 epoch）。
+/// JPEG APP1 fallback 与 PNG `eXIf` chunk 路径共用此 helper。
+pub(super) fn apply_tiff_ifd(exif: &mut Exif, tiff: TiffIfd, local_offset: FixedOffset) {
+    if let Some(s) = tiff.date_time_original.as_deref() {
+        exif.date_time_original = ascii_datetime_to_epoch(s, local_offset);
+    }
+    if let Some(s) = tiff.create_date.as_deref() {
+        exif.create_date = ascii_datetime_to_epoch(s, local_offset);
+    }
+    if let Some(s) = tiff.modify_date.as_deref() {
+        exif.modify_date = ascii_datetime_to_epoch(s, local_offset);
+    }
+    exif.make = tiff.make;
+    exif.model = tiff.model;
 }
 
 pub(super) fn populate_image_xmp_fallback(head: &[u8], exif: &mut Exif) {

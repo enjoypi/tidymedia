@@ -1,8 +1,9 @@
 use super::AviExif;
+use super::IFD_BASE;
 use super::parse_avif_ifd;
+use super::tests_common::MAX_ASCII_BYTES;
 use super::tests_common::avif_truncated_entry;
 use super::tests_common::avif_with_make;
-use super::{IFD_BASE, MAX_ASCII_BYTES};
 
 // ── parse_avif_ifd：strd 数据解析 ──
 

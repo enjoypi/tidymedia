@@ -33,6 +33,15 @@ pub fn data_large_sha512() -> SecureHash {
 pub const DATA_LARGE_COPY: &str = "tests/data/data_large_copy";
 
 pub const DATA_DNS_BENCHMARK: &str = "tests/data/DNSBenchmark.png";
+/// PNG 1.5+ `eXIf` chunk 自解析 fixture：`tests/fixtures/gen_png_exif.py` 生成。
+/// `IFD0` 含 Make=Canon, Model=EOS 7D, `ExifIFDPointer`；
+/// `ExifIFD` 含 `DateTimeOriginal`/`CreateDate`/`ModifyDate`（2017-02-14 10:30:00..02）。
+pub const DATA_PNG_EXIF: &str = "tests/data/sample-png-exif.png";
+/// JPEG APP1 fallback fixture：`tests/fixtures/gen_jpeg_makernotes_broken.py` 生成。
+/// `IFD0` 含 Make=Cam, Model=Model, `ExifIFDPointer` 指向"声称 10000 entries 但实际越界"
+/// 的 `ExifIFD`。nom-exif `parse_exif` 整体返 Err（模拟 Canon EOS 7D `MakerNotes`
+/// 偏移异常场景）；自实现 fallback 仍能解 `IFD0` Make/Model + `ExifIFD` `DTO`=2017:02:14。
+pub const DATA_JPEG_APP1_BROKEN: &str = "tests/data/sample-jpeg-app1-broken.jpg";
 
 /// 含 EXIF DateTimeOriginal/CreateDate/ModifyDate 的小 JPEG，ffmpeg+exiftool 生成。
 pub const DATA_JPEG_WITH_EXIF: &str = "tests/data/sample-with-exif.jpg";

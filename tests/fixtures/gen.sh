@@ -107,4 +107,15 @@ EOF
 rm -f blank-noexif.jpg
 trap - EXIT
 
+#######################################
+# Python 合成 fixture（PNG eXIf chunk / JPEG APP1 fallback）
+#######################################
+# 与 ffmpeg/exiftool 不同，这两个 fixture 用 Python stdlib 直接拼字节流：
+#   - PNG: gen_png_exif.py → sample-png-exif.png（带 eXIf chunk）
+#   - JPEG: gen_jpeg_makernotes_broken.py → sample-jpeg-app1-broken.jpg
+#     （IFD0 完整 + ExifIFD 越界 count，让 nom-exif parse_exif 失败但 fallback 可读）
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+uv run --quiet --no-project "$SCRIPT_DIR/gen_png_exif.py"
+uv run --quiet --no-project "$SCRIPT_DIR/gen_jpeg_makernotes_broken.py"
+
 echo "Generated $(ls -1 "$DATA_DIR" | wc -l) files in $DATA_DIR"

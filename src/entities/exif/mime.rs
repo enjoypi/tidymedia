@@ -5,6 +5,8 @@ use super::super::file_info::read_fill;
 
 pub(super) const META_TYPE_IMAGE: &str = "image/";
 pub(super) const META_TYPE_VIDEO: &str = "video/";
+/// PNG 容器；nom-exif 3.6 不解析 `eXIf` chunk，走 `entities::png` 自解析。
+pub(super) const MIME_PNG: &str = "image/png";
 /// RIFF AVI 容器；nom-exif 不支持，走 `entities::riff` 自解析内嵌 EXIF。
 pub(super) const MIME_AVI: &str = "video/x-msvideo";
 const MIME_QUICKTIME: &str = "video/quicktime";

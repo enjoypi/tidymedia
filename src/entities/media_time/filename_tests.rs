@@ -132,6 +132,51 @@ fn screenshot_rejects(#[case] name: &str) {
 }
 
 #[rstest]
+// macOS Snipping：`Screen Shot YYYY-MM-DD at HH.MM.SS.png`
+#[case::macos_basic(
+    "Screen Shot 2024-05-17 at 12.00.00.png",
+    epoch("2024-05-17T12:00:00Z")
+)]
+// 带序号后缀 ` (2)` 不影响前 22 字符解析
+#[case::macos_with_seq(
+    "Screen Shot 2024-05-17 at 12.00.00 (2).png",
+    epoch("2024-05-17T12:00:00Z")
+)]
+// `.jpg` 扩展名（部分版本/手动转格式）
+#[case::macos_jpg(
+    "Screen Shot 2024-05-17 at 12.00.00.jpg",
+    epoch("2024-05-17T12:00:00Z")
+)]
+fn macos_screenshot_parsed(#[case] name: &str, #[case] expected_ts: i64) {
+    let c = parse_filename(name, utc_offset()).unwrap();
+    assert_eq!(c.source, Source::FilenameScreenshot);
+    assert_eq!(c.utc.timestamp(), expected_ts);
+    assert!(c.inferred_offset);
+}
+
+#[rstest]
+// 缺 `at` 分隔
+#[case::macos_no_at("Screen Shot 2024-05-17    12.00.00.png")]
+// 非法月份
+#[case::macos_bad_month("Screen Shot 2024-13-17 at 12.00.00.png")]
+// 前缀错（少空格）
+#[case::macos_wrong_prefix("ScreenShot 2024-05-17 at 12.00.00.png")]
+// 长度不足 22
+#[case::macos_short("Screen Shot 2024-05-17.png")]
+fn macos_screenshot_rejects(#[case] name: &str) {
+    assert!(parse_filename(name, utc_offset()).is_none());
+}
+
+#[test]
+fn macos_screenshot_east8_offset_applied() {
+    // 本地 12:00 +08:00 = UTC 04:00
+    let c = parse_filename("Screen Shot 2024-05-17 at 12.00.00.png", east8()).unwrap();
+    let expected = Utc.with_ymd_and_hms(2024, 5, 17, 4, 0, 0).unwrap();
+    assert_eq!(c.utc, expected);
+    assert_eq!(c.offset, Some(east8()));
+}
+
+#[rstest]
 #[case::mmexport_basic("mmexport1686824625000.jpg", 1_686_824_625)]
 #[case::mmexport_no_ext("mmexport1686824625000", 1_686_824_625)]
 fn mmexport_parsed(#[case] name: &str, #[case] expected_ts: i64) {

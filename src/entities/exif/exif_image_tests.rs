@@ -104,6 +104,73 @@ fn from_path_jpeg_without_model_returns_none() {
     assert!(exif.make().is_none());
 }
 
+/// 合成 JPEG fixture：nom-exif `parse_exif` 因 `ExifIFD` 越界 count 整体失败，
+/// 自实现 fallback（`image_jpeg::parse_jpeg_app1_exif`）仍能读出 `IFD0` Make/Model
+/// 与 `ExifIFD` 第一个 entry 的 `DateTimeOriginal`。模拟 Canon EOS 7D `MakerNotes`
+/// 偏移异常场景。
+#[test]
+fn from_path_jpeg_app1_broken_falls_back_to_self_parse() {
+    let exif = Exif::from_path(Utf8Path::new(common::DATA_JPEG_APP1_BROKEN)).unwrap();
+    assert_eq!(exif.mime_type(), "image/jpeg");
+    // 2017-02-14 10:30:00 UTC = 1487068200
+    assert_eq!(exif.date_time_original(), 1_487_068_200);
+    assert_eq!(exif.make(), Some("Cam"));
+    assert_eq!(exif.model(), Some("Model"));
+}
+
+/// 截断 JPEG：nom-exif `parse_exif` Err + `parse_jpeg_app1_exif` 也找不到 Exif APP1
+/// → fallback 链最后退到 XMP fallback（无 packet）→ 字段全 0。覆盖 image.rs L50 None 分支。
+#[test]
+fn populate_image_dates_jpeg_truncated_falls_through_to_xmp() {
+    use std::io::Cursor;
+    // SOI + COM segment(len=2 = 仅 length 字段) + EOF：nom-exif parse_exif 必 Err
+    let buf = vec![0xFF_u8, 0xD8, 0xFF, 0xFE, 0x00, 0x02];
+    let mut exif = mk_exif("image/jpeg", |_| {});
+    let reader: Box<dyn super::MediaReader> = Box::new(Cursor::new(buf));
+    super::populate_image_dates(reader, &mut exif, super::tests_common::utc());
+    assert_eq!(exif.date_time_original(), 0);
+    assert_eq!(exif.exif_create_date(), 0);
+    assert_eq!(exif.make(), None);
+}
+
+/// `apply_tiff_ifd` 喂空 `TiffIfd::default()` → 三 `if let Some` 全 Else 分支，
+/// 字段保持初值 0。覆盖 image.rs L89 BRDA Else 分支。
+#[test]
+fn apply_tiff_ifd_with_empty_fields_writes_nothing() {
+    use super::super::tiff_ifd::TiffIfd;
+    let mut exif = mk_exif("image/jpeg", |e| {
+        e.make = Some("preset".to_string());
+    });
+    super::apply_tiff_ifd(&mut exif, TiffIfd::default(), super::tests_common::utc());
+    assert_eq!(exif.date_time_original(), 0);
+    assert_eq!(exif.exif_create_date(), 0);
+    assert_eq!(exif.exif_modify_date(), 0);
+    assert_eq!(exif.make(), None); // 被 None 覆盖
+    assert_eq!(exif.model(), None);
+}
+
+/// 验证 fixture 的 nom-exif 主路径**真的**失败（fixture 失效时立刻报警）。
+/// 这是 fallback 路径覆盖率的前提；fixture 改动若让 nom-exif 突然接受，
+/// 上面 fallback 集成 case 仍可能通过（走主路径），但本 case 会失败提示。
+#[test]
+fn jpeg_app1_broken_fixture_is_rejected_by_nom_exif() {
+    use std::io::Cursor;
+    let data = std::fs::read(common::DATA_JPEG_APP1_BROKEN).unwrap();
+    let ms = nom_exif::MediaSource::seekable(Cursor::new(data)).unwrap();
+    let mut parser = nom_exif::MediaParser::new();
+    let result = parser.parse_exif(ms);
+    assert!(
+        result.is_err()
+            || result.is_ok_and(|iter| {
+                let parsed: nom_exif::Exif = iter.into();
+                // 即便 Ok，也是空 EXIF（双 0），fallback 仍需触发
+                parsed.get(nom_exif::ExifTag::DateTimeOriginal).is_none()
+                    && parsed.get(nom_exif::ExifTag::Make).is_none()
+            }),
+        "fixture must trigger fallback path (either parse_exif Err or empty EXIF)"
+    );
+}
+
 /// chmod 000 让 `infer::get_from_path` `失败（fs::metadata` 仍可工作），
 /// 覆盖 `from_path` 第二个 `?` Err 分支。
 #[cfg(unix)]

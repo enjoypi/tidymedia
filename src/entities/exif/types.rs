@@ -12,10 +12,12 @@ use super::super::backend::MediaReader;
 use super::super::common;
 use super::super::uri::Location;
 use super::image::populate_image_dates;
+use super::image_png::populate_png_dates;
 use super::mime::META_TYPE_IMAGE;
 use super::mime::META_TYPE_VIDEO;
 use super::mime::MIME_AVI;
 use super::mime::MIME_M2TS;
+use super::mime::MIME_PNG;
 use super::mime::sniff_mime;
 use super::video::populate_avi_dates;
 use super::video::populate_m2ts_dates;
@@ -91,7 +93,11 @@ impl Exif {
             mime_type: mime_type.to_string(),
             ..Default::default()
         };
-        if mime_type.starts_with(META_TYPE_IMAGE) {
+        if mime_type.starts_with(MIME_PNG) {
+            // PNG 先于泛 image 分流：nom-exif 不解析 `eXIf` chunk，
+            // 时间在 PNG 1.5+ 自定义 chunk 内的完整 TIFF/EXIF header。
+            populate_png_dates(reader, &mut exif, local_offset);
+        } else if mime_type.starts_with(META_TYPE_IMAGE) {
             populate_image_dates(reader, &mut exif, local_offset);
         } else if mime_type.starts_with(MIME_AVI) {
             // AVI 先于泛 video 分流：nom-exif 不认 RIFF，时间在 strd 内嵌 EXIF。

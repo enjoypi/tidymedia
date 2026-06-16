@@ -20,6 +20,9 @@ fn fixture_extracts_all_four_fields() {
         AviExif {
             date_time_original: Some("2005:04:26 20:10:00".into()),
             create_date: Some("2005:04:26 20:10:00".into()),
+            // FUJIFILM FinePix E550 真实 strd 含 ModifyDate；tiff_ifd 公共
+            // 解析器统一读出（旧 RIFF 实现忽略此 tag），仅作仲裁旁证不进时间候选。
+            modify_date: Some("2005:04:26 20:10:00".into()),
             make: Some("FUJIFILM".into()),
             model: Some("FinePix E550".into()),
         }

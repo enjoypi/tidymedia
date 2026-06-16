@@ -14,8 +14,10 @@ pub mod file_index;
 pub mod file_info;
 pub(crate) mod m2ts;
 pub mod media_time;
+pub(crate) mod png;
 pub(crate) mod riff;
 #[cfg(test)]
 pub(crate) mod test_common;
+pub(crate) mod tiff_ifd;
 pub mod uri;
 pub(crate) mod xmp;

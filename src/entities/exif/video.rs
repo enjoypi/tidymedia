@@ -26,6 +26,11 @@ pub(super) fn populate_avi_dates(
         .create_date
         .as_deref()
         .map_or(0, |s| ascii_datetime_to_epoch(s, local_offset));
+    // ModifyDate 不进时间候选，仅供多数派仲裁识别 re-save（与图片 EXIF 一致）。
+    exif.modify_date = avi
+        .modify_date
+        .as_deref()
+        .map_or(0, |s| ascii_datetime_to_epoch(s, local_offset));
     exif.make = avi.make;
     exif.model = avi.model;
 }

@@ -18,11 +18,15 @@ const CAMERA_PREFIX: &str = "DSC_";
 const VIDEO_PHONE_PREFIX: &str = "VID_";
 const PIXEL_PREFIX: &str = "PXL_";
 const SCREENSHOT_PREFIX: &str = "Screenshot_";
+// macOS 截图：`Screen Shot YYYY-MM-DD at HH.MM.SS[ (N)].png`（注意有空格）。
+const MACOS_SCREENSHOT_PREFIX: &str = "Screen Shot ";
 // 微信导出：mmexport<13-digit-ms>.jpg
 const MMEXPORT_PREFIX: &str = "mmexport";
 // WhatsApp: "WhatsApp Image YYYY-MM-DD at HH.MM.SS" / "WhatsApp Video …"
 const WHATSAPP_IMAGE_PREFIX: &str = "WhatsApp Image ";
 const WHATSAPP_VIDEO_PREFIX: &str = "WhatsApp Video ";
+// `<前缀>YYYY-MM-DD at HH.MM.SS` 通用模板宽度（WhatsApp / macOS 截图共用）。
+const AT_DOTTED_LEN: usize = 22;
 
 /// 解析 `path.file_name()`（不含目录），匹配则返回 P2 候选。
 #[must_use]
@@ -37,10 +41,13 @@ pub fn parse_filename(name: &str, default_offset: FixedOffset) -> Option<Candida
     if let Some(c) = try_screenshot(stem, default_offset) {
         return Some(c);
     }
+    if let Some(c) = try_macos_screenshot(stem, default_offset) {
+        return Some(c);
+    }
     if let Some(c) = try_mmexport(stem) {
         return Some(c);
     }
-    if let Some(c) = try_whatsapp(name, default_offset) {
+    if let Some(c) = try_whatsapp(stem, default_offset) {
         return Some(c);
     }
     if let Some(c) = try_bare_yyyymmdd(stem, default_offset) {
@@ -193,25 +200,52 @@ fn try_mmexport(stem: &str) -> Option<Candidate> {
     millis_str_to_candidate(rest, Source::FilenameWeChatExport)
 }
 
-/// `WhatsApp`：`WhatsApp {Image|Video} YYYY-MM-DD at HH.MM.SS[ (N)]`（含扩展名）。
+/// `WhatsApp`：`WhatsApp {Image|Video} YYYY-MM-DD at HH.MM.SS[ (N)]`。
 /// 时区：`WhatsApp` 写设备本地时间，用 `default_offset` 推断。
-fn try_whatsapp(name: &str, default_offset: FixedOffset) -> Option<Candidate> {
-    // 先剥扩展名再解析
-    let stem = stem_without_ext(name);
-    let rest = stem
-        .strip_prefix(WHATSAPP_IMAGE_PREFIX)
-        .or_else(|| stem.strip_prefix(WHATSAPP_VIDEO_PREFIX))?;
-    // rest = "YYYY-MM-DD at HH.MM.SS[ (N)]"，取前 19 chars 为日期时间
-    // 格式：yyyy-mm-dd at HH.MM.SS → %Y-%m-%d at %H.%M.%S = 22 chars
-    if rest.len() < 22 {
-        return None;
-    }
-    let naive = NaiveDateTime::parse_from_str(&rest[..22], "%Y-%m-%d at %H.%M.%S").ok()?;
-    Some(naive_to_candidate(
-        naive,
+fn try_whatsapp(stem: &str, default_offset: FixedOffset) -> Option<Candidate> {
+    try_at_dotted(
+        stem,
+        WHATSAPP_IMAGE_PREFIX,
         default_offset,
         Source::FilenameWhatsApp,
-    ))
+    )
+    .or_else(|| {
+        try_at_dotted(
+            stem,
+            WHATSAPP_VIDEO_PREFIX,
+            default_offset,
+            Source::FilenameWhatsApp,
+        )
+    })
+}
+
+/// macOS 截图：`Screen Shot YYYY-MM-DD at HH.MM.SS[ (N)].png`（注意 `Screen Shot`
+/// 带空格、时间用 `.` 分隔），与 [`try_whatsapp`] 共用 `at HH.MM.SS` 模板。
+/// 与 `Screenshot_` 前缀（Android/Windows 截图）互不冲突。
+fn try_macos_screenshot(stem: &str, default_offset: FixedOffset) -> Option<Candidate> {
+    try_at_dotted(
+        stem,
+        MACOS_SCREENSHOT_PREFIX,
+        default_offset,
+        Source::FilenameScreenshot,
+    )
+}
+
+/// 公共模板 `<prefix>YYYY-MM-DD at HH.MM.SS[尾随后缀]`：剥前缀后取前 22
+/// 字节按 `chrono` 解析；尾部 ` (N)` 或扩展名自动忽略。
+fn try_at_dotted(
+    stem: &str,
+    prefix: &str,
+    default_offset: FixedOffset,
+    source: Source,
+) -> Option<Candidate> {
+    let rest = stem.strip_prefix(prefix)?;
+    if rest.len() < AT_DOTTED_LEN {
+        return None;
+    }
+    let naive =
+        NaiveDateTime::parse_from_str(&rest[..AT_DOTTED_LEN], "%Y-%m-%d at %H.%M.%S").ok()?;
+    Some(naive_to_candidate(naive, default_offset, source))
 }
 
 /// 裸格式：`YYYYMMDD_HHMMSS`（无前缀，15 chars stem）。

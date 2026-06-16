@@ -1,4 +1,6 @@
 mod image;
+mod image_jpeg;
+mod image_png;
 mod mime;
 mod types;
 mod video;
@@ -7,6 +9,8 @@ pub use self::types::Exif;
 
 // 测试要访问的内部 helper 在父 mod 私有 re-export，
 // 让 `exif_tests.rs` 的 `super::xxx` 引用照常解析（CLAUDE.md「测试要访问的内部项」节）。
+#[cfg(test)]
+use self::image::apply_tiff_ifd;
 #[cfg(test)]
 use self::image::build_gps_utc;
 #[cfg(test)]
@@ -17,6 +21,8 @@ use self::image::populate_image_dates;
 use self::image::populate_image_xmp_fallback;
 #[cfg(test)]
 use self::image::rational_to_u32;
+#[cfg(test)]
+use self::image_png::populate_png_dates;
 #[cfg(test)]
 use self::mime::bmff_3gpp_mime;
 #[cfg(test)]
@@ -59,3 +65,7 @@ mod mime_tests;
 #[cfg(test)]
 #[path = "exif_xmp_tests.rs"]
 mod xmp_tests;
+
+#[cfg(test)]
+#[path = "exif_png_tests.rs"]
+mod png_tests;

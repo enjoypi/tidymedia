@@ -2,6 +2,11 @@ use std::io::Cursor;
 
 pub(super) use super::*;
 
+// 测试本地常量（与 tiff_ifd / EXIF 规范一致）。
+pub(super) const TAG_MAKE: u16 = 0x010f;
+pub(super) const TYPE_ASCII: u16 = 2;
+pub(super) const MAX_ASCII_BYTES: usize = 256;
+
 pub(super) const FIXTURE: &str = "tests/data/sample-fuji-strd.avi";
 
 pub(super) fn fixture_bytes() -> Vec<u8> {
