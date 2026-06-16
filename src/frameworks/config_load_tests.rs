@@ -79,6 +79,31 @@ fn load_sanitizes_zero_unique_name_max_attempts_to_default() {
     remove_env_var("TIDYMEDIA_CONFIG");
 }
 
+// 超 ±23h 时区（chrono::FixedOffset / time::UtcOffset 在更大值上越界静默回退 UTC）：
+// sanitize 必须 warn + 回退默认 8，避免月末文件按 UTC 解释跨月归错桶且无告警。
+#[test]
+fn load_sanitizes_out_of_range_timezone_offset_to_default() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("badtz.yaml");
+    std::fs::write(&path, "copy:\n  timezone_offset_hours: 26\n").unwrap();
+    set_env_var("TIDYMEDIA_CONFIG", path.to_str().unwrap());
+    let cfg = load();
+    assert_eq!(cfg.copy.timezone_offset_hours, 8);
+    remove_env_var("TIDYMEDIA_CONFIG");
+}
+
+// 负方向同样越界（避免 sanitize 只检正方向漏掉 -26 等场景）。
+#[test]
+fn load_sanitizes_negative_out_of_range_timezone_offset_to_default() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("badtz_neg.yaml");
+    std::fs::write(&path, "copy:\n  timezone_offset_hours: -30\n").unwrap();
+    set_env_var("TIDYMEDIA_CONFIG", path.to_str().unwrap());
+    let cfg = load();
+    assert_eq!(cfg.copy.timezone_offset_hours, 8);
+    remove_env_var("TIDYMEDIA_CONFIG");
+}
+
 // yaml 内非法模板（结构错配）回退默认模板，不让渲染产生字面 '{' 目录。
 #[test]
 fn load_sanitizes_invalid_archive_template_to_default() {

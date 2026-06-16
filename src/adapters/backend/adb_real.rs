@@ -26,7 +26,7 @@
 //!   库支持后随消费链一起加回
 
 use std::io::{self, Cursor};
-use std::net::{Ipv4Addr, SocketAddrV4};
+use std::net::{SocketAddr, ToSocketAddrs};
 use std::time::{Duration, SystemTime};
 
 use adb_client::server_device::ADBServerDevice;
@@ -58,10 +58,24 @@ impl RealAdbClient {
     /// 按 serial（或 autodetect）+ adb-server 地址构造一个长连设备句柄。
     /// `server_host` / `server_port` 由 lib.rs 装配层从 `config()` 读取传入。
     pub fn new(serial: Option<String>, server_host: &str, server_port: u16) -> io::Result<Self> {
-        let host: Ipv4Addr = server_host
-            .parse()
-            .map_err(|e| io::Error::other(format!("adb server_host parse: {e}")))?;
-        let addr = SocketAddrV4::new(host, server_port);
+        // 用 (host, port).to_socket_addrs() 让 std::net 做 DNS 解析，支持主机名
+        // （'localhost' 等）与 IP 字面量；旧实现仅 `Ipv4Addr::parse` 致 server_host
+        // 必须是 IPv4 字面量，'localhost' 直接 parse fail 配置无法生效。
+        // adb_client::ADBServerDevice 当前仅接 SocketAddrV4：filter IPv4 后取首个，
+        // 全 IPv6 解析结果 → 显式 Err 而非静默 IPv4-only 假设。
+        let addr = (server_host, server_port)
+            .to_socket_addrs()
+            .map_err(|e| io::Error::other(format!("adb server_host resolve: {e}")))?
+            .find_map(|a| match a {
+                SocketAddr::V4(v4) => Some(v4),
+                SocketAddr::V6(_) => None,
+            })
+            .ok_or_else(|| {
+                io::Error::other(format!(
+                    "adb server_host {server_host}:{server_port} resolved to no IPv4 address \
+                     (adb_client requires IPv4)"
+                ))
+            })?;
         let device = match &serial {
             Some(s) => ADBServerDevice::new(s.clone(), Some(addr)),
             None => ADBServerDevice::autodetect(Some(addr)),

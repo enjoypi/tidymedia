@@ -89,35 +89,10 @@ impl RemoteAdapter for AdbAdapter {
     /// 把 `adb_client` 报错文案中的常见特征字符串映射成 [`io::ErrorKind`]。
     /// 同时识别 `Other`（`adb_client` 主要错误类型）与 `BrokenPipe`/`ConnectionReset`
     /// 等含 "no such file" 文案的链式错误——前者保留原 kind，后者按文案重映射，
-    /// 否则上层 `exists()` 会把"找不到"当作 IO 错误传播。
+    /// 否则上层 `exists()` 会把"找不到"当作 IO 错误传播。ADB 方言额外把
+    /// `"device not found"` / `"no devices"` 也归类为 `NotFound`。
     fn map_error(e: io::Error) -> io::Error {
-        if matches!(
-            e.kind(),
-            io::ErrorKind::NotFound | io::ErrorKind::PermissionDenied
-        ) {
-            return e;
-        }
-        // 错误文案为 ASCII；用 to_ascii_lowercase 避免 Unicode full-case folding
-        // 在非 ASCII 设备消息上字节布局漂移导致 contains 匹配丢失。
-        let msg = e.to_string().to_ascii_lowercase();
-        if msg.contains("enoent")
-            || msg.contains("no such file")
-            || msg.contains("does not exist")
-            || msg.contains("device not found")
-            || msg.contains("no devices")
-        {
-            return io::Error::new(io::ErrorKind::NotFound, e.to_string());
-        }
-        if msg.contains("eacces") || msg.contains("permission") {
-            return io::Error::new(io::ErrorKind::PermissionDenied, e.to_string());
-        }
-        // 并发 mkdir / 重复创建：pavao/adb_client 可能把 EEXIST 包成 Other("File exists")
-        // 等文案；mkdir_recursive 的 AlreadyExists 容忍依赖此重映射，否则多 source
-        // 并发归档到同 {year}/{month} 桶时硬失败。
-        if msg.contains("eexist") || msg.contains("file exists") || msg.contains("already exists") {
-            return io::Error::new(io::ErrorKind::AlreadyExists, e.to_string());
-        }
-        e
+        super::remote::map_remote_error(e, &["device not found", "no devices"])
     }
 
     fn ctx(&self) -> &() {

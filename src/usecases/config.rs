@@ -38,10 +38,15 @@ impl Default for CopyConfig {
 ///
 /// 模板为空、花括号嵌套/错配/未闭合、或占位符名未知时返回 `Err`。
 pub fn validate_archive_template(template: &str) -> Result<(), String> {
+    // 保证渲染后至少有一段非空目录的占位符——剩下的 {valuable_name} 可能渲染为
+    // 空串致全部文件落 output 根；要求模板含至少一个 always-non-empty 占位符。
+    // const 须放 fn 顶（clippy::items_after_statements，pedantic）。
+    const ALWAYS_NON_EMPTY: [&str; 5] = ["year", "month", "day", "make", "model"];
     if template.is_empty() {
         return Err("archive_template must not be empty".into());
     }
     let mut start: Option<usize> = None;
+    let mut has_safe_placeholder = false;
     for (i, c) in template.char_indices() {
         match c {
             '{' if start.is_some() => {
@@ -58,12 +63,20 @@ pub fn validate_archive_template(template: &str) -> Result<(), String> {
                         "archive_template has unknown placeholder {{{name}}}"
                     ));
                 }
+                if ALWAYS_NON_EMPTY.contains(&name) {
+                    has_safe_placeholder = true;
+                }
             }
             _ => {}
         }
     }
     if start.is_some() {
         return Err("archive_template has unbalanced braces: unclosed '{'".into());
+    }
+    if !has_safe_placeholder {
+        return Err("archive_template must contain at least one of \
+             {year}/{month}/{day}/{make}/{model} to guarantee a non-empty subdirectory"
+            .into());
     }
     Ok(())
 }
@@ -217,5 +230,29 @@ mod tests {
             validate_archive_template("{year}/{month}/{day}/{make}/{model}/{valuable_name}")
                 .is_ok()
         );
+    }
+
+    /// 仅 `{valuable_name}` 单占位符 → 渲染时 `valuable_name` 可能空 → 文件全落
+    /// output 根；validate 必须显式拒绝缺乏 always-non-empty 占位符的模板。
+    #[test]
+    fn validate_archive_template_rejects_template_without_safe_placeholder() {
+        let err = validate_archive_template("{valuable_name}").unwrap_err();
+        assert!(
+            err.contains("at least one of"),
+            "expected guidance about safe placeholders, got: {err}"
+        );
+    }
+
+    /// 单 always-non-empty 占位符即可通过（year 已保证非空）。
+    #[test]
+    fn validate_archive_template_accepts_single_safe_placeholder() {
+        assert!(validate_archive_template("{year}").is_ok());
+    }
+
+    /// 纯静态文本无占位符 → 渲染恒同字面量，无年/月分桶，同样拒绝。
+    #[test]
+    fn validate_archive_template_rejects_pure_static_text() {
+        let err = validate_archive_template("archive").unwrap_err();
+        assert!(err.contains("at least one of"), "got: {err}");
     }
 }

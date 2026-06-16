@@ -166,7 +166,7 @@ fn read_to_string_accepts_size_exactly_at_cap() {
     impl RemoteClient<DummyTarget> for AtCapClient {
         fn stat(&self, _t: &DummyTarget) -> io::Result<Metadata> {
             Ok(Metadata {
-                size: super::MAX_REMOTE_TEXT_BYTES,
+                size: super::MAX_TEXT_BYTES,
                 kind: EntryKind::File,
                 modified: None,
                 created: None,
@@ -197,7 +197,7 @@ fn read_to_string_accepts_size_exactly_at_cap() {
     assert_eq!(s, "ok");
 }
 
-// 远端 sidecar 体积上限：stat 报告超过 `MAX_REMOTE_TEXT_BYTES` 必须直接 Err，
+// 远端 sidecar 体积上限：stat 报告超过 `MAX_TEXT_BYTES` 必须直接 Err，
 // 不进 client.read 一次性入堆，防不受信远端共享拖爆内存。
 #[test]
 fn read_to_string_rejects_file_above_size_cap() {
@@ -207,7 +207,7 @@ fn read_to_string_rejects_file_above_size_cap() {
     impl RemoteClient<DummyTarget> for HugeStatClient {
         fn stat(&self, _t: &DummyTarget) -> io::Result<Metadata> {
             Ok(Metadata {
-                size: super::MAX_REMOTE_TEXT_BYTES + 1,
+                size: super::MAX_TEXT_BYTES + 1,
                 kind: EntryKind::File,
                 modified: None,
                 created: None,
@@ -218,7 +218,7 @@ fn read_to_string_rejects_file_above_size_cap() {
         }
         fn read(&self, _t: &DummyTarget) -> io::Result<Vec<u8>> {
             // 超限时不应到此：unreachable 既验证短路也用作 mutation kill。
-            unreachable!("read must not be called when stat exceeds MAX_REMOTE_TEXT_BYTES")
+            unreachable!("read must not be called when stat exceeds MAX_TEXT_BYTES")
         }
         fn write(&self, _t: &DummyTarget, _data: &[u8]) -> io::Result<u64> {
             unreachable!()

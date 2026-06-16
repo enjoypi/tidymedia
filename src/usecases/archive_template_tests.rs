@@ -94,4 +94,42 @@ mod test_render {
         let result = render("archive/photos", &c);
         assert_eq!(result, "archive/photos");
     }
+
+    /// EXIF Make 含 `../` 路径分隔符 → 经 `sanitize_path_segment` 替换为 `_`，
+    /// 避免 `{make}` 模板被恶意 EXIF 注入致写入 output 父目录。
+    #[test]
+    fn render_template_sanitizes_make_with_path_separators() {
+        let exif = Exif::with_mime("image/jpeg").with_make_model("../evil", "Z9");
+        let c = ctx("2024", "01", "01", "", Some(&exif));
+        let result = render("{make}/{year}", &c);
+        assert_eq!(result, ".._evil/2024");
+    }
+
+    /// EXIF Model 含反斜杠（Windows 风格）→ 同样替换为 `_`。
+    #[test]
+    fn render_template_sanitizes_model_with_backslash() {
+        let exif = Exif::with_mime("image/jpeg").with_make_model("Sony", r"A7\trap");
+        let c = ctx("2024", "01", "01", "", Some(&exif));
+        let result = render("{model}", &c);
+        assert_eq!(result, "A7_trap");
+    }
+
+    /// EXIF Make 全 `.` 段（`.` / `..` / `...`）→ 整段被替换为同长度 `_`，
+    /// 防止逐段 `Utf8PathBuf::join` 拼出 `output/..` 跳目录。
+    #[test]
+    fn render_template_sanitizes_dot_only_make() {
+        let exif = Exif::with_mime("image/jpeg").with_make_model("..", "Z9");
+        let c = ctx("2024", "01", "01", "", Some(&exif));
+        let result = render("{make}", &c);
+        assert_eq!(result, "__");
+    }
+
+    /// EXIF Make 含控制字符（\n 等）→ 替换为 `_`，避免日志/路径错位。
+    #[test]
+    fn render_template_sanitizes_control_chars_in_make() {
+        let exif = Exif::with_mime("image/jpeg").with_make_model("a\nb\tc", "Z9");
+        let c = ctx("2024", "01", "01", "", Some(&exif));
+        let result = render("{make}", &c);
+        assert_eq!(result, "a_b_c");
+    }
 }

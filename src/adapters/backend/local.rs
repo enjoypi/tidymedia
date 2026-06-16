@@ -96,6 +96,20 @@ impl Backend for LocalBackend {
 
     fn read_to_string(&self, loc: &Location) -> io::Result<String> {
         let path = local_path(loc)?;
+        // sidecar.rs 唯一消费者：XMP/Takeout JSON 实测 < 10 KiB。不受信媒体目录
+        // （USB/SD/网盘挂载）下注入 1 GB 假 `.xmp` 会让 read_to_string 一次性入堆
+        // 致 OOM；与 RemoteBackend 共享同口径 MAX_TEXT_BYTES 上限。
+        let len = fs::metadata(path.as_std_path())?.len();
+        if len > super::remote::MAX_TEXT_BYTES {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "local text file too large: {} bytes (limit {})",
+                    len,
+                    super::remote::MAX_TEXT_BYTES,
+                ),
+            ));
+        }
         fs::read_to_string(path.as_std_path())
     }
 
@@ -188,15 +202,19 @@ fn to_metadata(m: &fs::Metadata) -> Metadata {
     }
 }
 
-/// `ignore::WalkBuilder` 的单条记录映射到 [`Entry`]。size 在 metadata 失败时
-/// 兜底为 0——下游消费者读 size=0 会在再次 stat / `open_read` 时自然报错，
-/// 不需要在 walk 阶段就硬失败。
+/// `ignore::WalkBuilder` 的单条记录映射到 [`Entry`]。metadata 失败时返回 Err 让
+/// `visit_location` 计入 `walker_errors`——曾用 `map_or(0, ...)` 把 size 兜底成 0
+/// 会让该 entry 落入 `skipped_empty` 路径，与真正 0 字节文件混淆，运维诊断时
+/// `skipped_empty` 虚高、`walker_errors` 漏报。
 fn walk_entry_to_io(e: Result<ignore::DirEntry, ignore::Error>) -> io::Result<Entry> {
     let entry = e.map_err(|e| ignore_to_io(&e))?;
     let path = entry.path().to_path_buf();
     let utf8 = camino::Utf8PathBuf::from_path_buf(path)
         .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "non-UTF8 path"))?;
-    let size = entry.metadata().map_or(0, |m| m.len());
+    let size = entry
+        .metadata()
+        .map_err(|e| io::Error::other(format!("metadata failed for {utf8}: {e}")))?
+        .len();
     Ok(Entry {
         location: Location::Local(utf8),
         size,

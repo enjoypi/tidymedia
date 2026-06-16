@@ -394,6 +394,9 @@ mod tests {
     }
 
     // remove_file 失败时 rename 传播错误（copy 已成功，只有 remove 失败）。
+    // 默认 Backend::rename 必须把错误文案包装成 "copied … but cannot remove
+    // source"——让 do_copy / failed 计数能与 "copy 也失败" 区分，避免用户误判
+    // 重跑致丢源。
     #[test]
     fn rename_propagates_remove_error() {
         let b = FakeBackend::new("smb");
@@ -403,5 +406,10 @@ mod tests {
         b.inject_error(src.clone(), Op::RemoveFile, io::ErrorKind::PermissionDenied);
         let err = b.rename(&src, &dst, false).unwrap_err();
         assert_eq!(err.kind(), io::ErrorKind::PermissionDenied);
+        let msg = err.to_string();
+        assert!(
+            msg.contains("copied") && msg.contains("but cannot remove source"),
+            "default rename half-state must be labelled, got: {msg}"
+        );
     }
 }

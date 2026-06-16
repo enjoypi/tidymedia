@@ -256,6 +256,34 @@ fn copy_with_trace_subscriber_executes_trace_branch() {
     });
 }
 
+// `..` / `.` 路径段（恶意 EXIF 字段或自定义模板静态文本）必须被 naming::filter
+// 过滤掉；Utf8PathBuf::join("..") 是字面拼接不规范化，让 fs::File::create 按字面
+// 解析致 output 父目录被写入。本测试用自定义模板 `{year}/../target/.` 模拟该
+// 注入向量，验证逐段剥除后 sub_dir 落在 out/<year>/target 而非 out 父目录。
+#[test]
+fn generate_unique_name_drops_dot_and_dotdot_segments() {
+    let src = tempdir().unwrap();
+    let out = tempdir().unwrap();
+    let info = make_media_info(src.path(), "photo.png");
+    let template = "{year}/../target/.";
+    let (sub_dir, target) =
+        generate_unique_name(&info, &local_loc(out.path()), &local_arc(), template)
+            .unwrap()
+            .expect("path generated");
+    let sub_dir_str = sub_dir.path().as_str();
+    let out_str = utf8(out.path());
+    assert!(
+        sub_dir_str.starts_with(out_str.as_str()),
+        "subdir {sub_dir_str} must stay under output {out_str}"
+    );
+    assert!(
+        !sub_dir_str.contains(".."),
+        "subdir must not contain dotdot, got: {sub_dir_str}"
+    );
+    assert!(target.path().as_str().starts_with(out_str.as_str()));
+    assert!(target.path().as_str().ends_with("target/photo.png"));
+}
+
 // output 是已存在文件（非目录），backend.mkdir_p 失败 → 覆盖 copy() 内 `?` Err 分支。
 #[test]
 fn copy_with_output_as_file_errors() {

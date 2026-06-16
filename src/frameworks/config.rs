@@ -62,6 +62,25 @@ fn load() -> Config {
 ///   永不执行恒返 `None`，所有 copy/move 静默失败
 /// - 非法 `archive_template`（嵌套/错配/未知占位符）会渲染出字面 `{xxx}` 目录
 fn sanitize(mut cfg: Config) -> Config {
+    // `copy.timezone_offset_hours` 上限：chrono::FixedOffset::east_opt 限 ±24h-1s、
+    // time::UtcOffset::from_whole_seconds 限 ±25:59:59。统一收紧到 ±23 给两库都留
+    // buffer；超界让 offset_from_hours / chrono_offset_from_hours 静默回退 UTC，
+    // 月末文件跨月归错桶，必须 warn + 回退默认。const 内联避免顶层 const 在
+    // multi-binary instance 下被 LLVM 单独计 region。
+    const MAX_TIMEZONE_HOURS_ABS: u8 = 23;
+    if cfg.copy.timezone_offset_hours.unsigned_abs() > MAX_TIMEZONE_HOURS_ABS {
+        let fallback = CopyConfig::default().timezone_offset_hours;
+        warn!(
+            feature = "config",
+            operation = "sanitize",
+            result = "invalid_value",
+            field = "copy.timezone_offset_hours",
+            value = cfg.copy.timezone_offset_hours,
+            fallback,
+            "timezone_offset_hours must be within ±23; falling back to default"
+        );
+        cfg.copy.timezone_offset_hours = fallback;
+    }
     if cfg.copy.unique_name_max_attempts == 0 {
         let fallback = CopyConfig::default().unique_name_max_attempts;
         warn!(
@@ -154,7 +173,9 @@ fn find_close_brace(bytes: &[u8], start: usize) -> Option<usize> {
 
 fn resolve_var(body: &str) -> String {
     if let Some((name, default)) = body.split_once(":-") {
-        env::var(name).unwrap_or_else(|_| default.to_string())
+        // 默认值可含嵌套占位符（`${A:-${B:-x}}`），name 未设时递归展开 default 才
+        // 能让 B 等内层变量真正生效；否则字面 `${B:-x}` 会原样落进 YAML 值。
+        env::var(name).unwrap_or_else(|_| expand_env(default))
     } else {
         env::var(body).unwrap_or_default()
     }

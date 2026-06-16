@@ -123,34 +123,11 @@ impl RemoteAdapter for SmbAdapter {
     }
 
     /// pavao 把所有错误包成 `io::Error::other("pavao: ...")`：`mkdir_recursive` 的
-    /// `NotFound` 守卫必须靠文案重映射触发，否则多层归档目录创建必败。
-    /// 与 `AdbAdapter::map_error` 同构：先放行已正确分类的 `NotFound` / `PermissionDenied`
-    /// kind（防 future pavao 版本提前归一时被重复包装丢失分类），再按 ASCII 文案
-    /// 重映射 `Other` / `BrokenPipe` 等链式错误。
+    /// `NotFound` 守卫必须靠文案重映射触发，否则多层归档目录创建必败。SMB 无方言
+    /// 特有的 `NotFound` 触发文案，沿用 `map_remote_error` 的通用 ENOENT / no such
+    /// file / does not exist 集合即可。
     fn map_error(e: io::Error) -> io::Error {
-        if matches!(
-            e.kind(),
-            io::ErrorKind::NotFound | io::ErrorKind::PermissionDenied
-        ) {
-            return e;
-        }
-        // pavao 文案为 ASCII；to_ascii_lowercase 比 to_lowercase 快且不做 Unicode
-        // full-case folding（参考 adb.rs 同一处理）。
-        let msg = e.to_string().to_ascii_lowercase();
-        if msg.contains("enoent") || msg.contains("no such file") || msg.contains("does not exist")
-        {
-            return io::Error::new(io::ErrorKind::NotFound, e.to_string());
-        }
-        if msg.contains("eacces") || msg.contains("permission") {
-            return io::Error::new(io::ErrorKind::PermissionDenied, e.to_string());
-        }
-        // 并发 mkdir / 重复创建：pavao 把 EEXIST 包成 Other("File exists") 等文案；
-        // mkdir_recursive 的 AlreadyExists 容忍依赖此重映射，否则多 source 并发归档
-        // 到同 {year}/{month} 桶时硬失败。
-        if msg.contains("eexist") || msg.contains("file exists") || msg.contains("already exists") {
-            return io::Error::new(io::ErrorKind::AlreadyExists, e.to_string());
-        }
-        e
+        super::remote::map_remote_error(e, &[])
     }
 
     fn ctx(&self) -> &() {

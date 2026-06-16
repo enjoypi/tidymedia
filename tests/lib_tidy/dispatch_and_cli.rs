@@ -14,8 +14,9 @@ use tempfile::tempdir;
     feature = "adb-backend"
 )))]
 use tidymedia::Location;
-use tidymedia::{Commands, run_cli, tidy};
+use tidymedia::{Commands, run_cli, tidy, tidy_with};
 
+use super::FakeBackendFactory;
 #[cfg(not(feature = "adb-backend"))]
 use super::adb_loc;
 use super::{DATA_DIR, local};
@@ -302,6 +303,62 @@ fn tidy_find_propagates_error_when_output_is_file() {
         report: None,
     });
     assert!(res.is_err(), "find output must be an existing directory");
+}
+
+// output 路径不存在（NotFound）→ find_duplicates 仍以 "not a directory" 文案 Err。
+// 配合 lib_tidy 集成 binary instance 也覆盖 find 内 NotFound match guard arm，避免
+// multi-binary instance 0-hit region miss。
+#[test]
+fn tidy_find_propagates_error_when_output_missing() {
+    let res = tidy(Commands::Find {
+        secure: false,
+        sources: vec![local(DATA_DIR)],
+        output: Some(local("/no/such/dir/xyz")),
+        report: None,
+    });
+    let err = res.unwrap_err();
+    assert!(err.to_string().contains("not a directory"), "got: {err}");
+}
+
+// output metadata 返非 NotFound 错误（PermissionDenied / 网络等）→ find 必须传播
+// 原 Err，不被吞成 "not a directory"。FakeBackend inject_error 模拟该情况。
+// 覆盖 lib_tidy binary instance 中 find_duplicates Err(other) arm，消除 multi-
+// binary 0-hit region miss。
+#[test]
+fn tidy_find_propagates_permission_denied_metadata_error() {
+    let smb_out = tidymedia::Location::Smb {
+        user: None,
+        host: "nas".into(),
+        port: None,
+        share: "photos".into(),
+        path: camino::Utf8PathBuf::from("out"),
+    };
+    let fake_smb = std::sync::Arc::new(tidymedia::FakeBackend::new("smb"));
+    fake_smb.add_dir(smb_out.clone());
+    fake_smb.inject_error(
+        smb_out.clone(),
+        tidymedia::FakeOp::Metadata,
+        std::io::ErrorKind::PermissionDenied,
+    );
+
+    let mut factory = FakeBackendFactory::new();
+    factory.insert("smb", fake_smb as std::sync::Arc<dyn tidymedia::Backend>);
+
+    let err = tidy_with(
+        &factory,
+        Commands::Find {
+            secure: false,
+            sources: vec![local(DATA_DIR)],
+            output: Some(smb_out),
+            report: None,
+        },
+    )
+    .unwrap_err();
+    // 关键：错误不应被改写成 "not a directory"。
+    assert!(
+        !err.to_string().contains("not a directory"),
+        "PermissionDenied must propagate, got: {err}"
+    );
 }
 
 // output 父路径被普通文件占住 → usecases::copy 内 mkdir_p Err，

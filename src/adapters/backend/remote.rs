@@ -73,10 +73,12 @@ pub trait RemoteAdapter: Send + Sync + 'static {
     fn client(&self) -> &Arc<dyn RemoteClient<Self::Target>>;
 }
 
-/// 远端 sidecar 文本文件大小上限（防 `OOM`）：`sidecar.rs::read_to_string` 唯一消费者，
+/// sidecar 文本文件大小上限（防 `OOM`）：`sidecar.rs::read_to_string` 唯一消费者，
 /// XMP / Takeout JSON 实测 < 10 KiB；8 MiB 给极端 Takeout 复合 export 留足空间，
-/// 同时把恶意/损坏远端文件的内存放大封顶在常数倍。
-pub(crate) const MAX_REMOTE_TEXT_BYTES: u64 = 8 << 20;
+/// 同时把恶意/损坏 sidecar 文件的内存放大封顶在常数倍。Local/Remote 共用同一上限：
+/// 不受信媒体目录（USB/SD/网盘挂载）下注入 1 GB 假 `.xmp` 可让进程 OOM，与远端
+/// 共享上限是同口径防御。
+pub(crate) const MAX_TEXT_BYTES: u64 = 8 << 20;
 
 /// 泛型远端 Backend：对任意 [`RemoteAdapter`] 实现 [`Backend`] trait 的全部 12 个方法。
 /// SMB / ADB / MTP 三套实现收敛到此单一泛型。
@@ -88,6 +90,41 @@ impl<A: RemoteAdapter> RemoteBackend<A> {
     fn build_target(&self, loc: &Location) -> io::Result<A::Target> {
         A::Target::from_location(loc, self.adapter.ctx())
     }
+}
+
+/// 远端 client 错误的通用文案重映射（SMB/ADB 共用骨架）。
+///
+/// 先放行已正确分类的 `NotFound` / `PermissionDenied`（防 future client 版本提前
+/// 归一时被重复包装丢失分类），再按 ASCII 文案重新归类 `Other` / `BrokenPipe` /
+/// `ConnectionReset` 等链式错误。`extra_not_found` 让方言注入额外 `NotFound`
+/// 触发文案（ADB 的 `"device not found"` / `"no devices"` 等）。
+/// `to_ascii_lowercase` 比 `to_lowercase` 快且不做 Unicode full-case folding，
+/// 避免 `contains` 在本地化消息上字节漂移让匹配丢失。
+pub(crate) fn map_remote_error(e: io::Error, extra_not_found: &[&str]) -> io::Error {
+    if matches!(
+        e.kind(),
+        io::ErrorKind::NotFound | io::ErrorKind::PermissionDenied
+    ) {
+        return e;
+    }
+    let msg = e.to_string().to_ascii_lowercase();
+    if msg.contains("enoent")
+        || msg.contains("no such file")
+        || msg.contains("does not exist")
+        || extra_not_found.iter().any(|s| msg.contains(s))
+    {
+        return io::Error::new(io::ErrorKind::NotFound, e.to_string());
+    }
+    if msg.contains("eacces") || msg.contains("permission") {
+        return io::Error::new(io::ErrorKind::PermissionDenied, e.to_string());
+    }
+    // 并发 mkdir / 重复创建：client 可能把 EEXIST 包成 Other("File exists") 等文案；
+    // mkdir_recursive 的 AlreadyExists 容忍依赖此重映射，否则多 source 并发归档
+    // 到同 {year}/{month} 桶时硬失败。
+    if msg.contains("eexist") || msg.contains("file exists") || msg.contains("already exists") {
+        return io::Error::new(io::ErrorKind::AlreadyExists, e.to_string());
+    }
+    e
 }
 
 /// 统一记录远端 op 失败并套用协议级错误映射（R3：外部调用失败不静默）。
@@ -279,11 +316,11 @@ impl<A: RemoteAdapter> Backend for RemoteBackend<A> {
             .client()
             .stat(&target)
             .map_err(|e| map_and_log(A::scheme(), "stat", target.path(), A::map_error, e))?;
-        if meta.size > MAX_REMOTE_TEXT_BYTES {
+        if meta.size > MAX_TEXT_BYTES {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
                 format!(
-                    "remote text file too large: {} bytes (limit {MAX_REMOTE_TEXT_BYTES})",
+                    "remote text file too large: {} bytes (limit {MAX_TEXT_BYTES})",
                     meta.size
                 ),
             ));

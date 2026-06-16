@@ -125,6 +125,32 @@ fn parse_xmp_dates_key_at_end_returns_none() {
     assert!(parse_xmp_dates(xml).photoshop_date_created.is_none());
 }
 
+/// parse 失败（边界通过但值非 RFC3339）必须 continue 而非 return None：
+/// 后续真实属性应被命中。否则 description 字面注入即可让 P0 候选丢失。
+#[test]
+fn parse_xmp_dates_continues_past_parse_failure() {
+    let s = " photoshop:DateCreated=\"not-a-date\" \
+             photoshop:DateCreated=\"2020-01-01T00:00:00Z\"";
+    let dates = parse_xmp_dates(s);
+    assert!(
+        dates.photoshop_date_created.is_some(),
+        "real attribute after failed parse must still be found"
+    );
+}
+
+/// 第一处 key 前缀非边界字符（紧邻 ASCII 字母）→ continue；后续真实属性命中。
+#[test]
+fn parse_xmp_dates_continues_past_non_boundary_prefix() {
+    let s = "xphotoshop:DateCreated=\"2020-01-01T00:00:00Z\" \
+             photoshop:DateCreated=\"2021-02-02T00:00:00Z\"";
+    let dates = parse_xmp_dates(s);
+    assert_eq!(
+        dates.photoshop_date_created.unwrap().to_rfc3339(),
+        "2021-02-02T00:00:00+00:00",
+        "first occurrence had non-boundary prefix → must skip"
+    );
+}
+
 // ── strip_xml_comments ──
 
 /// 注释体替换为同字节数空格，前后正文与偏移原样保留。注释起点远离 0

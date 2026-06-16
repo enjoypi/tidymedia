@@ -52,9 +52,13 @@ pub(super) fn generate_unique_name(
 
     // render 输出以 '/' 分隔；整串 join 会把 '/' 原样嵌进路径，Windows 下产生
     // `D:\Pictures\2003/09` 混合分隔符。逐段 join 让分隔符回到 OS 原生形态。
+    // 防御 `..` / `.` 段（archive_template::sanitize_path_segment 已替换 EXIF make/
+    // model 中的危险字符；这里是第二道防线，覆盖 valuable_name 等其他渠道）：
+    // `Utf8PathBuf::join("..")` 是字面拼接不规范化，让 fs::File::create 按字面
+    // 解析致 output 外路径，跨目录写入。
     let sub_dir_path = sub_dir_rel
         .split('/')
-        .filter(|seg| !seg.is_empty())
+        .filter(|seg| !seg.is_empty() && *seg != "." && *seg != "..")
         .fold(output_dir.path().to_path_buf(), |p, seg| p.join(seg));
     let sub_dir_loc = output_dir.with_path(sub_dir_path.clone());
 

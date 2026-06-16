@@ -254,3 +254,35 @@ fn copy_file_rejects_non_local_dst_scheme() {
         .unwrap_err();
     assert_eq!(err.kind(), io::ErrorKind::InvalidInput);
 }
+
+// read_to_string 8 MiB 上限：与 RemoteBackend 同口径防 OOM——不受信媒体目录
+// （USB/SD/网盘挂载）下的恶意 `.xmp` 不能让 fs::read_to_string 把整文件入堆。
+#[test]
+fn read_to_string_rejects_file_above_size_cap() {
+    use std::io::Write;
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("huge.xmp");
+    let mut f = fs::File::create(&path).unwrap();
+    // 写 8 MiB + 1 字节让 metadata().len() 超 MAX_TEXT_BYTES。
+    let chunk = vec![b'a'; 1 << 20];
+    for _ in 0..8 {
+        f.write_all(&chunk).unwrap();
+    }
+    f.write_all(b"x").unwrap();
+    drop(f);
+    let err = LocalBackend::new()
+        .read_to_string(&local(&path))
+        .unwrap_err();
+    assert_eq!(err.kind(), io::ErrorKind::InvalidData);
+    assert!(err.to_string().contains("too large"), "got: {err}");
+}
+
+// 边界值：size 在上限内通过（杀 `>` → `>=` 变异，size==cap 必须放行）。
+#[test]
+fn read_to_string_accepts_size_below_cap() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("small.xmp");
+    fs::write(&path, b"<?xml version='1.0'?>").unwrap();
+    let s = LocalBackend::new().read_to_string(&local(&path)).unwrap();
+    assert!(s.starts_with("<?xml"));
+}

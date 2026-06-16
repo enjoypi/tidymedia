@@ -74,6 +74,25 @@ fn tidy_rejects_copy_with_invalid_archive_template() {
     assert!(msg.contains("invalid --archive-template"), "got: {msg}");
 }
 
+// archive_template 仅含 {valuable_name}（无 always-non-empty 占位符）→
+// validate_archive_template 拒绝；让 lib_tidy 集成 binary 也触发该 BR
+// 避免 multi-binary instance 0-hit region miss。
+#[test]
+fn tidy_rejects_copy_with_template_lacking_safe_placeholder() {
+    let out = tempdir().unwrap();
+    let err = tidy(Commands::Copy {
+        dry_run: true,
+        include_non_media: false,
+        sources: vec![local(DATA_DIR)],
+        output: local(out.path().to_str().unwrap()),
+        archive_template: Some("{valuable_name}".to_string()),
+        report: None,
+    })
+    .unwrap_err();
+    let msg = format!("{err}");
+    assert!(msg.contains("invalid --archive-template"), "got: {msg}");
+}
+
 // Move + 非法 archive_template → dispatch 返 Err（Move 分支 validate_template_arg `?`）。
 #[test]
 fn tidy_rejects_move_with_invalid_archive_template() {

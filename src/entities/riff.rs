@@ -107,12 +107,19 @@ fn find_strd_in(buf: &[u8], depth: u8) -> Option<&[u8]> {
         let size = u32::from_le_bytes([size_bytes[0], size_bytes[1], size_bytes[2], size_bytes[3]])
             as usize;
         let body = off + 8;
-        if fourcc == FOURCC_LIST && size >= 4 && buf.get(body..body + 4)? == FOURCC_STRL {
-            if let Some(hit) = find_strd_in(buf.get(body + 4..body + size)?, depth + 1) {
-                return Some(hit);
-            }
-        } else if fourcc == FOURCC_STRD {
+        // 损坏 chunk（list_type 或 body 切片越界）必须跳过本 chunk 继续扫，而非 `?`
+        // 让整层 find_strd_in 提前 return None —— 同一 hdrl 可能含多 LIST strl，
+        // 某 strl size 字段损坏不该让后续合法 strl 内的 strd 一并丢失。
+        if fourcc == FOURCC_STRD {
             return buf.get(body..body + size);
+        }
+        if fourcc == FOURCC_LIST
+            && size >= 4
+            && buf.get(body..body + 4).is_some_and(|s| s == FOURCC_STRL)
+            && let Some(inner) = buf.get(body + 4..body + size)
+            && let Some(hit) = find_strd_in(inner, depth + 1)
+        {
+            return Some(hit);
         }
         off = body + size + (size & 1);
     }

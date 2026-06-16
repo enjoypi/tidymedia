@@ -76,12 +76,15 @@ impl Location {
         let Some((scheme, rest)) = s.split_once(SEP) else {
             return Ok(Self::Local(Utf8PathBuf::from(s)));
         };
-        match scheme {
+        // RFC 3986 §3.1：scheme 大小写不敏感。规范化为小写后匹配，让 `SMB://`、
+        // `Adb://` 等用户惯用大写写法也能被识别（CLI 用户输入易触发）。
+        let scheme_lower = scheme.to_ascii_lowercase();
+        match scheme_lower.as_str() {
             SCHEME_LOCAL => Ok(Self::Local(Utf8PathBuf::from(decode(rest)?))),
             SCHEME_SMB => Self::parse_smb(rest),
             SCHEME_MTP => Self::parse_mtp(rest),
             SCHEME_ADB => Self::parse_adb(rest),
-            other => Err(ParseError::UnsupportedScheme(other.to_string())),
+            _ => Err(ParseError::UnsupportedScheme(scheme.to_string())),
         }
     }
 

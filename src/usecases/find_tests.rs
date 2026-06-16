@@ -254,6 +254,36 @@ fn find_duplicates_with_output_branch_runs() {
     find_duplicates(false, vec![local_data_dir()], Some(&out_pair)).unwrap();
 }
 
+/// metadata 失败（PermissionDenied / 网络错误等非 NotFound）必须传播原 Err，
+/// 不被吞成"not a directory"——曾用 `is_ok_and` 把 IO 错误一起吞掉致排查方向被误导。
+#[test]
+fn find_duplicates_propagates_non_notfound_metadata_error() {
+    use crate::adapters::backend::fake::FakeBackend;
+
+    let fake = Arc::new(FakeBackend::new("smb"));
+    let remote_dir = Location::Smb {
+        user: None,
+        host: "nas".into(),
+        port: None,
+        share: "photos".into(),
+        path: Utf8PathBuf::from("out"),
+    };
+    fake.add_dir(remote_dir.clone());
+    fake.inject_error(
+        remote_dir.clone(),
+        crate::adapters::backend::fake::Op::Metadata,
+        std::io::ErrorKind::PermissionDenied,
+    );
+    let backend: Arc<dyn Backend> = fake;
+    let out_pair = (remote_dir, backend);
+    let err = find_duplicates(true, vec![local_data_dir()], Some(&out_pair)).unwrap_err();
+    // 关键：错误不应被改写成 "not a directory"
+    assert!(
+        !err.to_string().contains("not a directory"),
+        "PermissionDenied must propagate, got: {err}"
+    );
+}
+
 /// `compute_output_prefix` 的 `other => other.display()` arm：
 /// 远端 `Location` 走 `Display` 而非 `full_path` canonicalize。`FakeBackend` 模拟
 /// SMB 目录让 `is_dir` check 通过、进入 `compute_output_prefix` 后命中 other arm。

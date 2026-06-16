@@ -87,9 +87,31 @@ pub(super) fn do_copy(
         } else {
             // 跨 backend 或 copy（remove=false）走 stream（mkparents=false 同上）。
             stream_copy(src, &target_loc, output_backend.as_ref())?;
+            // dst 已写入：先入索引让后续同 hash 源命中去重，再尝试 remove。
+            // 若 remove 失败仍向上传 Err 计 failed，但 dst 已登记 → 重跑或下批同
+            // hash 源不会再写一份副本（旧实现 ? 直接传 Err 跳过 add 致重复副本）。
+            _ = output_index.add(src.cloned_at(target_loc.clone(), Arc::clone(output_backend)));
             if opts.remove {
-                src.backend().remove_file(&src_loc)?;
+                src.backend().remove_file(&src_loc).map_err(|re| {
+                    std::io::Error::new(
+                        re.kind(),
+                        format!(
+                            "copy: copied {src_display} -> {dst} but cannot remove source: {re}",
+                            dst = target_loc.display(),
+                        ),
+                    )
+                })?;
             }
+            let target_display = target_loc.display();
+            debug!(
+                feature,
+                operation = "copy_file",
+                result = "ok",
+                source = %src_display,
+                target = %target_display,
+                "file transferred"
+            );
+            return Ok(true);
         }
         let target_display = target_loc.display();
         debug!(
@@ -101,10 +123,10 @@ pub(super) fn do_copy(
             "file transferred"
         );
 
-        // dst 内容与 src 字节等同，复用 src 的 hash / size / EXIF 入 output_index，
-        // 避免对刚写完的 dst 重新 stat + 读 4 KiB（远端额外一次 RTT）；同时消除
+        // fast-path rename 成功路径：dst 字节与 src 等同，复用 src 的 hash / size /
+        // EXIF 入 output_index，避免对刚写完的 dst 重新 stat + 读 4 KiB；同时消除
         // 旧实现 Info::open(dst) 在 NFS ESTALE / 防病毒抢占下失败 → dst 已写但未
-        // 入索引 → 后续同 hash 源文件 unique-name 再写一份 → 输出目录重复副本的漏洞。
+        // 入索引 → 后续同 hash 源文件再写一份的漏洞。
         _ = output_index.add(src.cloned_at(target_loc, Arc::clone(output_backend)));
 
         Ok(true)

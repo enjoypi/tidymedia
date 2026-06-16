@@ -31,11 +31,26 @@ pub(crate) fn find_duplicates(
     let mut index = file_index::Index::new();
 
     if let Some((loc, backend)) = output {
-        let is_dir = backend
-            .metadata(loc)
-            .is_ok_and(|m| m.kind == EntryKind::Dir);
-        if !is_dir {
-            let loc_str = loc.display();
+        let loc_str = loc.display();
+        // NotFound 与 Ok(非目录) 对用户语义等同——「output 路径不是可用目录」；其它
+        // ErrorKind（PermissionDenied / 网络 / 远端协议异常）必须传播原 Err，曾用
+        // `is_ok_and` 把它们一起吞成 "not a directory" 致排查方向被误导。
+        let missing_or_non_dir = match backend.metadata(loc) {
+            Ok(m) => m.kind != EntryKind::Dir,
+            Err(ref e) if e.kind() == std::io::ErrorKind::NotFound => true,
+            Err(e) => {
+                error!(
+                    feature = FEATURE_FIND,
+                    operation = "validate_output",
+                    result = "metadata_error",
+                    output = %loc_str,
+                    error = %e,
+                    "cannot access output path"
+                );
+                return Err(common::Error::Io(e));
+            }
+        };
+        if missing_or_non_dir {
             error!(
                 feature = FEATURE_FIND,
                 operation = "validate_output",

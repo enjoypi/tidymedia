@@ -121,7 +121,15 @@ pub fn copy_with_sidecar(
         include_non_media,
     };
     if total_files == 0 {
-        return Ok(finalize(report_sink, flags, scan_stats, 0, 0, 0, Vec::new()));
+        return Ok(finalize(
+            report_sink,
+            flags,
+            scan_stats,
+            0,
+            0,
+            0,
+            Vec::new(),
+        ));
     }
 
     trace!(
@@ -144,7 +152,15 @@ pub fn copy_with_sidecar(
     let (copied, ignored, failed, errors) =
         run_copy_loop(&source, &output_loc, &output_backend, &opts);
 
-    log_operation_summary(feature, total_files, copied, ignored, failed, flags, scan_stats);
+    log_operation_summary(
+        feature,
+        total_files,
+        copied,
+        ignored,
+        failed,
+        flags,
+        scan_stats,
+    );
     Ok(finalize(
         report_sink,
         flags,
@@ -296,7 +312,13 @@ fn run_copy_loop(
     let mut failed = 0usize;
     let mut errors: Vec<ReportError> = Vec::new();
 
-    for src in source.files().values() {
+    // HashMap.values() 迭代顺序受哈希种子影响；move 模式下两份同 hash 源文件，
+    // 哪份留下哪份删随版本/进程变化致结果不可重现。按 full_path 排序后迭代保证
+    // 同输入同输出，便于审计回放和测试断言。
+    let mut entries: Vec<_> = source.files().values().collect();
+    entries.sort_by(|a, b| a.full_path.cmp(&b.full_path));
+
+    for src in entries {
         match do_copy(src, output_loc, output_backend, &mut output_index, opts) {
             Ok(true) => {
                 copied += 1;

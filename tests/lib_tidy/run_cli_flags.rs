@@ -256,6 +256,31 @@ fn binary_emits_debug_log_to_stderr_when_log_level_debug() {
     );
 }
 
+/// binary 启动时 config.yaml 含越界 `timezone_offset_hours` → sanitize 必须回退
+/// 默认 + warn，不让月末文件按错时区归错桶且无告警。本测试通过 subprocess 触发
+/// `frameworks::config::sanitize` 的 timezone 越界分支（`lib_tidy` binary instance
+/// 视角的 multi-binary instrumentation）。
+#[test]
+fn binary_sanitizes_out_of_range_timezone_offset() {
+    let src = tempdir().unwrap();
+    seed_fixture(src.path());
+    let cfg_dir = tempdir().unwrap();
+    let cfg_path = cfg_dir.path().join("config.yaml");
+    std::fs::write(&cfg_path, "copy:\n  timezone_offset_hours: 99\n").expect("write test config");
+    let out = std::process::Command::new(env!("CARGO_BIN_EXE_tidymedia"))
+        .args(["find", src.path().to_str().unwrap()])
+        .env_remove("RUST_LOG")
+        .env("TIDYMEDIA_CONFIG", cfg_path.to_str().unwrap())
+        .output()
+        .expect("spawn tidymedia binary");
+    assert!(
+        out.status.success(),
+        "binary must keep running with sanitized timezone; status: {:?}, stderr: {}",
+        out.status,
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
 /// 不带 `--log-level` 时 binary 从 config.yaml `log.level` 取级别：配置 debug
 /// → "cli parsed" debug 日志必须落 stderr。杀 `install_logging` 中
 /// `unwrap_or_else(config_level)` None 侧接线类变异（默认 info 时该日志不输出）。

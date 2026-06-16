@@ -125,7 +125,19 @@ pub trait Backend: Send + Sync {
     /// 当 scheme 不匹配、源不存在、父目录创建失败或底层操作失败时返回 `Err`。
     fn rename(&self, from: &Location, to: &Location, mkparents: bool) -> io::Result<()> {
         // 跨设备 fallback：先 copy 再 remove；copy 返字节数，统一丢弃。
+        // copy 成功但 remove 失败的半态必须显式标记 "copied … but cannot remove
+        // source"，让上层（`do_copy` / failed 计数）能与 "copy 也失败" 区分；
+        // 否则用户误判后重跑会再次复制并删源致丢源。
         self.copy_file(from, to, mkparents)?;
-        self.remove_file(from)
+        self.remove_file(from).map_err(|re| {
+            io::Error::new(
+                re.kind(),
+                format!(
+                    "rename fallback: copied {src} -> {dst} but cannot remove source: {re}",
+                    src = from.display(),
+                    dst = to.display(),
+                ),
+            )
+        })
     }
 }

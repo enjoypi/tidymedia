@@ -58,32 +58,42 @@ pub(crate) fn parse_xmp_dates(content: &str) -> XmpDates {
 fn find_attr_rfc3339(haystack: &str, key: &str) -> Option<DateTime<FixedOffset>> {
     // XML attribute 边界：key 必须紧跟 whitespace 或 packet/element 起始（'<'），
     // 否则 `dc:description="...xmp:CreateDate='OLD'..."` 这类属性值内子串会
-    // 抢在真实属性前命中。线性扫描多次 find，命中即返；性能足够（XMP packet
-    // 实测 < 4 KB、命中通常在前 1 KB 内）。
+    // 抢在真实属性前命中。线性扫描多次 find，匹配到合法 RFC3339 即返；
+    // 边界通过但 parse 失败（如 description 含字面 `photoshop:DateCreated="text"`
+    // 注释残留）必须 continue 而非 return None，否则真实属性在后面出现将被永久跳过。
     let bytes = haystack.as_bytes();
     let key_bytes = key.as_bytes();
     let mut search_from = 0usize;
     loop {
         let rel = haystack.get(search_from..)?.find(key)?;
         let key_idx = search_from + rel;
-        let prev = if key_idx == 0 { b' ' } else { bytes[key_idx - 1] };
+        // 推进 cursor 前置：所有 continue 路径共享同一更新无遗漏死循环。
+        // find 已确保 key_idx + key_bytes.len() ≤ haystack.len()，切片不越界。
+        search_from = key_idx + key_bytes.len();
+        let prev = if key_idx == 0 {
+            b' '
+        } else {
+            bytes[key_idx - 1]
+        };
         // 边界字符 = ASCII 单字节即可：whitespace（space/tab/LF/CR）或 '<' 起始
         // attribute（针对 element 形态 <ns:Key>... 不命中，YAGNI 保持单段属性）。
-        let is_boundary = prev == b' '
-            || prev == b'\t'
-            || prev == b'\n'
-            || prev == b'\r'
-            || prev == b'<';
-        if is_boundary {
-            let after_eq = haystack.get(key_idx + key_bytes.len()..)?;
-            let quote = after_eq.chars().next()?;
-            if quote == '"' || quote == '\'' {
-                let rest = &after_eq[quote.len_utf8()..];
-                let end = rest.find(quote)?;
-                return DateTime::parse_from_rfc3339(&rest[..end]).ok();
-            }
+        if !matches!(prev, b' ' | b'\t' | b'\n' | b'\r' | b'<') {
+            continue;
         }
-        search_from = key_idx + key_bytes.len();
+        let after_eq = &haystack[search_from..];
+        let Some(quote) = after_eq.chars().next() else {
+            continue;
+        };
+        if quote != '"' && quote != '\'' {
+            continue;
+        }
+        let rest = &after_eq[quote.len_utf8()..];
+        let Some(end) = rest.find(quote) else {
+            continue;
+        };
+        if let Ok(dt) = DateTime::parse_from_rfc3339(&rest[..end]) {
+            return Some(dt);
+        }
     }
 }
 
