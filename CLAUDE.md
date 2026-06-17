@@ -10,6 +10,11 @@
 - **所有 cargo 命令 MUST 带 `--release`**：`profile.release` 已设 `opt-level = 0`，编译速度与 debug 相当，统一 target 目录避免双份产物
 - **ONNX 推理 e2e 真跑必切 opt=3**：`profile.release opt-level=0` 让 SCRFD/MobileFaceNet/FaceMesh/EyeState 推理慢到 e2e 不可行（实测 3×256×256 PNG 跑 4 模型 8+ min 未完成）；真跑前临时 `CARGO_PROFILE_RELEASE_OPT_LEVEL=3 cargo run --release -- cull ...`；日常 lib unit + 集成测试用 Fake 注入完整覆盖业务路径
 - 构建/运行/dry-run：`cargo {build,run} --release [-- copy /src -o /out [--dry-run]]`
+- **典型归档工作流**（4 步串联，详节见各章）：
+  - ① `cargo run --release -- copy /src -o /out --dry-run --report /tmp/r.json`（生成 dry-run 报告）
+  - ② `/tidy-verify /src /out`（dry-run 比对 + exiftool 对账 + 桶 MISMATCH 排查；见「核心算法」§EXIF vs 归档桶对账）
+  - ③ `cargo run --release -- copy /src -o /out`（真跑；改 `move` 子命令做原地搬迁，源会被删）
+  - ④ `cargo run --release -- find /out`（兜底查重，输出 Python 脚本由人工 review 后执行）
 - 测试 `cargo nextest run --release`；覆盖率 `cargo llvm-cov --release nextest --summary-only`（严格 100% 口径见「测试与覆盖率」）
 - lint `cargo +nightly fmt && cargo clippy --release --all-targets --all-features --locked -- -D warnings`；**`--all-features` 仅 Linux 可验**（smb-backend 需 libsmbclient）
 - **CLI flag 位置**：`--log-level=debug` 是全局 flag 放最前；`--dry-run` 是子命令级 MUST 放 `copy`/`move` 后
@@ -46,7 +51,12 @@
 - **AVI（RIFF）nom-exif 不支持**：老相机（Fujifilm FinePix 等）拍摄时间在 `LIST hdrl > LIST strl > strd` chunk（`AVIF` 魔数 + 裸 TIFF IFD，offset 基准 = strd+8），`entities/riff.rs` 自解析填 `Exif` 的 DTO/CreateDate/ModifyDate/make/model；`entities/exif/types.rs::from_reader` 按 `video/x-msvideo` 先于泛 video 分流。**IFD 字节解析抽 `entities/tiff_ifd.rs` 公共模块**（支持 II/MM byte order + IFD0 + ExifIFD 子 IFD），与 PNG eXIf chunk / JPEG APP1 fallback 共享。**双入口**：`parse_tiff(payload)` 接完整 TIFF header（II/MM + magic + IFD0 offset，PNG/JPEG 路径），`parse_ifds(base, ifd0_off, order)` 接裸 IFD（无 header，RIFF strd 路径，offset 不含 header 偏移）
 - **`tiff_ifd::scan_ifd` 是 lenient**：中段 entry 越界用 `break` 而非 `?`，已写入 `out` 的前 K 条字段保留；调用方 `parse_ifds` 整体返 `Some(部分填充)`。截断 fixture（PNG eXIf chunk 声称 N entries 但 buffer 只够 K 条）测试预期 `Some(...)` + 部分字段非空，**不**断言 `None`；只有 `count` u16 本身读不到才返 `None`
 - **PNG `eXIf` chunk nom-exif 不解析**：PNG 1.5+ 自定义 chunk `eXIf` = 完整 TIFF/EXIF header（II/MM + 0x002A magic + IFD0 + ExifIFD），Lightroom/相机直出 PNG 常含。`entities/png.rs` 自解析（chunk header BE u32 长度 + 4 字节 type，不验证 CRC YAGNI），`entities/exif/image_png.rs::populate_png_dates` 调 `tiff_ifd::parse_tiff` 抽 DTO/CreateDate/ModifyDate/Make/Model；`types.rs::from_reader` 按 `image/png` 先于泛 `image/` 分流。eXIf 缺失或 TIFF 损坏退回 XMP fallback（Lightroom 常并行写 PNG eXIf + XMP）；fixture `tests/data/sample-png-exif.png`（`tests/fixtures/gen_png_exif.py` 生成）
-- **JPEG nom-exif `parse_exif` 整体失败 fallback**：Canon EOS 7D 等 MakerNotes 偏移异常机型（exiftool 报 `Adjusted MakerNotes base by -126`）让 nom-exif 抛 Err 致 DTO/CreateDate/Make/Model 全丢。`entities/exif/image_jpeg.rs::parse_jpeg_app1_exif` 扫 JPEG APP1 段（`FF E1` marker + BE u16 长度 + `Exif\0\0` magic + 完整 TIFF header）调 `tiff_ifd::parse_tiff` 抽核心字段；`populate_image_dates` 的 nom-exif Err 分支前置 fallback，三态闭合（fallback 成功 → 直填 / fallback Err → 退 XMP fallback / 主路径 Ok 但双 0 → XMP fallback）。fixture `tests/data/sample-jpeg-app1-broken.jpg`（合成，模拟 ExifIFD 越界 count；累积真实 7D 样本后替换）。**fallback fixture 合成套路**：`ExifIFDPointer` → 子 IFD 声称 `count=10000` 但实际只放 1 entry → nom-exif 扫越界整体拒绝，fallback 看 IFD0（Make/Model）+ 子 IFD 第一 entry（DTO）仍能读出。集成测试 MUST 配「nom-exif 主路径真失败」反向断言（`parse_exif` Err 或返空），防 fixture 失效后 fallback 路径无意识地绕过
+- **JPEG nom-exif `parse_exif` 整体失败 fallback**：Canon EOS 7D 等 MakerNotes 偏移异常机型（exiftool 报 `Adjusted MakerNotes base by -126`）让 nom-exif 抛 Err 致 DTO/CreateDate/Make/Model 全丢
+  - 实现：`entities/exif/image_jpeg.rs::parse_jpeg_app1_exif` 扫 JPEG APP1 段（`FF E1` marker + BE u16 长度 + `Exif\0\0` magic + 完整 TIFF header）调 `tiff_ifd::parse_tiff` 抽核心字段
+  - 三态闭合：`populate_image_dates` 的 nom-exif Err 分支前置 fallback——fallback 成功 → 直填 / fallback Err → 退 XMP fallback / 主路径 Ok 但双 0 → XMP fallback
+  - fixture `tests/data/sample-jpeg-app1-broken.jpg`（合成，模拟 ExifIFD 越界 count；累积真实 7D 样本后替换）
+  - **fallback fixture 合成套路**：`ExifIFDPointer` → 子 IFD 声称 `count=10000` 但实际只放 1 entry → nom-exif 扫越界整体拒绝，fallback 看 IFD0（Make/Model）+ 子 IFD 第一 entry（DTO）仍能读出
+  - 集成测试 MUST 配「nom-exif 主路径真失败」反向断言（`parse_exif` Err 或返空），防 fixture 失效后 fallback 路径无意识地绕过
 - **M2TS/AVCHD nom-exif 不支持**：Canon 摄像机时间在 H.264 SEI `user_data_unregistered`（MDPM UUID），`entities/m2ts.rs` 按 AVCHD video PID `0x1011` 重组 192B BDAV payload 直搜 UUID（不解析 PMT/NAL，YAGNI），EP 字节 `00 00 03` 按 RBSP 剥离。tag `0x18`=[时区,世纪,年,月] BCD、`0x19`=[日,时,分,秒] BCD；时区字节忽略走 naive+配置时区；仅填 DTO（单一拍摄时刻不伪造 P1）；fixture `tests/data/sample-canon-avchd.m2ts`
 - **H.264 RBSP emulation-prevention strip 是无条件的**：`m2ts.rs::strip_emulation_prevention` 在 `00 00` 后 strip ANY `0x03` 是 H.264 spec 要求（编码器保证 RBSP 不含 `00 00 0[0-3]`，所以任何 `00 00 03` 必是 EP 字节，无需判 next byte）。code-review 易误判为"应判 next byte"，实际是规范行为
 - **JPEG/HEIC/TIFF XMP fallback**：Lightroom/Bridge/ACR re-tag 后 EXIF IFD0 可能仅剩 `ModifyDate`，原始时间在 XMP `photoshop:DateCreated`（→ DTO/P0）与 `xmp:CreateDate`（→ CreateDate/P1）。`populate_image_dates` 双 0 时扫已 buffer 头 64 KB（`XMP_SCAN_BYTES`），`entities/xmp.rs` 抽 attribute 形式（element/ExtendedXMP YAGNI），`adapters/sidecar.rs::parse_xmp_date` 复用同实现；fixture 用 `-api Compact="Shorthand,NoPadding"` 才出 attribute 形式
@@ -55,9 +65,25 @@
 
 ## 测试与覆盖率（项目特有；通用套路见 rust-p1 §5）
 - **覆盖率门槛 region/function/line/branch 四项 MUST 全 100%**（Linux + `--all-features` + ignore-regex 严格口径 + `--branch`）。**Windows 默认 feature 口径可能有平台差异 miss**（`uri.rs`/`sidecar.rs`/`filename.rs`/`resolve.rs`，多为 feature-gated + multi-binary instance）：Windows 本机判定 = 新增代码 100% + TOTAL miss 与 main 持平；怀疑回归先 `git stash` 对照
-- 严格 100%：`RUSTFLAGS="--cfg=coverage_nightly" cargo +nightly llvm-cov --release nextest --summary-only --branch --ignore-filename-regex='(_real\.rs|adapters/(ocr|face)/tract_[a-z]+\.rs)$' --all-features`；`lib.rs` / `bin/tidymedia.rs` 顶 `#![cfg_attr(coverage_nightly, feature(coverage_attribute))]`；`Cargo.toml [lints.rust] unexpected_cfgs` 注册 `cfg(coverage_nightly)`。ignore-regex 两类 subprocess multi-instance phantom：①`adapters/ocr/tract_dbnet.rs`（OCR 适配器，subprocess `tidymedia` bin 链接但不调 OCR）②`adapters/face/tract_{eyestate,facemesh,mobilefacenet,scrfd}.rs`（4 face detector tract impl，同 OCR phantom + `&&` 短路 4 sub-branch 1 unreachable）。**`usecases/cull/run.rs` 不再 ignore**——曾因 `pick_best` 内分数比较 subprocess phantom miss 整文件排除，已通过对私有 helper（`crop_face_bbox`/`crop_eye_around`/`u32_from_f32_clamped`）写微测试 + `inject_reader_error` 触发 `read_to_end` Err 路径 + `landmarks_5pt = [[1.0; 2]; 5]` 触发 `align_face` 矩阵奇异 + `facenet.with_error` 触发 `embed_face` Err 命中两 let-else continue，剔除后 region/function/line/branch 仍 100%。**判定原则**：summary 因 LLVM 多 instance 累加可能虚报 region/line miss，真值以 lcov `DA`/`BRDA` 无 `,0$` 为准（参考本节「multi-binary instance 陷阱」）
+- 严格 100% 命令：
+  - `RUSTFLAGS="--cfg=coverage_nightly" cargo +nightly llvm-cov --release nextest --summary-only --branch --ignore-filename-regex='(_real\.rs|adapters/(ocr|face)/tract_[a-z]+\.rs)$' --all-features`
+  - `lib.rs` / `bin/tidymedia.rs` 顶 `#![cfg_attr(coverage_nightly, feature(coverage_attribute))]`；`Cargo.toml [lints.rust] unexpected_cfgs` 注册 `cfg(coverage_nightly)`
+- ignore-regex 两类 subprocess multi-instance phantom：
+  - ① `adapters/ocr/tract_dbnet.rs`（OCR 适配器，subprocess `tidymedia` bin 链接但不调 OCR）
+  - ② `adapters/face/tract_{eyestate,facemesh,mobilefacenet,scrfd}.rs`（4 face detector tract impl，同 OCR phantom + `&&` 短路 4 sub-branch 1 unreachable）
+- **`usecases/cull/run.rs` 不再 ignore**：曾因 `pick_best` 内分数比较 subprocess phantom miss 整文件排除；剔除靠四类微测试：
+  - 私有 helper（`crop_face_bbox` / `crop_eye_around` / `u32_from_f32_clamped`）直测
+  - `inject_reader_error` 触发 `read_to_end` Err 路径
+  - `landmarks_5pt = [[1.0; 2]; 5]` 触发 `align_face` 矩阵奇异
+  - `facenet.with_error` 触发 `embed_face` Err 命中两 let-else continue
+  - 剔除后 region/function/line/branch 仍 100%
+- **判定原则**：summary 因 LLVM 多 instance 累加可能虚报 region/line miss，真值以 lcov `DA`/`BRDA` 无 `,0$` 为准（参考本节「multi-binary instance 陷阱」）
 - **`*_real.rs` 走 `--ignore-filename-regex` 而非 `coverage(off)`**：真实 client 适配器调真实 SMB/adb-server CI 不可触发，但 `coverage(off)` 注解侵入源码且 mutation testing 会扫到；命令行 `--ignore-filename-regex='_real\.rs$'` 排除整文件，源码零 attribute。`factory.rs` 的 cfg-gated 真实装配（`build_smb_backend` 等）抽到 `adapters/backend/factory_real.rs` 符合命名约定，由同 regex 排除；Unsupported feature-off 分支保留在 `factory.rs` 由 `tidy_rejects_*` e2e 100% 覆盖
-- **`--branch` multi-binary instance 陷阱**：lib unit test binary + `tests/lib_tidy.rs` 集成 binary **共享同一 lib rlib codegen**（crate hash 同，如 `Cs7NY9BuJphfg`），lcov 在该 instance 累加两 binary 的 counter——lib unit 已覆盖的 region 自动让 lib_tidy 也算 covered（**不需 lib_tidy 重复触发**）。真正独立 codegen 的是 `tidymedia` bin（subprocess 通过 `CARGO_BIN_EXE_tidymedia` 启动，cli_smoke / run_cli_flags 入口），它有独立 crate hash（如 `Cs1cCdkLBzXDt`）；subprocess 跑的是 spawn 真实 binary，**无法调 lib internal helpers**——`__<name>` re-export 套路对 subprocess instance 无效。subprocess 跑 find/help/version 时不可达的业务路径（如 `do_copy` 内 stream + remove fail）必须 `coverage(off)` 整 fn 豁免，并把不可达片段抽成 `*_helper` fn 独立 `coverage(off)`（参考 `usecases/copy/ops.rs::remove_src_after_stream_copy`）。其他 instance 计数细节套路：①重构成 `?`（算 region 不算 branch）；②显式 `match` 替 `.map_or_else(closure, closure)` 让 LLVM 跨 instance 合并 region；③用 cargo-llvm-cov JSON 报告（`--json`）查 `instance hash + FN/region count` 定位真实不可达 instance，**不要靠 lcov BRDA**（lcov 是累加后输出，instance 级 miss 不显示）
+- **`--branch` multi-binary instance 陷阱**：
+  - lib unit test binary + `tests/lib_tidy.rs` 集成 binary **共享同一 lib rlib codegen**（crate hash 同，如 `Cs7NY9BuJphfg`），lcov 在该 instance 累加两 binary 的 counter——lib unit 已覆盖的 region 自动让 lib_tidy 也算 covered（**不需 lib_tidy 重复触发**）
+  - 真正独立 codegen 的是 `tidymedia` bin（subprocess 通过 `CARGO_BIN_EXE_tidymedia` 启动，cli_smoke / run_cli_flags 入口），独立 crate hash（如 `Cs1cCdkLBzXDt`）；subprocess 跑 spawn 真实 binary，**无法调 lib internal helpers**——`__<name>` re-export 套路对 subprocess instance 无效
+  - subprocess 跑 find/help/version 时不可达的业务路径（如 `do_copy` 内 stream + remove fail）必须 `coverage(off)` 整 fn 豁免，并把不可达片段抽成 `*_helper` fn 独立 `coverage(off)`（参考 `usecases/copy/ops.rs::remove_src_after_stream_copy`）
+  - 其他 instance 计数细节套路：① 重构成 `?`（算 region 不算 branch）；② 显式 `match` 替 `.map_or_else(closure, closure)` 让 LLVM 跨 instance 合并 region；③ 用 cargo-llvm-cov JSON 报告（`--json`）查 `instance hash + FN/region count` 定位真实不可达 instance，**不要靠 lcov BRDA**（lcov 是累加后输出，instance 级 miss 不显示）
 - **`nm` 反查 instance hash 归属**：lcov 显示某 `Cs<hash>` instance 0-hit 时，`nm target/llvm-cov-target/release/deps/<binary> 2>/dev/null | rg Cs<hash>` 反查该 hash 属于哪个 binary。规律：所有 `*_test`/集成 binary 共享同一 lib rlib codegen hash；`tidymedia-<long>`（无 `.d`、19MB 大体积）是 subprocess 用真 bin，独立 hash
 - **tracing macro micro-region 在 release 不订阅 debug 级别时 0-hit**：`debug!`/`warn!` 宏展开生成 closure-form micro-region，release default subscriber 不订阅 debug → closure 不执行；lib unit 测试无 subscriber，subprocess instance 也无 → 这些 micro-region 在 multi-instance 累加下仍 0-hit。含多个 `debug!`/`warn!` 的业务 fn 整体 `coverage(off)` 是合理 workaround，配套抽业务级 helper 用独立 `coverage(off)` 让 wrap/边缘逻辑独立可读（参考 `usecases/copy/ops.rs::do_copy` + `remove_src_after_stream_copy`）
 - 改 `Cargo.toml` / `coverage` 属性后必 `cargo +nightly llvm-cov clean --workspace`
@@ -81,7 +107,20 @@
 - **同 `&&` 表达式在两业务调用点 → 抽 helper 收敛 BR**：相同 `if dto==0 && create_date==0` 出现在主路径 + APP1 fallback 两处 → LLVM 在两 callsite 各生成 5 个 sub-branch BR，需独立测试输入覆盖所有；抽 `fn populate_image_xmp_fallback_if_empty(...)` 让两处共用单点 BR，主路径既有 fixture（`sample-no-dates` / `sample-only-createdate` / `sample-with-exif`）即覆盖 fallback 同一 helper（参考 `entities/exif/image.rs`）。同样适用 `if protect` 嵌套 `&&` short-circuit chain → 重写成 `let (protect, is_survivor) = match { .. }` 让分支决策落 match arm（参考 `usecases/find.rs::render_script`）
 - **`Cursor` seek 永不失败**：测 seek Err 传播需手写 FailSeek reader（包 Cursor、seek 恒 Err，blanket impl 自动满足 `MediaReader`）。**MUST `#[derive(Debug)]`**——`MediaReader` blanket impl `Read + Seek + Send + Debug + ?Sized`，缺 Debug 让 `Box<dyn MediaReader>` cast 编译失败
 - **code-review fix 流程**：build 干净 + clippy 干净 + nextest 通过 ≠ 完工，MUST 再跑严格 100% 命令（见本节首条）确认四项 100%。新加的 `?` Err arm / `&&` 短路新增 sub-branch / defensive 兜底 arm 都易出 region miss，靠后续单测（喂边界值如 `u64::MAX` / `i64::MAX` 触发 `try_from` Err arm）或抽 helper 收敛
-- **mutation testing**：配置在 `.cargo/mutants.toml`（nextest + release + `--all-features`，排除 `*_real.rs`/测试基建；豁免在 `exclude_re` 注明 WHY）。**Windows 本机跑不了 `--all-features`**（smb 仅 Linux）：增量验证临时注释 `additional_cargo_args` 按默认 features 跑，feature-gated mutants 留 Linux。日常 `cargo mutants --in-diff <(git diff main)`；全量审计 ~677 mutants/~3h（2026-06 基线 509 caught / 168 unviable / 0 missed）；定点 `cargo mutants -F '<regex>'`（`-E` 是 exclude）。套路：①计数断言精确 `==`（`>= 1` 杀不掉 `+=`→`-=` usize release wrap MAX）；②与被调函数重复的入参 guard 等价变异，删冗余 guard 单点校验；③`cfg(windows)`/`cfg(not(feature))` 代码单口径必假幸存 → exclude_re；④tracing 字段值抽纯 fn 直测不靠捕日志；⑤防御性不可达 arm 喂错配变体直测；⑥写 kill 测试前确认变异行可达（如 `create_time` 无 EXIF let-else 早返回到不了被变异行）；⑦纯移动重构的 `--in-diff` 是假增量，可缩小到真改逻辑文件；⑧无返回值 tracing 副作用 fn `replace X with ()` 等价幸存 → exclude_re；⑨**算术常量 `*` → `+` 等价变异用中间边界值杀**：`1024 * 1024` 变 `1024 + 1024 = 2048` 时测试输入 < 2048 触发两侧同行为不可区分；用 `(2048, 1048576)` 区间值（如 5000）测——原代码触发回退，变异不触发，可区分
+- **mutation testing**：
+  - 配置在 `.cargo/mutants.toml`（nextest + release + `--all-features`，排除 `*_real.rs`/测试基建；豁免在 `exclude_re` 注明 WHY）
+  - **Windows 本机跑不了 `--all-features`**（smb 仅 Linux）：增量验证临时注释 `additional_cargo_args` 按默认 features 跑，feature-gated mutants 留 Linux
+  - 日常 `cargo mutants --in-diff <(git diff main)`；全量审计 ~677 mutants/~3h（2026-06 基线 509 caught / 168 unviable / 0 missed）；定点 `cargo mutants -F '<regex>'`（`-E` 是 exclude）
+  - 套路：
+    - ① 计数断言精确 `==`（`>= 1` 杀不掉 `+=`→`-=` usize release wrap MAX）
+    - ② 与被调函数重复的入参 guard 等价变异，删冗余 guard 单点校验
+    - ③ `cfg(windows)`/`cfg(not(feature))` 代码单口径必假幸存 → exclude_re
+    - ④ tracing 字段值抽纯 fn 直测不靠捕日志
+    - ⑤ 防御性不可达 arm 喂错配变体直测
+    - ⑥ 写 kill 测试前确认变异行可达（如 `create_time` 无 EXIF let-else 早返回到不了被变异行）
+    - ⑦ 纯移动重构的 `--in-diff` 是假增量，可缩小到真改逻辑文件
+    - ⑧ 无返回值 tracing 副作用 fn `replace X with ()` 等价幸存 → exclude_re
+    - ⑨ **算术常量 `*` → `+` 等价变异用中间边界值杀**：`1024 * 1024` 变 `1024 + 1024 = 2048` 时测试输入 < 2048 触发两侧同行为不可区分；用 `(2048, 1048576)` 区间值（如 5000）测——原代码触发回退，变异不触发，可区分
 - **`FakeBackend.copy_file` inject 陷阱**：`check_error` 按 **src loc** 匹配，inject `Op::CopyFile` Err MUST 用 src loc 不是 dst；且 `copy_file` 是 in-memory state 操作不支持跨 fake instance（按 self.state 找 src bytes），cull/group_writer 的 `output_backend.copy_file(src,dst)` 跨 scheme 测试只能①同一 fake + scheme!="local" 走 cross-scheme 分支②或走 stream_copy（参考 `move_text_shot` 的 `TwoSchemeFactory`）
 - **`unique_name_*` 耗尽测试用 FakeBackend.add_file 填满 N+1 候选**（base + `_1..=_N`）替手写 `AlwaysExists` trait wrapper：wrapper 要 impl 10+ Backend 方法、每个代理 fn 成新 0-hit region（仅 `exists` 被调）；`add_file` 套路无样板代码（参考 `cull/group_writer.rs::unique_name_in_dir_errors_when_exhausted`）
 - **`config.yaml` 默认值改 → `OnceLock` 一次性加载，依赖默认值的集成测试 MUST 切独立 yaml**：`tests/lib_tidy/cull.rs::write_temp_config` 写临时 yaml + `set_var("TIDYMEDIA_CONFIG", ...)` 让 `frameworks::config::config()` 加载指定路径；空字段（如 `scrfd_model_path=""`）触发 `InvalidInput` 测试同套路——不能再依赖「不切 config 就拿空字符串」
@@ -199,6 +238,18 @@
 - **R1 外置**：`copy.{timezone_offset_hours, unique_name_max_attempts, archive_template}` / `exif.valid_date_time_secs` / `backend.smb.{default_user,workgroup}` / `backend.adb.{server_host,server_port}` / `log.level`（CLI `--log-level` 缺省值，优先级 `RUST_LOG` > flag > 配置）。**无消费点的字段勿先加占位**
 - **不外置的合理例外**：算法常量（`EPOCH_1904` / `SOFT_THRESHOLD_1995` / `FUTURE_TOLERANCE_SECS` / `MTIME_VS_P0_HINT_SECS`）/ 协议字面量（`IMG_` / `DSC_` / `Screenshot_` / `XMP_KEY`）/ 日志维度名 / lookup 表（`MONTH`）/ 流式哈希（`FAST_READ_SIZE`、`STREAM_CHUNK = 1 MiB`、`MIME_SNIFF_BYTES = 256`）
 - `src/usecases/copy/ops.rs` 的 `println!("\"{}\"\t\"{}\"", src, dst)` 是 CLI 脚本可读输出，**不是** R3 日志路径，不要改成 tracing
+- **环境变量速查**（章节散见，集中索引）：
+
+  | 变量 | 用途 | 默认/兜底 | 说明位置 |
+  |---|---|---|---|
+  | `TIDYMEDIA_CONFIG` | 指定 config.yaml 路径 | `./config.yaml` | 本节首条 |
+  | `RUST_LOG` | 日志级别（优先级最高） | 由 `log.level` 兜底 | 本节 R1 外置条 |
+  | `CARGO_PROFILE_RELEASE_OPT_LEVEL` | e2e 真跑切 opt=3 | `0`（仓库 profile） | Quick Start §ONNX |
+  | `TIDYMEDIA_OCR_DET_MODEL` | OCR DBNet onnx 路径 | `backend.ocr.det_model_path` | 系统依赖 §move-text-shot |
+  | `TIDYMEDIA_FACE_*` | face 4 模型路径 + 阈值 | `backend.face.*` | 同步检查点 §FaceConfig |
+  | `SMB_USER` / `SMB_PASSWORD` | SMB 凭据 | `backend.smb.default_user` / 无 | 凭据节 |
+  | `KRB5CCNAME` | SMB Kerberos cache | 系统默认 | 凭据节 |
+  | `ANDROID_HOME` / `ANDROID_NDK_HOME` | Android 交叉编译 | 无 | Android 节 |
 
 ## Android / 移动端（feature `android-app`）
 - uniffi 0.31 proc-macro 模式：lib.rs 顶层 `uniffi::setup_scaffolding!()` + `#[uniffi::export]` / `#[derive(uniffi::Record)]` / `#[derive(uniffi::Error)]`；不需要 build.rs / .udl
@@ -235,10 +286,22 @@
 - **`use rayon::prelude::*` 违反 P0 §5**：最小 import = `use rayon::iter::{IntoParallelRefIterator, IntoParallelRefMutIterator, ParallelIterator}`（`par_iter_mut` 需 RefMut，少了编译失败）
 - **同盘 move fast-path**：`do_copy` 在 `opts.remove && src.scheme()=="local" && output.scheme()=="local"` 时走 `Backend::rename`（`LocalBackend::rename` 内 `fs::rename` 同卷原子 + `CrossesDevices` fallback 到 `fs::copy + remove`）。**MUST NOT** 在 Rust 层用 `metadata().dev()` / `GetVolumeInformationByHandleW` 重复判同卷——OS 内核是 same-volume 唯一权威源
 - **大文件 OOM fixture 用 random-noise PNG**：测 `max_image_bytes` 等 size 阈值分支需要真实大文件而非 `FakeBackend` 虚 size（API 不支持）；1500×1500 RGB random fill（如 `(i.wrapping_mul(37) ^ (i >> 3)) & 0xff`）经 PNG 编码后 > 1 MiB（噪声不可压缩），配合切独立 yaml `max_image_bytes: 1048576`（正好 1 MiB 不被 `sanitize_face` 拒绝）触发超限分支；纯色 PNG 压缩太小（< 1 KiB）无效
-- **dry-run log / 路径聚合用 Python**（heredoc 或 `uv run xxx.py`）：tidy-verify Step 3/4 已从 awk 迁到 `.claude/scripts/tidy-verify/*.py`（避 awk `\` regex 在 bash 单引号下二次解析致 `unterminated regexp`）；临时一次性分析用 `cat > /tmp/tm/x.py <<'PYEOF' ... PYEOF` + `cd /tmp/tm && uv run x.py`。**项目根外独立脚本（如 `tests/fixtures/gen_*.py` fixture 生成）** MUST `uv run --quiet --no-project <script>` 否则 uv 在项目根检测 pyproject.toml 致行为不一致。**Windows 输出陷阱**：Python stdout 默认 CRLF 与下游 grep/diff LF 不一致 MUST `sys.stdout.reconfigure(newline='\n')`；终端 stdout 默认 GBK 把 UTF-8 中文显示成 `��` → 含中文/路径的报告 MUST 写 UTF-8 文件再读；Write 工具落盘含 `'\\'` 的 Python 字符串字面量会吞反斜杠（用 `SEP = chr(92)` 或 heredoc 绕开）；Python `re` alternation 是 leftmost-first 不是 POSIX leftmost-longest，迁 awk regex MUST 把长 token 放前（`(1[012]|0?[1-9])` 而非 `(0?[1-9]|1[012])`）
+- **dry-run log / 路径聚合用 Python**（heredoc 或 `uv run xxx.py`）：
+  - tidy-verify Step 3/4 已从 awk 迁到 `.claude/scripts/tidy-verify/*.py`（避 awk `\` regex 在 bash 单引号下二次解析致 `unterminated regexp`）
+  - 临时一次性分析用 `cat > /tmp/tm/x.py <<'PYEOF' ... PYEOF` + `cd /tmp/tm && uv run x.py`
+  - **项目根外独立脚本（如 `tests/fixtures/gen_*.py` fixture 生成）** MUST `uv run --quiet --no-project <script>` 否则 uv 在项目根检测 pyproject.toml 致行为不一致
+  - **Windows 输出陷阱**：
+    - Python stdout 默认 CRLF 与下游 grep/diff LF 不一致 MUST `sys.stdout.reconfigure(newline='\n')`
+    - 终端 stdout 默认 GBK 把 UTF-8 中文显示成 `��` → 含中文/路径的报告 MUST 写 UTF-8 文件再读
+    - Write 工具落盘含 `'\\'` 的 Python 字符串字面量会吞反斜杠（用 `SEP = chr(92)` 或 heredoc 绕开）
+    - Python `re` alternation 是 leftmost-first 不是 POSIX leftmost-longest，迁 awk regex MUST 把长 token 放前（`(1[012]|0?[1-9])` 而非 `(0?[1-9]|1[012])`）
 - **`tracing::*!` message 含 `{name}` 会被当 named placeholder**：`warn!(... "use ${VAR:-default}")` 让 macro 找名为 `VAR` 的变量编译失败；转义 `{{VAR}}` 合规但读怪，最干净改措辞避开 `{` `}`（如 `"use ':-default' suffix"`），字段引用走具名字段（`var = body`）而非 message 内嵌
 - **`MediaWriter::finish` flush MUST `?` 传播不 `.ok()`**：当前 `std::fs::File::flush` 是 noop（std 文档保证），但 BufWriter 包装后 disk-full / cancel 在 finish 阶段才暴露，move 模式 src 随后删即永久丢失。新增 writer impl 同样要求；同款套路适用 `RemoteBufferedWriter::finish` 等 trait 实现
-- **`/code-review` agent 假阳性识别套路**（recall 模式 review agent 会过度报）：①「dead variant」类先 `rg <变体名> tests/ src/` 查测试是否引用 + 评估测试场景文档价值（如 P0 `QuickTimeCreationDate` ↔ P1 `QuickTimeCreateDate` 对称设计占位变体被穷举测试 `modifydate_has_no_source_variant` 引用，不算 dead）；②「fake silent Ok」类语义变更先核对真实后端 POSIX 行为 + 检查现有测试预期（POSIX `unlink` 不存在路径返 ENOENT，fake 应对齐 + 加测试覆盖新 BR）；③「stub map_error」类 feature off 默认透传按未来真实接入价值评估（与 SmbAdapter/AdbAdapter 对齐成本极低即应做）；④全文件审查不分派 `git diff` 时用 7 个 module-group agent 并行（backend / face+ocr / adapters顶层+uri / EXIF+容器 / file_info+media_time / usecases / frameworks+lib+bin），每 agent 返 ≤6 JSON findings，主线程独立 Read 验证后再修
+- **`/code-review` agent 假阳性识别套路**（recall 模式 review agent 会过度报）：
+  - ①「dead variant」类先 `rg <变体名> tests/ src/` 查测试是否引用 + 评估测试场景文档价值（如 P0 `QuickTimeCreationDate` ↔ P1 `QuickTimeCreateDate` 对称设计占位变体被穷举测试 `modifydate_has_no_source_variant` 引用，不算 dead）
+  - ②「fake silent Ok」类语义变更先核对真实后端 POSIX 行为 + 检查现有测试预期（POSIX `unlink` 不存在路径返 ENOENT，fake 应对齐 + 加测试覆盖新 BR）
+  - ③「stub map_error」类 feature off 默认透传按未来真实接入价值评估（与 SmbAdapter/AdbAdapter 对齐成本极低即应做）
+  - ④ 全文件审查不分派 `git diff` 时用 7 个 module-group agent 并行（backend / face+ocr / adapters顶层+uri / EXIF+容器 / file_info+media_time / usecases / frameworks+lib+bin），每 agent 返 ≤6 JSON findings，主线程独立 Read 验证后再修
 - **find 删除脚本统一 Python 输出**：`render_script` 输出 `#!/usr/bin/env python3` shebang + `import os` 头 + `os.remove("...")` 待删 / `# os.remove("...")` 注释保护，按 `DuplicateGroup` size 降序分组。**路径转义**：`s.replace('\\', "\\\\").replace('"', "\\\"")`；含 `\n` 控制字符暂不处理（YAGNI）
 - **tract `outputs[i].cast_to::<f32>()` 返 `Cow<Tensor>` 不能直接 `.as_slice()`**：MUST 三步走 `let cow = ...?; let view = cow.view(); let slice = view.as_slice::<f32>().map_err(io::Error::other)?;`。`view().as_slice::<T>()` 返 `Result<&[T], TractError>`（不是 Option，`.ok_or_else` 编译失败）。`tract_dbnet.rs` 用 `.expect(...)` 掩盖了 API 形态——新接 tract 模型 MUST 用 `map_err` 让 Err 可传播；多输出模型（如 SCRFD 9 tensors）每个 tensor 独立 `view()` 持 binding 防 borrowed value dropped
 - **clippy `field_reassign_with_default` (pedantic) 强制 struct literal**：测试 helper `let mut c = T::default(); c.field = v; c` MUST 改 `T { field: v, ..T::default() }`；仅覆盖部分字段时 `..T::default()` 合法，**全字段显式给值时禁用** `..Default::default()`（撞 `clippy::needless_update`）
