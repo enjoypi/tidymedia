@@ -101,7 +101,9 @@ fn has_text_false_when_sigmoid_below_threshold() {
 #[test]
 fn has_text_propagates_raw_error() {
     let det = TractDbnetDetector::with_raw(cfg(), Box::new(FailRaw));
-    let e = det.has_text(Utf8Path::new("/x.png"), &tiny_png()).unwrap_err();
+    let e = det
+        .has_text(Utf8Path::new("/x.png"), &tiny_png())
+        .unwrap_err();
     assert!(e.to_string().contains("stub raw failed"), "got: {e}");
 }
 

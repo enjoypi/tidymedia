@@ -82,7 +82,7 @@ pub enum Commands {
         report: Option<String>,
     },
 
-    /// Move images whose content contains detectable text (OCR text detection) from sources into the output directory, preserving each file's path relative to its source root. Requires building with `--features ocr-detect` and a configured `PaddleOCR` `DBNet` `det.onnx` model (`backend.ocr.det_model_path` / `TIDYMEDIA_OCR_DET_MODEL`). Non-image files are skipped.
+    /// Move images whose content contains detectable text (OCR text detection) from sources into the output directory, preserving each file's path relative to its source root. Requires a configured `PaddleOCR` `DBNet` `det.onnx` model (`backend.ocr.det_model_path` / `TIDYMEDIA_OCR_DET_MODEL`). Non-image files are skipped.
     MoveTextShot {
         /// Dry run, do not move files
         #[arg(short, long)]
@@ -95,6 +95,29 @@ pub enum Commands {
         /// The output directory (URI or local path)
         #[arg(short, long)]
         output: Location,
+
+        /// Write a JSON operation report to this path
+        #[arg(long)]
+        report: Option<String>,
+    },
+
+    /// Cull similar/burst photos: keep the best one in source and move lower-quality copies to `output/<relative-path>/group-NNN/`, with a `BEST_<basename>` copy of the best photo placed alongside for side-by-side review. Uses perceptual hashing for grouping plus 4 ONNX models (`SCRFD`/`MobileFaceNet`/`FaceMesh`/`EyeState`) configured under `backend.face.*` for face quality scoring.
+    Cull {
+        /// Dry run, do not move files or create output directories
+        #[arg(short, long)]
+        dry_run: bool,
+
+        /// The source directories or files (URI or local path)
+        #[arg(required = true)]
+        sources: Vec<Location>,
+
+        /// The output directory (URI or local path)
+        #[arg(short, long)]
+        output: Location,
+
+        /// Maximum pHash Hamming distance for grouping similar photos (overrides `backend.face.phash_hamming_max`)
+        #[arg(long)]
+        phash_max: Option<u8>,
 
         /// Write a JSON operation report to this path
         #[arg(long)]

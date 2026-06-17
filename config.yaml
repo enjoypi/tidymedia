@@ -31,8 +31,8 @@ backend:
     server_host: ${TIDYMEDIA_ADB_SERVER_HOST:-127.0.0.1}
     # adb daemon 默认端口；多个 adb 实例并存时按需调整
     server_port: ${TIDYMEDIA_ADB_SERVER_PORT:-5037}
-  # move-text-shot 子命令的文本检测后端（feature ocr-detect 启用时生效）
-  # 仅在启用 feature 且使用该子命令时读取；其余路径不消费这些字段
+  # move-text-shot 子命令的文本检测后端
+  # 仅在使用该子命令时读取；其余路径不消费这些字段
   ocr:
     # PaddleOCR DBNet det.onnx 模型本地路径；空 = 调用时报 InvalidInput
     # 模型文件不入 git，运行前由用户自备并指定路径
@@ -43,3 +43,31 @@ backend:
     min_text_pixel_ratio: ${TIDYMEDIA_OCR_MIN_RATIO:-0.005}
     # 推理前 resize 的短边像素上限；实际按 32 倍数对齐
     resize_max_side: ${TIDYMEDIA_OCR_MAX_SIDE:-736}
+  # cull 子命令的人脸质量评分后端
+  # 4 个 ONNX 模型路径 + pHash/清晰度/EAR 阈值 + 综合评分权重
+  # 模型不入 git，运行前由用户自备并指定路径；任一为空 = 调用时报 InvalidInput
+  face:
+    # SCRFD-500M-bn-kps（人脸 bbox + 5 点关键点）
+    scrfd_model_path: ${TIDYMEDIA_FACE_SCRFD_MODEL:-}
+    # MobileFaceNet（112×112 → 512 维 embedding）
+    facenet_model_path: ${TIDYMEDIA_FACE_FACENET_MODEL:-}
+    # MediaPipe FaceMesh（468 点 3D 关键点）
+    facemesh_model_path: ${TIDYMEDIA_FACE_FACEMESH_MODEL:-}
+    # MobileNetV3-EyeState（眼部裁剪二分类）
+    eyestate_model_path: ${TIDYMEDIA_FACE_EYESTATE_MODEL:-}
+    # pHash 汉明距离阈值；≤ 此值的两图视为相似入同组
+    phash_hamming_max: ${TIDYMEDIA_FACE_PHASH_MAX:-10}
+    # 全图 Laplacian 方差下限；低于此值视整图模糊丢弃（单图组例外保留）
+    sharpness_min: ${TIDYMEDIA_FACE_SHARPNESS_MIN:-100.0}
+    # 跨图人脸 embedding 余弦相似度阈值；≥ 此值判同一身份
+    face_cosine_min: ${TIDYMEDIA_FACE_COSINE_MIN:-0.5}
+    # EAR（眼睑纵横比）阈值；低于此值视为闭眼
+    ear_blink_max: ${TIDYMEDIA_FACE_EAR_MAX:-0.21}
+    # EyeState 模型闭眼概率阈值
+    eye_blink_score_max: ${TIDYMEDIA_FACE_BLINK_SCORE:-0.5}
+    # 综合评分中清晰度权重
+    w_sharpness: ${TIDYMEDIA_FACE_W_SHARPNESS:-1.0}
+    # 综合评分中闭眼惩罚权重
+    w_blink: ${TIDYMEDIA_FACE_W_BLINK:-2.0}
+    # 综合评分中微笑加分权重
+    w_smile: ${TIDYMEDIA_FACE_W_SMILE:-0.5}

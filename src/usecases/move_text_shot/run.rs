@@ -210,8 +210,7 @@ fn read_all(backend: &Arc<dyn Backend>, loc: &Location) -> io::Result<Vec<u8>> {
 
 fn is_image(bytes: &[u8]) -> bool {
     let head_len = MIME_SNIFF_BYTES.min(bytes.len());
-    infer::get(&bytes[..head_len])
-        .is_some_and(|t| t.mime_type().starts_with("image/"))
+    infer::get(&bytes[..head_len]).is_some_and(|t| t.mime_type().starts_with("image/"))
 }
 
 #[expect(

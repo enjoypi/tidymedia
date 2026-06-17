@@ -8,8 +8,8 @@ use crate::usecases::report::{Report, ReportSink};
 
 const FEATURE_COPY: &str = "copy";
 const FEATURE_FIND: &str = "find";
-#[cfg(feature = "ocr-detect")]
 const FEATURE_MOVE_TEXT_SHOT: &str = "move_text_shot";
+const FEATURE_CULL: &str = "cull";
 
 /// 把报告原子写到 `path`（先写临时文件再 persist）。
 /// 写盘失败仅 warn，不阻断主流程。
@@ -33,8 +33,8 @@ impl ReportSink for JsonFileReportSink {
         match report {
             Report::Copy(r) => write_report_json(&self.path, *r, FEATURE_COPY),
             Report::Find(r) => write_report_json(&self.path, *r, FEATURE_FIND),
-            #[cfg(feature = "ocr-detect")]
             Report::MoveTextShot(r) => write_report_json(&self.path, *r, FEATURE_MOVE_TEXT_SHOT),
+            Report::Cull(r) => write_report_json(&self.path, *r, FEATURE_CULL),
         }
     }
 }

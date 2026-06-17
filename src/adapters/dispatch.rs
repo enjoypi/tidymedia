@@ -4,19 +4,19 @@ use crate::adapters::report_sink::JsonFileReportSink;
 use crate::entities::common::{Error, Result};
 use crate::entities::uri::Location;
 use crate::usecases::config::validate_archive_template;
-#[cfg(feature = "ocr-detect")]
+use crate::usecases::cull::CullReport;
 use crate::usecases::move_text_shot::MoveTextShotReport;
 use crate::usecases::report::{CopyReport, FindReport, Report, ReportSink};
 
 /// 子命令执行结果：Copy/Move 返回 [`CopyReport`]，Find 返回 [`FindReport`]，
-/// `MoveTextShot` 返回 [`MoveTextShotReport`]（仅 feature `ocr-detect` 启用）。
-/// 让 `tidy_with` 单一入口同时服务 CLI（丢弃返回）与 Android/mobile（消费 report）。
+/// `MoveTextShot` 返回 [`MoveTextShotReport`]，`Cull` 返回 [`CullReport`]。
+/// `tidy_with` 单一入口同时服务 CLI（丢弃返回）与 Android/mobile（消费 report）。
 #[derive(Debug)]
 pub enum CommandResult {
     Copy(CopyReport),
     Find(FindReport),
-    #[cfg(feature = "ocr-detect")]
     MoveTextShot(MoveTextShotReport),
+    Cull(CullReport),
 }
 
 /// 用默认 backend factory 跑命令；旧入口，等价于 `tidy_with(&DefaultBackendFactory, ...)`。
@@ -35,20 +35,23 @@ pub fn tidy(command: Commands) -> Result<()> {
                 report.failed, report.copied, report.ignored
             ))))
         }
-        #[cfg(feature = "ocr-detect")]
         CommandResult::MoveTextShot(report) if report.failed > 0 => {
             Err(Error::Io(std::io::Error::other(format!(
                 "move-text-shot partial failure: {} failed, {} moved, {} skipped_no_text, \
                  {} skipped_non_image",
-                report.failed,
-                report.moved,
-                report.skipped_no_text,
-                report.skipped_non_image
+                report.failed, report.moved, report.skipped_no_text, report.skipped_non_image
             ))))
         }
-        CommandResult::Copy(_) | CommandResult::Find(_) => Ok(()),
-        #[cfg(feature = "ocr-detect")]
-        CommandResult::MoveTextShot(_) => Ok(()),
+        CommandResult::Cull(report) if report.failed > 0 => {
+            Err(Error::Io(std::io::Error::other(format!(
+                "cull partial failure: {} failed, {} moved, {} culled, {} grouped",
+                report.failed, report.moved, report.culled_count, report.grouped
+            ))))
+        }
+        CommandResult::Copy(_)
+        | CommandResult::Find(_)
+        | CommandResult::MoveTextShot(_)
+        | CommandResult::Cull(_) => Ok(()),
     }
 }
 
@@ -106,6 +109,20 @@ pub fn tidy_with(factory: &dyn BackendFactory, command: Commands) -> Result<Comm
             output,
             report,
         } => dispatch_move_text_shot(factory, sources, output, dry_run, report.as_deref()),
+        Commands::Cull {
+            dry_run,
+            sources,
+            output,
+            phash_max,
+            report,
+        } => dispatch_cull(
+            factory,
+            sources,
+            output,
+            dry_run,
+            phash_max,
+            report.as_deref(),
+        ),
     }
 }
 
@@ -162,10 +179,7 @@ fn dispatch_find(
     Ok(CommandResult::Find(find_report))
 }
 
-// 默认 feature 下 sources/output 经 `let _ = (..)` 消费；ocr-detect feature on 下
-// 仅 by-ref 借给 usecase——跨 feature 组合差异让 `needless_pass_by_value` 仅在后者
-// 触发，按 P0 §1 用 `#[allow]` 而非 `#[expect]`。
-#[allow(
+#[expect(
     clippy::needless_pass_by_value,
     reason = "由 Commands::MoveTextShot enum 解构 by-value 而来；usecase 接 &[]/& 借用"
 )]
@@ -176,32 +190,50 @@ fn dispatch_move_text_shot(
     dry_run: bool,
     report_path: Option<&str>,
 ) -> Result<CommandResult> {
-    #[cfg(feature = "ocr-detect")]
-    {
-        let ocr_cfg = &crate::usecases::config::config().backend.ocr;
-        let detector = crate::adapters::ocr::build_detector(ocr_cfg)?;
-        let move_report = crate::usecases::move_text_shot(
-            detector.as_ref(),
-            factory,
-            &sources,
-            &output,
-            dry_run,
-        )?;
-        if let Some(path) = report_path {
-            let sink = JsonFileReportSink::new(path);
-            sink.write(&Report::MoveTextShot(&move_report));
-        }
-        Ok(CommandResult::MoveTextShot(move_report))
+    let ocr_cfg = &crate::usecases::config::config().backend.ocr;
+    let detector = crate::adapters::ocr::build_detector(ocr_cfg)?;
+    let move_report =
+        crate::usecases::move_text_shot(detector.as_ref(), factory, &sources, &output, dry_run)?;
+    if let Some(path) = report_path {
+        let sink = JsonFileReportSink::new(path);
+        sink.write(&Report::MoveTextShot(&move_report));
     }
-    #[cfg(not(feature = "ocr-detect"))]
-    {
-        // 显式吃掉未使用变量，避免 dead binding warning（feature off 路径）
-        let _ = (factory, sources, output, dry_run, report_path);
-        Err(Error::Io(std::io::Error::new(
-            std::io::ErrorKind::Unsupported,
-            "move-text-shot requires the `ocr-detect` feature; rebuild with --features ocr-detect",
-        )))
+    Ok(CommandResult::MoveTextShot(move_report))
+}
+
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "由 Commands::Cull enum 解构 by-value 而来；usecase 接 &[]/& 借用"
+)]
+fn dispatch_cull(
+    factory: &dyn BackendFactory,
+    sources: Vec<Location>,
+    output: Location,
+    dry_run: bool,
+    phash_max: Option<u8>,
+    report_path: Option<&str>,
+) -> Result<CommandResult> {
+    let face_cfg = &crate::usecases::config::config().backend.face;
+    let scrfd = crate::adapters::face::build_scrfd_detector(face_cfg)?;
+    let facenet = crate::adapters::face::build_facenet_embedder(face_cfg)?;
+    let facemesh = crate::adapters::face::build_facemesh(face_cfg)?;
+    let eyestate = crate::adapters::face::build_eyestate_classifier(face_cfg)?;
+    let cull_report = crate::usecases::cull(
+        scrfd.as_ref(),
+        facenet.as_ref(),
+        facemesh.as_ref(),
+        eyestate.as_ref(),
+        factory,
+        &sources,
+        &output,
+        dry_run,
+        phash_max.unwrap_or(face_cfg.phash_hamming_max),
+    )?;
+    if let Some(path) = report_path {
+        let sink = JsonFileReportSink::new(path);
+        sink.write(&Report::Cull(&cull_report));
     }
+    Ok(CommandResult::Cull(cull_report))
 }
 
 // None 表示未传，跳过校验；Some(s) 时校验模板合法性。

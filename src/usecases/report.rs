@@ -46,8 +46,8 @@ pub struct ReportError {
 pub enum Report<'a> {
     Copy(&'a CopyReport),
     Find(&'a FindReport),
-    #[cfg(feature = "ocr-detect")]
     MoveTextShot(&'a crate::usecases::move_text_shot::MoveTextShotReport),
+    Cull(&'a crate::usecases::cull::CullReport),
 }
 
 /// 报告输出端：序列化格式 + 持久化机制由实现者决定（JSON 写盘 / stdout / 推送…）。

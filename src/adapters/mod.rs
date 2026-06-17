@@ -2,6 +2,7 @@
 pub mod backend;
 pub mod cli;
 pub mod dispatch;
+pub mod face;
 pub mod ocr;
 pub mod report_sink;
 pub mod sidecar;

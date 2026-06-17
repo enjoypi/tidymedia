@@ -1,6 +1,6 @@
 //! 文本检测 Gateway 抽象：把「这张图含不含可识别文字」的判定封进单一 trait，
-//! 让 usecase 不直接依赖 OCR 库。具体实现位于本目录下 `tract_dbnet*.rs`（feature
-//! `ocr-detect` 启用）；测试用 `FakeTextDetector`（路径查表 + Err 注入）。
+//! 让 usecase 不直接依赖 OCR 库。具体实现位于本目录下 `tract_dbnet*.rs`（tract-onnx
+//! 默认编译，无 feature gate）；测试用 `FakeTextDetector`（路径查表 + Err 注入）。
 //!
 //! 设计要点：
 //! - trait 对象安全（单方法、`&[u8]` + `&Utf8Path` 入参、无泛型）
@@ -15,13 +15,9 @@ use std::io;
 use camino::Utf8Path;
 
 pub mod fake;
-
-#[cfg(feature = "ocr-detect")]
 pub mod tract_dbnet;
-#[cfg(feature = "ocr-detect")]
 pub mod tract_dbnet_real;
 
-#[cfg(feature = "ocr-detect")]
 pub use tract_dbnet::build_detector;
 
 /// 文本检测 Gateway。实现者按 path + 字节判定，**不持** Backend

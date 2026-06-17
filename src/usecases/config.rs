@@ -175,12 +175,63 @@ impl Default for OcrConfig {
     }
 }
 
+/// `cull` 子命令的人脸质量评分参数：4 个 ONNX 模型路径 + pHash/清晰度/EAR
+/// 阈值 + 综合评分权重。模型不入 git，路径外置；阈值与权重暴露让用户按场景调优。
+#[derive(Clone, Debug, Deserialize)]
+#[serde(default)]
+pub struct FaceConfig {
+    /// SCRFD-500M-bn-kps（人脸 bbox + 5 点关键点）ONNX 路径；空 = 调用时报 `InvalidInput`。
+    pub scrfd_model_path: String,
+    /// `MobileFaceNet`（112×112 → 512 维 embedding）ONNX 路径。
+    pub facenet_model_path: String,
+    /// `MediaPipe` `FaceMesh`（468 点 3D 关键点）ONNX 路径。
+    pub facemesh_model_path: String,
+    /// `MobileNetV3`-EyeState（眼部裁剪二分类）ONNX 路径。
+    pub eyestate_model_path: String,
+    /// pHash 汉明距离阈值；≤ 此值的两图视为相似入同组。范围 `[1, 64]`。
+    pub phash_hamming_max: u8,
+    /// 全图 Laplacian 方差下限；低于此值视整图模糊丢弃（单图组例外保留）。
+    pub sharpness_min: f32,
+    /// 跨图人脸 embedding 余弦相似度阈值；≥ 此值判同一身份。范围 `(0, 1)`。
+    pub face_cosine_min: f32,
+    /// EAR（眼睑纵横比）阈值；低于此值视为闭眼。范围 `(0, 1)`。
+    pub ear_blink_max: f32,
+    /// `EyeState` 模型闭眼概率阈值。范围 `(0, 1)`。
+    pub eye_blink_score_max: f32,
+    /// 综合评分中清晰度权重。
+    pub w_sharpness: f32,
+    /// 综合评分中闭眼惩罚权重。
+    pub w_blink: f32,
+    /// 综合评分中微笑加分权重。
+    pub w_smile: f32,
+}
+
+impl Default for FaceConfig {
+    fn default() -> Self {
+        Self {
+            scrfd_model_path: String::new(),
+            facenet_model_path: String::new(),
+            facemesh_model_path: String::new(),
+            eyestate_model_path: String::new(),
+            phash_hamming_max: 10,
+            sharpness_min: 100.0,
+            face_cosine_min: 0.5,
+            ear_blink_max: 0.21,
+            eye_blink_score_max: 0.5,
+            w_sharpness: 1.0,
+            w_blink: 2.0,
+            w_smile: 0.5,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Default, Deserialize)]
 #[serde(default)]
 pub struct BackendConfig {
     pub smb: SmbBackendConfig,
     pub adb: AdbBackendConfig,
     pub ocr: OcrConfig,
+    pub face: FaceConfig,
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
@@ -211,6 +262,18 @@ mod tests {
         assert!((c.backend.ocr.binarize_threshold - 0.3).abs() < f32::EPSILON);
         assert!((c.backend.ocr.min_text_pixel_ratio - 0.005).abs() < f32::EPSILON);
         assert_eq!(c.backend.ocr.resize_max_side, 736);
+        assert_eq!(c.backend.face.scrfd_model_path, "");
+        assert_eq!(c.backend.face.facenet_model_path, "");
+        assert_eq!(c.backend.face.facemesh_model_path, "");
+        assert_eq!(c.backend.face.eyestate_model_path, "");
+        assert_eq!(c.backend.face.phash_hamming_max, 10);
+        assert!((c.backend.face.sharpness_min - 100.0).abs() < f32::EPSILON);
+        assert!((c.backend.face.face_cosine_min - 0.5).abs() < f32::EPSILON);
+        assert!((c.backend.face.ear_blink_max - 0.21).abs() < f32::EPSILON);
+        assert!((c.backend.face.eye_blink_score_max - 0.5).abs() < f32::EPSILON);
+        assert!((c.backend.face.w_sharpness - 1.0).abs() < f32::EPSILON);
+        assert!((c.backend.face.w_blink - 2.0).abs() < f32::EPSILON);
+        assert!((c.backend.face.w_smile - 0.5).abs() < f32::EPSILON);
         assert_eq!(c.log.level, "info");
     }
 

@@ -165,11 +165,7 @@ fn load_parses_quoted_template_placeholder_default() {
 fn load_sanitizes_invalid_ocr_binarize_threshold_to_default() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("badbt.yaml");
-    std::fs::write(
-        &path,
-        "backend:\n  ocr:\n    binarize_threshold: 1.5\n",
-    )
-    .unwrap();
+    std::fs::write(&path, "backend:\n  ocr:\n    binarize_threshold: 1.5\n").unwrap();
     set_env_var("TIDYMEDIA_CONFIG", path.to_str().unwrap());
     let cfg = load();
     assert!((cfg.backend.ocr.binarize_threshold - 0.3).abs() < f32::EPSILON);
@@ -180,11 +176,7 @@ fn load_sanitizes_invalid_ocr_binarize_threshold_to_default() {
 fn load_sanitizes_zero_ocr_binarize_threshold_to_default() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("zerobt.yaml");
-    std::fs::write(
-        &path,
-        "backend:\n  ocr:\n    binarize_threshold: 0.0\n",
-    )
-    .unwrap();
+    std::fs::write(&path, "backend:\n  ocr:\n    binarize_threshold: 0.0\n").unwrap();
     set_env_var("TIDYMEDIA_CONFIG", path.to_str().unwrap());
     let cfg = load();
     assert!((cfg.backend.ocr.binarize_threshold - 0.3).abs() < f32::EPSILON);
@@ -196,11 +188,7 @@ fn load_sanitizes_nan_ocr_binarize_threshold_to_default() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("nanbt.yaml");
     // YAML 1.1 `.nan` 是 NaN 字面量；is_finite() 路径分支
-    std::fs::write(
-        &path,
-        "backend:\n  ocr:\n    binarize_threshold: .nan\n",
-    )
-    .unwrap();
+    std::fs::write(&path, "backend:\n  ocr:\n    binarize_threshold: .nan\n").unwrap();
     set_env_var("TIDYMEDIA_CONFIG", path.to_str().unwrap());
     let cfg = load();
     assert!((cfg.backend.ocr.binarize_threshold - 0.3).abs() < f32::EPSILON);
@@ -211,11 +199,7 @@ fn load_sanitizes_nan_ocr_binarize_threshold_to_default() {
 fn load_sanitizes_negative_ocr_min_text_pixel_ratio_to_default() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("negratio.yaml");
-    std::fs::write(
-        &path,
-        "backend:\n  ocr:\n    min_text_pixel_ratio: -0.1\n",
-    )
-    .unwrap();
+    std::fs::write(&path, "backend:\n  ocr:\n    min_text_pixel_ratio: -0.1\n").unwrap();
     set_env_var("TIDYMEDIA_CONFIG", path.to_str().unwrap());
     let cfg = load();
     assert!((cfg.backend.ocr.min_text_pixel_ratio - 0.005).abs() < f32::EPSILON);
@@ -226,11 +210,7 @@ fn load_sanitizes_negative_ocr_min_text_pixel_ratio_to_default() {
 fn load_sanitizes_invalid_ocr_min_text_pixel_ratio_to_default() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("badratio.yaml");
-    std::fs::write(
-        &path,
-        "backend:\n  ocr:\n    min_text_pixel_ratio: 2.0\n",
-    )
-    .unwrap();
+    std::fs::write(&path, "backend:\n  ocr:\n    min_text_pixel_ratio: 2.0\n").unwrap();
     set_env_var("TIDYMEDIA_CONFIG", path.to_str().unwrap());
     let cfg = load();
     assert!((cfg.backend.ocr.min_text_pixel_ratio - 0.005).abs() < f32::EPSILON);
@@ -241,11 +221,7 @@ fn load_sanitizes_invalid_ocr_min_text_pixel_ratio_to_default() {
 fn load_sanitizes_too_small_ocr_resize_max_side_to_default() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("badside.yaml");
-    std::fs::write(
-        &path,
-        "backend:\n  ocr:\n    resize_max_side: 32\n",
-    )
-    .unwrap();
+    std::fs::write(&path, "backend:\n  ocr:\n    resize_max_side: 32\n").unwrap();
     set_env_var("TIDYMEDIA_CONFIG", path.to_str().unwrap());
     let cfg = load();
     assert_eq!(cfg.backend.ocr.resize_max_side, 736);
@@ -283,5 +259,130 @@ fn load_keeps_valid_copy_fields_unchanged() {
     let cfg = load();
     assert_eq!(cfg.copy.unique_name_max_attempts, 3);
     assert_eq!(cfg.copy.archive_template, "{year}/{day}");
+    remove_env_var("TIDYMEDIA_CONFIG");
+}
+
+// Face 阈值/权重越界回退默认；各分支独立测让 sanitize_face 内部 if 都被覆盖。
+
+#[test]
+fn load_sanitizes_zero_face_phash_hamming_max_to_default() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("face_phash_zero.yaml");
+    std::fs::write(&path, "backend:\n  face:\n    phash_hamming_max: 0\n").unwrap();
+    set_env_var("TIDYMEDIA_CONFIG", path.to_str().unwrap());
+    let cfg = load();
+    assert_eq!(cfg.backend.face.phash_hamming_max, 10);
+    remove_env_var("TIDYMEDIA_CONFIG");
+}
+
+#[test]
+fn load_sanitizes_too_large_face_phash_hamming_max_to_default() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("face_phash_big.yaml");
+    std::fs::write(&path, "backend:\n  face:\n    phash_hamming_max: 65\n").unwrap();
+    set_env_var("TIDYMEDIA_CONFIG", path.to_str().unwrap());
+    let cfg = load();
+    assert_eq!(cfg.backend.face.phash_hamming_max, 10);
+    remove_env_var("TIDYMEDIA_CONFIG");
+}
+
+#[test]
+fn load_sanitizes_zero_face_sharpness_min_to_default() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("face_sharp_zero.yaml");
+    std::fs::write(&path, "backend:\n  face:\n    sharpness_min: 0.0\n").unwrap();
+    set_env_var("TIDYMEDIA_CONFIG", path.to_str().unwrap());
+    let cfg = load();
+    assert!((cfg.backend.face.sharpness_min - 100.0).abs() < f32::EPSILON);
+    remove_env_var("TIDYMEDIA_CONFIG");
+}
+
+#[test]
+fn load_sanitizes_nan_face_sharpness_min_to_default() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("face_sharp_nan.yaml");
+    std::fs::write(&path, "backend:\n  face:\n    sharpness_min: .nan\n").unwrap();
+    set_env_var("TIDYMEDIA_CONFIG", path.to_str().unwrap());
+    let cfg = load();
+    assert!((cfg.backend.face.sharpness_min - 100.0).abs() < f32::EPSILON);
+    remove_env_var("TIDYMEDIA_CONFIG");
+}
+
+#[test]
+fn load_sanitizes_out_of_range_face_cosine_min_to_default() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("face_cos.yaml");
+    std::fs::write(&path, "backend:\n  face:\n    face_cosine_min: 1.5\n").unwrap();
+    set_env_var("TIDYMEDIA_CONFIG", path.to_str().unwrap());
+    let cfg = load();
+    assert!((cfg.backend.face.face_cosine_min - 0.5).abs() < f32::EPSILON);
+    remove_env_var("TIDYMEDIA_CONFIG");
+}
+
+#[test]
+fn load_sanitizes_out_of_range_face_ear_blink_max_to_default() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("face_ear.yaml");
+    std::fs::write(&path, "backend:\n  face:\n    ear_blink_max: -0.1\n").unwrap();
+    set_env_var("TIDYMEDIA_CONFIG", path.to_str().unwrap());
+    let cfg = load();
+    assert!((cfg.backend.face.ear_blink_max - 0.21).abs() < f32::EPSILON);
+    remove_env_var("TIDYMEDIA_CONFIG");
+}
+
+#[test]
+fn load_sanitizes_out_of_range_face_eye_blink_score_max_to_default() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("face_eye.yaml");
+    std::fs::write(&path, "backend:\n  face:\n    eye_blink_score_max: 2.0\n").unwrap();
+    set_env_var("TIDYMEDIA_CONFIG", path.to_str().unwrap());
+    let cfg = load();
+    assert!((cfg.backend.face.eye_blink_score_max - 0.5).abs() < f32::EPSILON);
+    remove_env_var("TIDYMEDIA_CONFIG");
+}
+
+#[test]
+fn load_sanitizes_negative_face_weight_to_default() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("face_w_neg.yaml");
+    std::fs::write(&path, "backend:\n  face:\n    w_sharpness: -1.0\n").unwrap();
+    set_env_var("TIDYMEDIA_CONFIG", path.to_str().unwrap());
+    let cfg = load();
+    assert!((cfg.backend.face.w_sharpness - 1.0).abs() < f32::EPSILON);
+    remove_env_var("TIDYMEDIA_CONFIG");
+}
+
+#[test]
+fn load_sanitizes_nan_face_weight_to_default() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("face_w_nan.yaml");
+    std::fs::write(&path, "backend:\n  face:\n    w_blink: .nan\n").unwrap();
+    set_env_var("TIDYMEDIA_CONFIG", path.to_str().unwrap());
+    let cfg = load();
+    assert!((cfg.backend.face.w_blink - 2.0).abs() < f32::EPSILON);
+    remove_env_var("TIDYMEDIA_CONFIG");
+}
+
+#[test]
+fn load_keeps_valid_face_fields_unchanged() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("face_ok.yaml");
+    std::fs::write(
+        &path,
+        "backend:\n  face:\n    phash_hamming_max: 8\n    sharpness_min: 50.0\n    \
+         face_cosine_min: 0.6\n    ear_blink_max: 0.25\n    eye_blink_score_max: 0.7\n    \
+         w_sharpness: 1.5\n    w_blink: 3.0\n    w_smile: 0.8\n",
+    )
+    .unwrap();
+    set_env_var("TIDYMEDIA_CONFIG", path.to_str().unwrap());
+    let cfg = load();
+    assert_eq!(cfg.backend.face.phash_hamming_max, 8);
+    assert!((cfg.backend.face.sharpness_min - 50.0).abs() < f32::EPSILON);
+    assert!((cfg.backend.face.face_cosine_min - 0.6).abs() < f32::EPSILON);
+    assert!((cfg.backend.face.ear_blink_max - 0.25).abs() < f32::EPSILON);
+    assert!((cfg.backend.face.eye_blink_score_max - 0.7).abs() < f32::EPSILON);
+    assert!((cfg.backend.face.w_sharpness - 1.5).abs() < f32::EPSILON);
+    assert!((cfg.backend.face.w_blink - 3.0).abs() < f32::EPSILON);
+    assert!((cfg.backend.face.w_smile - 0.8).abs() < f32::EPSILON);
     remove_env_var("TIDYMEDIA_CONFIG");
 }

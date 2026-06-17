@@ -1,4 +1,4 @@
-//! 真实 `PaddleOCR` `DBNet` `det.onnx` 加载（feature `ocr-detect` + 真模型文件）。
+//! 真实 `PaddleOCR` `DBNet` `det.onnx` 加载（tract-onnx 默认编译，需用户备真模型文件）。
 //!
 //! **覆盖率**：本文件走 `--ignore-filename-regex='_real\.rs$'` 排除整文件——
 //! 加载真实 ONNX 文件在 CI 不可触发（模型不入 git），fake 测试在 `tract_dbnet::tests`

@@ -104,3 +104,6 @@ mod windows_same_volume;
 
 #[path = "lib_tidy/move_text_shot.rs"]
 mod move_text_shot;
+
+#[path = "lib_tidy/cull.rs"]
+mod cull;

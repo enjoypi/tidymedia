@@ -15,7 +15,7 @@ pub use adapters::backend::mtp::{MtpBackend, MtpClient, MtpMatch, MtpTarget};
 pub use adapters::backend::smb::{SmbBackend, SmbClient, SmbTarget};
 pub use adapters::cli::{Cli, Commands, run_cli};
 pub use adapters::dispatch::{CommandResult, tidy, tidy_with};
-#[cfg(feature = "ocr-detect")]
+pub use usecases::cull::{CullReport, CulledEntry, GroupReport, ScoreBreakdown};
 pub use usecases::move_text_shot::MoveTextShotReport;
 
 // ── Entity re-exports ──
@@ -32,11 +32,22 @@ pub use adapters::sidecar;
 #[doc(hidden)]
 pub use adapters::backend::fake::{FakeBackend, Op as FakeOp};
 
-// TextDetector Gateway：trait 在 adapters/ocr，feature-gated 真实实现走 tract-onnx。
+// TextDetector Gateway：trait 在 adapters/ocr，真实实现走 tract-onnx（默认编译）。
 // Fake 暴露给集成测试做路径查表预设；与 FakeBackend 同套路（doc hidden）。
 pub use adapters::ocr::TextDetector;
 #[doc(hidden)]
 pub use adapters::ocr::fake::FakeTextDetector;
+
+// Face Gateway（cull 子命令用）：4 个 trait + 4 个 build_* 装配函数。
+// Fake 实现给集成测试做路径查表预设（无须真实 ONNX 模型驱动整 pipeline）。
+#[doc(hidden)]
+pub use adapters::face::fake::{
+    FakeEyeStateClassifier, FakeFaceDetector, FakeFaceEmbedder, FakeFaceMeshDetector,
+};
+pub use adapters::face::{
+    EyeStateClassifier, FaceDetection, FaceDetector, FaceEmbedder, FaceMeshDetector,
+    build_eyestate_classifier, build_facemesh, build_facenet_embedder, build_scrfd_detector,
+};
 
 // uniffi 0.31 proc-macro 模式要求 setup_scaffolding! 出现在 crate 根；FFI 入口
 // 与 DI 组装本体位于 frameworks/mobile（Clean Architecture Frameworks 层）。
