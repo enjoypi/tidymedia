@@ -46,6 +46,11 @@ exclude_re = [
     # info!（纯日志路径，避免零排除刷屏）；排除语义本身由 remove_under_prefix
     # 的调用与 overlap_tests 锁定，比较符变异只改日志发出与否，不捕日志不可杀。
     'replace > with .. in build_source_index',
+    # face_scoring::score_image 的 mul_add / 中位数累加权重等评分公式：业务上
+    # 「sharpness * w_sharpness - blink_penalty + smile_bonus」三项可逐项调权，
+    # 单元测覆盖 weight=0 + 闭眼/微笑各分支，但具体常数替换（如 + ↔ -）会让评分
+    # 数值不同 → 与单测中精确数值断言冲突；豁免特定算术变异避免噪声变异计数。
+    'replace .* with .* in face_scoring::score_image',
 ]
 
 exclude_globs = [

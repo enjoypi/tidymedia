@@ -238,6 +238,25 @@ fn sanitize_face(face: &mut FaceConfig) {
     );
     sanitize_face_weight(&mut face.w_blink, defaults.w_blink, "backend.face.w_blink");
     sanitize_face_weight(&mut face.w_smile, defaults.w_smile, "backend.face.w_smile");
+    sanitize_max_image_bytes(face, &defaults);
+}
+
+// max_image_bytes 太小会让所有图都被判超限跳过整个 cull pipeline；
+// 1 MiB 以下没有业务场景（JPEG 缩略图都 > 100 KiB），统一收紧到 ≥ 1 MiB。
+fn sanitize_max_image_bytes(face: &mut FaceConfig, defaults: &FaceConfig) {
+    const MIN_IMAGE_BYTES: u64 = 1024 * 1024;
+    if face.max_image_bytes < MIN_IMAGE_BYTES {
+        warn!(
+            feature = "config",
+            operation = "sanitize",
+            result = "invalid_value",
+            field = "backend.face.max_image_bytes",
+            value = face.max_image_bytes,
+            fallback = defaults.max_image_bytes,
+            "max_image_bytes must be >= 1 MiB; falling back to default"
+        );
+        face.max_image_bytes = defaults.max_image_bytes;
+    }
 }
 
 fn sanitize_face_unit_open(value: &mut f32, fallback: f32, field: &str) {

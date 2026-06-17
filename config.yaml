@@ -72,3 +72,6 @@ backend:
     w_blink: ${TIDYMEDIA_FACE_W_BLINK:-2.0}
     # 综合评分中微笑加分权重
     w_smile: ${TIDYMEDIA_FACE_W_SMILE:-0.5}
+    # 单文件字节上限（防 OOM）；超此值的图扫描阶段直接 skip 计入 failed
+    # 默认 50 MiB = 52428800 字节；大 RAW 文件可调高
+    max_image_bytes: ${TIDYMEDIA_FACE_MAX_BYTES:-52428800}

@@ -6,11 +6,6 @@
 //! 4×4 系统 + Gauss-Jordan 消元解出 `(a, b, tx, ty)`；再以反向映射 + 双线性采样
 //! 填充输出像素。规范源：`InsightFace` `ArcFace` 训练 / 推理统一预处理流程。
 
-// pick_best 接入 4 模型印证流水线前本模块仅被单测调用，CI 默认 features 下整
-// 模块出现 dead_code 噪声压住真实错误。commit 5 把 align_face 接入 run.rs 后
-// 此 allow 删除。
-#![allow(dead_code, reason = "占位实现：pick_best 接入 4 模型印证后启用")]
-
 use std::io;
 
 use image::{Rgb, RgbImage};

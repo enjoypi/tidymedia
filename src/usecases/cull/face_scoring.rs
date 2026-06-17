@@ -12,10 +12,6 @@
 //! - 左眼：33（外角）/ 160 / 158 / 133（内角）/ 153 / 144
 //! - 右眼：362（外角）/ 385 / 387 / 263（内角）/ 373 / 380
 
-// pick_best 接入 4 模型印证流水线前本模块仅被单测调用。commit 5 把
-// score_image 接入 run.rs 后此 allow 删除。
-#![allow(dead_code, reason = "占位实现：pick_best 接入 4 模型印证后启用")]
-
 use crate::adapters::face::FaceDetection;
 use crate::usecases::config::FaceConfig;
 

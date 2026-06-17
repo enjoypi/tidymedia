@@ -182,7 +182,10 @@ pub(crate) fn preprocess(img: &image::RgbImage) -> Tensor {
 
 /// 取宽高较大者并转 f32（letterbox scale 计算用）。维度 ≤ 65535 时 f32 精度够。
 fn orig_max_dim(w: u32, h: u32) -> f32 {
-    #[expect(clippy::cast_precision_loss, reason = "u32 → f32 精度损失仅 > 16M 时显现")]
+    #[expect(
+        clippy::cast_precision_loss,
+        reason = "u32 → f32 精度损失仅 > 16M 时显现"
+    )]
     let m = w.max(h) as f32;
     m
 }

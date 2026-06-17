@@ -142,23 +142,36 @@ fn cull_dry_run_two_similar_images_picks_one_best() {
     let src_dir = tempfile::tempdir().unwrap();
     let a = src_dir.path().join("a.png");
     let b = src_dir.path().join("b.png");
-    // 两张同色 PNG → ahash 相同 → 同组
+    // 两张同色 PNG → phash 相同 → 同组
     write_png(&a, [128, 128, 128]);
     write_png(&b, [128, 128, 128]);
     let src = local_loc(src_dir.path().to_str().unwrap());
     let out_dir = tempfile::tempdir().unwrap();
     let out = local_loc(out_dir.path().to_str().unwrap());
 
-    // detector 注入：让 a 检测到 1 张人脸，b 检测到 0 张 → a 应为 best
+    // detector 注入：让 a 检测到 1 张人脸（合法 ArcFace 模板 5 点），b 不命中 →
+    // 给 a 注入微笑 mesh（嘴角上扬 → smile_bonus > 0），a total > b total → a 是 best。
     let face = crate::FaceDetection {
-        bbox: [0.0, 0.0, 10.0, 10.0],
+        bbox: [0.0, 0.0, 16.0, 16.0],
         score: 0.9,
-        landmarks_5pt: [[1.0; 2]; 5],
+        landmarks_5pt: [
+            [38.2946, 51.6963],
+            [73.5318, 51.5014],
+            [56.0252, 71.7366],
+            [41.5493, 92.3655],
+            [70.7299, 92.2041],
+        ],
     };
     let a_camino = camino::Utf8PathBuf::from(a.to_str().unwrap());
-    let scrfd = FakeFaceDetector::new(vec![]).with_result(a_camino, vec![face]);
+    // MediaPipe 4 嘴部索引：61 / 291 / 13 / 14
+    let mut smile_mesh = vec![[0.0_f32; 3]; 468];
+    smile_mesh[61] = [0.0, 8.0, 0.0];
+    smile_mesh[291] = [10.0, 8.0, 0.0];
+    smile_mesh[13] = [5.0, 5.0, 0.0];
+    smile_mesh[14] = [5.0, 15.0, 0.0];
+    let scrfd = FakeFaceDetector::new(vec![]).with_result(a_camino.clone(), vec![face]);
     let facenet = FakeFaceEmbedder::new([0.0; 128]);
-    let facemesh = FakeFaceMeshDetector::new(vec![[0.0; 3]; 468]);
+    let facemesh = FakeFaceMeshDetector::new(vec![[0.0; 3]; 468]).with_result(a_camino, smile_mesh);
     let eyestate = FakeEyeStateClassifier::new(0.0);
 
     let report = cull(
@@ -183,6 +196,11 @@ fn cull_dry_run_two_similar_images_picks_one_best() {
         group.best_source.ends_with("a.png"),
         "got: {}",
         group.best_source
+    );
+    assert!(
+        group.score_breakdown.smile_bonus > 0.0,
+        "got: {:?}",
+        group.score_breakdown
     );
 }
 
@@ -428,46 +446,104 @@ fn cull_skips_entry_under_output_prefix() {
 }
 
 #[test]
-fn cull_records_failure_when_pick_best_read_errs() {
-    // 两张 fake PNG 同 ahash → 同组 → pick_best 重读：让其中一张 OpenRead 第二次
-    // 也失败（FakeBackend.inject_error 是持久注入，scan 时已记 failure，scanned=0）。
-    // 用 inject_reader_error：open_read 成功但 read 失败——scan 阶段 read_all
-    // 会调 read_to_end 立即 Err → scan 记 failure，仍然 0 scanned。
-    //
-    // 真正命中 pick_best 245-247 的方法：用 LocalBackend 走真实 FS，scan 时正常读，
-    // 写一文件 b 后再 chmod 0 → pick_best 重读失败。但 root 下 chmod 仍可读。
-    // 改用：构造 ScannedFile 数组 + FakeBackend 注 reader_error，直接调 pick_best
-    // 单元 fn 命中 Err arm。
-    let fake = Arc::new(FakeBackend::new("smb"));
-    let loc_a = smb_loc("/a.png");
-    let loc_b = smb_loc("/b.png");
-    fake.add_file(loc_a.clone(), b"x".to_vec());
-    fake.add_file(loc_b.clone(), b"y".to_vec());
-    fake.inject_reader_error(loc_a.clone(), io::ErrorKind::TimedOut);
-    fake.inject_reader_error(loc_b.clone(), io::ErrorKind::TimedOut);
-    let fake_dyn: Arc<dyn Backend> = fake;
-    let scanned = vec![
-        ScannedFile {
-            src_loc: loc_a,
-            src_backend: fake_dyn.clone(),
-            source_root: smb_loc("/"),
-            hash: 0,
-            sharpness: 1.0,
-        },
-        ScannedFile {
-            src_loc: loc_b,
-            src_backend: fake_dyn,
-            source_root: smb_loc("/"),
-            hash: 0,
-            sharpness: 1.0,
-        },
-    ];
+fn cull_records_failure_when_scrfd_detect_errs_on_all() {
+    // 两张同色 PNG → 同组 → analyze_image 调 SCRFD 时全部返 Err → 记 failure 2 次，
+    // best_total 仍 NEG_INFINITY 走兜底用 indices[0] 的 sharpness 作 total。
+    let src_dir = tempfile::tempdir().unwrap();
+    let a = src_dir.path().join("a.png");
+    let b = src_dir.path().join("b.png");
+    write_png(&a, [60, 60, 60]);
+    write_png(&b, [60, 60, 60]);
+    let src = local_loc(src_dir.path().to_str().unwrap());
+    let out_dir = tempfile::tempdir().unwrap();
+    let out = local_loc(out_dir.path().to_str().unwrap());
+    let scrfd = FakeFaceDetector::new(vec![])
+        .with_error(camino::Utf8PathBuf::from(a.to_str().unwrap()))
+        .with_error(camino::Utf8PathBuf::from(b.to_str().unwrap()));
+    let facenet = FakeFaceEmbedder::new([0.0; 128]);
+    let facemesh = FakeFaceMeshDetector::new(vec![[0.0; 3]; 468]);
+    let eyestate = FakeEyeStateClassifier::new(0.0);
+    let report = cull(
+        &scrfd,
+        &facenet,
+        &facemesh,
+        &eyestate,
+        &DefaultBackendFactory,
+        &[src],
+        &out,
+        true,
+        10,
+    )
+    .unwrap();
+    assert_eq!(report.scanned, 2);
+    assert_eq!(report.failed, 2, "两张 SCRFD Err 都记 failed");
+    // 仍选出 best（用兜底逻辑）+ 1 culled
+    assert_eq!(report.best_count, 1);
+    assert_eq!(report.culled_count, 1);
+}
+
+#[test]
+fn cull_records_failure_when_oversize_image_skipped() {
+    // 切独立 config 让 max_image_bytes = 1048576（1 MiB；正好等于 sanitize 下限不被回退）。
+    // 写一张 1500×1500 不可压缩 random-noise PNG（>1 MiB）→ scan_source 内 size 超阈值
+    // → record_failure（不读字节即跳过），failed=1，scanned=0。
+    let cfg_dir = tempfile::tempdir().unwrap();
+    let cfg_path = cfg_dir.path().join("config.yaml");
+    std::fs::write(
+        &cfg_path,
+        "backend:\n  face:\n    max_image_bytes: 1048576\n",
+    )
+    .unwrap();
+    // SAFETY: nextest per-test 进程隔离，无并发 env 修改竞争
+    unsafe {
+        std::env::set_var("TIDYMEDIA_CONFIG", cfg_path.to_str().unwrap());
+    }
+
+    let src_dir = tempfile::tempdir().unwrap();
+    let big_path = src_dir.path().join("big.png");
+    write_random_png(&big_path, 1500);
+    let src = local_loc(src_dir.path().to_str().unwrap());
+    let out_dir = tempfile::tempdir().unwrap();
+    let out = local_loc(out_dir.path().to_str().unwrap());
     let scrfd = FakeFaceDetector::new(vec![]);
-    let mut report = CullReport::default();
-    let idx = pick_best(&[0, 1], &scanned, &scrfd, &mut report);
-    // 两张都 read 失败 → best_score 仍是 NEG_INFINITY → 返初始 indices[0]
-    assert_eq!(idx, 0);
-    assert_eq!(report.failed, 2);
+    let facenet = FakeFaceEmbedder::new([0.0; 128]);
+    let facemesh = FakeFaceMeshDetector::new(vec![[0.0; 3]; 468]);
+    let eyestate = FakeEyeStateClassifier::new(0.0);
+    let report = cull(
+        &scrfd,
+        &facenet,
+        &facemesh,
+        &eyestate,
+        &DefaultBackendFactory,
+        &[src],
+        &out,
+        true,
+        10,
+    )
+    .unwrap();
+    assert_eq!(report.scanned, 0, "超 1 MiB PNG 被 OOM skip");
+    assert_eq!(report.failed, 1);
+    assert!(
+        report.errors[0].message.contains("max_image_bytes"),
+        "got: {}",
+        report.errors[0].message
+    );
+}
+
+/// 写一张 `side×side` random-noise PNG 让 PNG 压缩不下来，保证字节数 > 1 MiB。
+fn write_random_png(path: &std::path::Path, side: u32) {
+    use image::ImageEncoder;
+    let total = (side as usize) * (side as usize) * 3;
+    let mut pixels = vec![0_u8; total];
+    for (i, p) in pixels.iter_mut().enumerate() {
+        // 高熵 noise 模式（不可压缩）：每像素 ((i * 37) ^ (i >> 3)) mod 256
+        *p = u8::try_from((i.wrapping_mul(37) ^ (i >> 3)) & 0xff).expect("internal: & 0xff < 256");
+    }
+    let mut out = Vec::with_capacity(total);
+    image::codecs::png::PngEncoder::new(&mut out)
+        .write_image(&pixels, side, side, image::ExtendedColorType::Rgb8)
+        .unwrap();
+    std::fs::write(path, out).unwrap();
 }
 
 #[test]

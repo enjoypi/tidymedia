@@ -204,6 +204,9 @@ pub struct FaceConfig {
     pub w_blink: f32,
     /// 综合评分中微笑加分权重。
     pub w_smile: f32,
+    /// 单文件字节上限；超过此值的图扫描阶段直接 skip 计入 `failed`（防 OOM）。
+    /// 默认 50 MiB，覆盖典型相机原始 JPEG/HEIC + 适度裕度；大 RAW 文件需自行调高。
+    pub max_image_bytes: u64,
 }
 
 impl Default for FaceConfig {
@@ -221,6 +224,7 @@ impl Default for FaceConfig {
             w_sharpness: 1.0,
             w_blink: 2.0,
             w_smile: 0.5,
+            max_image_bytes: 50 * 1024 * 1024,
         }
     }
 }
@@ -274,6 +278,7 @@ mod tests {
         assert!((c.backend.face.w_sharpness - 1.0).abs() < f32::EPSILON);
         assert!((c.backend.face.w_blink - 2.0).abs() < f32::EPSILON);
         assert!((c.backend.face.w_smile - 0.5).abs() < f32::EPSILON);
+        assert_eq!(c.backend.face.max_image_bytes, 50 * 1024 * 1024);
         assert_eq!(c.log.level, "info");
     }
 

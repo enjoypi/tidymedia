@@ -8,10 +8,6 @@
 //!
 //! 不依赖 embedding 已归一化——内部按 L2 norm 再除一次让 Fake 输入也稳定。
 
-// pick_best 接入 4 模型印证流水线前本模块仅被单测调用。commit 5 把
-// cluster_identities 接入 run.rs 后此 allow 删除。
-#![allow(dead_code, reason = "占位实现：pick_best 接入 4 模型印证后启用")]
-
 use std::collections::{BTreeMap, BTreeSet};
 
 /// `MobileFaceNet` 128 维 embedding；同 `FaceEmbedder` trait 维度。
