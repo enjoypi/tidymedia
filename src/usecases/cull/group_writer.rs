@@ -243,7 +243,8 @@ fn write_manifest(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::adapters::backend::factory::{BackendFactory, DefaultBackendFactory};
+    use crate::adapters::backend::factory::DefaultBackendFactory;
+    use crate::entities::backend::factory::BackendFactory;
 
     fn local_loc(path: &str) -> Location {
         Location::Local(camino::Utf8PathBuf::from(path))

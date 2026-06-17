@@ -12,9 +12,9 @@
 //! - `split_stem_ext` / `relative_to` / `target_dir` 纯函数边界
 
 use super::*;
-use crate::adapters::backend::factory::BackendFactory;
 use crate::adapters::backend::fake::FakeBackend;
 use crate::adapters::ocr::fake::FakeTextDetector;
+use crate::entities::backend::factory::BackendFactory;
 use crate::entities::common::Error;
 use camino::Utf8PathBuf;
 use std::io;

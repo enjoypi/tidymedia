@@ -9,8 +9,8 @@ use std::sync::Arc;
 
 use tract_onnx::prelude::*;
 
-use super::FaceDetection;
 use super::tract_scrfd::{INPUT_SIDE, RawScrfd, ScrfdModel};
+use crate::usecases::face::FaceDetection;
 
 /// 读 ONNX → optimized → runnable。
 ///

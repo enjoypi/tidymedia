@@ -18,9 +18,9 @@ use image::GenericImageView;
 use parking_lot::Mutex;
 use tract_onnx::prelude::*;
 
-use super::TextDetector;
 use super::tract_dbnet_real::load_runnable;
 use crate::usecases::config::OcrConfig;
+use crate::usecases::ocr::TextDetector;
 
 /// 已优化并固定 shape 的 `DBNet` 推理图；`Arc` 让 trait 对象多线程共享。
 /// `TypedRunnableModel` 是 tract `RunnableModel<TypedFact, Box<dyn TypedOp>>` 的别名。

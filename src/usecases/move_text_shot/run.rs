@@ -14,12 +14,12 @@ use camino::{Utf8Path, Utf8PathBuf};
 use tracing::{debug, error};
 
 use super::report::MoveTextShotReport;
-use crate::adapters::backend::factory::BackendFactory;
-use crate::adapters::ocr::TextDetector;
+use crate::entities::backend::factory::BackendFactory;
 use crate::entities::backend::{Backend, EntryKind};
 use crate::entities::common::{self, canonical_prefix, under_prefix};
 use crate::entities::uri::Location;
 use crate::usecases::config::config;
+use crate::usecases::ocr::TextDetector;
 use crate::usecases::report::ReportError;
 
 const FEATURE: &str = "move_text_shot";

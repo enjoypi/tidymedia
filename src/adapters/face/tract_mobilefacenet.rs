@@ -13,9 +13,9 @@ use camino::Utf8Path;
 use parking_lot::Mutex;
 use tract_onnx::prelude::*;
 
-use super::FaceEmbedder;
 use super::tract_mobilefacenet_real::load_runnable;
 use crate::usecases::config::FaceConfig;
+use crate::usecases::face::FaceEmbedder;
 
 /// 已优化的 `MobileFaceNet` 推理图。
 pub(crate) type FacenetModel = Arc<TypedRunnableModel>;

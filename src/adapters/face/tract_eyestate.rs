@@ -20,9 +20,9 @@ use camino::Utf8Path;
 use parking_lot::Mutex;
 use tract_onnx::prelude::*;
 
-use super::EyeStateClassifier;
 use super::tract_eyestate_real::load_runnable;
 use crate::usecases::config::FaceConfig;
+use crate::usecases::face::EyeStateClassifier;
 
 pub(crate) type EyeStateModel = Arc<TypedRunnableModel>;
 

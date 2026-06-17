@@ -1,6 +1,7 @@
-use crate::adapters::backend::factory::{BackendFactory, DefaultBackendFactory};
+use crate::adapters::backend::factory::DefaultBackendFactory;
 use crate::adapters::cli::Commands;
 use crate::adapters::report_sink::JsonFileReportSink;
+use crate::entities::backend::factory::BackendFactory;
 use crate::entities::common::{Error, Result};
 use crate::entities::uri::Location;
 use crate::usecases::config::validate_archive_template;

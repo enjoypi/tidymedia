@@ -29,6 +29,8 @@ fn write_temp_config(
     unsafe {
         std::env::set_var("TIDYMEDIA_CONFIG", cfg_path.to_str().unwrap());
     }
+    // 装 yaml loader 让 lib API 内部 config() 走自定义 yaml 而非 default
+    tidymedia::install_config_loader();
     dir
 }
 

@@ -10,6 +10,7 @@ use crate::adapters::backend::fake::{FakeBackend, Op};
 use crate::adapters::backend::local::LocalBackend;
 use crate::adapters::face::fake::{FakeEyeStateClassifier, FakeFaceEmbedder, FakeFaceMeshDetector};
 use crate::entities::backend::Backend;
+use crate::entities::backend::factory::BackendFactory;
 use camino::Utf8PathBuf;
 
 fn local_loc(path: &str) -> Location {
@@ -42,7 +43,7 @@ impl MapFactory {
     }
 }
 
-impl crate::adapters::backend::factory::BackendFactory for MapFactory {
+impl BackendFactory for MapFactory {
     fn for_location(&self, loc: &Location) -> crate::entities::common::Result<Arc<dyn Backend>> {
         if let Some(b) = self.by_scheme.get(loc.scheme()) {
             return Ok(Arc::clone(b));
@@ -498,6 +499,8 @@ fn cull_records_failure_when_oversize_image_skipped() {
     unsafe {
         std::env::set_var("TIDYMEDIA_CONFIG", cfg_path.to_str().unwrap());
     }
+    // 装 yaml loader 让 usecases::config::config() 走自定义 yaml 而非 default
+    crate::install_config_loader();
 
     let src_dir = tempfile::tempdir().unwrap();
     let big_path = src_dir.path().join("big.png");

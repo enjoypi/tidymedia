@@ -9,7 +9,7 @@ use std::io;
 use camino::{Utf8Path, Utf8PathBuf};
 use parking_lot::Mutex;
 
-use super::TextDetector;
+use crate::usecases::ocr::TextDetector;
 
 /// 路径查表 + Err 注入。`new(default)` 设定查表 miss 的返回值；多次 `.with_result`
 /// 链式添加；`.inject_error(path)` 标记该路径返 Err。`Mutex` 让 trait 对象在

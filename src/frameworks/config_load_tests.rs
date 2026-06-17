@@ -1,7 +1,7 @@
-use super::config;
 use super::load;
 use super::test_common::remove_env_var;
 use super::test_common::set_env_var;
+use crate::usecases::config::config;
 
 // yaml 故意保留已删除的 timeout_secs / mtp 节：serde 默认忽略未知字段，
 // 旧 config.yaml 必须保持向后兼容不报错。

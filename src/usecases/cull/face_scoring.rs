@@ -12,8 +12,8 @@
 //! - 左眼：33（外角）/ 160 / 158 / 133（内角）/ 153 / 144
 //! - 右眼：362（外角）/ 385 / 387 / 263（内角）/ 373 / 380
 
-use crate::adapters::face::FaceDetection;
 use crate::usecases::config::FaceConfig;
+use crate::usecases::face::FaceDetection;
 
 use super::report::ScoreBreakdown;
 

@@ -1,11 +1,28 @@
-// 运行时配置结构体定义 + 默认值。
+// 运行时配置结构体定义 + 默认值 + 全局访问器。
 // 解析顺序：硬编码默认值 -> config.yaml(若存在) -> 环境变量替换 `${VAR:-default}`。
-// IO 加载逻辑（load/expand_env/config 全局访问器）在 frameworks::config。
+// yaml IO + sanitize 实现在 frameworks::config，按依赖倒置注入：frameworks 启动
+// 时调 `frameworks::config::install_global_loader()` 把 `load` fn 装到本模块的
+// [`LOADER`]；lazy init 命中时取出执行。usecases 不直接依赖 frameworks。
 
-// Re-export: usecases 层内部代码（copy.rs 等）通过此路径获取全局配置实例，
-// 避免直接依赖 frameworks 层（依赖方向 usecases → entities，不 → frameworks）。
-pub use crate::frameworks::config::config;
+use std::sync::OnceLock;
+
 use serde_derive::Deserialize;
+
+static CONFIG: OnceLock<Config> = OnceLock::new();
+static LOADER: OnceLock<fn() -> Config> = OnceLock::new();
+
+/// 全局只读配置；首次访问时取 [`LOADER`] 加载，未装则用 [`Config::default`]。
+/// CLI / FFI 启动期 MUST 先调 `crate::install_config_loader()`，否则用户的
+/// yaml 不会生效。
+pub fn config() -> &'static Config {
+    CONFIG.get_or_init(|| LOADER.get().map_or_else(Config::default, |f| f()))
+}
+
+/// 一次性注入加载器（fn pointer）；frameworks 层调用，依赖倒置入口。
+/// 多次调用静默忽略后续（OnceLock 语义）。
+pub fn install_loader(loader: fn() -> Config) {
+    let _ = LOADER.set(loader);
+}
 
 /// 默认归档模板：`{year}/{month}/{valuable_name}`。
 /// `{valuable_name}` 为路径中首个含非 ASCII 的目录段；若不存在则该段为空串。

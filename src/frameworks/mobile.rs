@@ -89,6 +89,7 @@ impl From<crate::Error> for TidyError {
     reason = "uniffi 0.31 FFI export 强制 owned String 入参"
 )]
 pub fn tidy_dry_run(src: String, output: String) -> Result<TidyStats, TidyError> {
+    crate::install_config_loader();
     run_copy_internal(&src, &output, /* dry_run = */ true)
 }
 
@@ -103,6 +104,7 @@ pub fn tidy_dry_run(src: String, output: String) -> Result<TidyStats, TidyError>
     reason = "uniffi 0.31 FFI export 强制 owned String 入参"
 )]
 pub fn tidy_run(src: String, output: String) -> Result<TidyStats, TidyError> {
+    crate::install_config_loader();
     run_copy_internal(&src, &output, /* dry_run = */ false)
 }
 
@@ -120,6 +122,7 @@ pub fn tidy_find_duplicates(
     sources: Vec<String>,
     secure: bool,
 ) -> Result<MobileFindReport, TidyError> {
+    crate::install_config_loader();
     let locs = parse_locations(sources)?;
     let result = tidy_with(
         &DefaultBackendFactory,

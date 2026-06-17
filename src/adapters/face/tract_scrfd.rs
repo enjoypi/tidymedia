@@ -16,8 +16,8 @@ use parking_lot::Mutex;
 use tract_onnx::prelude::*;
 
 use super::tract_scrfd_real::{ScaleMeta, TractRawScrfd, load_runnable};
-use super::{FaceDetection, FaceDetector};
 use crate::usecases::config::FaceConfig;
+use crate::usecases::face::{FaceDetection, FaceDetector};
 
 pub(crate) type ScrfdModel = Arc<TypedRunnableModel>;
 

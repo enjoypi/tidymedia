@@ -6,7 +6,9 @@ use std::io;
 use camino::{Utf8Path, Utf8PathBuf};
 use parking_lot::Mutex;
 
-use super::{EyeStateClassifier, FaceDetection, FaceDetector, FaceEmbedder, FaceMeshDetector};
+use crate::usecases::face::{
+    EyeStateClassifier, FaceDetection, FaceDetector, FaceEmbedder, FaceMeshDetector,
+};
 
 // ───────────────────── FakeFaceDetector ─────────────────────
 

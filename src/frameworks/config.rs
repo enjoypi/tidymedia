@@ -1,8 +1,9 @@
 // 配置加载：从文件系统 / 环境变量读取并解析为 [`Config`]。
-// Config 结构体定义在 usecases::config；本模块只负责 IO + 解析。
+// Config 结构体 + 全局 OnceLock + 访问器在 usecases::config（应用关注点）；
+// 本模块只负责 IO + 解析（外部数据格式适配器），通过 [`install_global_loader`]
+// 把 [`load`] 装到 usecases 层供 lazy init 使用。
 use std::env;
 use std::fs;
-use std::sync::OnceLock;
 
 use tracing::debug;
 use tracing::warn;
@@ -11,14 +12,16 @@ use crate::usecases::config::{
     Config, CopyConfig, FaceConfig, LogConfig, OcrConfig, validate_archive_template,
 };
 
-static CONFIG: OnceLock<Config> = OnceLock::new();
-
-/// 全局只读配置；首次调用时加载。
-pub fn config() -> &'static Config {
-    CONFIG.get_or_init(load)
+/// 把 yaml/env loader 注入 `usecases::config` 全局；CLI / FFI 启动早期调用。
+/// 多次调用静默忽略后续（OnceLock 语义）。
+pub fn install_global_loader() {
+    crate::usecases::config::install_loader(load);
 }
 
-fn load() -> Config {
+/// 读 yaml + 解析 + sanitize 出一份 [`Config`]。文件缺失或解析失败回退 [`Config::default`]。
+/// `pub(crate)` 让 `lib_tidy` 集成测试 binary 通过 `install_global_loader` 间接走此路径；
+/// 直接调 [`load`] 的 lib unit 测试位于 `config_load_tests.rs`。
+pub(crate) fn load() -> Config {
     let path = env::var("TIDYMEDIA_CONFIG").unwrap_or_else(|_| "config.yaml".to_string());
 
     let Ok(raw) = fs::read_to_string(&path) else {

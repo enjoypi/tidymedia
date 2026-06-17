@@ -37,7 +37,7 @@ pub(super) fn build_smb_backend(loc: &Location) -> Result<Arc<dyn Backend>> {
         password: std::env::var("SMB_PASSWORD").ok(),
         krb5_ccname: std::env::var("KRB5CCNAME").ok(),
     };
-    let cfg = &crate::frameworks::config::config().backend.smb;
+    let cfg = &crate::usecases::config::config().backend.smb;
     // Error 已 #[from] io::Error，直接 `?` 自动转换。
     let client = RealSmbClient::new(&target, &cfg.default_user, &cfg.workgroup)?;
     Ok(SmbBackend::arc_with_client(Arc::new(client)))
@@ -63,7 +63,7 @@ pub(super) fn build_adb_backend(loc: &Location) -> Result<Arc<dyn Backend>> {
     let Location::Adb { serial, .. } = loc else {
         unreachable!("DefaultBackendFactory routes only Location::Adb here")
     };
-    let cfg = &crate::frameworks::config::config().backend.adb;
+    let cfg = &crate::usecases::config::config().backend.adb;
     let client = RealAdbClient::new(serial.clone(), &cfg.server_host, cfg.server_port)?;
     Ok(AdbBackend::arc_with_client(Arc::new(client)))
 }

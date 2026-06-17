@@ -9,6 +9,8 @@ use std::time::SystemTime;
 
 use super::uri::Location;
 
+pub mod factory;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum EntryKind {
     File,

@@ -11,9 +11,9 @@ use camino::Utf8Path;
 use parking_lot::Mutex;
 use tract_onnx::prelude::*;
 
-use super::FaceMeshDetector;
 use super::tract_facemesh_real::load_runnable;
 use crate::usecases::config::FaceConfig;
+use crate::usecases::face::FaceMeshDetector;
 
 pub(crate) type FaceMeshModel = Arc<TypedRunnableModel>;
 

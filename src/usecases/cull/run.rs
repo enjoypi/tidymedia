@@ -25,14 +25,14 @@ use super::identity_cluster;
 use super::phash::{group_by_hash, phash};
 use super::report::{CullReport, ScoreBreakdown};
 use super::sharpness::laplacian_variance;
-use crate::adapters::backend::factory::BackendFactory;
-use crate::adapters::face::{
-    EyeStateClassifier, FaceDetection, FaceDetector, FaceEmbedder, FaceMeshDetector,
-};
+use crate::entities::backend::factory::BackendFactory;
 use crate::entities::backend::{Backend, EntryKind};
 use crate::entities::common::{self, canonical_prefix, under_prefix};
 use crate::entities::uri::Location;
 use crate::usecases::config::{FaceConfig, config};
+use crate::usecases::face::{
+    EyeStateClassifier, FaceDetection, FaceDetector, FaceEmbedder, FaceMeshDetector,
+};
 use crate::usecases::report::ReportError;
 
 const FEATURE: &str = "cull";
