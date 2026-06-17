@@ -145,10 +145,7 @@ pub type SmbBackend = RemoteBackend<SmbAdapter>;
 impl SmbBackend {
     /// 真实库适配器未启用时的入口：返回 `Unsupported` 让上层报错。
     pub fn new() -> io::Result<Self> {
-        Err(io::Error::new(
-            io::ErrorKind::Unsupported,
-            "smb-backend not enabled; rebuild with --features smb-backend",
-        ))
+        Err(super::remote::unsupported_backend("smb-backend"))
     }
 
     /// 注入自定义 client。测试用 fake，生产路径注入 `RealSmbClient`。

@@ -99,6 +99,11 @@ fn push_epoch(
 
 /// 把 epoch 秒值转成 Candidate；secs == 0 时认为字段未填，返回 None。
 /// 集成测试可借此构造任意来源/优先级的 P0/P1/P3/P4 候选，无需触达 Exif 内部类型。
+///
+/// 损坏 EXIF（如 u64 字段被填 `0xFFFF_FFFF_FFFF_FFFF`）的 secs 可能超过 `i64::MAX`；
+/// 直接 `cast_signed` 会折回大负值绕过 1904/future filter 让文件落 1969/12 桶。
+/// 用 `try_from + try_seconds + checked_add_signed` 三段守护，任一溢出即返 None
+/// 让 Index 回退到下一优先级候选。
 #[must_use]
 pub fn epoch_to_candidate(
     secs: u64,
@@ -109,7 +114,9 @@ pub fn epoch_to_candidate(
     if secs == 0 {
         return None;
     }
-    let utc = DateTime::<Utc>::UNIX_EPOCH + TimeDelta::seconds(secs.cast_signed());
+    let signed = i64::try_from(secs).ok()?;
+    let delta = TimeDelta::try_seconds(signed)?;
+    let utc = DateTime::<Utc>::UNIX_EPOCH.checked_add_signed(delta)?;
     Some(Candidate {
         utc,
         offset,

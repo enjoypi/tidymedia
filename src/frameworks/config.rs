@@ -177,7 +177,20 @@ fn resolve_var(body: &str) -> String {
         // 能让 B 等内层变量真正生效；否则字面 `${B:-x}` 会原样落进 YAML 值。
         env::var(name).unwrap_or_else(|_| expand_env(default))
     } else {
-        env::var(body).unwrap_or_default()
+        // 无 `:-` 默认值的 bare `${VAR}` 在 env 未设时返空串：YAML 接受空字符串
+        // 值，sanitize 只对 archive_template / log.level 等 fields 兜底，其他 string
+        // 字段会静默吃下空串（如 backend.smb.default_user）。改返 warn 让运维可见
+        // 配置漂移；行为仍兼容（保留旧空串语义）。
+        env::var(body).unwrap_or_else(|_| {
+            warn!(
+                feature = "config",
+                operation = "expand_env",
+                result = "unset_var_empty_substitution",
+                var = body,
+                "bare ${{{body}}} unset; substituting empty string. Use ${{{body}:-default}} to silence."
+            );
+            String::new()
+        })
     }
 }
 

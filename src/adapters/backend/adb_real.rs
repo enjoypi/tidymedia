@@ -200,10 +200,15 @@ impl RemoteClient<AdbTarget> for RealAdbClient {
 
 /// stat 返回的 unix mode `高位包含文件类型（S_IFMT` 段）。
 /// 与 adb 协议 `ADBListItemType::from_mode_and_entry` 同套位运算。
+///
+/// `S_IFMT` 高三 bit 全 0（mode==0 等）是 `adb_client` 某些版本对受限/不可读
+/// 文件的 sentinel；保守按 File 处理，避免 file_index 的 `kind != File` 过滤把
+/// 用户实际想归档的媒体静默丢弃。Symlink/socket/fifo/block/char 等 (0b001/
+/// 0b011/0b101/0b110/0b111) 仍归 Other，归档行为不变。
 fn kind_from_mode(mode: u32) -> EntryKind {
     match ((mode >> 13) & 0b111) as u8 {
         0b010 => EntryKind::Dir,
-        0b100 => EntryKind::File,
+        0b100 | 0b000 => EntryKind::File,
         _ => EntryKind::Other,
     }
 }

@@ -47,9 +47,13 @@ pub(super) fn populate_image_dates(
     let Ok(iter) = parser.parse_exif(ms) else {
         // nom-exif 整体 Err（如 Canon EOS 7D MakerNotes 偏移异常）→ 先试 JPEG APP1
         // 裸 IFD 自解析；再无 EXIF 落回 XMP packet 兜底。
+        // APP1 fallback 命中但 IFD0 仅含 Make/Model（dates 全 None，re-tag 后常见
+        // 场景）时 apply_tiff_ifd 不会填日期 → 双 0 与主路径同样需要 XMP 兜底，
+        // 否则 photoshop:DateCreated 仍存在但被静默忽略，文件落 mtime P4。
         if let Some(tiff) = parse_jpeg_app1_exif(&head) {
             apply_tiff_ifd(exif, tiff, local_offset);
-        } else {
+        }
+        if exif.date_time_original == 0 && exif.create_date == 0 {
             populate_image_xmp_fallback(&head, exif);
         }
         return;

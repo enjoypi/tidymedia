@@ -159,15 +159,32 @@ pub(crate) fn render_script(
     // 输入已按 size 降序（DuplicateGroup filter_and_sort 内部约定）；直接顺序遍历。
     for group in same {
         let _ = writeln!(sink, "# SIZE {}", group.size);
-        for path in &group.paths {
+        // 当指定了 output_prefix 但组内**无任何**文件位于 prefix 下（用户尚未把任一份
+        // 副本归档进 output），如果按原逻辑全发 active `os.remove(...)` 用户跑脚本即
+        // 永久数据丢失。此时把首份保留为注释作 survivor，其余仍标记为删除，让用户
+        // 至少保住一份；下方 `# SURVIVOR` 标记让审查者明白该行被特殊保护的原因。
+        let any_under_prefix = output_prefix.is_some_and(|p| {
+            group
+                .paths
+                .iter()
+                .any(|path| under_prefix(path.as_str(), p))
+        });
+        for (idx, path) in group.paths.iter().enumerate() {
             let path_str = path.as_str();
-            let starts = output_prefix.is_some_and(|p| under_prefix(path_str, p));
             let escaped = escape_py_string(path_str);
-            if output_prefix.is_some() && !starts {
-                let _ = writeln!(sink, "os.remove(\"{escaped}\")");
-            } else {
-                // 在 output prefix 下或未指定 prefix → 注释保护，需手动取消注释才会删
+            let protect = match output_prefix {
+                None => true,
+                Some(p) if any_under_prefix => under_prefix(path_str, p),
+                // 无 path 在 prefix 下：保留首份作 survivor，其余仍删
+                Some(_) => idx == 0,
+            };
+            if protect {
+                if output_prefix.is_some() && !any_under_prefix && idx == 0 {
+                    let _ = writeln!(sink, "# SURVIVOR (no copy under output)");
+                }
                 let _ = writeln!(sink, "# os.remove(\"{escaped}\")");
+            } else {
+                let _ = writeln!(sink, "os.remove(\"{escaped}\")");
             }
         }
         let _ = writeln!(sink);

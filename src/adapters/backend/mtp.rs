@@ -121,10 +121,7 @@ pub type MtpBackend = RemoteBackend<MtpAdapter>;
 impl MtpBackend {
     /// 真实库适配器未启用时的入口：返回 `Unsupported`。
     pub fn new() -> io::Result<Self> {
-        Err(io::Error::new(
-            io::ErrorKind::Unsupported,
-            "mtp-backend not enabled; rebuild with --features mtp-backend",
-        ))
+        Err(super::remote::unsupported_backend("mtp-backend"))
     }
 
     /// 注入自定义 client + 匹配策略。

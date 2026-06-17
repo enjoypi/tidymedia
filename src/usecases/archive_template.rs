@@ -14,7 +14,7 @@ const FEATURE_COPY: &str = "copy";
 
 /// `render` 支持的全部占位符名。`validate_archive_template` 据此拒绝未知占位符
 ///（未知名渲染时不被替换，会产生形如 `{foo}` 的字面目录段）。
-/// 新增占位符时 MUST 同步 `render` 内的替换分支与此列表。
+/// 单源：render 走单次扫描按 name 派发，新增占位符仅需扩这里 + render 内的 match。
 pub(crate) const PLACEHOLDERS: [&str; 6] =
     ["year", "month", "day", "valuable_name", "make", "model"];
 
@@ -29,28 +29,59 @@ pub struct TemplateContext<'a> {
 
 /// 渲染归档模板，返回去掉末尾空段的相对路径字符串。
 ///
-/// 空段（由连续 `/` 或尾斜杠产生）被过滤掉，调用方用 `Path::join` 接续文件名即可。
+/// 单次扫描模板字面量按 `{name}` 派发；相比旧版逐占位符 `str::replace` 减少 6
+/// 次 String 中间分配。`{make}` / `{model}` 仍懒访问 EXIF（首次遇到时缓存）。
+/// 未知占位符按 `validate_archive_template` 早期拒绝，此处仍按原 `str::replace`
+/// 行为原样保留 `{name}` 字面段（防御性兜底，与旧版字符串等价）。
 pub fn render(template: &str, ctx: &TemplateContext<'_>) -> String {
-    let mut result = template.to_string();
-
-    result = result.replace("{year}", ctx.year);
-    result = result.replace("{month}", ctx.month);
-    result = result.replace("{day}", ctx.day);
-    result = result.replace("{valuable_name}", ctx.valuable_name);
-
-    // {make} / {model}：仅在模板包含时才访问 EXIF，避免无谓解析。
-    if result.contains("{make}") {
-        let make = read_exif_field(ctx.exif, Exif::make, "make");
-        result = result.replace("{make}", &make);
+    let mut make: Option<String> = None;
+    let mut model: Option<String> = None;
+    let mut out = String::with_capacity(template.len());
+    let mut rest = template;
+    while let Some(open) = rest.find('{') {
+        out.push_str(&rest[..open]);
+        let tail = &rest[open + 1..];
+        let Some(close) = tail.find('}') else {
+            // 无闭合 `}`：剩余原样保留（validate 已拒绝此形态）
+            out.push('{');
+            out.push_str(tail);
+            return clean_segments(&out);
+        };
+        let name = &tail[..close];
+        let resolved: Option<&str> = match name {
+            "year" => Some(ctx.year),
+            "month" => Some(ctx.month),
+            "day" => Some(ctx.day),
+            "valuable_name" => Some(ctx.valuable_name),
+            "make" => Some(
+                make.get_or_insert_with(|| read_exif_field(ctx.exif, Exif::make, "make"))
+                    .as_str(),
+            ),
+            "model" => Some(
+                model
+                    .get_or_insert_with(|| read_exif_field(ctx.exif, Exif::model, "model"))
+                    .as_str(),
+            ),
+            _ => None,
+        };
+        if let Some(v) = resolved {
+            out.push_str(v);
+        } else {
+            // 未知占位符（validate_archive_template 已早期拒绝）：原样保留 `{name}`
+            // 字面段，与旧 `str::replace` 不命中行为等价，作为防御性兜底。
+            out.push('{');
+            out.push_str(name);
+            out.push('}');
+        }
+        rest = &tail[close + 1..];
     }
-    if result.contains("{model}") {
-        let model = read_exif_field(ctx.exif, Exif::model, "model");
-        result = result.replace("{model}", &model);
-    }
+    out.push_str(rest);
+    clean_segments(&out)
+}
 
-    // 过滤空段（如 `{valuable_name}` 替换后产生的空组件），拼回斜杠分隔路径。
-    result
-        .split('/')
+// 过滤空段（如 `{valuable_name}` 渲染空串后产生的空组件），拼回斜杠分隔路径。
+fn clean_segments(s: &str) -> String {
+    s.split('/')
         .filter(|seg| !seg.is_empty())
         .collect::<Vec<_>>()
         .join("/")

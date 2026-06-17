@@ -84,7 +84,10 @@ impl From<crate::Error> for TidyError {
 #[uniffi::export]
 // uniffi 0.31 FFI 边界要求 owned String；clippy::needless_pass_by_value 只在
 // android-app feature 启用时触发，跨 feature 差异须用 #[allow] 不用 #[expect]。
-#[allow(clippy::needless_pass_by_value)]
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "uniffi 0.31 FFI export 强制 owned String 入参"
+)]
 pub fn tidy_dry_run(src: String, output: String) -> Result<TidyStats, TidyError> {
     run_copy_internal(&src, &output, /* dry_run = */ true)
 }
@@ -95,7 +98,10 @@ pub fn tidy_dry_run(src: String, output: String) -> Result<TidyStats, TidyError>
 ///
 /// 当扫描源、解析路径或底层执行失败时返回 `TidyError`。
 #[uniffi::export]
-#[allow(clippy::needless_pass_by_value)]
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "uniffi 0.31 FFI export 强制 owned String 入参"
+)]
 pub fn tidy_run(src: String, output: String) -> Result<TidyStats, TidyError> {
     run_copy_internal(&src, &output, /* dry_run = */ false)
 }
@@ -106,7 +112,10 @@ pub fn tidy_run(src: String, output: String) -> Result<TidyStats, TidyError> {
 ///
 /// 当解析路径或底层执行失败时返回 `TidyError`。
 #[uniffi::export]
-#[allow(clippy::needless_pass_by_value)]
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "uniffi 0.31 FFI export 强制 owned Vec<String> 入参"
+)]
 pub fn tidy_find_duplicates(
     sources: Vec<String>,
     secure: bool,

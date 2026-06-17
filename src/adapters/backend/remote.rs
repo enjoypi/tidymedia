@@ -73,6 +73,17 @@ pub trait RemoteAdapter: Send + Sync + 'static {
     fn client(&self) -> &Arc<dyn RemoteClient<Self::Target>>;
 }
 
+/// feature off 时各 `RemoteBackend` 别名共用的 `Unsupported` 构造：把 scheme + feature
+/// 名拼成与 factory 路径同口径的错误文案，让用户看到的提示是统一的"<scheme>-backend
+/// not enabled; rebuild with --features <scheme>-backend"。
+#[must_use]
+pub fn unsupported_backend(feature: &str) -> io::Error {
+    io::Error::new(
+        io::ErrorKind::Unsupported,
+        format!("{feature} not enabled; rebuild with --features {feature}"),
+    )
+}
+
 /// sidecar 文本文件大小上限（防 `OOM`）：`sidecar.rs::read_to_string` 唯一消费者，
 /// XMP / Takeout JSON 实测 < 10 KiB；8 MiB 给极端 Takeout 复合 export 留足空间，
 /// 同时把恶意/损坏 sidecar 文件的内存放大封顶在常数倍。Local/Remote 共用同一上限：
@@ -180,7 +191,14 @@ fn walk_recursive<A: RemoteAdapter>(
         if entry.kind == EntryKind::Dir {
             match A::Target::from_location(&entry.location, adapter.ctx()) {
                 Ok(sub) => walk_recursive::<A>(adapter, &sub, out),
-                Err(e) => out.push(Err(e)),
+                Err(e) => {
+                    // Dir entry 反向 from_location 失败：子树无法下钻，本目录条目
+                    // 也跳过 Ok push——否则 caller 既收到 Err（已记 walker_errors）
+                    // 又收到 Ok(Dir) 重复事件，且后者随后被 visit_location 静默
+                    // 过滤掉，纯属噪声。
+                    out.push(Err(e));
+                    continue;
+                }
             }
         }
         out.push(Ok(entry));

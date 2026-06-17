@@ -42,7 +42,9 @@ fn make_media_info(dir: &Path, name: &str) -> Info {
 fn fill_collisions(sub: &Path) {
     fs::create_dir_all(sub).unwrap();
     fs::write(sub.join("photo.png"), b"").unwrap();
-    for i in 1..10 {
+    // 与 naming.rs 的 `0..=max_attempts` 同步：max_attempts=10 时填原名 + _1..=_10
+    // 共 11 个 slot 才能耗尽。
+    for i in 1..=10 {
         fs::write(sub.join(format!("photo_{i}.png")), b"").unwrap();
     }
 }
@@ -75,14 +77,17 @@ fn generate_unique_name_uses_suffix_when_first_taken() {
 }
 
 #[test]
-fn generate_unique_name_none_after_10_collisions() {
+fn generate_unique_name_none_after_max_collisions() {
     let src = tempdir().unwrap();
     let info = make_media_info(src.path(), "photo.png");
     let out = tempdir().unwrap();
     fill_collisions(&out.path().join("2024").join("01"));
     let res =
         generate_unique_name(&info, &local_loc(out.path()), &local_arc(), DEFAULT_TMPL).unwrap();
-    assert!(res.is_none(), "should exhaust after 10 collisions");
+    assert!(
+        res.is_none(),
+        "should exhaust after max_attempts+1 collisions"
+    );
 }
 
 // 无扩展名文件冲突重命名不得产生尾点（"photo_1." 在 Windows 会被 CreateFile 剥点、

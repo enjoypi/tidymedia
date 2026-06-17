@@ -63,7 +63,10 @@ pub(super) fn generate_unique_name(
     let sub_dir_loc = output_dir.with_path(sub_dir_path.clone());
 
     let max_attempts = config().copy.unique_name_max_attempts;
-    for i in 0..max_attempts {
+    // 范围 `0..=max_attempts`：i=0 试原名，i=1..=N 试 `_1..=_N`，共 N+1 候选；
+    // 与配置文档"`unique_name_max_attempts` = N 个数字后缀"一致。旧 `0..N` 让
+    // 后缀只到 _{N-1}，N=10 时 _10 永不被尝试，第 11 个同名文件直接失败。
+    for i in 0..=max_attempts {
         let target_path = if i == 0 {
             sub_dir_path.join(file_name)
         } else {

@@ -279,8 +279,9 @@ fn copy_succeeds_when_dst_open_read_would_fail_after_transfer() {
     assert_eq!(report.failed, 0);
 }
 
-// generate_unique_name 耗尽：output 子桶预先塞满同名 + 9 个 _i 变体（max_attempts=10），
-// do_copy 内 `if let Some(..) = generate_unique_name(..)?` 走 None 分支 → ops.rs L106
+// generate_unique_name 耗尽：output 子桶预先塞满原名 + _1..=_10 共 11 个 slot
+// （与 naming.rs `0..=max_attempts` 同步，max_attempts=10），do_copy 内
+// `if let Some(..) = generate_unique_name(..)?` 走 None 分支 → ops.rs L106
 // Err arm 触发。本测试在集成 binary 触发该路径（lib unit 已有同语义测试，缺集成 instance）。
 #[test]
 fn copy_reports_failure_when_unique_name_exhausted() {
@@ -294,7 +295,7 @@ fn copy_reports_failure_when_unique_name_exhausted() {
     let sub = out.path().join("2024").join("05");
     std::fs::create_dir_all(&sub).unwrap();
     std::fs::write(sub.join("sample-with-offset.jpg"), b"").unwrap();
-    for i in 1..10 {
+    for i in 1..=10 {
         std::fs::write(sub.join(format!("sample-with-offset_{i}.jpg")), b"").unwrap();
     }
 

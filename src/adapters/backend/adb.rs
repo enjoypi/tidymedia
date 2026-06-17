@@ -110,10 +110,7 @@ pub type AdbBackend = RemoteBackend<AdbAdapter>;
 impl AdbBackend {
     /// 真实库适配器未启用时的入口：返回 `Unsupported` 让上层报错。
     pub fn new() -> io::Result<Self> {
-        Err(io::Error::new(
-            io::ErrorKind::Unsupported,
-            "adb-backend not enabled; rebuild with --features adb-backend",
-        ))
+        Err(super::remote::unsupported_backend("adb-backend"))
     }
 
     /// 注入自定义 client。测试用 fake；生产路径由 lib.rs 在 feature 启用时

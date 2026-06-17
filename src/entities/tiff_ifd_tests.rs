@@ -170,12 +170,15 @@ fn parse_ifds_count_out_of_bounds_returns_none() {
 }
 
 #[test]
-fn parse_ifds_entry_out_of_bounds_returns_none() {
-    // count=5 但仅给 1 个 entry 的空间，第二个 entry 读 tag 越界
+fn parse_ifds_entry_out_of_bounds_preserves_earlier_entries() {
+    // count=5 但仅给 1 个 entry 的空间：scan_ifd 中段越界用 break 截断（lenient），
+    // 已成功解出的字段保留。本例 entry[0] 的 val=100 越界让 read_ascii 返 None，
+    // 故 make 仍为 None；关键断言：parse_ifds 整体返 Some 而非 None。
     let mut buf = Vec::new();
     buf.extend_from_slice(&u16_bytes(5, ByteOrder::Le));
     buf.extend_from_slice(&ifd_entry(0x010f, 2, 6, 100, ByteOrder::Le));
-    assert_eq!(parse_ifds(&buf, 0, ByteOrder::Le), None);
+    let got = parse_ifds(&buf, 0, ByteOrder::Le).expect("partial parse retained");
+    assert!(got.make.is_none());
 }
 
 #[test]

@@ -76,20 +76,21 @@ fn render_script_python_no_output_all_commented() {
 }
 
 #[test]
-fn render_script_uncommments_paths_outside_output_prefix() {
+fn render_script_keeps_survivor_when_no_path_under_output_prefix() {
+    // 数据全在 /data，无任何 path 落在 /keepers 下：fix #2 让每组第一份做 survivor
+    // （注释保护），其余仍发待删。否则跑脚本删光 = 数据丢失。
     let same = sample_two_groups();
     let out = run_render(&same, Some("/keepers"));
-    // /data/* 不在 /keepers 下 → 待删（无注释）
-    for path in [
-        "/data/big_a",
-        "/data/big_b",
-        "/data/small_a",
-        "/data/small_b",
-    ] {
-        let line = format!("os.remove(\"{path}\")");
-        assert!(out.contains(&line), "missing line: {line}\nfull:\n{out}");
-    }
-    assert!(!out.contains("# os.remove(\"/data/"));
+    // SURVIVOR 标记 + 首份注释保护
+    assert!(out.contains("# SURVIVOR (no copy under output)"));
+    assert!(out.contains("# os.remove(\"/data/big_a\")\n"));
+    assert!(out.contains("# os.remove(\"/data/small_a\")\n"));
+    // 同组其余仍发待删
+    assert!(out.contains("os.remove(\"/data/big_b\")\n"));
+    assert!(out.contains("os.remove(\"/data/small_b\")\n"));
+    // 但 big_b/small_b 自身不应被注释（出现 `# os.remove(".../*_b")` 即漏删）
+    assert!(!out.contains("# os.remove(\"/data/big_b\")"));
+    assert!(!out.contains("# os.remove(\"/data/small_b\")"));
 }
 
 /// `/photos_backup` 不应被 `/photos` prefix 误判为「在 output 内须保留」。

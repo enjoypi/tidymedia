@@ -23,11 +23,15 @@ fn strd_shorter_than_ifd_base_returns_none() {
 }
 
 #[test]
-fn ifd_count_claims_more_entries_than_present_returns_none() {
-    // count=3 但只有 1 个 entry 的空间 → 越界 → 整体拒绝。
+fn ifd_count_claims_more_entries_than_present_preserves_parsed_fields() {
+    // count=3 但只有 1 个 entry 的空间：scan_ifd 中段越界用 break 截断，已成功
+    // 解出的 IFD0 字段（Make）保留（防止 PNG eXIf / JPEG APP1 等截断 fixture 让
+    // 整个 EXIF 退化到 mtime P4）。
     let mut strd = avif_with_make(b"FUJIFILM\0");
     strd[IFD_BASE] = 3;
-    assert_eq!(parse_avif_ifd(&strd), None);
+    let got = parse_avif_ifd(&strd).expect("partial parse retained");
+    assert_eq!(got.make.as_deref(), Some("FUJIFILM"));
+    assert_eq!(got.date_time_original, None);
 }
 
 #[test]
@@ -90,21 +94,26 @@ fn entry_with_unknown_tag_is_skipped() {
     assert_eq!(got, AviExif::default());
 }
 
-// ── scan_ifd：entry 各字段处截断 ──
+// ── scan_ifd：entry 各字段处截断（lenient 模式：截断点之前的 IFD 字段保留） ──
 
 #[test]
-fn ifd_entry_truncated_at_typ_returns_none() {
-    assert_eq!(parse_avif_ifd(&avif_truncated_entry(2)), None);
+fn ifd_entry_truncated_at_typ_yields_empty_fields() {
+    // count=1 但第一个 entry 在 typ 字段处截断：break 截断，无字段写入，
+    // 返回 Some(默认 TiffIfd) 让 caller 走下一优先级而非整体 None。
+    let got = parse_avif_ifd(&avif_truncated_entry(2)).expect("count was readable");
+    assert_eq!(got, AviExif::default());
 }
 
 #[test]
-fn ifd_entry_truncated_at_cnt_returns_none() {
-    assert_eq!(parse_avif_ifd(&avif_truncated_entry(5)), None);
+fn ifd_entry_truncated_at_cnt_yields_empty_fields() {
+    let got = parse_avif_ifd(&avif_truncated_entry(5)).expect("count was readable");
+    assert_eq!(got, AviExif::default());
 }
 
 #[test]
-fn ifd_entry_truncated_at_val_returns_none() {
-    assert_eq!(parse_avif_ifd(&avif_truncated_entry(9)), None);
+fn ifd_entry_truncated_at_val_yields_empty_fields() {
+    let got = parse_avif_ifd(&avif_truncated_entry(9)).expect("count was readable");
+    assert_eq!(got, AviExif::default());
 }
 
 // strd 头部即截断（IFD count u16le 都不够读）→ scan_ifd 首句 u16le(base, 0)? 返 None。

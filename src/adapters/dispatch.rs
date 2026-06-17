@@ -18,9 +18,19 @@ pub enum CommandResult {
 ///
 /// # Errors
 ///
-/// 当命令执行过程中发生 IO 错误、backend 构造失败或业务逻辑出错时返回 `Err`。
+/// 当命令执行过程中发生 IO 错误、backend 构造失败、业务逻辑出错，或 Copy/Move
+/// 出现非零 failed（部分文件复制失败）时返回 `Err`，让 CLI 退出码非 0 让 CI/cron
+/// 脚本能区分"全部成功"与"部分失败"。
 pub fn tidy(command: Commands) -> Result<()> {
-    tidy_with(&DefaultBackendFactory, command).map(|_| ())
+    match tidy_with(&DefaultBackendFactory, command)? {
+        CommandResult::Copy(report) if report.failed > 0 => {
+            Err(Error::Io(std::io::Error::other(format!(
+                "copy partial failure: {} failed, {} copied, {} ignored",
+                report.failed, report.copied, report.ignored
+            ))))
+        }
+        CommandResult::Copy(_) | CommandResult::Find(_) => Ok(()),
+    }
 }
 
 /// 注入版入口：调用方提供 [`BackendFactory`]，常用于集成测试用 fake 装配混合 scheme。

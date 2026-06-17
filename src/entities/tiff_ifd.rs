@@ -75,7 +75,10 @@ pub(crate) fn parse_ifds(base: &[u8], ifd0_off: usize, order: ByteOrder) -> Opti
 }
 
 // 扫单个 IFD 填充 out；外参 `exif_ifd` 在命中 ExifOffset tag 时被写入。
-// 返回 `Option<()>` 表达"IFD 本身可读"——count 字段越界即 None。
+// 返回 `Option<()>` 表达"IFD count 字段本身可读"——只要 count 能读出即返 Some，
+// 中段 entry 越界用 break 截断，已收集字段保留：截断 fixture（PNG eXIf chunk
+// 长度声明 N entries 但实际 buffer 只够前 K 条）下，前 K 条的 Make/Model/DTO
+// 仍可消费，否则 caller 退到 mtime P4 归错桶。
 fn scan_ifd(
     base: &[u8],
     ifd_off: usize,
@@ -86,10 +89,18 @@ fn scan_ifd(
     let count = u16_at(base, ifd_off, order)? as usize;
     for i in 0..count {
         let e = ifd_off + 2 + i * 12;
-        let tag = u16_at(base, e, order)?;
-        let typ = u16_at(base, e + 2, order)?;
-        let cnt = u32_at(base, e + 4, order)? as usize;
-        let val = u32_at(base, e + 8, order)? as usize;
+        let Some(tag) = u16_at(base, e, order) else {
+            break;
+        };
+        let Some(typ) = u16_at(base, e + 2, order) else {
+            break;
+        };
+        let Some(cnt) = u32_at(base, e + 4, order).map(|v| v as usize) else {
+            break;
+        };
+        let Some(val) = u32_at(base, e + 8, order).map(|v| v as usize) else {
+            break;
+        };
         match (tag, typ) {
             (TAG_EXIF_OFFSET, TYPE_LONG) => *exif_ifd = Some(val),
             (TAG_MAKE, TYPE_ASCII) => out.make = read_ascii(base, val, cnt),
