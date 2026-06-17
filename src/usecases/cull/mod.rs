@@ -9,6 +9,7 @@
 
 mod face_align;
 mod group_writer;
+mod identity_cluster;
 mod phash;
 mod report;
 mod run;
