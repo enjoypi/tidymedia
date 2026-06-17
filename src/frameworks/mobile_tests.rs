@@ -31,11 +31,14 @@ fn dry_run_returns_real_scanned_count() {
         out.path().to_str().unwrap().into(),
     )
     .unwrap();
-    // dry-run で実ファイルがなければ total_scanned は 1（スキャン済み）。
-    // dry-run でも copy カウンタは「コピー予定数」を返す（実ファイル作成なし）。
+    // dry-run 仍扫源：total_scanned 含 1 张图；copied 是「计划复制数」（dry-run 不真写）。
     assert_eq!(stats.total_scanned, 1);
+    assert_eq!(
+        stats.copied, 1,
+        "dry-run copy 计数应等于计划复制数（成功且未跳过）"
+    );
     assert_eq!(stats.status, "dry-run ok");
-    // 出力ディレクトリにファイルが実際に書き込まれていないことで dry-run を確認
+    // 真实未写盘：output 目录保持空
     let written: Vec<_> = std::fs::read_dir(out.path()).unwrap().collect();
     assert!(written.is_empty(), "dry-run must not write to output dir");
 }
@@ -91,9 +94,11 @@ fn find_duplicates_report_clone_and_debug() {
         group_count: 2,
         groups: vec![
             MobileDuplicateGroup {
+                size_bytes: 1024,
                 paths: vec!["a".into(), "b".into()],
             },
             MobileDuplicateGroup {
+                size_bytes: 2048,
                 paths: vec!["c".into(), "d".into()],
             },
         ],
@@ -150,11 +155,10 @@ fn run_failed_files_marks_status_partial() {
 #[test]
 fn find_duplicates_invalid_source_returns_err() {
     let err = tidy_find_duplicates(vec!["/nonexistent_xyz_dir".into()], false);
-    // /nonexistent_xyz_dir は存在しないが LocalBackend は visit で
-    // エラーをスキップするため Ok(empty) が返る — エラー経路は
-    // URI パース失敗で確認する
-    let _ = err; // Ok or Err どちらでもよい
-    // URI パースエラーを確認
+    // /nonexistent_xyz_dir 不存在；LocalBackend.visit 会静默跳过 walker 错误返 Ok(empty)
+    // 故此处 Ok/Err 都可接受；错误路径走下方 URI parse 失败再确认。
+    let _ = err;
+    // URI parse 失败必返 Err。
     let parse_err = tidy_find_duplicates(vec!["smb://".into()], false);
     assert!(parse_err.is_err());
 }

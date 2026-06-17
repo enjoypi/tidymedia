@@ -184,10 +184,29 @@ fn map_and_log(
 }
 
 fn mkparent<A: RemoteAdapter>(target: &A::Target, client: &Arc<dyn RemoteClient<A::Target>>) {
-    if let Some(parent) = target.parent() {
-        // best-effort：父目录创建失败由随后的 write/copy 自身报错。
-        let _ = mkdir_recursive::<A>(&parent, client);
+    if let Some(parent) = target.parent()
+        && let Err(e) = mkdir_recursive::<A>(&parent, client)
+    {
+        log_mkparent_err::<A>(&parent, &e);
     }
+}
+
+/// best-effort：父目录创建失败由随后的 write/copy 自身报错；R3 要求所有外部调用
+/// 输出结构化日志，否则运维拿到的「写入 ENOENT」缺父目录创建失败上下文。
+/// 抽独立 fn + `coverage(off)`：debug! 宏 closure-form micro-region 在 release
+/// default subscriber 不订阅 debug 时永 0-hit，与 CLAUDE.md「tracing macro micro-region」
+/// 套路一致；调用方的 `if let Err` 分支由 `open_write_mkparent_failure_swallowed_to_debug_log`
+/// 等测试覆盖。
+#[cfg_attr(coverage_nightly, coverage(off))]
+fn log_mkparent_err<A: RemoteAdapter>(parent: &A::Target, e: &io::Error) {
+    debug!(
+        scheme = A::scheme(),
+        operation = "mkparent",
+        path = %parent.path(),
+        result = "error",
+        error = %e,
+        "mkparent best-effort failed; subsequent write will surface error"
+    );
 }
 
 /// 递归扫描远端目录树，把所有 entry（含 Dir，与 `LocalBackend::walk` 行为对齐）收集到 `out`。

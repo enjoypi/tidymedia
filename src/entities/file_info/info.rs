@@ -222,12 +222,15 @@ impl Info {
         let gps_utc = self.exif.as_ref().and_then(exif::Exif::gps_utc);
         // ModifyDate 不进候选，仅作多数派仲裁的 re-save 旁证；epoch 已在
         // EXIF 解析层按配置时区转换，0 = 缺失。
+        // 与 epoch_to_candidate 同口径：i64::try_from 守护 u64>i64::MAX 折回负数
+        // 致 timestamp_opt 返虚假 1969 时间戳被多数派误用为 re-save 旁证。
         let modify_date_utc = self
             .exif
             .as_ref()
             .map(exif::Exif::exif_modify_date)
             .filter(|&s| s > 0)
-            .and_then(|s| Utc.timestamp_opt(s.cast_signed(), 0).single());
+            .and_then(|s| i64::try_from(s).ok())
+            .and_then(|s| Utc.timestamp_opt(s, 0).single());
         let mut candidates = match self.exif.as_ref() {
             Some(exif) => media_time::candidates_from_exif(exif, default_offset),
             None => Vec::new(),
@@ -285,20 +288,14 @@ fn ensure_hashable(meta: &crate::entities::backend::Metadata, loc: &Location) ->
     Ok(())
 }
 
-/// fs 兜底：取 mtime 与 btime 的较早值；任一缺失就用另一方；都缺失退到 `UNIX_EPOCH`。
-/// 这是 P4 内部决策（mtime 兜底）——选较早值是因为 btime 在某些
-/// 文件系统上 == ctime，受 inode 变更影响，比 mtime 更不稳定。
+/// P4 fs 兜底：按 CLAUDE.md「P4 = FsMtime」定义优先用 mtime；mtime 缺失才退 btime；
+/// 两者都缺失退 `UNIX_EPOCH`。btime 在 copy 后通常 = 复制时刻（晚于源 mtime），
+/// 在某些 fs 上 == ctime（inode 变更时刻），比 mtime 更不稳定，故不取较早值。
 pub(super) fn pick_fs_fallback(
     modified: Option<SystemTime>,
     created: Option<SystemTime>,
 ) -> SystemTime {
-    match (modified, created) {
-        (Some(m), Some(c)) if m < c => m,
-        // m >= c、或 m 缺失：优先用 c；两者都缺失退到 EPOCH
-        (_, Some(c)) => c,
-        (Some(m), None) => m,
-        (None, None) => SystemTime::UNIX_EPOCH,
-    }
+    modified.or(created).unwrap_or(SystemTime::UNIX_EPOCH)
 }
 
 impl PartialEq for Info {

@@ -50,9 +50,12 @@ pub struct MobileFindReport {
     pub bytes_read: u64,
 }
 
-/// 一组重复文件的路径集合。uniffi 0.31 原生支持嵌套 Record sequence，跨 FFI 直接映射。
+/// 一组重复文件：size（组内共享，下游按 size 过滤/排序用）+ 路径集合。
+/// uniffi 0.31 原生支持嵌套 Record sequence，跨 FFI 直接映射。
 #[derive(uniffi::Record, Clone, Debug)]
 pub struct MobileDuplicateGroup {
+    /// 组内每个文件的字节数（同组 size 相同）。
+    pub size_bytes: u64,
     pub paths: Vec<String>,
 }
 
@@ -142,6 +145,9 @@ pub fn tidy_find_duplicates(
 #[uniffi::export]
 #[must_use]
 pub fn tidymedia_version() -> String {
+    // 装 config loader 不强求 — 版本号不消费 config — 但保持「每个 FFI export 顶部
+    // 都装一遍」的统一约定，避免后续新增 export 时漏装；OnceLock 装载是幂等的。
+    crate::install_config_loader();
     env!("CARGO_PKG_VERSION").to_string()
 }
 
@@ -198,7 +204,10 @@ fn mobile_report_from(report: FindReport) -> MobileFindReport {
         groups: report
             .groups
             .into_iter()
-            .map(|paths| MobileDuplicateGroup { paths })
+            .map(|g| MobileDuplicateGroup {
+                size_bytes: g.size,
+                paths: g.paths,
+            })
             .collect(),
         bytes_read: report.bytes_read,
     }

@@ -198,8 +198,9 @@ fn parse_ifds_exif_subifd_offset_invalid_keeps_ifd0_fields() {
 // ---------- read_ascii 边界 ----------
 
 #[test]
-fn parse_ifds_ascii_inline_cnt_le_4_returns_none() {
-    // Model ASCII cnt=4 → 内联存储，本实现按损坏数据拒绝（read_ascii cnt <= 4 → None）
+fn parse_ifds_ascii_inline_cnt_le_4_decoded_from_val() {
+    // TIFF 规范：Model ASCII cnt=4 → 数据 inline 存于 entry val 字段 4 字节。
+    // 新实现按规范读 inline 数据（旧实现拒绝，让 DJI/LG/FUJI 等短 Make/Model 字段丢失）。
     let mut buf = Vec::new();
     buf.extend_from_slice(&u16_bytes(1, ByteOrder::Le));
     buf.extend_from_slice(&ifd_entry(
@@ -211,7 +212,7 @@ fn parse_ifds_ascii_inline_cnt_le_4_returns_none() {
     ));
     buf.extend_from_slice(&u32_bytes(0, ByteOrder::Le));
     let ifd = parse_ifds(&buf, 0, ByteOrder::Le).unwrap();
-    assert_eq!(ifd.model, None);
+    assert_eq!(ifd.model.as_deref(), Some("abcd"));
 }
 
 #[test]
@@ -293,4 +294,62 @@ fn parse_ifds_exif_pointer_with_wrong_type_ignored() {
     buf.extend_from_slice(&u32_bytes(0, ByteOrder::Le));
     let ifd = parse_ifds(&buf, 0, ByteOrder::Le).unwrap();
     assert_eq!(ifd, TiffIfd::default());
+}
+
+/// TIFF 规范：ASCII cnt ≤ 4 时数据 inline 存在 entry 的 val 字段（4 字节）。
+/// DJI（"DJI\0" cnt=4）/ LG（"LG\0" cnt=3）等短厂商名走此形式，过去被静默拒绝。
+#[test]
+fn parse_ifds_inline_ascii_make_short_dji() {
+    let mut buf = Vec::new();
+    // 1 entry：Make ASCII cnt=4，val 字段 = b"DJI\0"
+    buf.extend_from_slice(&u16_bytes(1, ByteOrder::Le));
+    // 手工构造 entry：tag=0x010f Make, typ=2 ASCII, cnt=4, val 字段直接是 ASCII bytes
+    buf.extend_from_slice(&u16_bytes(0x010f, ByteOrder::Le)); // tag Make
+    buf.extend_from_slice(&u16_bytes(2, ByteOrder::Le)); // typ ASCII
+    buf.extend_from_slice(&u32_bytes(4, ByteOrder::Le)); // cnt=4
+    buf.extend_from_slice(b"DJI\0"); // val 字段 4 字节 inline ASCII
+    buf.extend_from_slice(&u32_bytes(0, ByteOrder::Le)); // next-IFD
+    let ifd = parse_ifds(&buf, 0, ByteOrder::Le).unwrap();
+    assert_eq!(ifd.make.as_deref(), Some("DJI"));
+}
+
+#[test]
+fn parse_ifds_inline_ascii_make_two_chars_lg() {
+    let mut buf = Vec::new();
+    buf.extend_from_slice(&u16_bytes(1, ByteOrder::Le));
+    buf.extend_from_slice(&u16_bytes(0x010f, ByteOrder::Le));
+    buf.extend_from_slice(&u16_bytes(2, ByteOrder::Le));
+    buf.extend_from_slice(&u32_bytes(3, ByteOrder::Le)); // cnt=3 (LG\0)
+    // val 字段 4 字节：前 3 字节是 ASCII "LG\0"，第 4 字节填充
+    buf.extend_from_slice(b"LG\0\0");
+    buf.extend_from_slice(&u32_bytes(0, ByteOrder::Le));
+    let ifd = parse_ifds(&buf, 0, ByteOrder::Le).unwrap();
+    assert_eq!(ifd.make.as_deref(), Some("LG"));
+}
+
+#[test]
+fn parse_ifds_inline_ascii_be_byte_order() {
+    // BE 字节序下 inline 同样按文件顺序读取（4 字节直接是 ASCII）。
+    let mut buf = Vec::new();
+    buf.extend_from_slice(&u16_bytes(1, ByteOrder::Be));
+    buf.extend_from_slice(&u16_bytes(0x010f, ByteOrder::Be));
+    buf.extend_from_slice(&u16_bytes(2, ByteOrder::Be));
+    buf.extend_from_slice(&u32_bytes(4, ByteOrder::Be));
+    buf.extend_from_slice(b"FUJI"); // 4 字节 inline，BE/LE 顺序对 byte string 无影响
+    buf.extend_from_slice(&u32_bytes(0, ByteOrder::Be));
+    let ifd = parse_ifds(&buf, 0, ByteOrder::Be).unwrap();
+    assert_eq!(ifd.make.as_deref(), Some("FUJI"));
+}
+
+#[test]
+fn parse_ifds_ascii_cnt_zero_returns_none() {
+    let mut buf = Vec::new();
+    buf.extend_from_slice(&u16_bytes(1, ByteOrder::Le));
+    buf.extend_from_slice(&u16_bytes(0x010f, ByteOrder::Le));
+    buf.extend_from_slice(&u16_bytes(2, ByteOrder::Le));
+    buf.extend_from_slice(&u32_bytes(0, ByteOrder::Le)); // cnt=0
+    buf.extend_from_slice(&u32_bytes(0, ByteOrder::Le));
+    buf.extend_from_slice(&u32_bytes(0, ByteOrder::Le));
+    let ifd = parse_ifds(&buf, 0, ByteOrder::Le).unwrap();
+    assert_eq!(ifd.make, None);
 }

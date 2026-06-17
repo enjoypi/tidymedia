@@ -177,10 +177,20 @@ mod tests {
 
     /// 渐变图：DCT 低频集中、对缩放鲁棒，作为 downscale 稳定性测试 fixture。
     fn gradient() -> RgbImage {
-        let mut img = RgbImage::new(64, 64);
-        for y in 0_u32..64 {
-            for x in 0_u32..64 {
-                let v = u8::try_from((x + y) * 2 % 255).expect("internal: mod 255 fits u8");
+        gradient_at(64)
+    }
+
+    /// 任意分辨率渐变图。≥ 256 × 256 大尺寸用于稳定性测试（与 CLAUDE.md
+    /// 「pHash 测试 fixture 设计」一致：低分辨率 + checker 经 phash 32 × 32 缩放
+    /// 高频损失严重，不适合做缩放/重压缩稳定性断言）。
+    fn gradient_at(side: u32) -> RgbImage {
+        let mut img = RgbImage::new(side, side);
+        for y in 0_u32..side {
+            for x in 0_u32..side {
+                // 线性映射 0..255 区间，避免 `% 255` 取模在大尺寸下出现「断崖」让 phash
+                // 把图像识别为多个 stripe pattern 而虚增汉明距离。
+                let v = u8::try_from(((x + y) * 255 / (2 * side - 2).max(1)).min(255))
+                    .expect("internal: clamped to <=255 fits u8");
                 img.put_pixel(x, y, image::Rgb([v, v, v]));
             }
         }
@@ -203,8 +213,19 @@ mod tests {
 
     #[test]
     fn phash_stable_under_minor_brightness_shift() {
-        // checker 像素 ±5 平移 → DCT 低频结构保持 → Hamming 距离很小
-        let a = checker();
+        // 256×256 high-entropy random fill + 像素 ±5 平移 → DCT 系数远离中位数 →
+        // 小幅 brightness 偏移翻转的低频系数符号极少 → Hamming 距离应很小。
+        // 旧实现用 64×64 checker：经 phash 32×32 缩放后高频损失严重让断言脆弱
+        // （CLAUDE.md「pHash 测试 fixture 设计」明确大图 + random/gradient 才是
+        // 稳定性测试口径，本测试用 random 而非纯 gradient 以避开后者中位数附近
+        // 系数密集的脆弱性）。
+        let mut a = RgbImage::new(256, 256);
+        for (i, px) in a.pixels_mut().enumerate() {
+            // 高熵 noise：与 cull/run_tests.rs::write_random_png 同套路
+            let v = u8::try_from((i.wrapping_mul(37) ^ (i >> 3)) & 0xff)
+                .expect("internal: & 0xff < 256");
+            px.0 = [v, v, v];
+        }
         let mut b = a.clone();
         for px in b.pixels_mut() {
             for ch in &mut px.0 {

@@ -211,14 +211,68 @@ fn list_with_empty_parent_path_includes_all_files() {
 }
 
 #[test]
-fn list_includes_entry_when_child_equals_parent() {
-    // 触发 list filter `child == parent` 的 True 分支：path 自身作为 key
-    // 且 path 不以末尾 `/` 形式做前缀匹配。
+fn list_excludes_entry_when_child_equals_parent() {
+    // 新语义：list 只返直属子项，不含 parent 自身（真实 SMB/ADB 行为对齐）。
     let c = client();
     c.add_file("/self", b"x".to_vec());
     let t = TestTarget {
         path: Utf8PathBuf::from("/self"),
     };
     let entries = c.list(&t).unwrap();
-    assert_eq!(entries.len(), 1);
+    assert_eq!(entries.len(), 0, "self path 不算 self 的子项");
+}
+
+#[test]
+fn is_direct_child_rejects_when_inner_is_empty() {
+    // 触发 `!inner.is_empty()` 短路 False arm：child = parent + "/"（结尾分隔符没 segment）。
+    // add_file 直接插入带尾分隔符的 key，让 list("/a") 看到 child="/a/" → strip 后 inner=""。
+    let c = client();
+    c.add_file("/a/", b"x".to_vec());
+    c.add_file("/a/real.txt", b"y".to_vec());
+    let t = TestTarget {
+        path: Utf8PathBuf::from("/a"),
+    };
+    let entries = c.list(&t).unwrap();
+    assert_eq!(entries.len(), 1, "尾分隔符 /a/ 不算 /a 的直属项");
+    assert!(
+        entries[0].location.display().ends_with("real.txt"),
+        "got: {entries:?}"
+    );
+}
+
+#[test]
+fn is_direct_child_matches_backslash_separator() {
+    // 触发 is_direct_child 末尾 `!inner.contains('\\')` 短路 sub-branch（Windows-like
+    // 反斜杠路径不在常规测试覆盖中，单独构造覆盖）。
+    let c = client();
+    c.add_file(r"a\x.txt", b"x".to_vec());
+    c.add_file(r"a\sub\deep.txt", b"y".to_vec());
+    let t = TestTarget {
+        path: Utf8PathBuf::from("a"),
+    };
+    let entries = c.list(&t).unwrap();
+    // a\x.txt 是直属（inner = x.txt，无内嵌分隔符）；a\sub\deep.txt 含 '\\' → 排除
+    assert_eq!(entries.len(), 1, "got: {entries:?}");
+    assert!(
+        entries[0].location.display().ends_with("x.txt"),
+        "got: {entries:?}"
+    );
+}
+
+#[test]
+fn list_returns_only_direct_children() {
+    // 多层目录 fixture：parent /a 含直属 x.txt + 子目录 sub + sub 下嵌套 nested.txt。
+    // list("/a") 必返 2（x.txt + sub），不含 nested.txt（让 walk_recursive 多层递归
+    // 不重复 yield）。
+    let c = client();
+    c.add_file("/a/x.txt", b"x".to_vec());
+    c.add_dir("/a/sub");
+    c.add_file("/a/sub/nested.txt", b"n".to_vec());
+    let t = TestTarget {
+        path: Utf8PathBuf::from("/a"),
+    };
+    let entries = c.list(&t).unwrap();
+    assert_eq!(entries.len(), 2, "仅直属 x.txt 与 sub，不含 nested.txt");
+    let dir_count = entries.iter().filter(|e| e.kind == EntryKind::Dir).count();
+    assert_eq!(dir_count, 1, "sub 是 Dir entry");
 }

@@ -129,7 +129,8 @@ fn pick_fs_fallback_modified_smaller_than_created() {
     );
 }
 
-/// `pick_fs_fallback：modified` ≥ created → 取 created。
+/// `pick_fs_fallback`：P4 定义为 mtime，modified 始终优先 created（btime 在 copy 后
+/// 通常 = 复制时刻不稳定）。`modified ≥ created` 时仍返 modified。
 #[test]
 fn pick_fs_fallback_modified_ge_created() {
     let m = SystemTime::UNIX_EPOCH + Duration::from_secs(200);
@@ -139,7 +140,8 @@ fn pick_fs_fallback_modified_ge_created() {
         got.duration_since(SystemTime::UNIX_EPOCH)
             .unwrap()
             .as_secs(),
-        100
+        200,
+        "P4=mtime：modified 优先于 created"
     );
 }
 

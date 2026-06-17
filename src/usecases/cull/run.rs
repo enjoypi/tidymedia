@@ -107,7 +107,9 @@ pub fn cull(
             &mut report,
         );
     }
-    report.scanned = scanned.len();
+    // report.scanned 由 scan_source 增量累加触达的 source 文件数（含被识别为非媒体
+    // 跳过、超大跳过、解码失败、IO 失败），口径与 CopyReport.scanned 一致；
+    // 而 scanned vec 仅含成功解码的图（用于后续分组/评分），不是 report 的 scanned。
 
     let hashes: Vec<u64> = scanned.iter().map(|s| s.hash).collect();
     let groups = group_by_hash(&hashes, phash_max_hamming);
@@ -161,7 +163,7 @@ fn process_group(
     report: &mut CullReport,
 ) {
     report.grouped += 1;
-    let (best_idx, best_breakdown) = pick_best_for_group(
+    let (best_idx, best_breakdown, breakdowns) = pick_best_for_group(
         grp_indices,
         scanned,
         scrfd,
@@ -172,14 +174,17 @@ fn process_group(
         report,
     );
     let best = &scanned[best_idx];
+    // culled.score 用对应 breakdown.total（综合评分），与 best_breakdown.total 同口径，
+    // 取代旧实现单字段 sharpness（CulledEntry 文档承诺综合评分）。
     let culled_refs: Vec<(&Location, &Arc<dyn Backend>, f32)> = grp_indices
         .iter()
-        .filter(|&&i| i != best_idx)
-        .map(|&i| {
+        .enumerate()
+        .filter(|&(_, &i)| i != best_idx)
+        .map(|(pos, &i)| {
             (
                 &scanned[i].src_loc,
                 &scanned[i].src_backend,
-                scanned[i].sharpness,
+                breakdowns[pos].total,
             )
         })
         .collect();
@@ -278,9 +283,13 @@ fn scan_source(
         if entry.kind != EntryKind::File {
             continue;
         }
+        // under_prefix 命中 = 该文件位于 output 子树（同根归档场景），不算 source 触达。
         if under_prefix(&entry.location.display(), output_prefix) {
             continue;
         }
+        // 触达 source 文件即计入 scanned（含后续被识别为非图/超大/解码失败/IO 失败的）；
+        // 口径与 CopyReport.scanned 一致：walker 触达数而非成功入索引数。
+        report.scanned += 1;
         if entry.size > face_cfg.max_image_bytes {
             let err = io::Error::new(
                 io::ErrorKind::InvalidInput,
@@ -357,53 +366,49 @@ fn pick_best_for_group(
     eyestate: &dyn EyeStateClassifier,
     face_cfg: &FaceConfig,
     report: &mut CullReport,
-) -> (usize, ScoreBreakdown) {
-    let mut best_idx = indices[0];
-    let mut best_total = f32::NEG_INFINITY;
-    let mut best_breakdown = ScoreBreakdown::default();
+) -> (usize, ScoreBreakdown, Vec<ScoreBreakdown>) {
+    // 每个 indices 项总是有 breakdown：analyze_image 失败时退化为 sharpness-only
+    // 计算（face_count=0 时 score_image 仅含 w_sharpness*sharpness 项）。这样 culled
+    // 项的 score 字段也用 breakdown.total，与 best 的 score_breakdown.total 同口径，
+    // 不再混用 sharpness 单分量（破坏 CulledEntry「综合评分」承诺）。
+    let mut breakdowns: Vec<ScoreBreakdown> = Vec::with_capacity(indices.len());
     let mut per_image_embeddings: Vec<Vec<[f32; identity_cluster::EMBED_DIM]>> =
         Vec::with_capacity(indices.len());
     for &i in indices {
         let item = &scanned[i];
-        let Some(analysis) =
-            analyze_image(item, scrfd, facenet, facemesh, eyestate, face_cfg, report)
-        else {
-            per_image_embeddings.push(Vec::new());
-            continue;
+        let analysis = analyze_image(item, scrfd, facenet, facemesh, eyestate, face_cfg, report);
+        let (faces, meshes, eye_states, embeddings) = match analysis {
+            Some(a) => (a.faces, a.meshes, a.eye_states, a.embeddings),
+            None => (Vec::new(), Vec::new(), Vec::new(), Vec::new()),
         };
-        per_image_embeddings.push(analysis.embeddings.clone());
-        let breakdown = face_scoring::score_image(
+        per_image_embeddings.push(embeddings);
+        breakdowns.push(face_scoring::score_image(
             item.sharpness,
-            &analysis.faces,
-            &analysis.meshes,
-            &analysis.eye_states,
+            &faces,
+            &meshes,
+            &eye_states,
             face_cfg,
-        );
-        if breakdown.total > best_total {
-            best_total = breakdown.total;
-            best_idx = i;
-            best_breakdown = breakdown;
-        }
+        ));
     }
     let clusters =
         identity_cluster::cluster_identities(&per_image_embeddings, face_cfg.face_cosine_min);
     log_identity_clusters(&clusters);
-    // 没有任一 analysis 成功（best_total 仍是 NEG_INFINITY）→ best_breakdown 全 0，
-    // best_idx 是 indices[0] 默认值；上游 write_group 仍按此搬剩余 culled。
-    if best_total.is_finite() {
-        return (best_idx, best_breakdown);
-    }
-    // 兜底：用 indices[0] 的 sharpness 作 total，让 report 显示有意义值。
-    let fallback = &scanned[best_idx];
-    (
-        best_idx,
-        ScoreBreakdown {
-            sharpness: fallback.sharpness,
-            blink_penalty: 0.0,
-            smile_bonus: 0.0,
-            total: fallback.sharpness,
-        },
-    )
+
+    // 选最高 total；NaN 退化为 Equal（不破坏序）。indices.len() >= 2（调用方保证），
+    // breakdowns 同长 → max_by 不返 None。
+    let best_pos = breakdowns
+        .iter()
+        .enumerate()
+        .max_by(|(_, a), (_, b)| {
+            a.total
+                .partial_cmp(&b.total)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        })
+        .map(|(p, _)| p)
+        .expect("internal: indices/breakdowns guaranteed non-empty by caller");
+    let best_idx = indices[best_pos];
+    let best_breakdown = breakdowns[best_pos];
+    (best_idx, best_breakdown, breakdowns)
 }
 
 /// 单图 4 模型印证：`SCRFD` → 每脸 (`face_align` → `facenet`) + (bbox crop → `facemesh`) +

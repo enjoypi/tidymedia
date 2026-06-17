@@ -12,7 +12,21 @@ use camino::Utf8PathBuf;
 use super::remote::RemoteClient;
 use super::remote::RemoteTarget;
 use crate::entities::backend::{Entry, EntryKind, Metadata};
-use crate::entities::common::under_prefix;
+
+/// `child` 是否为 `parent` 目录的直属项（parent/<name>，<name> 不含分隔符）。
+/// 不复用 `under_prefix`：那个函数把 path == prefix 也算 true，且不剥分隔符之后的
+/// 多级嵌套——对模拟 SMB/ADB list 语义需更严格的「正好一级」判定。
+fn is_direct_child(child: &str, parent: &str) -> bool {
+    let parent_trim = parent.strip_suffix(['/', '\\']).unwrap_or(parent);
+    let Some(rest) = child.strip_prefix(parent_trim) else {
+        return false;
+    };
+    // rest 必须以 '/' 或 '\\' 起 + 剩余 segment 中无更深分隔符
+    let Some(inner) = rest.strip_prefix(['/', '\\']) else {
+        return false;
+    };
+    !inner.is_empty() && !inner.contains('/') && !inner.contains('\\')
+}
 
 /// Client 操作的错误注入键。
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
@@ -95,6 +109,25 @@ impl<T: RemoteTarget> FakeRemoteClient<T> {
         );
     }
 
+    /// 添加目录：path 是 fake 命名空间内的目录路径。让多层目录树 fixture 可构造，
+    /// 配合下面 `list` 的"直属子项"语义驱动 `walk_recursive` 的 Dir 递归分支。
+    pub fn add_dir(&self, path: &str) {
+        let p = Utf8PathBuf::from(path);
+        let mut s = self.files.lock().unwrap();
+        s.insert(
+            p,
+            FileEntry {
+                data: Vec::new(),
+                meta: Metadata {
+                    size: 0,
+                    kind: EntryKind::Dir,
+                    modified: None,
+                    created: None,
+                },
+            },
+        );
+    }
+
     /// 注入错误：下次调用 `op` 且 path 匹配时返回对应 `ErrorKind`。
     pub fn inject(&self, op: RemoteFakeOp, path: &str, kind: io::ErrorKind) {
         self.op_errors
@@ -149,13 +182,16 @@ impl<T: RemoteTarget> RemoteClient<T> for FakeRemoteClient<T> {
         self.check(RemoteFakeOp::List, target.path())?;
         let s = self.files.lock().unwrap();
         let parent = target.path().as_str();
-        // 空 parent 是 "list 全部" 的快捷：under_prefix 对空前缀返 false（要求 path
-        // 以分隔符开头），与"列根目录"语义相反，需要显式短路。非空 parent 走
-        // under_prefix 复用生产代码同一前缀语义（剥尾分隔符 + 边界校验）。
+        // 空 parent 是 "list 全部" 的快捷（测试便利）；非空 parent 按真实 SMB/ADB
+        // list 语义只返**直属子项**（child 是 parent/<name>，<name> 不含分隔符），
+        // 让 `walk_recursive` 的 Dir 递归分支可在 fake 中正确驱动多层目录树而不重复。
         Ok(s.keys()
             .filter(|p| {
                 let child = p.as_str();
-                parent.is_empty() || under_prefix(child, parent)
+                if parent.is_empty() {
+                    return true;
+                }
+                is_direct_child(child, parent)
             })
             .map(|p| {
                 let m = &s[p].meta;

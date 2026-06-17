@@ -63,7 +63,10 @@ fn sample_copy_report() -> CopyReport {
 fn sample_find_report() -> FindReport {
     FindReport {
         scanned: 10,
-        groups: vec![vec!["a.jpg".into(), "a_copy.jpg".into()]],
+        groups: vec![crate::usecases::report::DuplicateGroupReport {
+            size: 1024,
+            paths: vec!["a.jpg".into(), "a_copy.jpg".into()],
+        }],
         bytes_read: 1024,
     }
 }
@@ -95,6 +98,10 @@ fn sink_writes_valid_find_json() {
     assert_eq!(parsed["bytes_read"], 1024);
     let groups = parsed["groups"].as_array().unwrap();
     assert_eq!(groups.len(), 1);
+    // 新 schema：group 含 size + paths（旧 schema 仅 Vec<String>，丢 size 让下游无法按
+    // 大小过滤；本断言钉新结构防止回归）。
+    assert_eq!(groups[0]["size"], 1024);
+    assert_eq!(groups[0]["paths"].as_array().unwrap().len(), 2);
 }
 
 #[test]

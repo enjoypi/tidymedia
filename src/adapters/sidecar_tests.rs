@@ -170,9 +170,11 @@ fn try_takeout_unparseable_returns_none() {
     assert!(try_takeout(&Location::Local(mp), backend.as_ref()).is_none());
 }
 
-/// 非 Local `backend：with_extension` / `append_suffix` 都返回 None →
-/// `discover_with_backend` 直接返回空 Vec（SMB/MTP/ADB 暂未支持 sibling 探测；
-/// 见 docs/media-time-detection.md 末「Known limitations」）。
+/// 非 Local backend：`LocalBackend::read_to_string` 对 non-local scheme 返
+/// `InvalidInput`，`read_sidecar` 把 Err 转 None，`discover_with_backend` 返空 Vec。
+/// 注意 `should_log_read_error(InvalidInput) == true`，此路径会 debug! 日志而非静默；
+/// 未来若新增真实 SMB/MTP/ADB sidecar 支持，需在 adapter 层各自实现 `read_to_string`，
+/// 不能依赖此处「scheme 守卫」错觉（见 docs/media-time-detection.md 末「Known limitations」）。
 #[test]
 fn discover_with_backend_smb_returns_empty() {
     let smb_loc = Location::Smb {

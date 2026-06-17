@@ -80,7 +80,9 @@ impl RemoteTarget for SmbTarget {
 
     fn parent(&self) -> Option<Self> {
         let parent = self.path.parent()?;
-        if parent.as_str().is_empty() {
+        // share 内根（"/"）或空路径不应被 mkdir：服务器对 mkdir('/') 反应未定义，
+        // 与 AdbTarget::parent 哨兵对齐。
+        if parent.as_str().is_empty() || parent.as_str() == "/" {
             return None;
         }
         Some(SmbTarget {

@@ -71,6 +71,20 @@ fn parent_target_returns_none_for_empty_path() {
 }
 
 #[test]
+fn parent_target_returns_none_when_parent_is_root_slash() {
+    // Utf8PathBuf::from("/foo").parent() == Some("/")：与 AdbTarget::parent 对齐，
+    // 哨兵让 mkdir_recursive 不会对 storage 根发出 mkdir('/') 调用。
+    let t = MtpTarget {
+        device: "d".into(),
+        storage: "s".into(),
+        path: Utf8PathBuf::from("/foo"),
+        device_match: MtpMatch::Fuzzy,
+        storage_match: MtpMatch::Fuzzy,
+    };
+    assert!(t.parent().is_none(), "/foo 的 parent '/' 被哨兵拒返 None");
+}
+
+#[test]
 fn mtp_target_equality_and_debug() {
     let t1 = MtpTarget {
         device: "d".into(),

@@ -12,7 +12,7 @@ use crate::entities::file_info;
 use crate::entities::uri::Location;
 
 use super::copy::Source;
-use super::report::FindReport;
+use super::report::{DuplicateGroupReport, FindReport};
 
 const FEATURE_FIND: &str = "find";
 
@@ -117,7 +117,10 @@ pub(crate) fn find_duplicates(
         bytes_read,
         groups: groups
             .into_iter()
-            .map(|g| g.paths.into_iter().map(|p| p.to_string()).collect())
+            .map(|g| DuplicateGroupReport {
+                size: g.size,
+                paths: g.paths.into_iter().map(|p| p.to_string()).collect(),
+            })
             .collect(),
     })
 }

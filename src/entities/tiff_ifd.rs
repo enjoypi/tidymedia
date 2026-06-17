@@ -98,37 +98,68 @@ fn scan_ifd(
         let Some(cnt) = u32_at(base, e + 4, order).map(|v| v as usize) else {
             break;
         };
-        let Some(val) = u32_at(base, e + 8, order).map(|v| v as usize) else {
+        // val 字段（entry 中 e+8..e+12 共 4 字节）有两种含义：
+        // - TIFF 类型尺寸 × cnt > 4 时 → val 解为 u32 offset，指向 base[val..val+size]
+        // - TIFF 类型尺寸 × cnt ≤ 4 时 → 4 字节直接是 inline 数据
+        // ASCII 类型尺寸 = 1，所以 cnt ≤ 4 时数据 inline 存于 e+8..e+8+cnt，
+        // 当前实现只走 offset 路径致 DJI/LG 等短 Make 字段（"DJI\0"/"LG\0"）静默丢失。
+        let Some(val_bytes) = base
+            .get(e + 8..e + 12)
+            .and_then(|b| <[u8; 4]>::try_from(b).ok())
+        else {
             break;
         };
+        let val_offset = u32_from_bytes(val_bytes, order) as usize;
         match (tag, typ) {
-            (TAG_EXIF_OFFSET, TYPE_LONG) => *exif_ifd = Some(val),
-            (TAG_MAKE, TYPE_ASCII) => out.make = read_ascii(base, val, cnt),
-            (TAG_MODEL, TYPE_ASCII) => out.model = read_ascii(base, val, cnt),
+            (TAG_EXIF_OFFSET, TYPE_LONG) => *exif_ifd = Some(val_offset),
+            (TAG_MAKE, TYPE_ASCII) => out.make = read_ascii(base, val_bytes, val_offset, cnt),
+            (TAG_MODEL, TYPE_ASCII) => out.model = read_ascii(base, val_bytes, val_offset, cnt),
             (TAG_DATE_TIME_ORIGINAL, TYPE_ASCII) => {
-                out.date_time_original = read_ascii(base, val, cnt);
+                out.date_time_original = read_ascii(base, val_bytes, val_offset, cnt);
             }
-            (TAG_CREATE_DATE, TYPE_ASCII) => out.create_date = read_ascii(base, val, cnt),
-            (TAG_MODIFY_DATE, TYPE_ASCII) => out.modify_date = read_ascii(base, val, cnt),
+            (TAG_CREATE_DATE, TYPE_ASCII) => {
+                out.create_date = read_ascii(base, val_bytes, val_offset, cnt);
+            }
+            (TAG_MODIFY_DATE, TYPE_ASCII) => {
+                out.modify_date = read_ascii(base, val_bytes, val_offset, cnt);
+            }
             _ => {}
         }
     }
     Some(())
 }
 
-// ASCII 字段读取：目标标签（日期 20 字节、Make/Model >4 字节）均走 offset
-// 间接存储；cnt ≤ 4 的内联形式对这些标签不会出现，按损坏数据拒绝。
-fn read_ascii(base: &[u8], off: usize, cnt: usize) -> Option<String> {
-    if cnt <= 4 || cnt > MAX_ASCII_BYTES {
+// ASCII 字段读取：cnt ≤ 4 走 inline（val 字段的 cnt 个字节），cnt > 4 走 base[off..off+cnt]。
+// 短 Make/Model（"DJI\0" cnt=4、"LG\0" cnt=3）的 inline 形式过去被静默拒绝。
+fn read_ascii(base: &[u8], val_bytes: [u8; 4], off: usize, cnt: usize) -> Option<String> {
+    if cnt == 0 || cnt > MAX_ASCII_BYTES {
         return None;
     }
-    let raw = base.get(off..off + cnt)?;
+    let raw: &[u8] = if cnt <= 4 {
+        // val_bytes 固定 4 字节、cnt 在 [1,4] 范围（前一段 if 已过滤 0 与 > MAX），
+        // 直接索引避免不可达的 .get(..cnt)? Err arm 算 region miss。
+        &val_bytes[..cnt]
+    } else {
+        base.get(off..off + cnt)?
+    };
+    decode_ascii(raw)
+}
+
+fn decode_ascii(raw: &[u8]) -> Option<String> {
     let s = std::str::from_utf8(raw)
         .ok()?
         .trim_end_matches('\0')
         .trim()
         .to_string();
     (!s.is_empty()).then_some(s)
+}
+
+// 字节序敏感的 u32 解析（独立于 u32_at 的 base+offset 形式，让 scan_ifd 复用同序约定）。
+fn u32_from_bytes(bytes: [u8; 4], order: ByteOrder) -> u32 {
+    match order {
+        ByteOrder::Le => u32::from_le_bytes(bytes),
+        ByteOrder::Be => u32::from_be_bytes(bytes),
+    }
 }
 
 fn u16_at(b: &[u8], off: usize, order: ByteOrder) -> Option<u16> {

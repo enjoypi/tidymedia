@@ -63,7 +63,8 @@ impl RemoteTarget for MtpTarget {
 
     fn parent(&self) -> Option<Self> {
         let parent = self.path.parent()?;
-        if parent.as_str().is_empty() {
+        // storage 根（"/"）或空路径不应被 mkdir，与 AdbTarget::parent 哨兵对齐。
+        if parent.as_str().is_empty() || parent.as_str() == "/" {
             return None;
         }
         Some(MtpTarget {

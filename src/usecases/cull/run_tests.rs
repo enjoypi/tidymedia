@@ -228,7 +228,8 @@ fn cull_scan_skips_non_image_file() {
         10,
     )
     .unwrap();
-    assert_eq!(report.scanned, 0, "non-image skipped before scanned++");
+    // 非图按 walker 触达计入 scanned，但 is_image 早返不进 scanned vec；失败=0。
+    assert_eq!(report.scanned, 1, "walker 触达 1 文件即 scanned=1");
     assert_eq!(report.failed, 0);
 }
 
@@ -524,7 +525,8 @@ fn cull_records_failure_when_oversize_image_skipped() {
         10,
     )
     .unwrap();
-    assert_eq!(report.scanned, 0, "超 1 MiB PNG 被 OOM skip");
+    // walker 触达 1 文件后 size 超阈值，按口径仍计入 scanned（含 OOM 跳过项）；failed=1。
+    assert_eq!(report.scanned, 1, "超阈值文件仍计入 walker 触达 scanned");
     assert_eq!(report.failed, 1);
     assert!(
         report.errors[0].message.contains("max_image_bytes"),

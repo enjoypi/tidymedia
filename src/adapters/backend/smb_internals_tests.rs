@@ -264,6 +264,22 @@ fn parent_target_returns_none_when_parent_empty() {
 }
 
 #[test]
+fn parent_target_returns_none_when_parent_is_root_slash() {
+    // Utf8PathBuf::from("/foo").parent() == Some("/")：与 AdbTarget::parent 对齐
+    // 加 `"/"` 哨兵让 mkdir_recursive 不会对 share 根发出 mkdir('/') 调用。
+    let t = SmbTarget {
+        user: None,
+        host: "h".into(),
+        port: None,
+        share: "s".into(),
+        path: Utf8PathBuf::from("/foo"),
+        password: None,
+        krb5_ccname: None,
+    };
+    assert!(t.parent().is_none(), "/foo 的 parent '/' 被哨兵拒返 None");
+}
+
+#[test]
 fn build_target_threads_env_password_and_krb5() {
     // SAFETY: nextest 每测试独立进程
     unsafe {

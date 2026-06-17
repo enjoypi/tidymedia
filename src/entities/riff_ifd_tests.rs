@@ -43,12 +43,18 @@ fn missing_exif_offset_still_returns_ifd0_fields() {
 }
 
 #[test]
-fn inline_ascii_count_le_4_is_rejected() {
-    // cnt<=4 的内联 ASCII 对目标标签不应出现，按损坏数据拒绝。
+fn inline_ascii_count_le_4_is_decoded_from_val_field() {
+    // TIFF 规范：ASCII cnt ≤ 4 时数据直接 inline 在 entry val 字段（4 字节）。
+    // 构造 entry：cnt=4，val 字段 4 字节为 b"FUJI"（直接当 ASCII bytes 解释）。
+    // strd 布局：AVIF_MAGIC(4) + reserved(4) + count(2) + entry(12) + next-IFD(4) + ...
     let mut strd = avif_with_make(b"FUJI\0\0\0\0\0");
-    strd[IFD_BASE + 2 + 4] = 4; // entry.cnt: 9 → 4
-    let got = parse_avif_ifd(&strd).unwrap();
-    assert_eq!(got.make, None);
+    // 改 entry.cnt：9 → 4（位置 IFD_BASE + 2 + 4 = cnt 字段起点）
+    strd[IFD_BASE + 2 + 4] = 4;
+    // 改 entry.val 4 字节为 inline ASCII "FUJI"（覆盖原 offset 18 的 4 字节 LE bytes）
+    let val_off = IFD_BASE + 2 + 8;
+    strd[val_off..val_off + 4].copy_from_slice(b"FUJI");
+    let got = parse_avif_ifd(&strd).expect("AVI strd 仍可解析");
+    assert_eq!(got.make.as_deref(), Some("FUJI"));
 }
 
 #[test]

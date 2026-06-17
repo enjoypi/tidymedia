@@ -109,6 +109,28 @@ fn walk_lists_files_under_root() {
 }
 
 #[test]
+fn walk_recurses_into_subdirectory() {
+    // 多层 fixture：/root 含 a.bin + /root/sub 子目录 + /root/sub/c.bin。
+    // 验证 walk_recursive 的 EntryKind::Dir 分支能驱动子目录下钻并 yield 嵌套 file。
+    let client = fake_client();
+    client.add_file("root/a.bin", vec![1]);
+    client.add_dir("root/sub");
+    client.add_file("root/sub/c.bin", vec![2]);
+    let backend = backend_with(client);
+    let entries: Vec<_> = backend
+        .walk(&smb("root"))
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap();
+    // 期望：a.bin (file) + sub (dir) + sub/c.bin (file) = 3 entries（dir 也 yield）。
+    assert_eq!(entries.len(), 3, "got: {entries:?}");
+    let nested = entries
+        .iter()
+        .find(|e| e.location.display().ends_with("c.bin"))
+        .expect("nested c.bin must appear");
+    assert_eq!(nested.kind, crate::entities::backend::EntryKind::File);
+}
+
+#[test]
 fn walk_propagates_target_error() {
     let backend = backend_with(fake_client());
     let local = Location::Local(Utf8PathBuf::from("/tmp/x"));
@@ -323,6 +345,31 @@ fn open_read_propagates_client_error() {
     let backend = backend_with(client);
     let err = backend.open_read(&smb("a.bin")).unwrap_err();
     assert_eq!(err.kind(), io::ErrorKind::TimedOut);
+}
+
+/// 触发 `remote::mkparent` 的 `if let Err(e)` 调试日志 arm：`mkparent` 调
+/// `mkdir_recursive(parent)`，对 parent 的 stat 注入非 `NotFound` Err，让
+/// `mkdir_recursive` 直接传播错误 → `mkparent` 进入 `debug!` 分支（被 swallow，
+/// 调用方 `open_write` 仍成功，因为 client.write 是 fake 直接落盘）。
+#[test]
+fn open_write_mkparent_failure_swallowed_to_debug_log() {
+    use std::io::Write;
+    let client = fake_client();
+    // 对 parent "subdir" 的 stat 注入 PermissionDenied → mkdir_recursive 直接
+    // propagate Err（非 NotFound 不会触发祖先扫描），mkparent debug! 分支命中。
+    client.inject(
+        RemoteFakeOp::Stat,
+        "subdir",
+        io::ErrorKind::PermissionDenied,
+    );
+    let backend = backend_with(client.clone());
+    // open_write mkparents=true：mkparent 内 mkdir_recursive 失败被 swallow；
+    // 后续 fake client.write 直接写 path 不验父目录，整个 open_write 成功。
+    let mut w = backend.open_write(&smb("subdir/dst.bin"), true).unwrap();
+    w.write_all(b"x").unwrap();
+    w.finish().unwrap();
+    let stored = client.get_file("subdir/dst.bin");
+    assert_eq!(stored.as_deref(), Some(&b"x"[..]));
 }
 
 #[test]

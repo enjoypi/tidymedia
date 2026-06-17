@@ -25,13 +25,22 @@ pub struct CopyReport {
 }
 
 /// find 操作报告。`scanned` = Index 中实际入索引的文件总数（不仅是重复组路径数）；
-/// `bytes_read` = 流式哈希过程中累计读取的字节数；`groups` 保留每组结构（不展平）。
+/// `bytes_read` = 流式哈希过程中累计读取的字节数；`groups` 保留每组完整字段（size + paths）
+/// 不展平，让下游按 size 过滤或排序时不丢信息（`render_script` 的 `# SIZE N` 注释亦此口径）。
 #[derive(Debug, Default, Serialize)]
 pub struct FindReport {
     pub scanned: usize,
-    /// 每个重复组：组内文件路径列表（保留组边界，不做 CSV 展平）。
-    pub groups: Vec<Vec<String>>,
+    pub groups: Vec<DuplicateGroupReport>,
     pub bytes_read: u64,
+}
+
+/// 单个重复组的报告项：组内文件 size（同组共享）+ 路径列表。
+#[derive(Debug, Default, Serialize)]
+pub struct DuplicateGroupReport {
+    /// 组内每个文件的字节数（同组所有文件 size 相同；重复判定靠 size + hash）。
+    pub size: u64,
+    /// 组内文件路径列表（保留组边界，不做 CSV 展平）。
+    pub paths: Vec<String>,
 }
 
 /// 报告中的单条错误记录。

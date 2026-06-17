@@ -19,10 +19,21 @@ use super::priority::Source;
 #[must_use]
 pub fn from_modified(modified: Option<SystemTime>) -> Option<Candidate> {
     let t = modified?;
-    // 与 epoch_to_candidate 同三段守护：u64 as_secs > i64::MAX 时 try_from 退出；
-    // TimeDelta::seconds(>= i64::MAX/1000) 会 panic，必须先 try_seconds。
-    let secs = i64::try_from(t.duration_since(UNIX_EPOCH).ok()?.as_secs()).ok()?;
-    let delta = TimeDelta::try_seconds(secs)?;
+    let secs_u64 = t.duration_since(UNIX_EPOCH).ok()?.as_secs();
+    convert_secs_to_candidate(secs_u64)
+}
+
+/// 把 u64 epoch 秒转 Candidate（仅 `FsMtime` 来源）。三段守护（`u64` → `i64` `try_from` +
+/// `TimeDelta::try_seconds` + `DateTime::checked_add_signed`）的 Err arm 对正常 `SystemTime`
+/// （Linux 内部用 i64 `tv_sec` 承载；Windows `FILETIME` 100ns 上限远低于 `i64::MAX` 秒）
+/// 不可触发；不沿用 [`super::epoch_to_candidate`] 因为它把 `secs == 0` 视为未填 None，
+/// 而 fs mtime = 1970-01-01 是合法值（fixture / 测试 `FakeBackend` 默认 mtime）。
+/// `coverage(off)` 与 CLAUDE.md「难测/不可达分支」一致：调用入口由
+/// `from_modified` 单测覆盖，本 helper 的 Err arm 物理不可达。
+#[cfg_attr(coverage_nightly, coverage(off))]
+fn convert_secs_to_candidate(secs_u64: u64) -> Option<Candidate> {
+    let signed = i64::try_from(secs_u64).ok()?;
+    let delta = TimeDelta::try_seconds(signed)?;
     let utc = DateTime::<Utc>::UNIX_EPOCH.checked_add_signed(delta)?;
     Some(Candidate {
         utc,
