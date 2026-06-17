@@ -29,6 +29,11 @@
   - 任一路径为空时调用立即返 `InvalidInput`（懒加载，构造时不读文件；首次 `has_text` / `detect_faces` 触发 `load_runnable`）
   - **MobileFaceNet 128 维而非 512 维**：foamliu 训练规格；`FaceEmbedder` trait 签名 `[f32; 128]`，切换 512 维变体需同步改 `EMBED_DIM` 与 trait 接口
   - **YOLOv8 EyeState decode 与现有 MobileNetV3 假设不同**：输入 640×640 letterbox 而非 64×64 直接 resize，输出检测头 max conf 而非 softmax；closed_index=1 按 README 描述（open=0 / closed=1）
+- **ONNX 模型获取与化简陷阱**（`scripts/download_models.sh` 单点装配）：
+  - **PINTO_model_zoo tarball 嵌套两层**：外 `.tar.gz` 按 framework 分目录（`01_float32` / `20_new_onnx_postprocess_N-batch` 等），每目录内还有 `resources.tar.gz` 才是真 onnx；脚本必须 `tar -xzf` 再进子目录 `tar -xzf inner/resources_post.tar.gz`
+  - **`torch.onnx.export` 2.x 默认 dynamo exporter 拒绝 ScriptModule**：`foamliu/MobileFaceNet` 等 `torch.jit.script` 产物 MUST 显式 `dynamo=False` 走旧 torchscript exporter，否则报 `Exporting a ScriptModule is not supported`
+  - **`onnxsim` 化简 dynamic-input 模型 MUST `overwrite_input_shapes={'images':[1,3,640,640]}`**：SCRFD/YOLOv8 等导出时 input dim 是 `['batch',3,'h','w']`，tract 加载效率低；化简同时固化静态 shape；onnxsim 依赖 `onnxruntime`，`uv run --with onnx --with onnxsim --with onnxruntime`
+  - **`uv run` 临时拉 torch 链 MUST 三件套**：`uv run --no-project --with torch --with numpy --with onnxscript scripts/export_mobilefacenet.py`，缺 numpy/onnxscript 任一 `torch.onnx.export` 直接挂（numpy `Failed to initialize` / `ModuleNotFoundError onnxscript`）
 - `bin/exiftool/exiftool.exe`（仅开发调试）：常用 `-time:all -s <f>` 查时间字段、`-P '-AllDates<Filename' -overwrite_original <dir>` 按文件名批量改时间保 mtime；单文件按值写 `-P -overwrite_original "-AllDates=YYYY:MM:DD HH:MM:SS" "-FileModifyDate=..."`
   - **中文路径**：portable exiftool 缺 `Win32API::File`，命令行 UTF-8 直传 0 文件；要 UTF-8 路径走 **tempfile + `-@ <file>` + `-charset filename=UTF8`**（小写 `filename`）；省掉 `-charset` 走 ANSI 系统调用也稳（stdout 乱码不影响 EXIF 抽取）
   - 写操作默认产 `<file>_original` 备份，MUST 清理（magic-bytes 仍 JPEG 会被 tidymedia 当媒体归档）
@@ -75,6 +80,7 @@
 - **mutation testing**：配置在 `.cargo/mutants.toml`（nextest + release + `--all-features`，排除 `*_real.rs`/测试基建；豁免在 `exclude_re` 注明 WHY）。**Windows 本机跑不了 `--all-features`**（smb 仅 Linux）：增量验证临时注释 `additional_cargo_args` 按默认 features 跑，feature-gated mutants 留 Linux。日常 `cargo mutants --in-diff <(git diff main)`；全量审计 ~677 mutants/~3h（2026-06 基线 509 caught / 168 unviable / 0 missed）；定点 `cargo mutants -F '<regex>'`（`-E` 是 exclude）。套路：①计数断言精确 `==`（`>= 1` 杀不掉 `+=`→`-=` usize release wrap MAX）；②与被调函数重复的入参 guard 等价变异，删冗余 guard 单点校验；③`cfg(windows)`/`cfg(not(feature))` 代码单口径必假幸存 → exclude_re；④tracing 字段值抽纯 fn 直测不靠捕日志；⑤防御性不可达 arm 喂错配变体直测；⑥写 kill 测试前确认变异行可达（如 `create_time` 无 EXIF let-else 早返回到不了被变异行）；⑦纯移动重构的 `--in-diff` 是假增量，可缩小到真改逻辑文件；⑧无返回值 tracing 副作用 fn `replace X with ()` 等价幸存 → exclude_re
 - **`FakeBackend.copy_file` inject 陷阱**：`check_error` 按 **src loc** 匹配，inject `Op::CopyFile` Err MUST 用 src loc 不是 dst；且 `copy_file` 是 in-memory state 操作不支持跨 fake instance（按 self.state 找 src bytes），cull/group_writer 的 `output_backend.copy_file(src,dst)` 跨 scheme 测试只能①同一 fake + scheme!="local" 走 cross-scheme 分支②或走 stream_copy（参考 `move_text_shot` 的 `TwoSchemeFactory`）
 - **`unique_name_*` 耗尽测试用 FakeBackend.add_file 填满 N+1 候选**（base + `_1..=_N`）替手写 `AlwaysExists` trait wrapper：wrapper 要 impl 10+ Backend 方法、每个代理 fn 成新 0-hit region（仅 `exists` 被调）；`add_file` 套路无样板代码（参考 `cull/group_writer.rs::unique_name_in_dir_errors_when_exhausted`）
+- **`config.yaml` 默认值改 → `OnceLock` 一次性加载，依赖默认值的集成测试 MUST 切独立 yaml**：`tests/lib_tidy/cull.rs::write_temp_config` 写临时 yaml + `set_var("TIDYMEDIA_CONFIG", ...)` 让 `frameworks::config::config()` 加载指定路径；空字段（如 `scrfd_model_path=""`）触发 `InvalidInput` 测试同套路——不能再依赖「不切 config 就拿空字符串」
 
 ## Fixture
 - `tests/data/` 下文件 mtime 每次 `git checkout` 重置；时间相关测试 MUST 用 `filetime::set_file_mtime` 固定（封装 `entities/test_common::copy_png_to` 固定到 `FIXED_MEDIA_MTIME` = 2024-01-01 12:00:00 UTC）
@@ -106,6 +112,7 @@
 - **新增 OCR detector / TextDetector trait 方法** → `adapters/ocr/mod.rs::TextDetector` 定义 + `adapters/ocr/fake.rs::FakeTextDetector` 同步支持新方法 + `adapters/ocr/tract_dbnet*.rs` 真实实现（`*_real.rs` 走 `--ignore-filename-regex` 排除，`tract_dbnet.rs` 因含 subprocess instance phantom miss 也整文件排除——见「测试与覆盖率」节）
 - **新增 Face detector / `FaceDetector`/`FaceEmbedder`/`FaceMeshDetector`/`EyeStateClassifier` trait 方法** → `adapters/face/mod.rs` 4 trait 定义 + `adapters/face/fake.rs` 4 Fake 同步 + 4 套 `tract_{scrfd,mobilefacenet,facemesh,eyestate}.rs(+_real.rs)` 真实实现（`*_real.rs` 走 `--ignore-filename-regex` 排除；若主体 `tract_*.rs` 出现 subprocess phantom miss 同 `tract_dbnet.rs` 一并加入 ignore-regex）+ `lib.rs` re-export 4 trait + 4 Fake（`#[doc(hidden)]`）
 - **新增 `FaceConfig` 字段** → `usecases/config.rs::FaceConfig` + `BackendConfig.face` + `frameworks/config.rs::sanitize_face()` 加校验分支（对齐 `sanitize_ocr` 套路）+ `sanitize()` 末尾调用 + `config.yaml backend.face:` 子段（每字段 `${TIDYMEDIA_FACE_*:-默认}` env 兜底）+ `usecases/config.rs::tests::config_defaults_match_historical_constants` 加新字段默认值断言
+- **改 `FaceEmbedder` 等 face trait 接口维度**（如 `[f32; 512] → [f32; 128]`）→ trait 定义 (`adapters/face/mod.rs`) + 真实 impl (`tract_mobilefacenet.rs::EMBED_DIM` + `decode` 返回类型) + `fake.rs` (字段/构造/`impl` 三处) + 单测 (`tract_*_tests.rs` 函数名 + `ConstRaw.dim`) + 集成测试 (`tests/lib_tidy/cull.rs` 等所有 `FakeFaceEmbedder::new([0.0; N])`)。sed `'s/\[0\.0; <旧>\]/[0.0; <新>\]/g'` 全局批量是可靠套路
 
 ## 项目分层（Clean Architecture）
 - 四层（自外向内）：`src/frameworks/` → `src/adapters/` → `src/usecases/` → `src/entities/`
