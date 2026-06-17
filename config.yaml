@@ -45,16 +45,17 @@ backend:
     resize_max_side: ${TIDYMEDIA_OCR_MAX_SIDE:-736}
   # cull 子命令的人脸质量评分后端
   # 4 个 ONNX 模型路径 + pHash/清晰度/EAR 阈值 + 综合评分权重
-  # 模型不入 git，运行前由用户自备并指定路径；任一为空 = 调用时报 InvalidInput
+  # 模型走 git-lfs 存放在 models/，clone 后 `git lfs pull` 拉取；
+  # 任一路径为空 = 调用时报 InvalidInput
   face:
-    # SCRFD-500M-bn-kps（人脸 bbox + 5 点关键点）
-    scrfd_model_path: ${TIDYMEDIA_FACE_SCRFD_MODEL:-}
-    # MobileFaceNet（112×112 → 512 维 embedding）
-    facenet_model_path: ${TIDYMEDIA_FACE_FACENET_MODEL:-}
-    # MediaPipe FaceMesh（468 点 3D 关键点）
-    facemesh_model_path: ${TIDYMEDIA_FACE_FACEMESH_MODEL:-}
-    # MobileNetV3-EyeState（眼部裁剪二分类）
-    eyestate_model_path: ${TIDYMEDIA_FACE_EYESTATE_MODEL:-}
+    # SCRFD-10G-bn-kps（人脸 bbox + 5 点关键点；antelopev2 默认变体）
+    scrfd_model_path: ${TIDYMEDIA_FACE_SCRFD_MODEL:-models/scrfd_10g_bnkps.onnx}
+    # MobileFaceNet（112×112 → 128 维 embedding；foamliu/MobileFaceNet 训练规格）
+    facenet_model_path: ${TIDYMEDIA_FACE_FACENET_MODEL:-models/mobilefacenet.onnx}
+    # MediaPipe FaceMesh（468 点 3D 关键点；PINTO_model_zoo 192×192 静态版）
+    facemesh_model_path: ${TIDYMEDIA_FACE_FACEMESH_MODEL:-models/face_mesh_192x192.onnx}
+    # YOLOv8 EyeState（眼部开/闭检测；MichalMlodawski/open-closed-eye-detection）
+    eyestate_model_path: ${TIDYMEDIA_FACE_EYESTATE_MODEL:-models/eyestate_yolov8.onnx}
     # pHash 汉明距离阈值；≤ 此值的两图视为相似入同组
     phash_hamming_max: ${TIDYMEDIA_FACE_PHASH_MAX:-10}
     # 全图 Laplacian 方差下限；低于此值视整图模糊丢弃（单图组例外保留）

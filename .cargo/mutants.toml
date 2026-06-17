@@ -25,6 +25,11 @@ exclude_re = [
     # 口径下不编译必幸存（行为由默认 features 的 tidy_rejects_* 测试维护）；
     # feature-on 版需真实 SMB/ADB 设备，与 *_real.rs 同因不可 CI 触发。
     'replace build_(smb|mtp|adb)_backend ',
+    # face 4 detector 的 build_*_(detector|embedder|facemesh|classifier)：cfg
+    # build_eyestate_classifier 等真实路径需 ONNX 模型文件在 models/ 目录可读，
+    # mutant 把 path 校验 / Box::new 替换成 () 的等价变异在无模型环境下幸存；
+    # 与 build_*_backend 同套路：feature off / 真依赖外部资源 → exclude_re 豁免。
+    'replace build_(scrfd|facenet|facemesh|eyestate)_',
     # rename_or_fallback 的 CrossesDevices guard 变 false：仅当 rename 真返回
     # EXDEV 时可区分，需要真实跨设备挂载点，tempdir 单测不可复现（与该函数
     # coverage(off) 注释同因）。guard 变 true / == 变 != 由

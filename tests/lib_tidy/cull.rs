@@ -212,10 +212,11 @@ fn tidy_returns_err_when_cull_partial_failure() {
 #[test]
 fn run_cli_cull_string_form_accepts_phash_max_flag() {
     // 字符串形式验 clap 名映射（--phash-max → phash_max: Option<u8>）
-    // 配置缺失 → InvalidInput；但只要 clap 解析成功就证明 flag 注册
+    // 切空 scrfd 路径强制 build_scrfd_detector InvalidInput；只要 clap 解析成功
+    // 报错文案含 "scrfd_model_path is empty" 即证 flag 注册 + dispatch 链路通
+    let _cfg = write_temp_config("", "/tmp/m2", "/tmp/m3", "/tmp/m4");
     let src = tempdir().unwrap();
     let out = tempdir().unwrap();
-    // 不切 config → 默认 face.scrfd_model_path = "" → build_scrfd_detector InvalidInput
     let err = run_cli([
         "tidymedia",
         "cull",
@@ -228,6 +229,5 @@ fn run_cli_cull_string_form_accepts_phash_max_flag() {
     ])
     .unwrap_err();
     let msg = err.to_string();
-    // clap 解析成功 → 进入 dispatch_cull → build_scrfd_detector 空路径 InvalidInput
     assert!(msg.contains("scrfd_model_path is empty"), "got: {msg}");
 }

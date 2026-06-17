@@ -1,0 +1,5 @@
+# ONNX 模型走 git-lfs：cull + move-text-shot 子命令依赖
+# models/*.onnx 合计约 35MB；clone 后 `git lfs pull` 自动拉取
+*.onnx filter=lfs diff=lfs merge=lfs -text
+# 转换中间产物（foamliu MobileFaceNet 原始 pt）
+*.pt filter=lfs diff=lfs merge=lfs -text

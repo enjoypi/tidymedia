@@ -53,14 +53,17 @@ pub trait FaceDetector: Send + Sync + std::fmt::Debug {
     fn detect_faces(&self, path: &Utf8Path, image_bytes: &[u8]) -> io::Result<Vec<FaceDetection>>;
 }
 
-/// 人脸嵌入 Gateway：输入对齐后的 112×112 RGB，输出 L2-normalized 512 维向量。
+/// 人脸嵌入 Gateway：输入对齐后的 112×112 RGB，输出 L2-normalized 128 维向量。
+///
+/// 维度选 128：`foamliu/MobileFaceNet` 训练规格（论文标准 embedding 维），与官方
+/// `InsightFace` 512 维变体不同但接口契约一致——dim 不进对外 API 名只进内部常量。
 pub trait FaceEmbedder: Send + Sync + std::fmt::Debug {
-    /// 对 `aligned` 跑 `MobileFaceNet` 返 512 维 embedding（L2 后）。
+    /// 对 `aligned` 跑 `MobileFaceNet` 返 128 维 embedding（L2 后）。
     ///
     /// # Errors
     ///
     /// 模型推理失败或路径级注入错误时返回 `Err`。
-    fn embed_face(&self, path: &Utf8Path, aligned: &image::RgbImage) -> io::Result<[f32; 512]>;
+    fn embed_face(&self, path: &Utf8Path, aligned: &image::RgbImage) -> io::Result<[f32; 128]>;
 }
 
 /// `FaceMesh` Gateway：输入 192×192 人脸 crop，输出 468 个 3D 关键点（用于 EAR）。

@@ -58,19 +58,19 @@ fn build_facenet_embedder_rejects_whitespace_only_path() {
 }
 
 #[test]
-fn embed_face_returns_l2_normalized_512() {
+fn embed_face_returns_l2_normalized_128() {
     let det = TractFacenetEmbedder::with_raw(
         cfg(),
         Box::new(ConstRaw {
             value: 1.0,
-            dim: 512,
+            dim: 128,
         }),
     );
     let emb = det
         .embed_face(Utf8Path::new("/x.jpg"), &tiny_face())
         .unwrap();
-    // L2: all-ones vector of len 512 → 1/sqrt(512) per element
-    let expected = 1.0_f32 / (512.0_f32).sqrt();
+    // L2: all-ones vector of len 128 → 1/sqrt(128) per element
+    let expected = 1.0_f32 / (128.0_f32).sqrt();
     for v in &emb {
         assert!((v - expected).abs() < 1e-5, "got: {v}");
     }
@@ -85,7 +85,7 @@ fn embed_face_zero_vector_remains_zero() {
         cfg(),
         Box::new(ConstRaw {
             value: 0.0,
-            dim: 512,
+            dim: 128,
         }),
     );
     let emb = det
@@ -105,11 +105,11 @@ fn embed_face_propagates_raw_error() {
 
 #[test]
 fn decode_rejects_short_output() {
-    let t = tract_ndarray::Array2::from_shape_vec((1, 256), vec![0.0_f32; 256])
+    let t = tract_ndarray::Array2::from_shape_vec((1, 64), vec![0.0_f32; 64])
         .unwrap()
         .into_tensor();
     let e = decode(&t).unwrap_err();
-    assert!(e.to_string().contains("dim 256 < expected 512"), "got: {e}");
+    assert!(e.to_string().contains("dim 64 < expected 128"), "got: {e}");
 }
 
 #[test]
@@ -132,7 +132,7 @@ fn detector_debug_includes_loaded_state() {
         cfg(),
         Box::new(ConstRaw {
             value: 0.0,
-            dim: 512,
+            dim: 128,
         }),
     );
     let s = format!("{det:?}");

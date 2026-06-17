@@ -71,14 +71,14 @@ impl FaceDetector for FakeFaceDetector {
 
 /// 路径查表 `MobileFaceNet`：embedding 默认 `default_embedding`，可路径级覆盖 + Err 注入。
 pub struct FakeFaceEmbedder {
-    results: Mutex<HashMap<Utf8PathBuf, [f32; 512]>>,
+    results: Mutex<HashMap<Utf8PathBuf, [f32; 128]>>,
     errors: Mutex<HashSet<Utf8PathBuf>>,
-    default: [f32; 512],
+    default: [f32; 128],
 }
 
 impl FakeFaceEmbedder {
     #[must_use]
-    pub fn new(default: [f32; 512]) -> Self {
+    pub fn new(default: [f32; 128]) -> Self {
         Self {
             results: Mutex::new(HashMap::new()),
             errors: Mutex::new(HashSet::new()),
@@ -87,7 +87,7 @@ impl FakeFaceEmbedder {
     }
 
     #[must_use]
-    pub fn with_result(self, path: impl Into<Utf8PathBuf>, embedding: [f32; 512]) -> Self {
+    pub fn with_result(self, path: impl Into<Utf8PathBuf>, embedding: [f32; 128]) -> Self {
         self.results.lock().insert(path.into(), embedding);
         self
     }
@@ -110,7 +110,7 @@ impl std::fmt::Debug for FakeFaceEmbedder {
 }
 
 impl FaceEmbedder for FakeFaceEmbedder {
-    fn embed_face(&self, path: &Utf8Path, _aligned: &image::RgbImage) -> io::Result<[f32; 512]> {
+    fn embed_face(&self, path: &Utf8Path, _aligned: &image::RgbImage) -> io::Result<[f32; 128]> {
         if self.errors.lock().contains(path) {
             return Err(io::Error::other(format!(
                 "FakeFaceEmbedder: injected error for {path}"
@@ -292,8 +292,8 @@ mod tests {
 
     #[test]
     fn fake_face_embedder_path_resolution_and_error_precedence() {
-        let zero = [0.0; 512];
-        let mut one = [0.0; 512];
+        let zero = [0.0; 128];
+        let mut one = [0.0; 128];
         one[0] = 1.0;
         let d = FakeFaceEmbedder::new(zero)
             .with_result("/a", one)
@@ -313,8 +313,8 @@ mod tests {
 
     #[test]
     fn fake_face_embedder_debug_shows_counts() {
-        let d = FakeFaceEmbedder::new([0.0; 512])
-            .with_result("/a", [0.0; 512])
+        let d = FakeFaceEmbedder::new([0.0; 128])
+            .with_result("/a", [0.0; 128])
             .with_error("/b");
         let s = format!("{d:?}");
         assert!(s.contains("results_count: 1"), "got: {s}");

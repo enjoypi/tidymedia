@@ -1,4 +1,6 @@
-//! tract-onnx 实现 `FaceEmbedder`：跑 `MobileFaceNet` 输出 512 维 L2-normalized embedding。
+//! tract-onnx 实现 `FaceEmbedder`：跑 `MobileFaceNet` 输出 128 维 L2-normalized embedding。
+//! 维度按 `foamliu/MobileFaceNet` 训练规格定（论文标准 128 维）；官方 `InsightFace`
+//! 512 维变体未启用——切换时同步改 `EMBED_DIM` 与 `FaceEmbedder` 接口签名。
 //!
 //! 设计与 `tract_dbnet` 同构：内部 `RawFacenet` trait 隔离真实 `model.run`，
 //! 单测注入 `ConstRaw` 验前/后处理，真实加载在 `_real.rs` 走 ignore-regex 排除。
@@ -18,12 +20,12 @@ use crate::usecases::config::FaceConfig;
 /// 已优化的 `MobileFaceNet` 推理图。
 pub(crate) type FacenetModel = Arc<TypedRunnableModel>;
 
-const EMBED_DIM: usize = 512;
+const EMBED_DIM: usize = 128;
 const INPUT_SIDE: u32 = 112;
 
 /// 把模型加载与单张推理拆开注入，让前/后处理可独立单测。
 pub(crate) trait RawFacenet: Send + Sync {
-    /// 接预处理 NCHW `[1, 3, 112, 112]` f32；返 `[1, 512]` f32 embedding（未 L2）。
+    /// 接预处理 NCHW `[1, 3, 112, 112]` f32；返 `[1, 128]` f32 embedding（未 L2）。
     ///
     /// # Errors
     ///
@@ -86,7 +88,7 @@ impl TractFacenetEmbedder {
 }
 
 impl FaceEmbedder for TractFacenetEmbedder {
-    fn embed_face(&self, _path: &Utf8Path, aligned: &image::RgbImage) -> io::Result<[f32; 512]> {
+    fn embed_face(&self, _path: &Utf8Path, aligned: &image::RgbImage) -> io::Result<[f32; 128]> {
         self.ensure_raw()?;
         let input = preprocess(aligned);
         let output = {
@@ -149,8 +151,8 @@ pub(crate) fn preprocess(img: &image::RgbImage) -> Tensor {
         .into_tensor()
 }
 
-/// 取 `[1, 512]` embedding 并 L2 normalize → `[f32; 512]`。
-pub(crate) fn decode(output: &Tensor) -> io::Result<[f32; 512]> {
+/// 取 `[1, 128]` embedding 并 L2 normalize → `[f32; 128]`。
+pub(crate) fn decode(output: &Tensor) -> io::Result<[f32; 128]> {
     let cast = output
         .cast_to::<f32>()
         .map_err(|e| io::Error::other(format!("facenet output not f32-castable: {e}")))?;

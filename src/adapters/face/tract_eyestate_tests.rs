@@ -1,18 +1,30 @@
-//! `tract_eyestate` 单元测试。
+//! `tract_eyestate` 单元测试 — `YOLOv8` 检测头版。
 
 use super::*;
 use camino::Utf8Path;
 
+/// `dummy` output shape `[1, 6, anchors]`，按 channel-major flat layout（与 tract
+/// `as_slice` 顺序一致）。`closed_max` 注入 closed channel 的最大 conf。
+fn build_yolo_output(anchors: usize, closed_max: f32) -> Tensor {
+    let mut data = vec![0.0_f32; OUTPUT_CHANNELS * anchors];
+    // closed channel (index 5) 的最后一个 anchor 注入 max
+    let closed_offset = (BOX_DIMS + CLOSED_CLASS_IDX) * anchors;
+    if anchors > 0 {
+        data[closed_offset + anchors - 1] = closed_max;
+    }
+    tract_ndarray::Array3::from_shape_vec((1, OUTPUT_CHANNELS, anchors), data)
+        .expect("stub yolo output shape")
+        .into_tensor()
+}
+
 struct ConstRaw {
-    logits: [f32; 2],
+    closed_max: f32,
+    anchors: usize,
 }
 
 impl RawEyeState for ConstRaw {
     fn run(&self, _input: Tensor) -> io::Result<Tensor> {
-        let t = tract_ndarray::Array2::from_shape_vec((1, 2), self.logits.to_vec())
-            .expect("stub shape")
-            .into_tensor();
-        Ok(t)
+        Ok(build_yolo_output(self.anchors, self.closed_max))
     }
 }
 
@@ -55,25 +67,43 @@ fn build_eyestate_classifier_rejects_whitespace_only_path() {
 }
 
 #[test]
-fn classify_eye_high_when_closed_logit_dominates() {
-    // logits [open=0.0, closed=5.0] → softmax 接近 1.0
-    let det = TractEyeStateClassifier::with_raw(cfg(), Box::new(ConstRaw { logits: [0.0, 5.0] }));
+fn classify_eye_returns_high_when_closed_conf_dominates() {
+    let det = TractEyeStateClassifier::with_raw(
+        cfg(),
+        Box::new(ConstRaw {
+            closed_max: 0.9,
+            anchors: 8400,
+        }),
+    );
     let p = det.classify_eye(Utf8Path::new("/x"), &tiny_eye()).unwrap();
-    assert!(p > 0.99, "got: {p}");
+    assert!((p - 0.9).abs() < 1e-5, "got: {p}");
 }
 
 #[test]
-fn classify_eye_low_when_open_logit_dominates() {
-    let det = TractEyeStateClassifier::with_raw(cfg(), Box::new(ConstRaw { logits: [5.0, 0.0] }));
+fn classify_eye_returns_low_when_all_anchors_silent() {
+    let det = TractEyeStateClassifier::with_raw(
+        cfg(),
+        Box::new(ConstRaw {
+            closed_max: 0.0,
+            anchors: 8400,
+        }),
+    );
     let p = det.classify_eye(Utf8Path::new("/x"), &tiny_eye()).unwrap();
-    assert!(p < 0.01, "got: {p}");
+    assert!(p.abs() < f32::EPSILON, "got: {p}");
 }
 
 #[test]
-fn classify_eye_balanced_at_half() {
-    let det = TractEyeStateClassifier::with_raw(cfg(), Box::new(ConstRaw { logits: [1.0, 1.0] }));
+fn classify_eye_clamps_conf_above_one() {
+    // 防御性：模型若输出 >1.0 的原始 logit-without-sigmoid，clamp 到 [0,1]
+    let det = TractEyeStateClassifier::with_raw(
+        cfg(),
+        Box::new(ConstRaw {
+            closed_max: 5.0,
+            anchors: 100,
+        }),
+    );
     let p = det.classify_eye(Utf8Path::new("/x"), &tiny_eye()).unwrap();
-    assert!((p - 0.5).abs() < 1e-5, "got: {p}");
+    assert!((p - 1.0).abs() < f32::EPSILON, "got: {p}");
 }
 
 #[test]
@@ -86,29 +116,64 @@ fn classify_eye_propagates_raw_error() {
 }
 
 #[test]
-fn decode_rejects_short_output() {
-    let t = tract_ndarray::Array1::from_vec(vec![0.0_f32]).into_tensor();
+fn decode_rejects_wrong_rank() {
+    let t = tract_ndarray::Array2::from_shape_vec((1, 6), vec![0.0_f32; 6])
+        .unwrap()
+        .into_tensor();
     let e = decode(&t).unwrap_err();
-    assert!(e.to_string().contains("len 1 < expected 2"), "got: {e}");
+    assert!(e.to_string().contains("!= [1, 6, anchors]"), "got: {e}");
 }
 
 #[test]
-fn preprocess_resizes_non_64() {
-    let big = image::RgbImage::from_pixel(128, 64, image::Rgb([10, 20, 30]));
-    let t = preprocess(&big);
-    assert_eq!(t.shape(), [1, 3, 64, 64]);
+fn decode_rejects_wrong_channel_count() {
+    let t = tract_ndarray::Array3::from_shape_vec((1, 4, 8400), vec![0.0_f32; 4 * 8400])
+        .unwrap()
+        .into_tensor();
+    let e = decode(&t).unwrap_err();
+    assert!(e.to_string().contains("!= [1, 6, anchors]"), "got: {e}");
 }
 
 #[test]
-fn preprocess_keeps_64_unchanged_shape() {
-    let exact = image::RgbImage::from_pixel(64, 64, image::Rgb([10, 20, 30]));
+fn decode_rejects_zero_anchors() {
+    let t = tract_ndarray::Array3::from_shape_vec((1, 6, 0), Vec::<f32>::new())
+        .unwrap()
+        .into_tensor();
+    let e = decode(&t).unwrap_err();
+    assert!(e.to_string().contains("0 anchors"), "got: {e}");
+}
+
+#[test]
+fn preprocess_letterbox_square_input() {
+    // 正方形输入 → 无 padding，整图占满 640×640
+    let exact = image::RgbImage::from_pixel(320, 320, image::Rgb([100, 100, 100]));
     let t = preprocess(&exact);
-    assert_eq!(t.shape(), [1, 3, 64, 64]);
+    assert_eq!(t.shape(), [1, 3, 640, 640]);
+}
+
+#[test]
+fn preprocess_letterbox_landscape_pads_vertical() {
+    // 横向 640×320 → resize 长边 640 后 height=320，上下各 padding 160 行 114/255
+    let wide = image::RgbImage::from_pixel(640, 320, image::Rgb([200, 100, 50]));
+    let t = preprocess(&wide);
+    assert_eq!(t.shape(), [1, 3, 640, 640]);
+}
+
+#[test]
+fn preprocess_handles_zero_dim_input() {
+    let empty = image::RgbImage::new(0, 10);
+    let t = preprocess(&empty);
+    assert_eq!(t.shape(), [1, 3, 640, 640]);
 }
 
 #[test]
 fn detector_debug_includes_loaded_state() {
-    let det = TractEyeStateClassifier::with_raw(cfg(), Box::new(ConstRaw { logits: [0.0, 0.0] }));
+    let det = TractEyeStateClassifier::with_raw(
+        cfg(),
+        Box::new(ConstRaw {
+            closed_max: 0.0,
+            anchors: 100,
+        }),
+    );
     let s = format!("{det:?}");
     assert!(s.contains("loaded: true"), "got: {s}");
 }

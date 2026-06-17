@@ -90,7 +90,7 @@ fn cull_empty_source_returns_ok_zero() {
     let out_dir = tempfile::tempdir().unwrap();
     let out = local_loc(out_dir.path().to_str().unwrap());
     let scrfd = FakeFaceDetector::new(vec![]);
-    let facenet = FakeFaceEmbedder::new([0.0; 512]);
+    let facenet = FakeFaceEmbedder::new([0.0; 128]);
     let facemesh = FakeFaceMeshDetector::new(vec![[0.0; 3]; 468]);
     let eyestate = FakeEyeStateClassifier::new(0.0);
     let report = cull(
@@ -118,7 +118,7 @@ fn cull_source_inside_output_returns_err() {
     let src = local_loc(sub.to_str().unwrap());
     let out = local_loc(tmp.path().to_str().unwrap());
     let scrfd = FakeFaceDetector::new(vec![]);
-    let facenet = FakeFaceEmbedder::new([0.0; 512]);
+    let facenet = FakeFaceEmbedder::new([0.0; 128]);
     let facemesh = FakeFaceMeshDetector::new(vec![[0.0; 3]; 468]);
     let eyestate = FakeEyeStateClassifier::new(0.0);
     let err = cull(
@@ -157,7 +157,7 @@ fn cull_dry_run_two_similar_images_picks_one_best() {
     };
     let a_camino = camino::Utf8PathBuf::from(a.to_str().unwrap());
     let scrfd = FakeFaceDetector::new(vec![]).with_result(a_camino, vec![face]);
-    let facenet = FakeFaceEmbedder::new([0.0; 512]);
+    let facenet = FakeFaceEmbedder::new([0.0; 128]);
     let facemesh = FakeFaceMeshDetector::new(vec![[0.0; 3]; 468]);
     let eyestate = FakeEyeStateClassifier::new(0.0);
 
@@ -194,7 +194,7 @@ fn cull_scan_skips_non_image_file() {
     let out_dir = tempfile::tempdir().unwrap();
     let out = local_loc(out_dir.path().to_str().unwrap());
     let scrfd = FakeFaceDetector::new(vec![]);
-    let facenet = FakeFaceEmbedder::new([0.0; 512]);
+    let facenet = FakeFaceEmbedder::new([0.0; 128]);
     let facemesh = FakeFaceMeshDetector::new(vec![[0.0; 3]; 468]);
     let eyestate = FakeEyeStateClassifier::new(0.0);
     let report = cull(
@@ -221,7 +221,7 @@ fn cull_returns_err_when_factory_rejects_output() {
     let src = local_loc(src_dir.path().to_str().unwrap());
     let out = smb_loc("/out");
     let scrfd = FakeFaceDetector::new(vec![]);
-    let facenet = FakeFaceEmbedder::new([0.0; 512]);
+    let facenet = FakeFaceEmbedder::new([0.0; 128]);
     let facemesh = FakeFaceMeshDetector::new(vec![[0.0; 3]; 468]);
     let eyestate = FakeEyeStateClassifier::new(0.0);
     let err = cull(
@@ -251,7 +251,7 @@ fn cull_returns_err_when_factory_rejects_source() {
     let out_dir = tempfile::tempdir().unwrap();
     let out = local_loc(out_dir.path().to_str().unwrap());
     let scrfd = FakeFaceDetector::new(vec![]);
-    let facenet = FakeFaceEmbedder::new([0.0; 512]);
+    let facenet = FakeFaceEmbedder::new([0.0; 128]);
     let facemesh = FakeFaceMeshDetector::new(vec![[0.0; 3]; 468]);
     let eyestate = FakeEyeStateClassifier::new(0.0);
     let err = cull(
@@ -281,7 +281,7 @@ fn cull_mkdir_p_failure_propagates_when_not_dry_run() {
     let src_dir = tempfile::tempdir().unwrap();
     let src = local_loc(src_dir.path().to_str().unwrap());
     let scrfd = FakeFaceDetector::new(vec![]);
-    let facenet = FakeFaceEmbedder::new([0.0; 512]);
+    let facenet = FakeFaceEmbedder::new([0.0; 128]);
     let facemesh = FakeFaceMeshDetector::new(vec![[0.0; 3]; 468]);
     let eyestate = FakeEyeStateClassifier::new(0.0);
     let err = cull(
@@ -308,7 +308,7 @@ fn cull_skips_single_image_group() {
     let out_dir = tempfile::tempdir().unwrap();
     let out = local_loc(out_dir.path().to_str().unwrap());
     let scrfd = FakeFaceDetector::new(vec![]);
-    let facenet = FakeFaceEmbedder::new([0.0; 512]);
+    let facenet = FakeFaceEmbedder::new([0.0; 128]);
     let facemesh = FakeFaceMeshDetector::new(vec![[0.0; 3]; 468]);
     let eyestate = FakeEyeStateClassifier::new(0.0);
     let report = cull(
@@ -340,7 +340,7 @@ fn cull_records_failure_when_walk_yields_err() {
     let out_dir = tempfile::tempdir().unwrap();
     let out = local_loc(out_dir.path().to_str().unwrap());
     let scrfd = FakeFaceDetector::new(vec![]);
-    let facenet = FakeFaceEmbedder::new([0.0; 512]);
+    let facenet = FakeFaceEmbedder::new([0.0; 128]);
     let facemesh = FakeFaceMeshDetector::new(vec![[0.0; 3]; 468]);
     let eyestate = FakeEyeStateClassifier::new(0.0);
     let report = cull(
@@ -374,7 +374,7 @@ fn cull_records_failure_when_open_read_errs() {
     let out_dir = tempfile::tempdir().unwrap();
     let out = local_loc(out_dir.path().to_str().unwrap());
     let scrfd = FakeFaceDetector::new(vec![]);
-    let facenet = FakeFaceEmbedder::new([0.0; 512]);
+    let facenet = FakeFaceEmbedder::new([0.0; 128]);
     let facemesh = FakeFaceMeshDetector::new(vec![[0.0; 3]; 468]);
     let eyestate = FakeEyeStateClassifier::new(0.0);
     let report = cull(
@@ -408,7 +408,7 @@ fn cull_skips_entry_under_output_prefix() {
     let src = local_loc(src_path.to_str().unwrap());
     let out = local_loc(out_path.to_str().unwrap());
     let scrfd = FakeFaceDetector::new(vec![]);
-    let facenet = FakeFaceEmbedder::new([0.0; 512]);
+    let facenet = FakeFaceEmbedder::new([0.0; 128]);
     let facemesh = FakeFaceMeshDetector::new(vec![[0.0; 3]; 468]);
     let eyestate = FakeEyeStateClassifier::new(0.0);
     let report = cull(
@@ -489,7 +489,7 @@ fn cull_records_failure_when_write_group_errs() {
     write_png(&src_dir.path().join("b.png"), [200, 200, 200]);
     let src = local_loc(src_dir.path().to_str().unwrap());
     let scrfd = FakeFaceDetector::new(vec![]);
-    let facenet = FakeFaceEmbedder::new([0.0; 512]);
+    let facenet = FakeFaceEmbedder::new([0.0; 128]);
     let facemesh = FakeFaceMeshDetector::new(vec![[0.0; 3]; 468]);
     let eyestate = FakeEyeStateClassifier::new(0.0);
     let report = cull(
@@ -523,7 +523,7 @@ fn cull_records_failure_on_corrupt_image() {
     let out_dir = tempfile::tempdir().unwrap();
     let out = local_loc(out_dir.path().to_str().unwrap());
     let scrfd = FakeFaceDetector::new(vec![]);
-    let facenet = FakeFaceEmbedder::new([0.0; 512]);
+    let facenet = FakeFaceEmbedder::new([0.0; 128]);
     let facemesh = FakeFaceMeshDetector::new(vec![[0.0; 3]; 468]);
     let eyestate = FakeEyeStateClassifier::new(0.0);
     let report = cull(

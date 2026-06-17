@@ -19,10 +19,16 @@
 
 ## 系统依赖与库特性
 - 无外部进程依赖；EXIF/视频元数据走 `nom-exif`（图+视频）+ `infer`（magic-bytes MIME）
-- **`tract-onnx` + `image` 默认编译**（旧 `ocr-detect` feature 已废）：`move-text-shot` + `cull` 子命令共用 tract-onnx 推理 + image 解码栈；ONNX 模型文件**不入 git**——用户自备并通过 env / `config.yaml` 指定路径：
-  - `move-text-shot`：`backend.ocr.det_model_path` / `TIDYMEDIA_OCR_DET_MODEL`（`PaddleOCR DBNet det.onnx`，约 5–10 MB）
-  - `cull`：`backend.face.{scrfd,facenet,facemesh,eyestate}_model_path` 4 个路径（SCRFD-500M-bn-kps / MobileFaceNet / MediaPipe FaceMesh / MobileNetV3 EyeState，合计约 12 MB）
+- **`tract-onnx` + `image` 默认编译**（旧 `ocr-detect` feature 已废）：`move-text-shot` + `cull` 子命令共用 tract-onnx 推理 + image 解码栈；ONNX 模型**走 git-lfs 存放 `models/`**（4 个 face + 1 个 OCR，合计约 35 MB；clone 后 `git lfs pull` 或先期 `git lfs install` 自动拉取），`scripts/download_models.sh` + `simplify_onnx.py` 为初次装配脚本（用户 onnxsim 化简 + 固化静态 input shape）：
+  - `move-text-shot`：`backend.ocr.det_model_path` / `TIDYMEDIA_OCR_DET_MODEL`（`PaddleOCR DBNet det.onnx`，约 5–10 MB；用户自备）
+  - `cull`：`backend.face.{scrfd,facenet,facemesh,eyestate}_model_path` 4 个路径，已落地默认值：
+    - SCRFD-10G (`models/scrfd_10g_bnkps.onnx`，antelopev2；500M 变体无开源 onnx)
+    - MobileFaceNet (`models/mobilefacenet.onnx`，128 维 embedding；foamliu/MobileFaceNet pt→onnx，**非官方 512 维**)
+    - MediaPipe FaceMesh (`models/face_mesh_192x192.onnx`，PINTO_model_zoo 静态版)
+    - YOLOv8 EyeState (`models/eyestate_yolov8.onnx`，MichalMlodawski/open-closed-eye-detection；**非 MobileNetV3 softmax**，decode 取 `[1, 6, 8400]` anchor max closed conf)
   - 任一路径为空时调用立即返 `InvalidInput`（懒加载，构造时不读文件；首次 `has_text` / `detect_faces` 触发 `load_runnable`）
+  - **MobileFaceNet 128 维而非 512 维**：foamliu 训练规格；`FaceEmbedder` trait 签名 `[f32; 128]`，切换 512 维变体需同步改 `EMBED_DIM` 与 trait 接口
+  - **YOLOv8 EyeState decode 与现有 MobileNetV3 假设不同**：输入 640×640 letterbox 而非 64×64 直接 resize，输出检测头 max conf 而非 softmax；closed_index=1 按 README 描述（open=0 / closed=1）
 - `bin/exiftool/exiftool.exe`（仅开发调试）：常用 `-time:all -s <f>` 查时间字段、`-P '-AllDates<Filename' -overwrite_original <dir>` 按文件名批量改时间保 mtime；单文件按值写 `-P -overwrite_original "-AllDates=YYYY:MM:DD HH:MM:SS" "-FileModifyDate=..."`
   - **中文路径**：portable exiftool 缺 `Win32API::File`，命令行 UTF-8 直传 0 文件；要 UTF-8 路径走 **tempfile + `-@ <file>` + `-charset filename=UTF8`**（小写 `filename`）；省掉 `-charset` 走 ANSI 系统调用也稳（stdout 乱码不影响 EXIF 抽取）
   - 写操作默认产 `<file>_original` 备份，MUST 清理（magic-bytes 仍 JPEG 会被 tidymedia 当媒体归档）
