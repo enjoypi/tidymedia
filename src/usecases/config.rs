@@ -149,11 +149,38 @@ impl Default for AdbBackendConfig {
     }
 }
 
+/// `move-text-shot` 子命令的文本检测后端参数。模型文件路径外置；
+/// 二值化与「响应像素占比」两阈值都暴露让用户按机型/语言调优。
+#[derive(Clone, Debug, Deserialize)]
+#[serde(default)]
+pub struct OcrConfig {
+    /// `PaddleOCR` `DBNet` `det.onnx` 模型本地路径。空串 = feature on 调用时报 `InvalidInput`。
+    pub det_model_path: String,
+    /// sigmoid 输出图二值化阈值（DBNet 训练惯用 0.3）。
+    pub binarize_threshold: f32,
+    /// 「二值化后前景像素 / 总像素」比例下限；高于此值视为含文本。
+    pub min_text_pixel_ratio: f32,
+    /// 推理前 resize 的短边像素上限；DBNet 要求 32 倍数（实际 resize 时按 32 对齐）。
+    pub resize_max_side: u32,
+}
+
+impl Default for OcrConfig {
+    fn default() -> Self {
+        Self {
+            det_model_path: String::new(),
+            binarize_threshold: 0.3,
+            min_text_pixel_ratio: 0.005,
+            resize_max_side: 736,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Default, Deserialize)]
 #[serde(default)]
 pub struct BackendConfig {
     pub smb: SmbBackendConfig,
     pub adb: AdbBackendConfig,
+    pub ocr: OcrConfig,
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
@@ -180,6 +207,10 @@ mod tests {
         assert_eq!(c.backend.smb.workgroup, "WORKGROUP");
         assert_eq!(c.backend.adb.server_host, "127.0.0.1");
         assert_eq!(c.backend.adb.server_port, 5037);
+        assert_eq!(c.backend.ocr.det_model_path, "");
+        assert!((c.backend.ocr.binarize_threshold - 0.3).abs() < f32::EPSILON);
+        assert!((c.backend.ocr.min_text_pixel_ratio - 0.005).abs() < f32::EPSILON);
+        assert_eq!(c.backend.ocr.resize_max_side, 736);
         assert_eq!(c.log.level, "info");
     }
 

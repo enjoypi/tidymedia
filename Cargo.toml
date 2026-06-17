@@ -22,6 +22,11 @@ adb-backend = ["dep:adb_client"]
 # 之后 `uniffi-bindgen generate ... --library libtidymedia.so --language kotlin`
 # 生成 Kotlin 绑定，见 `mobile/build-android.sh`。
 android-app = ["dep:uniffi"]
+# 启用 `move-text-shot` 子命令的真实 OCR 文本检测后端（PaddleOCR DBNet det.onnx via
+# tract-onnx 纯 Rust 推理引擎）。模型文件不入 git，运行前由用户自备并通过
+# `backend.ocr.det_model_path` / `TIDYMEDIA_OCR_DET_MODEL` 指定路径。
+# 未启用时子命令仍接受 CLI 解析，调用立即返 io::ErrorKind::Unsupported；与 smb/adb 同套路。
+ocr-detect = ["dep:tract-onnx", "dep:image"]
 
 # 仅 rlib：cdylib 只在 Android 交叉编译时需要，由 build-android.sh 用
 # `cargo rustc --crate-type cdylib` 按需产出。若写死 cdylib，Windows 上
@@ -53,6 +58,8 @@ sha2 = "*"
 tempfile = "*"
 thiserror = "*"
 time = "*"
+tract-onnx = { version = "*", optional = true }
+image = { version = "*", optional = true }
 tracing = "*"
 tracing-subscriber = { version = "*", features = ["env-filter"] }
 wyhash = "*"

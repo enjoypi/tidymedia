@@ -187,14 +187,14 @@ mod tests {
         assert_eq!(v[0].utc.timestamp(), 100);
     }
 
-    /// 覆盖 `i64::try_from(secs).ok()?` Err arm：u64::MAX 超 i64::MAX → None。
+    /// 覆盖 `i64::try_from(secs).ok()?` Err arm：`u64::MAX` 超 `i64::MAX` → None。
     #[test]
     fn epoch_to_candidate_u64_above_i64_max_returns_none() {
         assert!(epoch_to_candidate(u64::MAX, Source::ExifDateTimeOriginal, None, false).is_none());
     }
 
-    /// 覆盖 `TimeDelta::try_seconds(signed)?` Err arm：i64::MAX 通过 try_from 但
-    /// 超 TimeDelta 内部 secs*1000 上限 → None。
+    /// 覆盖 `TimeDelta::try_seconds(signed)?` Err arm：`i64::MAX` 通过 `try_from` 但
+    /// 超 `TimeDelta` 内部 secs*1000 上限 → None。
     #[test]
     fn epoch_to_candidate_overflows_timedelta_returns_none() {
         let secs = u64::try_from(i64::MAX).unwrap();
@@ -202,7 +202,7 @@ mod tests {
     }
 
     /// 覆盖 `UNIX_EPOCH.checked_add_signed(delta)?` Err arm：constructs delta that
-    /// passes `try_seconds` but UNIX_EPOCH + delta exceeds DateTime year range。
+    /// passes `try_seconds` but `UNIX_EPOCH` + delta exceeds `DateTime` year range。
     #[test]
     fn epoch_to_candidate_exceeds_datetime_range_returns_none() {
         // TimeDelta MAX secs ≈ i64::MAX/1000 ≈ 9.22e15；DateTime max secs from

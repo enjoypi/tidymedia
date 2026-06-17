@@ -101,3 +101,6 @@ mod windows_path;
 
 #[path = "lib_tidy/windows_same_volume.rs"]
 mod windows_same_volume;
+
+#[path = "lib_tidy/move_text_shot.rs"]
+mod move_text_shot;

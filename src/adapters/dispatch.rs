@@ -4,14 +4,19 @@ use crate::adapters::report_sink::JsonFileReportSink;
 use crate::entities::common::{Error, Result};
 use crate::entities::uri::Location;
 use crate::usecases::config::validate_archive_template;
+#[cfg(feature = "ocr-detect")]
+use crate::usecases::move_text_shot::MoveTextShotReport;
 use crate::usecases::report::{CopyReport, FindReport, Report, ReportSink};
 
-/// 子命令执行结果：Copy/Move 返回 [`CopyReport`]，Find 返回 [`FindReport`]。
-/// 让 `tidy_with` 单一入口同时服务 CLI（丢弃返回）与 Android/mobile（消费 report 字段）。
+/// 子命令执行结果：Copy/Move 返回 [`CopyReport`]，Find 返回 [`FindReport`]，
+/// `MoveTextShot` 返回 [`MoveTextShotReport`]（仅 feature `ocr-detect` 启用）。
+/// 让 `tidy_with` 单一入口同时服务 CLI（丢弃返回）与 Android/mobile（消费 report）。
 #[derive(Debug)]
 pub enum CommandResult {
     Copy(CopyReport),
     Find(FindReport),
+    #[cfg(feature = "ocr-detect")]
+    MoveTextShot(MoveTextShotReport),
 }
 
 /// 用默认 backend factory 跑命令；旧入口，等价于 `tidy_with(&DefaultBackendFactory, ...)`。
@@ -22,14 +27,28 @@ pub enum CommandResult {
 /// 出现非零 failed（部分文件复制失败）时返回 `Err`，让 CLI 退出码非 0 让 CI/cron
 /// 脚本能区分"全部成功"与"部分失败"。
 pub fn tidy(command: Commands) -> Result<()> {
-    match tidy_with(&DefaultBackendFactory, command)? {
+    let result = tidy_with(&DefaultBackendFactory, command)?;
+    match result {
         CommandResult::Copy(report) if report.failed > 0 => {
             Err(Error::Io(std::io::Error::other(format!(
                 "copy partial failure: {} failed, {} copied, {} ignored",
                 report.failed, report.copied, report.ignored
             ))))
         }
+        #[cfg(feature = "ocr-detect")]
+        CommandResult::MoveTextShot(report) if report.failed > 0 => {
+            Err(Error::Io(std::io::Error::other(format!(
+                "move-text-shot partial failure: {} failed, {} moved, {} skipped_no_text, \
+                 {} skipped_non_image",
+                report.failed,
+                report.moved,
+                report.skipped_no_text,
+                report.skipped_non_image
+            ))))
+        }
         CommandResult::Copy(_) | CommandResult::Find(_) => Ok(()),
+        #[cfg(feature = "ocr-detect")]
+        CommandResult::MoveTextShot(_) => Ok(()),
     }
 }
 
@@ -81,6 +100,12 @@ pub fn tidy_with(factory: &dyn BackendFactory, command: Commands) -> Result<Comm
             output,
             report,
         } => dispatch_find(factory, sources, output, secure, report.as_deref()),
+        Commands::MoveTextShot {
+            dry_run,
+            sources,
+            output,
+            report,
+        } => dispatch_move_text_shot(factory, sources, output, dry_run, report.as_deref()),
     }
 }
 
@@ -135,6 +160,48 @@ fn dispatch_find(
         sink.write(&Report::Find(&find_report));
     }
     Ok(CommandResult::Find(find_report))
+}
+
+// 默认 feature 下 sources/output 经 `let _ = (..)` 消费；ocr-detect feature on 下
+// 仅 by-ref 借给 usecase——跨 feature 组合差异让 `needless_pass_by_value` 仅在后者
+// 触发，按 P0 §1 用 `#[allow]` 而非 `#[expect]`。
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "由 Commands::MoveTextShot enum 解构 by-value 而来；usecase 接 &[]/& 借用"
+)]
+fn dispatch_move_text_shot(
+    factory: &dyn BackendFactory,
+    sources: Vec<Location>,
+    output: Location,
+    dry_run: bool,
+    report_path: Option<&str>,
+) -> Result<CommandResult> {
+    #[cfg(feature = "ocr-detect")]
+    {
+        let ocr_cfg = &crate::usecases::config::config().backend.ocr;
+        let detector = crate::adapters::ocr::build_detector(ocr_cfg)?;
+        let move_report = crate::usecases::move_text_shot(
+            detector.as_ref(),
+            factory,
+            &sources,
+            &output,
+            dry_run,
+        )?;
+        if let Some(path) = report_path {
+            let sink = JsonFileReportSink::new(path);
+            sink.write(&Report::MoveTextShot(&move_report));
+        }
+        Ok(CommandResult::MoveTextShot(move_report))
+    }
+    #[cfg(not(feature = "ocr-detect"))]
+    {
+        // 显式吃掉未使用变量，避免 dead binding warning（feature off 路径）
+        let _ = (factory, sources, output, dry_run, report_path);
+        Err(Error::Io(std::io::Error::new(
+            std::io::ErrorKind::Unsupported,
+            "move-text-shot requires the `ocr-detect` feature; rebuild with --features ocr-detect",
+        )))
+    }
 }
 
 // None 表示未传，跳过校验；Some(s) 时校验模板合法性。

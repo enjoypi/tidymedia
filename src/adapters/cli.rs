@@ -82,6 +82,25 @@ pub enum Commands {
         report: Option<String>,
     },
 
+    /// Move images whose content contains detectable text (OCR text detection) from sources into the output directory, preserving each file's path relative to its source root. Requires building with `--features ocr-detect` and a configured `PaddleOCR` `DBNet` `det.onnx` model (`backend.ocr.det_model_path` / `TIDYMEDIA_OCR_DET_MODEL`). Non-image files are skipped.
+    MoveTextShot {
+        /// Dry run, do not move files
+        #[arg(short, long)]
+        dry_run: bool,
+
+        /// The source directories or files (URI or local path)
+        #[arg(required = true)]
+        sources: Vec<Location>,
+
+        /// The output directory (URI or local path)
+        #[arg(short, long)]
+        output: Location,
+
+        /// Write a JSON operation report to this path
+        #[arg(long)]
+        report: Option<String>,
+    },
+
     /// Move non-duplicate media files from sources into the output directory. Sources that duplicate something already in output are physically deleted; duplicate detection uses SHA-512. Pass --include-non-media to also move everything else.
     Move {
         /// Dry run, do not move or delete files

@@ -8,6 +8,8 @@ use crate::usecases::report::{Report, ReportSink};
 
 const FEATURE_COPY: &str = "copy";
 const FEATURE_FIND: &str = "find";
+#[cfg(feature = "ocr-detect")]
+const FEATURE_MOVE_TEXT_SHOT: &str = "move_text_shot";
 
 /// 把报告原子写到 `path`（先写临时文件再 persist）。
 /// 写盘失败仅 warn，不阻断主流程。
@@ -31,14 +33,17 @@ impl ReportSink for JsonFileReportSink {
         match report {
             Report::Copy(r) => write_report_json(&self.path, *r, FEATURE_COPY),
             Report::Find(r) => write_report_json(&self.path, *r, FEATURE_FIND),
+            #[cfg(feature = "ocr-detect")]
+            Report::MoveTextShot(r) => write_report_json(&self.path, *r, FEATURE_MOVE_TEXT_SHOT),
         }
     }
 }
 
 fn write_report_json<T: serde::Serialize>(path: &str, report: &T, feature: &str) {
-    // CopyReport / FindReport 均为纯字段 derive(Serialize) 结构体，序列化不可能失败。
+    // CopyReport / FindReport / MoveTextShotReport 均为纯字段 derive(Serialize) 结构体，
+    // 序列化不可能失败。
     let json = serde_json::to_string_pretty(report)
-        .expect("internal error: serializing CopyReport/FindReport must not fail");
+        .expect("internal error: serializing report must not fail");
     match try_write_report_json(path, json.as_bytes()) {
         Ok(()) => {}
         Err(e) => {

@@ -31,3 +31,15 @@ backend:
     server_host: ${TIDYMEDIA_ADB_SERVER_HOST:-127.0.0.1}
     # adb daemon 默认端口；多个 adb 实例并存时按需调整
     server_port: ${TIDYMEDIA_ADB_SERVER_PORT:-5037}
+  # move-text-shot 子命令的文本检测后端（feature ocr-detect 启用时生效）
+  # 仅在启用 feature 且使用该子命令时读取；其余路径不消费这些字段
+  ocr:
+    # PaddleOCR DBNet det.onnx 模型本地路径；空 = 调用时报 InvalidInput
+    # 模型文件不入 git，运行前由用户自备并指定路径
+    det_model_path: ${TIDYMEDIA_OCR_DET_MODEL:-}
+    # sigmoid 输出图二值化阈值（DBNet 训练惯用 0.3）
+    binarize_threshold: ${TIDYMEDIA_OCR_THRESHOLD:-0.3}
+    # 二值化后前景像素占比下限；高于此值判含文本
+    min_text_pixel_ratio: ${TIDYMEDIA_OCR_MIN_RATIO:-0.005}
+    # 推理前 resize 的短边像素上限；实际按 32 倍数对齐
+    resize_max_side: ${TIDYMEDIA_OCR_MAX_SIDE:-736}

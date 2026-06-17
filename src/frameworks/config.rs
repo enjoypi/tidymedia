@@ -7,7 +7,9 @@ use std::sync::OnceLock;
 use tracing::debug;
 use tracing::warn;
 
-use crate::usecases::config::{Config, CopyConfig, LogConfig, validate_archive_template};
+use crate::usecases::config::{
+    Config, CopyConfig, LogConfig, OcrConfig, validate_archive_template,
+};
 
 static CONFIG: OnceLock<Config> = OnceLock::new();
 
@@ -106,6 +108,7 @@ fn sanitize(mut cfg: Config) -> Config {
         );
         cfg.copy.archive_template = fallback;
     }
+    sanitize_ocr(&mut cfg.backend.ocr);
     // 非法 level 会让 CLI 端 parse 失败静默退 info；此处统一回退 + 告警。
     // 注意：未传 --log-level 时 config 在 subscriber 安装前加载，本 warn 不可见
     //（行为仍安全回退）；显式传 flag 或 RUST_LOG 时可见。
@@ -123,6 +126,59 @@ fn sanitize(mut cfg: Config) -> Config {
         cfg.log.level = fallback;
     }
     cfg
+}
+
+// OCR 三阈值非法即 warn + 回退默认；与 `archive_template` 同哲学（feature off
+// 时仍走此校验，让 yaml 内字段格式问题统一可观测）。
+// - `binarize_threshold ∈ (0, 1)`：DBNet sigmoid 输出域，越界即恒真/恒假
+// - `min_text_pixel_ratio ∈ (0, 1)`：占比阈值，越界让所有图都判命中或永不命中
+// - `resize_max_side >= 64`：太小让 DBNet 输入丢失结构信息
+fn sanitize_ocr(ocr: &mut OcrConfig) {
+    // 顶置常量：clippy::items_after_statements 禁止 statement 后插 const/fn
+    const MIN_RESIZE_SIDE: u32 = 64;
+
+    let defaults = OcrConfig::default();
+    if !is_unit_open(ocr.binarize_threshold) {
+        warn!(
+            feature = "config",
+            operation = "sanitize",
+            result = "invalid_value",
+            field = "backend.ocr.binarize_threshold",
+            value = ocr.binarize_threshold,
+            fallback = defaults.binarize_threshold,
+            "binarize_threshold must be in (0, 1); falling back to default"
+        );
+        ocr.binarize_threshold = defaults.binarize_threshold;
+    }
+    if !is_unit_open(ocr.min_text_pixel_ratio) {
+        warn!(
+            feature = "config",
+            operation = "sanitize",
+            result = "invalid_value",
+            field = "backend.ocr.min_text_pixel_ratio",
+            value = ocr.min_text_pixel_ratio,
+            fallback = defaults.min_text_pixel_ratio,
+            "min_text_pixel_ratio must be in (0, 1); falling back to default"
+        );
+        ocr.min_text_pixel_ratio = defaults.min_text_pixel_ratio;
+    }
+    if ocr.resize_max_side < MIN_RESIZE_SIDE {
+        warn!(
+            feature = "config",
+            operation = "sanitize",
+            result = "invalid_value",
+            field = "backend.ocr.resize_max_side",
+            value = ocr.resize_max_side,
+            fallback = defaults.resize_max_side,
+            "resize_max_side must be >= 64; falling back to default"
+        );
+        ocr.resize_max_side = defaults.resize_max_side;
+    }
+}
+
+// 开区间 (0.0, 1.0) 内的有限正数。NaN/Inf 均通过 `is_finite()` 拒绝。
+fn is_unit_open(v: f32) -> bool {
+    v.is_finite() && v > 0.0 && v < 1.0
 }
 
 /// 把 `${VAR:-default}` 替换为环境变量值或默认值。

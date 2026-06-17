@@ -160,6 +160,115 @@ fn load_parses_quoted_template_placeholder_default() {
     remove_env_var("TIDYMEDIA_CONFIG");
 }
 
+// OCR `binarize_threshold` 越界（≤0 或 ≥1 或 NaN）回退默认 0.3，避免恒真/恒假。
+#[test]
+fn load_sanitizes_invalid_ocr_binarize_threshold_to_default() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("badbt.yaml");
+    std::fs::write(
+        &path,
+        "backend:\n  ocr:\n    binarize_threshold: 1.5\n",
+    )
+    .unwrap();
+    set_env_var("TIDYMEDIA_CONFIG", path.to_str().unwrap());
+    let cfg = load();
+    assert!((cfg.backend.ocr.binarize_threshold - 0.3).abs() < f32::EPSILON);
+    remove_env_var("TIDYMEDIA_CONFIG");
+}
+
+#[test]
+fn load_sanitizes_zero_ocr_binarize_threshold_to_default() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("zerobt.yaml");
+    std::fs::write(
+        &path,
+        "backend:\n  ocr:\n    binarize_threshold: 0.0\n",
+    )
+    .unwrap();
+    set_env_var("TIDYMEDIA_CONFIG", path.to_str().unwrap());
+    let cfg = load();
+    assert!((cfg.backend.ocr.binarize_threshold - 0.3).abs() < f32::EPSILON);
+    remove_env_var("TIDYMEDIA_CONFIG");
+}
+
+#[test]
+fn load_sanitizes_nan_ocr_binarize_threshold_to_default() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("nanbt.yaml");
+    // YAML 1.1 `.nan` 是 NaN 字面量；is_finite() 路径分支
+    std::fs::write(
+        &path,
+        "backend:\n  ocr:\n    binarize_threshold: .nan\n",
+    )
+    .unwrap();
+    set_env_var("TIDYMEDIA_CONFIG", path.to_str().unwrap());
+    let cfg = load();
+    assert!((cfg.backend.ocr.binarize_threshold - 0.3).abs() < f32::EPSILON);
+    remove_env_var("TIDYMEDIA_CONFIG");
+}
+
+#[test]
+fn load_sanitizes_negative_ocr_min_text_pixel_ratio_to_default() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("negratio.yaml");
+    std::fs::write(
+        &path,
+        "backend:\n  ocr:\n    min_text_pixel_ratio: -0.1\n",
+    )
+    .unwrap();
+    set_env_var("TIDYMEDIA_CONFIG", path.to_str().unwrap());
+    let cfg = load();
+    assert!((cfg.backend.ocr.min_text_pixel_ratio - 0.005).abs() < f32::EPSILON);
+    remove_env_var("TIDYMEDIA_CONFIG");
+}
+
+#[test]
+fn load_sanitizes_invalid_ocr_min_text_pixel_ratio_to_default() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("badratio.yaml");
+    std::fs::write(
+        &path,
+        "backend:\n  ocr:\n    min_text_pixel_ratio: 2.0\n",
+    )
+    .unwrap();
+    set_env_var("TIDYMEDIA_CONFIG", path.to_str().unwrap());
+    let cfg = load();
+    assert!((cfg.backend.ocr.min_text_pixel_ratio - 0.005).abs() < f32::EPSILON);
+    remove_env_var("TIDYMEDIA_CONFIG");
+}
+
+#[test]
+fn load_sanitizes_too_small_ocr_resize_max_side_to_default() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("badside.yaml");
+    std::fs::write(
+        &path,
+        "backend:\n  ocr:\n    resize_max_side: 32\n",
+    )
+    .unwrap();
+    set_env_var("TIDYMEDIA_CONFIG", path.to_str().unwrap());
+    let cfg = load();
+    assert_eq!(cfg.backend.ocr.resize_max_side, 736);
+    remove_env_var("TIDYMEDIA_CONFIG");
+}
+
+#[test]
+fn load_keeps_valid_ocr_fields_unchanged() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("okocr.yaml");
+    std::fs::write(
+        &path,
+        "backend:\n  ocr:\n    binarize_threshold: 0.4\n    min_text_pixel_ratio: 0.01\n    resize_max_side: 960\n",
+    )
+    .unwrap();
+    set_env_var("TIDYMEDIA_CONFIG", path.to_str().unwrap());
+    let cfg = load();
+    assert!((cfg.backend.ocr.binarize_threshold - 0.4).abs() < f32::EPSILON);
+    assert!((cfg.backend.ocr.min_text_pixel_ratio - 0.01).abs() < f32::EPSILON);
+    assert_eq!(cfg.backend.ocr.resize_max_side, 960);
+    remove_env_var("TIDYMEDIA_CONFIG");
+}
+
 // 合法配置不被 sanitize 改写（防 sanitize 被变异成无条件重置）。
 #[test]
 fn load_keeps_valid_copy_fields_unchanged() {

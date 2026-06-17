@@ -142,7 +142,7 @@ mod test_render {
     }
 
     /// `validate_archive_template` 已拒绝未闭合 `{`，但 render 自身的防御兜底
-    /// （无闭合 `}` early-return + clean_segments）需直接喂模板字面量命中。
+    /// （无闭合 `}` early-return + `clean_segments`）需直接喂模板字面量命中。
     #[test]
     fn render_unclosed_brace_preserves_literal_and_returns() {
         let c = ctx("2024", "01", "15", "", None);
