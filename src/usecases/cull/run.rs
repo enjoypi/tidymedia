@@ -22,7 +22,7 @@ use std::sync::Arc;
 use tracing::{debug, error};
 
 use super::group_writer::{GroupPlan, write_group};
-use super::phash::{ahash, group_by_hash};
+use super::phash::{group_by_hash, phash};
 use super::report::{CullReport, ScoreBreakdown};
 use super::sharpness::laplacian_variance;
 use crate::adapters::backend::factory::BackendFactory;
@@ -232,7 +232,7 @@ fn scan_source(
                 continue;
             }
         };
-        let hash = ahash(&img);
+        let hash = phash(&img);
         let luma = image::imageops::grayscale(&image::DynamicImage::ImageRgb8(img));
         let sharp = laplacian_variance(&luma);
         out.push(ScannedFile {
