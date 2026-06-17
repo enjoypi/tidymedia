@@ -290,11 +290,8 @@ mod tests {
         let dc = out[0][0].abs();
         // 抽查几个非 DC 系数 ≈ 0
         for &(u, v) in &[(0_usize, 1_usize), (1, 0), (5, 7), (15, 23)] {
-            assert!(
-                out[u][v].abs() < dc * 1e-3,
-                "(u,v)=({u},{v}) value={} dc={dc}",
-                out[u][v]
-            );
+            let val = out[u][v];
+            assert!(val.abs() < dc * 1e-3, "(u,v)=({u},{v}) value={val} dc={dc}");
         }
     }
 

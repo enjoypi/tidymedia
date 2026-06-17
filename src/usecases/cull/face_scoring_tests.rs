@@ -175,6 +175,17 @@ fn ear_at_indices_zero_horizontal_returns_none() {
 }
 
 #[test]
+fn ear_from_mesh_right_eye_degenerate_returns_none() {
+    // 左眼 6 点合法（ratio=0.5 → EAR=0.25），右眼外/内角同点 → 右眼 ear_at_indices None
+    // → ear_from_mesh 在右眼 `?` Err arm 早返 None。
+    let mut mesh = vec![[10.0_f32; 3]; MESH_POINT_COUNT];
+    set_eye(&mut mesh, LEFT_EYE_IDX, 1.25);
+    mesh[RIGHT_EYE_IDX[0]] = [3.0, 5.0, 0.0];
+    mesh[RIGHT_EYE_IDX[3]] = [3.0, 5.0, 0.0];
+    assert!(ear_from_mesh(&mesh).is_none());
+}
+
+#[test]
 fn ear_from_mesh_under_size_returns_none() {
     let mesh = vec![[0.0_f32; 3]; 10];
     assert!(ear_from_mesh(&mesh).is_none());

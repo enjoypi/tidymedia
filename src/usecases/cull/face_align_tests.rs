@@ -118,6 +118,20 @@ fn warp_inverse_zero_determinant_returns_black() {
 }
 
 #[test]
+fn warp_inverse_zero_height_image_returns_black() {
+    // w=5, h=0 → 命中 `image.height() == 0` 短路子分支（与 w=0 case 是不同 BRDA）。
+    let img = RgbImage::new(5, 0);
+    let sim = Similarity {
+        a: 1.0,
+        b: 0.0,
+        tx: 0.0,
+        ty: 0.0,
+    };
+    let out = warp_inverse(&img, &sim, 4);
+    assert!(out.pixels().all(|p| p.0 == [0, 0, 0]));
+}
+
+#[test]
 fn bilinear_sample_out_of_bounds_returns_black() {
     // 源 16×16，采样 (-1, -1) / (100, 100) 都越界 → 4 邻域全部 sample_clamped 返 0
     // → 加权和 0 → 输出 [0,0,0]。

@@ -364,6 +364,18 @@ fn load_sanitizes_nan_face_weight_to_default() {
 }
 
 #[test]
+fn load_sanitizes_undersized_max_image_bytes_to_default() {
+    // < 1 MiB 触发 sanitize_max_image_bytes 回退到默认 50 MiB。
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("face_max_bytes_small.yaml");
+    std::fs::write(&path, "backend:\n  face:\n    max_image_bytes: 1024\n").unwrap();
+    set_env_var("TIDYMEDIA_CONFIG", path.to_str().unwrap());
+    let cfg = load();
+    assert_eq!(cfg.backend.face.max_image_bytes, 50 * 1024 * 1024);
+    remove_env_var("TIDYMEDIA_CONFIG");
+}
+
+#[test]
 fn load_keeps_valid_face_fields_unchanged() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("face_ok.yaml");
