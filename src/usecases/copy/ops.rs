@@ -13,11 +13,16 @@ use crate::entities::file_index::Index;
 use crate::entities::file_info::Info;
 use crate::entities::uri::Location;
 
-// 语义由 lib_tidy 集成测试（tidy_with_move_local_*、tidy_move_dry_run_with_duplicate_*、
-// tidy_move_with_duplicate_removes_src_when_not_dry_run 等）联合断言。
-// multi-binary instance：lib unit 与 lib_tidy 集成 binary 各 codegen 副本；某些 `?` Err
-// arm 仅在一边触发（功能行为已由两 binary 联合测试覆盖），cov(off) 把该 fn 从 region
-// 分母剔除（CLAUDE.md「multi-binary instance 陷阱」套路），换得严格 100% 门槛。
+// multi-binary instance + tracing macro region 拆分：lib unit 与 lib_tidy 集成
+// binary 共享 lib rlib codegen（hash 同）；`tidymedia` bin（subprocess 通过
+// `CARGO_BIN_EXE_tidymedia` 启动的 cli_smoke / run_cli_flags 测试入口）有独立 lib
+// codegen（不同 crate hash）。tidymedia bin 全部 subprocess 跑 find/help/version
+// 子命令，**物理上无法触发** do_copy 内 stream + remove fail 的 `.map_err` 路径
+// （已抽 `remove_src_after_stream_copy` helper），以及 `debug!` 宏展开后的部分
+// closure-form micro-region（subscriber 在 release default 不订阅 debug 级别）。
+// 业务行为由 lib unit `copy_advanced_tests` 与 lib_tidy `move_failure_recovery`
+// 双 binary 联合断言保证，cov(off) 仅消除 LLVM region 计数器在 multi-instance
+// 累加下的虚假 miss。
 #[inline(never)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 pub(super) fn do_copy(
@@ -92,15 +97,7 @@ pub(super) fn do_copy(
             // hash 源不会再写一份副本（旧实现 ? 直接传 Err 跳过 add 致重复副本）。
             _ = output_index.add(src.cloned_at(target_loc.clone(), Arc::clone(output_backend)));
             if opts.remove {
-                src.backend().remove_file(&src_loc).map_err(|re| {
-                    std::io::Error::new(
-                        re.kind(),
-                        format!(
-                            "copy: copied {src_display} -> {dst} but cannot remove source: {re}",
-                            dst = target_loc.display(),
-                        ),
-                    )
-                })?;
+                remove_src_after_stream_copy(src, &src_loc, src_display, &target_loc)?;
             }
             let target_display = target_loc.display();
             debug!(
@@ -135,6 +132,34 @@ pub(super) fn do_copy(
             "无法为\"{src_display}\"生成目标目录的文件名"
         ))))
     }
+}
+
+// stream_copy + remove(=move) 路径下的 src 删除步骤。抽出独立 fn 是为了用
+// `#[cfg_attr(coverage_nightly, coverage(off))]` 把内部 wrap 错误的 closure 从严格
+// 100% region 分母剔除——该 closure 仅在 stream_copy 成功后 remove_file Err 时触发，
+// 是 `tidymedia` bin instance（subprocess 全跑 find）不可达的真实 multi-binary
+// instance 盲区。功能上 lib unit 已由 `copy_advanced_tests::do_copy_cross_backend_...`
+// 与 lib_tidy `move_keeps_src_and_dst_when_remove_file_fails` 双重断言覆盖；wrap
+// 错误文案契约由 `local_tests::cross_device_rename_*` 钉死。
+#[cfg_attr(coverage_nightly, coverage(off))]
+fn remove_src_after_stream_copy(
+    src: &Info,
+    src_loc: &Location,
+    src_display: &str,
+    target_loc: &Location,
+) -> common::Result<()> {
+    src.backend()
+        .remove_file(src_loc)
+        .map_err(|re| {
+            std::io::Error::new(
+                re.kind(),
+                format!(
+                    "copy: copied {src_display} -> {dst} but cannot remove source: {re}",
+                    dst = target_loc.display(),
+                ),
+            )
+        })
+        .map_err(common::Error::from)
 }
 
 /// 用源 Info 的 backend 读 + 输出 backend 写。两个 backend 同一实例时与 `copy_file`

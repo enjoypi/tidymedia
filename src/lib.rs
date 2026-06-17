@@ -30,14 +30,6 @@ pub use adapters::sidecar;
 #[doc(hidden)]
 pub use adapters::backend::fake::{FakeBackend, Op as FakeOp};
 
-// 测试用 internal helper re-export，让 `tests/lib_tidy.rs` 集成 binary 也能在
-// 不绕 dispatch / OnceLock 副作用的前提下直接触发覆盖率敏感分支（multi-binary
-// instance 下避免 0-hit region miss）。
-#[doc(hidden)]
-pub use entities::xmp::parse_xmp_dates as __parse_xmp_dates;
-#[doc(hidden)]
-pub use usecases::find::compute_output_prefix as __compute_output_prefix;
-
 // uniffi 0.31 proc-macro 模式要求 setup_scaffolding! 出现在 crate 根；FFI 入口
 // 与 DI 组装本体位于 frameworks/mobile（Clean Architecture Frameworks 层）。
 #[cfg(feature = "android-app")]
