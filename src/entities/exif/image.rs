@@ -81,10 +81,10 @@ pub(super) fn populate_image_dates(
     populate_image_xmp_fallback_if_empty(&head, exif);
 }
 
-/// 主路径 + APP1 fallback 路径共享的"空日期才退 XMP"决策点。单点 `&&` short-circuit
-/// 让 LLVM 仅生成一组 BR，避免两调用点各自的 BR 子分支分散导致 multi-instance
-/// 累加下某些 sub-branch 0-hit。
-fn populate_image_xmp_fallback_if_empty(head: &[u8], exif: &mut Exif) {
+/// 主路径 + APP1 fallback 路径 + PNG eXIf 路径共享的"空日期才退 XMP"决策点。
+/// 单点 `&&` short-circuit 让 LLVM 仅生成一组 BR，避免多调用点各自的 BR 子分支
+/// 分散导致 multi-instance 累加下某些 sub-branch 0-hit。
+pub(super) fn populate_image_xmp_fallback_if_empty(head: &[u8], exif: &mut Exif) {
     if exif.date_time_original == 0 && exif.create_date == 0 {
         populate_image_xmp_fallback(head, exif);
     }

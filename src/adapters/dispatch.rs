@@ -30,9 +30,14 @@ pub fn tidy(command: Commands) -> Result<()> {
     let result = tidy_with(&DefaultBackendFactory, command)?;
     match result {
         CommandResult::Copy(report) if report.failed > 0 => {
+            // report.remove 区分 copy 与 move：错文案会让 CI 脚本按 "copy" 误判子命令。
+            let op = if report.remove { "move" } else { "copy" };
+            let past = if report.remove { "moved" } else { "copied" };
             Err(Error::Io(std::io::Error::other(format!(
-                "copy partial failure: {} failed, {} copied, {} ignored",
-                report.failed, report.copied, report.ignored
+                "{op} partial failure: {failed} failed, {ok} {past}, {ignored} ignored",
+                failed = report.failed,
+                ok = report.copied,
+                ignored = report.ignored,
             ))))
         }
         CommandResult::MoveTextShot(report) if report.failed > 0 => {

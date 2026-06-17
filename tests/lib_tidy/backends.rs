@@ -258,7 +258,7 @@ fn default_factory_smb_without_feature_returns_unsupported() {
     });
     let err = res.unwrap_err();
     assert!(
-        format!("{err}").contains("smb backend not enabled"),
+        format!("{err}").contains("smb-backend not enabled"),
         "expected unsupported, got: {err}"
     );
 }
@@ -274,7 +274,7 @@ fn default_factory_adb_without_feature_returns_unsupported() {
     });
     let err = res.unwrap_err();
     assert!(
-        format!("{err}").contains("adb backend not enabled"),
+        format!("{err}").contains("adb-backend not enabled"),
         "expected unsupported, got: {err}"
     );
 }

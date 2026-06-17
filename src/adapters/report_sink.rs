@@ -7,6 +7,7 @@ use crate::entities::common;
 use crate::usecases::report::{Report, ReportSink};
 
 const FEATURE_COPY: &str = "copy";
+const FEATURE_MOVE: &str = "move";
 const FEATURE_FIND: &str = "find";
 const FEATURE_MOVE_TEXT_SHOT: &str = "move_text_shot";
 const FEATURE_CULL: &str = "cull";
@@ -31,7 +32,10 @@ impl JsonFileReportSink {
 impl ReportSink for JsonFileReportSink {
     fn write(&self, report: &Report<'_>) {
         match report {
-            Report::Copy(r) => write_report_json(&self.path, *r, FEATURE_COPY),
+            Report::Copy(r) => {
+                let feature = if r.remove { FEATURE_MOVE } else { FEATURE_COPY };
+                write_report_json(&self.path, *r, feature);
+            }
             Report::Find(r) => write_report_json(&self.path, *r, FEATURE_FIND),
             Report::MoveTextShot(r) => write_report_json(&self.path, *r, FEATURE_MOVE_TEXT_SHOT),
             Report::Cull(r) => write_report_json(&self.path, *r, FEATURE_CULL),

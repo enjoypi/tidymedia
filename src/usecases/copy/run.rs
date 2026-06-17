@@ -12,9 +12,8 @@ use tracing::trace;
 use super::ops::do_copy;
 use crate::entities::backend::Backend;
 use crate::entities::common;
-use crate::entities::common::under_prefix;
+use crate::entities::common::{canonical_prefix, under_prefix};
 use crate::entities::file_index::{CandidateProvider, Index, VisitStats};
-use crate::entities::file_info;
 use crate::entities::uri::Location;
 use crate::usecases::config::config;
 use crate::usecases::report::{CopyReport, Report, ReportError, ReportSink};
@@ -390,18 +389,7 @@ pub(super) fn summary_result(failed: usize) -> &'static str {
     if failed == 0 { "ok" } else { "partial" }
 }
 
-// 重叠保护用的可比前缀：Local 走 canonicalize 消除相对路径/symlink 差异，失败
-//（如 dry-run 下尚未创建的 output）回退原始路径；远端无 canonicalize，display
-// 即规范形（scheme/host 不同自然不构成前缀关系）。
-pub(super) fn canonical_prefix(loc: &Location) -> String {
-    match loc {
-        Location::Local(p) => match file_info::full_path(p.as_str()) {
-            Ok(fp) => fp.as_str().to_string(),
-            Err(_) => p.as_str().to_string(),
-        },
-        other => other.display(),
-    }
-}
+// canonical_prefix 已上提到 entities::common（4 个 use case 共用）。
 
 // 通过注入的 sink 输出报告；None 时跳过（用 case 不知道协议与持久化细节）。
 fn emit_report(sink: Option<&dyn ReportSink>, report: &CopyReport) {

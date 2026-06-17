@@ -1,5 +1,7 @@
 use thiserror::Error;
 
+use crate::entities::uri::Location;
+
 #[derive(Debug, Error)]
 pub enum Error {
     #[error("IO error occurred: {0}")]
@@ -21,6 +23,23 @@ pub fn under_prefix(path: &str, prefix: &str) -> bool {
     }
     let rest = &path[prefix.len()..];
     rest.is_empty() || rest.starts_with('/') || rest.starts_with('\\')
+}
+
+/// 把 [`Location`] 规范化为 prefix 字符串：Local 路径 canonicalize（解析符号
+/// 链接 + 相对路径转绝对）；远端 backend 直接 display。copy / move / cull /
+/// move-text-shot 4 个 use case 的「source 是否在 output 子树」判定共用此助手——
+/// 朴素 `Location::display()` 在 output 是符号链接时（`/tmp/out → /photos/out`）
+/// 会让 src `/photos/out/img.jpg` 与 output prefix `/tmp/out` 字面不匹配，
+/// `under_prefix` 误返 false，move 模式下源被当成"output 外"被搬迁致循环或丢失。
+#[must_use]
+pub fn canonical_prefix(loc: &Location) -> String {
+    match loc {
+        Location::Local(p) => match crate::entities::file_info::full_path(p.as_str()) {
+            Ok(fp) => fp.as_str().to_string(),
+            Err(_) => p.as_str().to_string(),
+        },
+        other => other.display(),
+    }
 }
 
 #[cfg(test)]

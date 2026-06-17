@@ -17,7 +17,7 @@ use super::report::MoveTextShotReport;
 use crate::adapters::backend::factory::BackendFactory;
 use crate::adapters::ocr::TextDetector;
 use crate::entities::backend::{Backend, EntryKind};
-use crate::entities::common::{self, under_prefix};
+use crate::entities::common::{self, canonical_prefix, under_prefix};
 use crate::entities::uri::Location;
 use crate::usecases::config::config;
 use crate::usecases::report::ReportError;
@@ -41,7 +41,8 @@ pub fn move_text_shot(
     dry_run: bool,
 ) -> common::Result<MoveTextShotReport> {
     let output_backend = factory.for_location(output)?;
-    let output_prefix = output.display();
+    // canonical_prefix 让 symlink output 下 src 路径与 output prefix 字面可比。
+    let output_prefix = canonical_prefix(output);
 
     ensure_sources_outside_output(sources, &output_prefix)?;
 
@@ -93,7 +94,7 @@ fn summary_result(failed: usize) -> &'static str {
 
 fn ensure_sources_outside_output(sources: &[Location], output_prefix: &str) -> common::Result<()> {
     for src in sources {
-        let prefix = src.display();
+        let prefix = canonical_prefix(src);
         if under_prefix(&prefix, output_prefix) {
             return Err(common::Error::Io(io::Error::new(
                 io::ErrorKind::InvalidInput,

@@ -180,13 +180,16 @@ impl Default for OcrConfig {
 #[derive(Clone, Debug, Deserialize)]
 #[serde(default)]
 pub struct FaceConfig {
-    /// SCRFD-500M-bn-kps（人脸 bbox + 5 点关键点）ONNX 路径；空 = 调用时报 `InvalidInput`。
+    /// SCRFD-10G-bn-kps（人脸 bbox + 5 点关键点；antelopev2 默认变体）ONNX 路径；
+    /// 空 = 调用时报 `InvalidInput`。
     pub scrfd_model_path: String,
-    /// `MobileFaceNet`（112×112 → 512 维 embedding）ONNX 路径。
+    /// `MobileFaceNet`（112×112 → 128 维 embedding；foamliu/MobileFaceNet 训练规格）ONNX 路径。
+    /// 切换 512 维变体需同步改 `EMBED_DIM` 与 `FaceEmbedder` trait 接口。
     pub facenet_model_path: String,
-    /// `MediaPipe` `FaceMesh`（468 点 3D 关键点）ONNX 路径。
+    /// `MediaPipe` `FaceMesh`（468 点 3D 关键点；`PINTO_model_zoo` 静态 192×192 版）ONNX 路径。
     pub facemesh_model_path: String,
-    /// `MobileNetV3`-EyeState（眼部裁剪二分类）ONNX 路径。
+    /// `YOLOv8` `EyeState`（640×640 letterbox → 检测头 max conf；
+    /// `MichalMlodawski/open-closed-eye-detection`）ONNX 路径。
     pub eyestate_model_path: String,
     /// pHash 汉明距离阈值；≤ 此值的两图视为相似入同组。范围 `[1, 64]`。
     pub phash_hamming_max: u8,

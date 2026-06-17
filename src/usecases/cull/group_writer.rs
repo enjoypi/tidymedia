@@ -55,9 +55,15 @@ pub(crate) fn write_group(
         .ok_or_else(|| io::Error::other("best source has no file name"))?;
     let best_dst_name = format!("{BEST_PREFIX}{best_basename}");
     let best_dst = unique_name_in_dir(&group_dir, &best_dst_name, output_backend, dry_run)?;
-    if !dry_run {
-        plan.best_source_backend
-            .copy_file(plan.best_source, &best_dst, false)?;
+    if !dry_run
+        && let Err(e) = plan
+            .best_source_backend
+            .copy_file(plan.best_source, &best_dst, false)
+    {
+        // copy_file 跨 scheme 不保证原子：部分字节落盘后 Err 残留半截 dst 文件，
+        // 重跑时 unique_name 跳到 BEST_x_1 致重复堆积。best-effort 清理。
+        let _ = output_backend.remove_file(&best_dst);
+        return Err(e);
     }
 
     let mut culled_reports = Vec::with_capacity(plan.culled.len());

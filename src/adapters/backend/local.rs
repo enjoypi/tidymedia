@@ -320,12 +320,11 @@ impl Write for LocalWriter {
 }
 
 impl MediaWriter for LocalWriter {
-    // fs::File::flush 对未 BufWriter 包装的 std::fs::File 是 noop；这里 best-effort
-    // 调用并忽略可能的 Err（disk-full 等场景测试不可稳定触发）。
+    // P0 §2：MUST 优先 ? 传播错误。std::fs::File::flush 当前是 noop，但若未来加
+    // BufWriter 包装会让 disk-full 等场景静默丢数据（move 模式下源随后删除即丢失）。
     fn finish(self: Box<Self>) -> io::Result<()> {
         let mut me = *self;
-        me.file.flush().ok();
-        Ok(())
+        me.file.flush()
     }
 }
 

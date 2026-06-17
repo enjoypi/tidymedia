@@ -173,6 +173,18 @@ fn inject_error_on_unlink() {
     assert_eq!(e.kind(), io::ErrorKind::PermissionDenied);
 }
 
+// unlink 不存在路径返 NotFound：与真实 SMB/ADB 行为对齐；
+// 覆盖 fake_remote.rs::unlink 的 is_none() True arm。
+#[test]
+fn unlink_returns_not_found_when_missing() {
+    let c = client();
+    let t = TestTarget {
+        path: Utf8PathBuf::from("/never_existed"),
+    };
+    let e = c.unlink(&t).unwrap_err();
+    assert_eq!(e.kind(), io::ErrorKind::NotFound);
+}
+
 #[test]
 fn inject_error_on_mkdir() {
     let c = client();

@@ -123,16 +123,18 @@ pub fn build_facenet_embedder(cfg: &FaceConfig) -> io::Result<Box<dyn FaceEmbedd
 /// 输入 112×112 RGB → `[-1, 1]` 归一化 NCHW `[1, 3, 112, 112]` f32。
 /// 非 112×112 入参用 Triangle filter 强制 resize（与 `ArcFace` 训练一致）。
 pub(crate) fn preprocess(img: &image::RgbImage) -> Tensor {
-    let resized = if img.width() == INPUT_SIDE && img.height() == INPUT_SIDE {
-        img.clone()
-    } else {
-        image::imageops::resize(
-            img,
-            INPUT_SIDE,
-            INPUT_SIDE,
-            image::imageops::FilterType::Triangle,
-        )
-    };
+    // 已对齐 INPUT_SIDE 时 Cow::Borrowed 零拷贝；P0 §3 借用参数避免不必要克隆。
+    let resized: std::borrow::Cow<'_, image::RgbImage> =
+        if img.width() == INPUT_SIDE && img.height() == INPUT_SIDE {
+            std::borrow::Cow::Borrowed(img)
+        } else {
+            std::borrow::Cow::Owned(image::imageops::resize(
+                img,
+                INPUT_SIDE,
+                INPUT_SIDE,
+                image::imageops::FilterType::Triangle,
+            ))
+        };
 
     let side = INPUT_SIDE as usize;
     let plane = side * side;

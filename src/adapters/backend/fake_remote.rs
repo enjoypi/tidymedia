@@ -196,7 +196,12 @@ impl<T: RemoteTarget> RemoteClient<T> for FakeRemoteClient<T> {
         self.record(target);
         self.check(RemoteFakeOp::Unlink, target.path())?;
         let mut s = self.files.lock().unwrap();
-        s.remove(target.path());
+        if s.remove(target.path()).is_none() {
+            // 真实 SMB/ADB unlink 缺失文件返 ENOENT；fake 静默 Ok 会掩盖
+            // best-effort cleanup（`let _ = remove_file(..)`）与真错 `?` 上抛
+            // 之间的语义差。`error_factory` 让 SMB 测试可注入文案变体。
+            return Err((self.error_factory)(io::ErrorKind::NotFound));
+        }
         Ok(())
     }
 

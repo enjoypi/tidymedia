@@ -157,7 +157,7 @@ fn preprocess_rejects_zero_byte_input() {
 #[test]
 fn decide_returns_false_on_empty_tensor() {
     let t = tract_ndarray::Array4::<f32>::zeros((1, 1, 0, 0)).into_tensor();
-    assert!(!decide(&t, 0.3, 0.005));
+    assert!(!decide(&t, 0.3, 0.005).unwrap());
 }
 
 #[test]
@@ -168,7 +168,7 @@ fn decide_boundary_ratio_strictly_greater() {
     let t = tract_ndarray::Array4::from_shape_vec((1, 1, 10, 10), data)
         .unwrap()
         .into_tensor();
-    assert!(decide(&t, 0.3, 0.005));
+    assert!(decide(&t, 0.3, 0.005).unwrap());
 
     // 1000 像素中 1 个超阈值 → ratio=0.001 < 0.005 → false
     let mut data = vec![0.0_f32; 1000];
@@ -176,7 +176,7 @@ fn decide_boundary_ratio_strictly_greater() {
     let t = tract_ndarray::Array4::from_shape_vec((1, 1, 25, 40), data)
         .unwrap()
         .into_tensor();
-    assert!(!decide(&t, 0.3, 0.005));
+    assert!(!decide(&t, 0.3, 0.005).unwrap());
 }
 
 #[test]

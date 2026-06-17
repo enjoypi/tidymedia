@@ -141,7 +141,7 @@ fn tidy_rejects_smb_uri_with_clear_error() {
     });
     let err = res.unwrap_err();
     let msg = format!("{err}");
-    assert!(msg.contains("smb backend not enabled"), "got: {msg}");
+    assert!(msg.contains("smb-backend not enabled"), "got: {msg}");
 }
 
 #[cfg(not(feature = "mtp-backend"))]
@@ -161,7 +161,7 @@ fn tidy_rejects_mtp_output_with_clear_error() {
     });
     let err = res.unwrap_err();
     let msg = format!("{err}");
-    assert!(msg.contains("mtp backend not enabled"), "got: {msg}");
+    assert!(msg.contains("mtp-backend not enabled"), "got: {msg}");
 }
 
 #[cfg(not(feature = "adb-backend"))]
@@ -175,7 +175,7 @@ fn tidy_rejects_adb_uri_with_clear_error() {
     });
     let err = res.unwrap_err();
     let msg = format!("{err}");
-    assert!(msg.contains("adb backend not enabled"), "got: {msg}");
+    assert!(msg.contains("adb-backend not enabled"), "got: {msg}");
 }
 
 #[cfg(not(feature = "adb-backend"))]
@@ -191,7 +191,7 @@ fn tidy_rejects_adb_output_with_clear_error() {
     });
     let err = res.unwrap_err();
     let msg = format!("{err}");
-    assert!(msg.contains("adb backend not enabled"), "got: {msg}");
+    assert!(msg.contains("adb-backend not enabled"), "got: {msg}");
 }
 
 /// Copy 分支：sources 含非 Local Location → `require_local_paths` ? Err
@@ -213,7 +213,7 @@ fn tidy_rejects_copy_smb_source() {
         archive_template: None,
         report: None,
     });
-    assert!(format!("{}", res.unwrap_err()).contains("smb backend not enabled"));
+    assert!(format!("{}", res.unwrap_err()).contains("smb-backend not enabled"));
 }
 
 /// Find 分支：output 是非 Local Location → option.map.transpose ? Err
@@ -230,7 +230,7 @@ fn tidy_rejects_find_mtp_output() {
         }),
         report: None,
     });
-    assert!(format!("{}", res.unwrap_err()).contains("mtp backend not enabled"));
+    assert!(format!("{}", res.unwrap_err()).contains("mtp-backend not enabled"));
 }
 
 /// Move 分支：sources 非 Local → `require_local_paths` ? Err
@@ -252,7 +252,7 @@ fn tidy_rejects_move_smb_source() {
         archive_template: None,
         report: None,
     });
-    assert!(format!("{}", res.unwrap_err()).contains("smb backend not enabled"));
+    assert!(format!("{}", res.unwrap_err()).contains("smb-backend not enabled"));
 }
 
 /// Move 分支：output 非 Local → `require_local_path` ? Err
@@ -272,7 +272,7 @@ fn tidy_rejects_move_mtp_output() {
         archive_template: None,
         report: None,
     });
-    assert!(format!("{}", res.unwrap_err()).contains("mtp backend not enabled"));
+    assert!(format!("{}", res.unwrap_err()).contains("mtp-backend not enabled"));
 }
 #[cfg(not(feature = "smb-backend"))]
 #[test]
@@ -280,7 +280,7 @@ fn run_cli_accepts_uri_form_smb_and_reports_unsupported() {
     let r = run_cli(["tidymedia", "find", "smb://nas/photos"]);
     let err = r.unwrap_err();
     let msg = format!("{err}");
-    assert!(msg.contains("smb backend not enabled"), "got: {msg}");
+    assert!(msg.contains("smb-backend not enabled"), "got: {msg}");
 }
 
 #[test]

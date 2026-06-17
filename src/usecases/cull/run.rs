@@ -30,7 +30,7 @@ use crate::adapters::face::{
     EyeStateClassifier, FaceDetection, FaceDetector, FaceEmbedder, FaceMeshDetector,
 };
 use crate::entities::backend::{Backend, EntryKind};
-use crate::entities::common::{self, under_prefix};
+use crate::entities::common::{self, canonical_prefix, under_prefix};
 use crate::entities::uri::Location;
 use crate::usecases::config::{FaceConfig, config};
 use crate::usecases::report::ReportError;
@@ -55,7 +55,7 @@ struct ScannedFile {
 /// 单张图 4 模型印证结果（faces 长度与其余 3 vec 一致：对齐失败/嵌入失败的 face 整体丢弃）。
 struct ImageAnalysis {
     faces: Vec<FaceDetection>,
-    embeddings: Vec<[f32; 128]>,
+    embeddings: Vec<[f32; identity_cluster::EMBED_DIM]>,
     meshes: Vec<Vec<[f32; 3]>>,
     eye_states: Vec<(f32, f32)>,
 }
@@ -84,7 +84,10 @@ pub fn cull(
 ) -> common::Result<CullReport> {
     let face_cfg = &config().backend.face;
     let output_backend = factory.for_location(output)?;
-    let output_prefix = output.display();
+    // canonical_prefix 让 symlink output（如 /tmp/out → /photos/cull_output）下
+    // src 路径与 output prefix 字面可比；裸 display() 会让 under_prefix 误返 false
+    // 致 move 模式把 output 内文件再次搬迁自身。
+    let output_prefix = canonical_prefix(output);
     ensure_sources_outside_output(sources, &output_prefix)?;
 
     let mut report = CullReport {
@@ -183,8 +186,7 @@ fn process_group(
             )
         })
         .collect();
-    report.best_count += 1;
-    report.culled_count += culled_refs.len();
+    let culled_len = culled_refs.len();
     let plan = GroupPlan {
         group_id: *next_group_id,
         best_source: &best.src_loc,
@@ -193,6 +195,8 @@ fn process_group(
         best_score: best_breakdown.total,
         score_breakdown: best_breakdown,
     };
+    // 计数搬到 Ok arm 内：write_group Err 时 groups 不 push，best_count/culled_count
+    // 也必须保持原子（曾经在外提前累加，让 best_count != groups.len() 误导消费方）。
     match write_group(
         &plan,
         &best.source_root,
@@ -201,7 +205,11 @@ fn process_group(
         dry_run,
         moved,
     ) {
-        Ok(g) => report.groups.push(g),
+        Ok(g) => {
+            report.best_count += 1;
+            report.culled_count += culled_len;
+            report.groups.push(g);
+        }
         Err(e) => record_failure(report, best.src_loc.display(), &e),
     }
     *next_group_id += 1;
@@ -240,7 +248,7 @@ fn log_identity_clusters(clusters: &[Vec<usize>]) {
 
 fn ensure_sources_outside_output(sources: &[Location], output_prefix: &str) -> common::Result<()> {
     for src in sources {
-        let prefix = src.display();
+        let prefix = canonical_prefix(src);
         if under_prefix(&prefix, output_prefix) {
             return Err(common::Error::Io(io::Error::new(
                 io::ErrorKind::InvalidInput,
@@ -356,7 +364,8 @@ fn pick_best_for_group(
     let mut best_idx = indices[0];
     let mut best_total = f32::NEG_INFINITY;
     let mut best_breakdown = ScoreBreakdown::default();
-    let mut per_image_embeddings: Vec<Vec<[f32; 128]>> = Vec::with_capacity(indices.len());
+    let mut per_image_embeddings: Vec<Vec<[f32; identity_cluster::EMBED_DIM]>> =
+        Vec::with_capacity(indices.len());
     for &i in indices {
         let item = &scanned[i];
         let Some(analysis) = analyze_image(item, scrfd, facenet, facemesh, eyestate, report) else {

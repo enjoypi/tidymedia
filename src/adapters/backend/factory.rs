@@ -11,6 +11,13 @@ use crate::entities::common::Error;
 use crate::entities::common::Result;
 use crate::entities::uri::Location;
 
+#[cfg(not(all(
+    feature = "smb-backend",
+    feature = "mtp-backend",
+    feature = "adb-backend"
+)))]
+use super::remote::unsupported_backend;
+
 /// Backend 装配抽象：按 [`Location`] 构造对应的 [`Backend`] 句柄。
 ///
 /// 生产路径走 [`DefaultBackendFactory`]：Local 直接给 [`LocalBackend`]，SMB / MTP
@@ -46,10 +53,7 @@ use super::factory_real::build_smb_backend;
 
 #[cfg(not(feature = "smb-backend"))]
 fn build_smb_backend(_loc: &Location) -> Result<Arc<dyn Backend>> {
-    Err(Error::Io(std::io::Error::new(
-        std::io::ErrorKind::Unsupported,
-        "smb backend not enabled in this build; rebuild with --features smb-backend",
-    )))
+    Err(Error::Io(unsupported_backend("smb-backend")))
 }
 
 #[cfg(feature = "mtp-backend")]
@@ -57,10 +61,7 @@ use super::factory_real::build_mtp_backend;
 
 #[cfg(not(feature = "mtp-backend"))]
 fn build_mtp_backend(_loc: &Location) -> Result<Arc<dyn Backend>> {
-    Err(Error::Io(std::io::Error::new(
-        std::io::ErrorKind::Unsupported,
-        "mtp backend not enabled in this build; rebuild with --features mtp-backend",
-    )))
+    Err(Error::Io(unsupported_backend("mtp-backend")))
 }
 
 #[cfg(feature = "adb-backend")]
@@ -68,8 +69,5 @@ use super::factory_real::build_adb_backend;
 
 #[cfg(not(feature = "adb-backend"))]
 fn build_adb_backend(_loc: &Location) -> Result<Arc<dyn Backend>> {
-    Err(Error::Io(std::io::Error::new(
-        std::io::ErrorKind::Unsupported,
-        "adb backend not enabled in this build; rebuild with --features adb-backend",
-    )))
+    Err(Error::Io(unsupported_backend("adb-backend")))
 }

@@ -14,6 +14,7 @@ use super::super::file_info::read_fill;
 use super::super::png;
 use super::image::apply_tiff_ifd;
 use super::image::populate_image_xmp_fallback;
+use super::image::populate_image_xmp_fallback_if_empty;
 use super::types::Exif;
 
 /// XMP packet fallback 扫描窗口（与 `image.rs::XMP_SCAN_BYTES` 同口径）。
@@ -39,7 +40,6 @@ pub(super) fn populate_png_dates(
     apply_tiff_ifd(exif, ifd, local_offset);
 
     // PNG eXIf 但所有日期字段全空：仍尝试 XMP fallback（导出工具常并行写）。
-    if exif.date_time_original == 0 && exif.create_date == 0 {
-        populate_image_xmp_fallback(&head, exif);
-    }
+    // 复用 image.rs 的 helper 收敛 `&&` 短路 BR 到单点。
+    populate_image_xmp_fallback_if_empty(&head, exif);
 }

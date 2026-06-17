@@ -118,11 +118,11 @@ impl TextDetector for TractDbnetDetector {
                 .expect("ensure_raw set Some before lock release")
                 .run(input)?
         };
-        Ok(decide(
+        decide(
             &output,
             self.cfg.binarize_threshold,
             self.cfg.min_text_pixel_ratio,
-        ))
+        )
     }
 }
 
@@ -214,18 +214,24 @@ fn align32(v: u32) -> u32 {
 /// sigmoid 输出图二值化后看前景像素占比是否超阈值。`output` 期望 NCHW `[1, 1, H, W]`
 /// 但只看数值，不校验维度（DBNet 输出固定形状，由模型保证）。
 ///
-/// `cast_to` / `as_slice` 仅当 Datum 类型不可转或非 contiguous 时失败——本调用
-/// f32 → f32 + contiguous Array4 都不可能触发，用 `expect` 标内部不变量。
-pub(crate) fn decide(output: &Tensor, binarize_threshold: f32, min_text_pixel_ratio: f32) -> bool {
+/// # Errors
+///
+/// `cast_to` / `as_slice` 失败时返 `io::Error::other`（Datum 类型不可转或非
+/// contiguous Array4；DBNet 实际输出 f32 sigmoid + contiguous，正常路径不会触发）。
+pub(crate) fn decide(
+    output: &Tensor,
+    binarize_threshold: f32,
+    min_text_pixel_ratio: f32,
+) -> io::Result<bool> {
     let cast = output
         .cast_to::<f32>()
-        .expect("internal: f32→f32 cast must not fail");
+        .map_err(|e| io::Error::other(format!("dbnet output cast: {e}")))?;
     let view = cast.view();
     let slice = view
         .as_slice::<f32>()
-        .expect("internal: contiguous Array4 always yields a slice");
+        .map_err(|e| io::Error::other(format!("dbnet output slice: {e}")))?;
     if slice.is_empty() {
-        return false;
+        return Ok(false);
     }
     let hits = slice.iter().filter(|&&v| v > binarize_threshold).count();
     #[expect(
@@ -233,7 +239,7 @@ pub(crate) fn decide(output: &Tensor, binarize_threshold: f32, min_text_pixel_ra
         reason = "像素总数最多 ~10^6，f32 精度足以表达比例"
     )]
     let ratio = hits as f32 / slice.len() as f32;
-    ratio > min_text_pixel_ratio
+    Ok(ratio > min_text_pixel_ratio)
 }
 
 #[cfg(test)]

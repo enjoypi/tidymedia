@@ -15,9 +15,9 @@ use self::ops::do_copy;
 #[cfg(test)]
 use self::run::copy;
 #[cfg(test)]
-use self::run::{
-    CopyOpts, canonical_prefix, chrono_offset_from_hours, offset_from_hours, summary_result,
-};
+use self::run::{CopyOpts, chrono_offset_from_hours, offset_from_hours, summary_result};
+#[cfg(test)]
+use crate::entities::common::canonical_prefix;
 #[cfg(test)]
 use crate::entities::file_info::Info;
 #[cfg(test)]

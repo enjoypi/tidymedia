@@ -19,9 +19,13 @@ use super::priority::Source;
 #[must_use]
 pub fn from_modified(modified: Option<SystemTime>) -> Option<Candidate> {
     let t = modified?;
-    let secs = t.duration_since(UNIX_EPOCH).ok()?.as_secs().cast_signed();
+    // 与 epoch_to_candidate 同三段守护：u64 as_secs > i64::MAX 时 try_from 退出；
+    // TimeDelta::seconds(>= i64::MAX/1000) 会 panic，必须先 try_seconds。
+    let secs = i64::try_from(t.duration_since(UNIX_EPOCH).ok()?.as_secs()).ok()?;
+    let delta = TimeDelta::try_seconds(secs)?;
+    let utc = DateTime::<Utc>::UNIX_EPOCH.checked_add_signed(delta)?;
     Some(Candidate {
-        utc: DateTime::<Utc>::UNIX_EPOCH + TimeDelta::seconds(secs),
+        utc,
         offset: None,
         source: Source::FsMtime,
         inferred_offset: false,

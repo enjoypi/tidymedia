@@ -104,7 +104,12 @@ impl RemoteAdapter for MtpAdapter {
         "mtp"
     }
 
-    // map_error 默认透传（与原 MtpBackend 一致）
+    // 与 SmbAdapter/AdbAdapter 对齐：未来真实 MTP client 把 ENOENT 包成
+    // io::Error::other("...no such file...") 时，统一走 map_remote_error
+    // 重映射，让 mkdir_recursive 等的 NotFound guard 可靠触发。
+    fn map_error(e: io::Error) -> io::Error {
+        super::remote::map_remote_error(e, &[])
+    }
 
     fn ctx(&self) -> &(MtpMatch, MtpMatch) {
         &self.matches
