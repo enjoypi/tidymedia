@@ -28,9 +28,11 @@
 - nom-exif `Exif::get(tag)` 仅读 IFD0/MAIN；GPS 子 IFD 标签必须 `Exif::iter()` 按 tag code 匹配
 - **老 QuickTime `pnot`/`mdat` 首 box MOV**（NIKON COOLPIX S5/P5000、Casio 等 2003-2008 早期机型，及 `moov` 在文件末尾的 mdat-first 变体）nom-exif 3.6.0 `parse_bmff_mime` 拒识。fork patch 在入口短路返 QuickTime mime（**必须 `BoxHeader::parse` 仅解析 header**——`BoxHolder::parse` 要求整 body 入 buffer，数 MB mdat 必 Incomplete 让短路静默失效）：`Cargo.toml [patch.crates-io] nom-exif = { git = "https://github.com/enjoypi/nom-exif.git", branch = "feat/legacy-quicktime-pnot" }`；上游 PR 合并后切回 `*` 删 patch
 - **AVI（RIFF）nom-exif 不支持**：老相机（Fujifilm FinePix 等）拍摄时间在 `LIST hdrl > LIST strl > strd` chunk（`AVIF` 魔数 + 裸 TIFF IFD，offset 基准 = strd+8），`entities/riff.rs` 自解析填 `Exif` 的 DTO/CreateDate/ModifyDate/make/model；`entities/exif/types.rs::from_reader` 按 `video/x-msvideo` 先于泛 video 分流。**IFD 字节解析抽 `entities/tiff_ifd.rs` 公共模块**（支持 II/MM byte order + IFD0 + ExifIFD 子 IFD），与 PNG eXIf chunk / JPEG APP1 fallback 共享。**双入口**：`parse_tiff(payload)` 接完整 TIFF header（II/MM + magic + IFD0 offset，PNG/JPEG 路径），`parse_ifds(base, ifd0_off, order)` 接裸 IFD（无 header，RIFF strd 路径，offset 不含 header 偏移）
+- **`tiff_ifd::scan_ifd` 是 lenient**：中段 entry 越界用 `break` 而非 `?`，已写入 `out` 的前 K 条字段保留；调用方 `parse_ifds` 整体返 `Some(部分填充)`。截断 fixture（PNG eXIf chunk 声称 N entries 但 buffer 只够 K 条）测试预期 `Some(...)` + 部分字段非空，**不**断言 `None`；只有 `count` u16 本身读不到才返 `None`
 - **PNG `eXIf` chunk nom-exif 不解析**：PNG 1.5+ 自定义 chunk `eXIf` = 完整 TIFF/EXIF header（II/MM + 0x002A magic + IFD0 + ExifIFD），Lightroom/相机直出 PNG 常含。`entities/png.rs` 自解析（chunk header BE u32 长度 + 4 字节 type，不验证 CRC YAGNI），`entities/exif/image_png.rs::populate_png_dates` 调 `tiff_ifd::parse_tiff` 抽 DTO/CreateDate/ModifyDate/Make/Model；`types.rs::from_reader` 按 `image/png` 先于泛 `image/` 分流。eXIf 缺失或 TIFF 损坏退回 XMP fallback（Lightroom 常并行写 PNG eXIf + XMP）；fixture `tests/data/sample-png-exif.png`（`tests/fixtures/gen_png_exif.py` 生成）
 - **JPEG nom-exif `parse_exif` 整体失败 fallback**：Canon EOS 7D 等 MakerNotes 偏移异常机型（exiftool 报 `Adjusted MakerNotes base by -126`）让 nom-exif 抛 Err 致 DTO/CreateDate/Make/Model 全丢。`entities/exif/image_jpeg.rs::parse_jpeg_app1_exif` 扫 JPEG APP1 段（`FF E1` marker + BE u16 长度 + `Exif\0\0` magic + 完整 TIFF header）调 `tiff_ifd::parse_tiff` 抽核心字段；`populate_image_dates` 的 nom-exif Err 分支前置 fallback，三态闭合（fallback 成功 → 直填 / fallback Err → 退 XMP fallback / 主路径 Ok 但双 0 → XMP fallback）。fixture `tests/data/sample-jpeg-app1-broken.jpg`（合成，模拟 ExifIFD 越界 count；累积真实 7D 样本后替换）。**fallback fixture 合成套路**：`ExifIFDPointer` → 子 IFD 声称 `count=10000` 但实际只放 1 entry → nom-exif 扫越界整体拒绝，fallback 看 IFD0（Make/Model）+ 子 IFD 第一 entry（DTO）仍能读出。集成测试 MUST 配「nom-exif 主路径真失败」反向断言（`parse_exif` Err 或返空），防 fixture 失效后 fallback 路径无意识地绕过
 - **M2TS/AVCHD nom-exif 不支持**：Canon 摄像机时间在 H.264 SEI `user_data_unregistered`（MDPM UUID），`entities/m2ts.rs` 按 AVCHD video PID `0x1011` 重组 192B BDAV payload 直搜 UUID（不解析 PMT/NAL，YAGNI），EP 字节 `00 00 03` 按 RBSP 剥离。tag `0x18`=[时区,世纪,年,月] BCD、`0x19`=[日,时,分,秒] BCD；时区字节忽略走 naive+配置时区；仅填 DTO（单一拍摄时刻不伪造 P1）；fixture `tests/data/sample-canon-avchd.m2ts`
+- **H.264 RBSP emulation-prevention strip 是无条件的**：`m2ts.rs::strip_emulation_prevention` 在 `00 00` 后 strip ANY `0x03` 是 H.264 spec 要求（编码器保证 RBSP 不含 `00 00 0[0-3]`，所以任何 `00 00 03` 必是 EP 字节，无需判 next byte）。code-review 易误判为"应判 next byte"，实际是规范行为
 - **JPEG/HEIC/TIFF XMP fallback**：Lightroom/Bridge/ACR re-tag 后 EXIF IFD0 可能仅剩 `ModifyDate`，原始时间在 XMP `photoshop:DateCreated`（→ DTO/P0）与 `xmp:CreateDate`（→ CreateDate/P1）。`populate_image_dates` 双 0 时扫已 buffer 头 64 KB（`XMP_SCAN_BYTES`），`entities/xmp.rs` 抽 attribute 形式（element/ExtendedXMP YAGNI），`adapters/sidecar.rs::parse_xmp_date` 复用同实现；fixture 用 `-api Compact="Shorthand,NoPadding"` 才出 attribute 形式
   - **seek 失败仍跑 XMP fallback**：head 已读入不浪费，否则非可寻址 reader 的 re-tag 图退回 mtime 归错桶
   - **XMP 未闭合 `<!--` 按 strict 抹至 EOF**：lenient 会把注释中 `photoshop:DateCreated="OLD"` 误读为合法属性
@@ -57,7 +59,9 @@
 - **fn pointer 依赖注入测 Err arm**：thin wrapper 在生产路径下 OK arm 必触发但 Err arm 难真触发（如 `walk_entry_to_io` 的 `entry.metadata()` 失败、`rename_or_fallback` 的 `remove` 失败）→ 抽 `*_with(fn pointer)` 参数化版本，生产入口默认传 real fn，测试注 mock 返 Err 命中 `.map_err` 闭包 region（参考 `local.rs::walk_entry_to_io_with` / `rename_or_fallback_with`）
 - **`DummyCtx::fail_after(n: usize)` 模式**：`from_location` 第 N 次调用之后开始返 Err，让 `walk_recursive` 的子项 `from_location` Err arm 在根 `build_target` 成功的前提下被命中（用 `Arc<AtomicUsize>` 计数；参考 `remote_test_helpers.rs::DummyCtx`）
 - **assert! `&&` 拆两条 assert**：`assert!(a && b, ...)` 让 LLVM 把 `&&` 短路为两 sub-branch BR，False 路径（assert 失败）天然 0-hit；拆 `assert!(a); assert!(b);` 单 contains 不分子分支，BR 100%
+- **同 `&&` 表达式在两业务调用点 → 抽 helper 收敛 BR**：相同 `if dto==0 && create_date==0` 出现在主路径 + APP1 fallback 两处 → LLVM 在两 callsite 各生成 5 个 sub-branch BR，需独立测试输入覆盖所有；抽 `fn populate_image_xmp_fallback_if_empty(...)` 让两处共用单点 BR，主路径既有 fixture（`sample-no-dates` / `sample-only-createdate` / `sample-with-exif`）即覆盖 fallback 同一 helper（参考 `entities/exif/image.rs`）。同样适用 `if protect` 嵌套 `&&` short-circuit chain → 重写成 `let (protect, is_survivor) = match { .. }` 让分支决策落 match arm（参考 `usecases/find.rs::render_script`）
 - **`Cursor` seek 永不失败**：测 seek Err 传播需手写 FailSeek reader（包 Cursor、seek 恒 Err，blanket impl 自动满足 `MediaReader`）。**MUST `#[derive(Debug)]`**——`MediaReader` blanket impl `Read + Seek + Send + Debug + ?Sized`，缺 Debug 让 `Box<dyn MediaReader>` cast 编译失败
+- **code-review fix 流程**：build 干净 + clippy 干净 + nextest 通过 ≠ 完工，MUST 再跑 `RUSTFLAGS="--cfg=coverage_nightly" cargo +nightly llvm-cov --release nextest --summary-only --branch --ignore-filename-regex='_real\.rs$'` 确认四项 100%。新加的 `?` Err arm / `&&` 短路新增 sub-branch / defensive 兜底 arm 都易出 region miss，靠后续单测（喂边界值如 `u64::MAX` / `i64::MAX` 触发 `try_from` Err arm）或抽 helper 收敛
 - **mutation testing**：配置在 `.cargo/mutants.toml`（nextest + release + `--all-features`，排除 `*_real.rs`/测试基建；豁免在 `exclude_re` 注明 WHY）。**Windows 本机跑不了 `--all-features`**（smb 仅 Linux）：增量验证临时注释 `additional_cargo_args` 按默认 features 跑，feature-gated mutants 留 Linux。日常 `cargo mutants --in-diff <(git diff main)`；全量审计 ~677 mutants/~3h（2026-06 基线 509 caught / 168 unviable / 0 missed）；定点 `cargo mutants -F '<regex>'`（`-E` 是 exclude）。套路：①计数断言精确 `==`（`>= 1` 杀不掉 `+=`→`-=` usize release wrap MAX）；②与被调函数重复的入参 guard 等价变异，删冗余 guard 单点校验；③`cfg(windows)`/`cfg(not(feature))` 代码单口径必假幸存 → exclude_re；④tracing 字段值抽纯 fn 直测不靠捕日志；⑤防御性不可达 arm 喂错配变体直测；⑥写 kill 测试前确认变异行可达（如 `create_time` 无 EXIF let-else 早返回到不了被变异行）；⑦纯移动重构的 `--in-diff` 是假增量，可缩小到真改逻辑文件；⑧无返回值 tracing 副作用 fn `replace X with ()` 等价幸存 → exclude_re
 
 ## Fixture
@@ -80,6 +84,8 @@
 - **新增 `Backend` trait 方法** → 全部 7 个实现同步加默认或 override：`local`/`remote`/`smb`/`adb`/`mtp`/`fake`/`fake_remote`；按「远端测试套路」补 OK / client Err 注入 / 非自家 scheme 三类测试
 - **新增 `Backend` impl** → `walk` MUST 递归 yield 所有 file：LocalBackend 走 `WalkBuilder`、RemoteBackend 用 `walk_recursive` 自驱 `EntryKind::Dir` 子树；单层 list 会让 `Index::visit_location` 在 `kind != File` 过滤 Dir 永不下钻，远端子目录静默丢失
 - **新增配置字段** → `usecases/config.rs` 结构体 + `config.yaml` + `validate_*` 校验或被消费（杜绝哑配置）；secret 加 `.env.example`（值 `changeme`）+ 确认 `.env` 已 gitignore
+- **`unique_name_max_attempts` 是 N+1 候选**：`naming.rs` 循环 `0..=N`（原名 + _1..=_N），N=10 时实际 11 slot 才耗尽。测试 `fill_collisions` 配套 `1..=10`（不是 `1..10`）
+- **`find::render_script` SURVIVOR**：output_prefix=Some 且组内无 path 在 prefix 下 → 首份注释保护并加 `# SURVIVOR (no copy under output)` 标记，其余 active `os.remove`；防用户跑脚本删光全部副本。测试 MUST 允许"首份注释"，不能盲目 `!out.contains("# os.remove(\"<未保护前缀>")`
 - **新增 CLI flag** → `adapters/dispatch.rs` 调度透传 + **每子命令路径（copy/move/find）独立 e2e 触发 Some/None 两边**，否则 LLVM branch miss；e2e MUST 含 `run_cli(["tidymedia", ...])` 字符串形式（clap flag 名映射只有该形式能验证）
 - **新增 `media_time` 候选 / 调整 P0–P4** → `entities/media_time/priority.rs::Source`/`Priority` → 对应解析模块 → `resolve`/`decision` 裁决 → 补 fixture
 - **新增 archive_template 占位符** → `usecases/archive_template.rs::render` 替换分支 + 同文件 `PLACEHOLDERS` 常量（当前 6 项）+ `usecases/config.rs::validate_archive_template`（在 `frameworks/config.rs::sanitize` 被调用）三处同步
@@ -91,6 +97,7 @@
 - `usecases/` 仅依赖 `entities/`；通过 `pub use crate::frameworks::config::config;` re-export 让 usecases 内部用 `super::config::config`
 - `entities/backend/` 是 Gateway 抽象（`trait Backend` + `SmbTarget`/`AdbTarget`/`MtpTarget`）；具体实现在 `adapters/backend/` 通过 re-export 保留原路径；`file_info`/`file_index`/`exif`/`media_time::sidecar` 都 backend-aware（持 `Arc<dyn Backend>`）
 - 目录名是 `usecases`（无下划线）
+- **`tidy()` partial-failure Err 与 `tidy_with()` 不对称**：`tidy()`（CLI 入口）在 `CopyReport.failed > 0` 时返 Err 让 `$?` 非 0；`tidy_with(factory, ...)` 直接返 `CommandResult` 跳过该检查。覆盖 `dispatch.rs` partial-failure Err arm MUST 用 `tidy(Commands::Copy {..})`，不能用 `tidy_with`（参考 `tests/lib_tidy/move_failure_recovery.rs::tidy_returns_err_when_copy_partial_failure`）
 
 ## 核心算法：media_time
 - 优先级：**P0** = `ExifDateTimeOriginal` / `QuickTimeCreationDate` / `MkvDateUtc`；**P1** = `ExifCreateDate` / `QuickTimeCreateDate`；**P2** = 文件名启发式；**P3** = `XmpSidecar` / `GoogleTakeoutJson`；**P4** = `FsMtime`
@@ -140,6 +147,7 @@
 - 每方法测三类：OK / client Err / 非自家 scheme 返 `InvalidInput`
 - **"未启用 feature 返 Unsupported" 集成测试 MUST `#[cfg(not(feature = "<scheme>-backend"))]` gate**，否则启用 feature 跑 nextest 会 fail
 - 远端 op 失败的结构化日志统一在 `remote.rs::map_and_log`（非泛型单点，避免 monomorphization 覆盖率重复计数）；新增远端日志沿用此单点，**勿**在 smb/adb/mtp 各自加
+- **feature off stub `new()` 用 `remote::unsupported_backend(feature)`**：smb/adb/mtp 三个 backend 的 cfg-off `new()` 共用单点 helper 构造 `io::Error::Unsupported`，文案 `"<feature> not enabled; rebuild with --features <feature>"`。新增 remote backend 用此 pattern 避免 stub 副本散落
 
 ## 配置与日志
 - 运行时配置：`config.yaml`（项目根）+ `src/usecases/config.rs`，`config()` 返 `&'static Config`（`OnceLock`）
@@ -173,7 +181,8 @@
 - **`#[cfg(test)]` 标在方法/import 上，不要标在 `impl Foo {}` 块上**：同块生产方法会被一起 gate 掉
 - **`--all-features` clippy 与 `#[cfg(not(feature))]` test 联动**：启用全 feature 后，gate 掉的 test fn 对应 imports 必须用同样 `#[cfg(not(all(feature = "smb-backend", feature = "mtp-backend", feature = "adb-backend")))]` 包裹，否则 `unused_import` error
 - **clippy 1.95 `doc_markdown` 扩大**：含点号的文件名、含下划线的标识符在 `///`/`//!` 中均需反引号包
-- **`chrono::TimeDelta::seconds(i64)` 会 panic**（secs > ≈ `i64::MAX/1000`），`?` / `.ok()?` 截不住——外部 timestamp（Takeout JSON / 用户输入）解析 MUST 用 `try_seconds()?` + `DateTime::checked_add_signed`
+- **`chrono::TimeDelta::seconds(i64)` 会 panic**（secs > ≈ `i64::MAX/1000`），`?` / `.ok()?` 截不住——外部 timestamp（Takeout JSON / 用户输入）解析 MUST 用 `try_seconds()?` + `DateTime::checked_add_signed`。**`TimeDelta::milliseconds(i64)` 不 panic**（内部 `(secs, nanos<1e9)` 分离存储），任意 i64 ms 输入安全；code-review 易把两者混为一谈误报"13 位 ms 触发 panic"
+- **`epoch_to_candidate(u64)` 用 `try_from + try_seconds + checked_add_signed` 三段守护**：u64 > i64::MAX 通过 `cast_signed` 会折回大负值绕过 1904/future filter 让文件落 1969/12 桶；同样防 TimeDelta 上限 + DateTime 年份范围溢出。任一 None 即返 None 让 caller 退到下一优先级候选
 - **重复组容器 MUST `Vec<DuplicateGroup { size, paths }>`**，MUST NOT `BTreeMap<size, _>`：size 作唯一键让同 size 不同 content 的两组互相覆盖
 - **路径前缀匹配 MUST 校验分隔符边界**：`"/photos_backup/x".starts_with("/photos")` 误判 → `find.rs::under_prefix` 已封装。**prefix 末尾 `/`/`\\` 在 helper 内剥**：朴素 `starts_with` 会让 `rest='img.jpg'` 既非空也不以分隔符开头而误判
 - **含 secret 字段的 struct MUST 手写 `Debug`**：derive 让 `debug!(target=?t)` 把明文写日志（P0 §12 违反）；手写把 secret 渲染成 `Option<&"***">` 占位（参考 `adapters/backend/smb.rs::SmbTarget`）
