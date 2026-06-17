@@ -7,6 +7,7 @@
 //! `FaceMesh` EAR + `EyeState` 双印证流水线，留 e2e 步骤 6 真跑后补足（对应模块
 //! `face_align` / `identity_cluster` / `face_scoring` 届时新增）。
 
+mod face_align;
 mod group_writer;
 mod phash;
 mod report;
