@@ -174,7 +174,7 @@ fn parse_tz_offset_non_digit_mm_returns_none() {
     assert!(parse_tz_offset(b"+08'XY'").is_none());
 }
 
-/// 覆盖 `from_utf8(tz.get(1..3)?).ok()?` Err arm：tz 含非 UTF-8 字节 → from_utf8 Err。
+/// 覆盖 `from_utf8(tz.get(1..3)?).ok()?` Err arm：tz 含非 UTF-8 字节 → `from_utf8` Err。
 #[test]
 fn parse_tz_offset_non_utf8_hh_returns_none() {
     assert!(parse_tz_offset(b"+\xff\xff").is_none());

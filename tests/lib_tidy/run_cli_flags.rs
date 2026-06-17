@@ -256,17 +256,19 @@ fn binary_emits_debug_log_to_stderr_when_log_level_debug() {
     );
 }
 
-/// spawn `tidymedia copy --include-non-media --dry-run` 跑 PDF fixture 让 bin
-/// instance 走 `office::pdf` 业务路径，消除 LLVM multi-instance phantom miss
-/// （CLAUDE.md「--branch multi-binary instance 陷阱」套路）。
+/// spawn `tidymedia copy --include-non-media --dry-run` 跑各 office fixture 让 bin
+/// instance 走 `office::*` 业务路径，消除 LLVM multi-instance phantom miss
+/// （CLAUDE.md「--branch multi-binary instance 陷阱」套路）。新增 office 解析模块
+/// 时把对应 fixture 加入 `OFFICE_FIXTURES` 即可，无需新增 subprocess fn。
+const OFFICE_FIXTURES: &[&str] = &["sample-pdf-dated.pdf", "sample-docx-dated.docx"];
+
 #[test]
-fn binary_copy_with_pdf_walks_office_pdf_path() {
+fn binary_copy_with_office_fixtures_walks_office_paths() {
     let src = tempdir().unwrap();
-    std::fs::copy(
-        format!("{DATA_DIR}/sample-pdf-dated.pdf"),
-        src.path().join("sample-pdf-dated.pdf"),
-    )
-    .expect("seed pdf fixture into tempdir");
+    for name in OFFICE_FIXTURES {
+        std::fs::copy(format!("{DATA_DIR}/{name}"), src.path().join(name))
+            .unwrap_or_else(|e| panic!("seed {name}: {e}"));
+    }
     let out = tempdir().unwrap();
     let outp = std::process::Command::new(env!("CARGO_BIN_EXE_tidymedia"))
         .args([
@@ -282,7 +284,7 @@ fn binary_copy_with_pdf_walks_office_pdf_path() {
         .expect("spawn tidymedia binary");
     assert!(
         outp.status.success(),
-        "binary copy with pdf fixture must succeed; stderr: {}",
+        "binary copy with office fixtures must succeed; stderr: {}",
         String::from_utf8_lossy(&outp.stderr)
     );
 }
