@@ -617,3 +617,176 @@ fn cull_records_failure_on_corrupt_image() {
     assert_eq!(report.failed, 1);
     assert_eq!(report.errors.len(), 1);
 }
+
+#[test]
+fn u32_from_f32_clamped_handles_nan_negative_inf_and_overflow() {
+    // 覆盖 `!v.is_finite() || v < 0.0` 两 sub-branch + clamp 到 limit 主路径
+    assert_eq!(u32_from_f32_clamped(f32::NAN, 100), 0);
+    assert_eq!(u32_from_f32_clamped(f32::INFINITY, 100), 0);
+    assert_eq!(u32_from_f32_clamped(-1.0, 100), 0);
+    assert_eq!(u32_from_f32_clamped(50.0, 100), 50);
+    assert_eq!(u32_from_f32_clamped(150.0, 100), 100);
+}
+
+#[test]
+fn crop_face_bbox_returns_1x1_when_x_or_y_inverted() {
+    // bbox 反序触发 `xe <= xu || ye <= yu` 的两 sub-branch
+    let image = image::RgbImage::from_pixel(20, 20, image::Rgb([0; 3]));
+    let landmarks = [[0.0_f32; 2]; 5];
+    let x_inverted = crate::FaceDetection {
+        bbox: [10.0, 0.0, 5.0, 20.0],
+        score: 0.9,
+        landmarks_5pt: landmarks,
+    };
+    let y_inverted = crate::FaceDetection {
+        bbox: [0.0, 10.0, 20.0, 5.0],
+        score: 0.9,
+        landmarks_5pt: landmarks,
+    };
+    assert_eq!(crop_face_bbox(&image, &x_inverted).dimensions(), (1, 1));
+    assert_eq!(crop_face_bbox(&image, &y_inverted).dimensions(), (1, 1));
+}
+
+#[test]
+fn crop_eye_around_returns_1x1_when_center_off_image() {
+    // 极负中心 + 小半径让 x0=x1=0（或 y0=y1=0），命中 `x1 <= x0 || y1 <= y0` 两 sub-branch
+    let image = image::RgbImage::from_pixel(20, 20, image::Rgb([0; 3]));
+    let off_x = crop_eye_around(&image, [-100.0, 10.0], 1.0);
+    assert_eq!(off_x.dimensions(), (1, 1));
+    let off_y = crop_eye_around(&image, [10.0, -100.0], 1.0);
+    assert_eq!(off_y.dimensions(), (1, 1));
+}
+
+#[test]
+fn crop_eye_around_returns_box_when_center_inside_image() {
+    // 中心在图内 + 合理半径让 (x0<x1, y0<y1) 都成立 → 走正常 crop_imm 分支
+    let image = image::RgbImage::from_pixel(40, 40, image::Rgb([0; 3]));
+    let crop = crop_eye_around(&image, [20.0, 20.0], 5.0);
+    assert_eq!(crop.dimensions(), (10, 10));
+}
+
+#[test]
+fn cull_skips_face_when_align_fit_is_singular() {
+    // SCRFD 返 5 点重合的 face → fit_similarity 矩阵奇异 → align_face Err → continue
+    let src_dir = tempfile::tempdir().unwrap();
+    let a = src_dir.path().join("a.png");
+    let b = src_dir.path().join("b.png");
+    write_png(&a, [70, 70, 70]);
+    write_png(&b, [70, 70, 70]);
+    let src = local_loc(src_dir.path().to_str().unwrap());
+    let out_dir = tempfile::tempdir().unwrap();
+    let out = local_loc(out_dir.path().to_str().unwrap());
+    let singular = crate::FaceDetection {
+        bbox: [0.0, 0.0, 16.0, 16.0],
+        score: 0.9,
+        landmarks_5pt: [[1.0_f32; 2]; 5],
+    };
+    let scrfd = FakeFaceDetector::new(vec![])
+        .with_result(
+            camino::Utf8PathBuf::from(a.to_str().unwrap()),
+            vec![singular],
+        )
+        .with_result(
+            camino::Utf8PathBuf::from(b.to_str().unwrap()),
+            vec![singular],
+        );
+    let facenet = FakeFaceEmbedder::new([0.0; 128]);
+    let facemesh = FakeFaceMeshDetector::new(vec![[0.0; 3]; 468]);
+    let eyestate = FakeEyeStateClassifier::new(0.0);
+    let report = cull(
+        &scrfd,
+        &facenet,
+        &facemesh,
+        &eyestate,
+        &DefaultBackendFactory,
+        &[src],
+        &out,
+        true,
+        10,
+    )
+    .unwrap();
+    assert_eq!(report.scanned, 2);
+    assert_eq!(report.best_count, 1);
+}
+
+#[test]
+fn cull_records_failure_when_read_to_end_errs() {
+    // open_read 成功但 reader.read 立即 Err → read_all 内 read_to_end ? 触发 Err 路径
+    let fake = Arc::new(FakeBackend::new("smb"));
+    let src = smb_loc("/src");
+    let file_loc = smb_loc("/src/img.png");
+    fake.add_dir(src.clone());
+    fake.add_file(file_loc.clone(), b"unused".to_vec());
+    fake.inject_reader_error(file_loc, io::ErrorKind::TimedOut);
+    let mut factory = MapFactory::new();
+    factory.insert("smb", fake);
+
+    let out_dir = tempfile::tempdir().unwrap();
+    let out = local_loc(out_dir.path().to_str().unwrap());
+    let scrfd = FakeFaceDetector::new(vec![]);
+    let facenet = FakeFaceEmbedder::new([0.0; 128]);
+    let facemesh = FakeFaceMeshDetector::new(vec![[0.0; 3]; 468]);
+    let eyestate = FakeEyeStateClassifier::new(0.0);
+    let report = cull(
+        &scrfd,
+        &facenet,
+        &facemesh,
+        &eyestate,
+        &factory,
+        &[src],
+        &out,
+        true,
+        10,
+    )
+    .unwrap();
+    assert_eq!(report.failed, 1);
+    assert!(report.errors[0].message.contains("timed out"));
+}
+
+#[test]
+fn cull_skips_face_when_embedder_returns_err() {
+    // SCRFD valid 5 点 + facenet.with_error → align ok → embed_face Err → continue
+    let src_dir = tempfile::tempdir().unwrap();
+    let a = src_dir.path().join("a.png");
+    let b = src_dir.path().join("b.png");
+    write_png(&a, [110, 110, 110]);
+    write_png(&b, [110, 110, 110]);
+    let src = local_loc(src_dir.path().to_str().unwrap());
+    let out_dir = tempfile::tempdir().unwrap();
+    let out = local_loc(out_dir.path().to_str().unwrap());
+    let face = crate::FaceDetection {
+        bbox: [0.0, 0.0, 16.0, 16.0],
+        score: 0.9,
+        landmarks_5pt: [
+            [38.2946, 51.6963],
+            [73.5318, 51.5014],
+            [56.0252, 71.7366],
+            [41.5493, 92.3655],
+            [70.7299, 92.2041],
+        ],
+    };
+    let a_path = camino::Utf8PathBuf::from(a.to_str().unwrap());
+    let b_path = camino::Utf8PathBuf::from(b.to_str().unwrap());
+    let scrfd = FakeFaceDetector::new(vec![])
+        .with_result(a_path.clone(), vec![face])
+        .with_result(b_path.clone(), vec![face]);
+    let facenet = FakeFaceEmbedder::new([0.0; 128])
+        .with_error(a_path)
+        .with_error(b_path);
+    let facemesh = FakeFaceMeshDetector::new(vec![[0.0; 3]; 468]);
+    let eyestate = FakeEyeStateClassifier::new(0.0);
+    let report = cull(
+        &scrfd,
+        &facenet,
+        &facemesh,
+        &eyestate,
+        &DefaultBackendFactory,
+        &[src],
+        &out,
+        true,
+        10,
+    )
+    .unwrap();
+    assert_eq!(report.scanned, 2);
+    assert_eq!(report.best_count, 1);
+}

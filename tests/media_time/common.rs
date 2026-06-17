@@ -29,7 +29,6 @@ pub fn ts(secs: i64) -> DateTime<Utc> {
         .expect("epoch second is valid")
 }
 
-#[allow(dead_code)]
 pub fn set_mtime(path: &Path, secs: i64) {
     let ts = filetime::FileTime::from_unix_time(secs, 0);
     filetime::set_file_mtime(path, ts).expect("can set mtime on test fixture");
