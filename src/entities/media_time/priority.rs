@@ -16,6 +16,10 @@ pub enum Source {
     ExifDateTimeOriginal,
     QuickTimeCreationDate,
     MkvDateUtc,
+    /// 办公文档容器内创建时间（dcterms:created / PDF `/CreationDate` / CFB
+    /// `PID_CREATE_DTM` / iWork plist `createdDate` / `.mm` CREATED 等），由
+    /// `entities::office` 子模块归一为 Unix UTC epoch。
+    DocumentCreated,
     // P1 — 容器内"数字化/写入"
     ExifCreateDate,
     QuickTimeCreateDate,
@@ -42,9 +46,10 @@ impl Source {
     #[must_use]
     pub fn priority(self) -> Priority {
         match self {
-            Source::ExifDateTimeOriginal | Source::QuickTimeCreationDate | Source::MkvDateUtc => {
-                Priority::P0
-            }
+            Source::ExifDateTimeOriginal
+            | Source::QuickTimeCreationDate
+            | Source::MkvDateUtc
+            | Source::DocumentCreated => Priority::P0,
             Source::ExifCreateDate | Source::QuickTimeCreateDate => Priority::P1,
             Source::FilenameCamera
             | Source::FilenamePhone

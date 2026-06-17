@@ -1,3 +1,4 @@
+mod document;
 mod image;
 mod image_jpeg;
 mod image_png;
@@ -26,7 +27,11 @@ use self::image_png::populate_png_dates;
 #[cfg(test)]
 use self::mime::bmff_3gpp_mime;
 #[cfg(test)]
+use self::mime::is_office_mime;
+#[cfg(test)]
 use self::mime::m2ts_legacy_mime;
+#[cfg(test)]
+use self::mime::mime_from_ext;
 #[cfg(test)]
 use self::mime::quicktime_legacy_mime;
 #[cfg(test)]

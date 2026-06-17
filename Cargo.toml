@@ -32,6 +32,7 @@ crate-type = ["rlib"]
 adb_client = { version = "3.2", optional = true }
 uniffi = { version = "0.31", optional = true }
 camino = { version = "*", features = ["serde1"] }
+cfb = "*"
 chrono = "*"
 clap = { version = "*", features = ["derive"] }
 generic-array = "0"
@@ -43,6 +44,7 @@ nom-exif = "*"
 parking_lot = "*"
 pavao = { version = "0.2", optional = true }
 percent-encoding = "*"
+plist = "*"
 rayon = "*"
 serde = "*"
 serde_derive = "*"
@@ -58,6 +60,7 @@ tracing = "*"
 tracing-subscriber = { version = "*", features = ["env-filter"] }
 wyhash = "*"
 xxhash-rust = { version = "*", features = ["xxh3"] }
+zip = "*"
 
 [dev-dependencies]
 assert_cmd = "*"

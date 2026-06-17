@@ -11,6 +11,7 @@ use super::super::backend::Backend;
 use super::super::backend::MediaReader;
 use super::super::common;
 use super::super::uri::Location;
+use super::document::populate_document_dates;
 use super::image::populate_image_dates;
 use super::image_png::populate_png_dates;
 use super::mime::META_TYPE_IMAGE;
@@ -18,6 +19,7 @@ use super::mime::META_TYPE_VIDEO;
 use super::mime::MIME_AVI;
 use super::mime::MIME_M2TS;
 use super::mime::MIME_PNG;
+use super::mime::is_office_mime;
 use super::mime::sniff_mime;
 use super::video::populate_avi_dates;
 use super::video::populate_m2ts_dates;
@@ -53,6 +55,15 @@ pub struct Exif {
     // 用于 archive_template 的 `{make}` / `{model}` 占位符。
     pub(super) make: Option<String>,
     pub(super) model: Option<String>,
+
+    // 办公文档容器内创建/修改时间（dcterms:created / PDF /CreationDate /
+    // CFB PID_CREATE_DTM / iWork plist createdDate / `.mm` CREATED 等），
+    // 已经在 `entities::office` 子模块归一为 Unix UTC epoch。
+    // 0 表字段缺失。`doc_created` 由 `Info::create_time` 注入 P0
+    // [`crate::entities::media_time::Source::DocumentCreated`] 候选；
+    // `doc_modified` 仅作 re-save 旁证（与 EXIF `ModifyDate` 同口径），不进候选。
+    pub(super) doc_created: u64,
+    pub(super) doc_modified: u64,
 }
 
 impl Exif {
@@ -72,20 +83,34 @@ impl Exif {
     /// Backend Gateway 入口：从 [`Location`] 用 backend 打开 reader，
     /// `sniff_mime` 在原 reader 上 seek(0) 之后把句柄交给 [`Self::from_reader`] 解析。
     /// 单次 `open_read` 减少远端 backend 的往返次数。
+    ///
+    /// `sniff_mime` 返空时调 [`super::mime::mime_from_ext`] 按 location 扩展名兜底，
+    /// 让 `infer` 不识别的纯文本 / RTF / iWork / 思维导图等办公自定义 mime 仍能命中
+    /// `from_reader` 的 office 分支（路由本身 stub 阶段返 0，但保留为后续 commit 接入）。
     pub fn open(
         loc: &Location,
         backend: &Arc<dyn Backend>,
         local_offset: FixedOffset,
     ) -> common::Result<Self> {
         let mut reader = backend.open_read(loc)?;
-        let mime_type = sniff_mime(reader.as_mut())?;
+        let sniffed = sniff_mime(reader.as_mut())?;
+        let mime_type = if sniffed.is_empty() {
+            super::mime::mime_from_ext(loc.path().extension())
+                .map_or(String::new(), str::to_string)
+        } else {
+            sniffed
+        };
         Ok(Self::from_reader(reader, &mime_type, local_offset))
     }
 
     /// 用调用方已 sniff 好的 MIME + 已 seek 到起点的 reader 解析容器内时间。
     /// 不再触碰 IO 入口，便于 fake backend 单测各种 MIME 分支。
+    ///
+    /// `mut reader`：image/video/png/avi/m2ts 分支按 owned Box move 消费；office
+    /// 分支按 `&mut dyn MediaReader` 借出（stub 阶段不读 reader，commit 接入后子模块
+    /// 自行读取 ZIP/PDF/CFB 字节）。
     pub fn from_reader(
-        reader: Box<dyn MediaReader>,
+        mut reader: Box<dyn MediaReader>,
         mime_type: &str,
         local_offset: FixedOffset,
     ) -> Self {
@@ -107,6 +132,11 @@ impl Exif {
             populate_m2ts_dates(reader, &mut exif, local_offset);
         } else if mime_type.starts_with(META_TYPE_VIDEO) {
             populate_video_dates(reader, &mut exif, local_offset);
+        } else if is_office_mime(mime_type) {
+            // 办公文档（PDF / OOXML / CFB / iWork / ODF / RTF / EPUB / 思维导图 /
+            // 纯文本）走独立分流，不读 EXIF / XMP；子模块返 (created, modified)
+            // 二元组归一为 Unix UTC epoch。`reader.as_mut()` 借引用，函数末尾 Drop。
+            populate_document_dates(reader.as_mut(), mime_type, &mut exif);
         }
         exif
     }
@@ -131,6 +161,20 @@ impl Exif {
 
     pub fn qt_create_date(&self) -> u64 {
         self.qt_create_date
+    }
+
+    /// 办公文档容器内创建时间（已归一为 Unix UTC epoch）；0 = 缺失。
+    /// 由 `Info::create_time` 注入 P0 `Source::DocumentCreated` 候选。
+    pub fn doc_created(&self) -> u64 {
+        self.doc_created
+    }
+
+    pub(super) fn set_doc_created(&mut self, secs: u64) {
+        self.doc_created = secs;
+    }
+
+    pub(super) fn set_doc_modified(&mut self, secs: u64) {
+        self.doc_modified = secs;
     }
 
     /// GPS UTC 时间（由 `GPSDateStamp` + `GPSTimeStamp` 合成）。
@@ -202,6 +246,12 @@ impl Exif {
     /// 跨模块测试用：链式设置视频容器创建时间（`qt_create_date`）。
     pub(crate) fn with_qt_create_date(mut self, secs: u64) -> Self {
         self.qt_create_date = secs;
+        self
+    }
+
+    /// 跨模块测试用：链式设置办公文档容器创建时间（`doc_created`）。
+    pub(crate) fn with_doc_created(mut self, secs: u64) -> Self {
+        self.doc_created = secs;
         self
     }
 

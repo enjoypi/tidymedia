@@ -2,6 +2,7 @@ use std::io;
 
 use super::super::backend::MediaReader;
 use super::super::file_info::read_fill;
+use super::super::office;
 
 pub(super) const META_TYPE_IMAGE: &str = "image/";
 pub(super) const META_TYPE_VIDEO: &str = "video/";
@@ -60,4 +61,72 @@ pub(super) fn m2ts_legacy_mime(buf: &[u8]) -> Option<&'static str> {
 // 不认 `3gp*` brand，不识别会让 is_media=false 致整段 3GP 手机视频被 ignore。
 pub(super) fn bmff_3gpp_mime(buf: &[u8]) -> Option<&'static str> {
     (buf.get(4..8) == Some(b"ftyp") && buf.get(8..11) == Some(b"3gp")).then_some(MIME_3GPP)
+}
+
+/// 判定 mime 是否属办公文档族（PDF / OOXML / CFB / iWork / ODF / RTF / EPUB /
+/// 思维导图 / 纯文本）。`types.rs::from_reader` 用此把命中分流到
+/// `populate_document_dates`；新增容器 MUST 同步 `entities/office/mod.rs` MIME 常量。
+pub(super) fn is_office_mime(mime: &str) -> bool {
+    mime.starts_with(office::MIME_PDF)
+        || mime.starts_with(office::MIME_OOXML_PREFIX)
+        || mime == office::MIME_DOC
+        || mime == office::MIME_PPT
+        || mime == office::MIME_XLS
+        || mime == office::MIME_PAGES
+        || mime == office::MIME_NUMBERS
+        || mime == office::MIME_KEYNOTE
+        || mime.starts_with(office::MIME_IWORK_PREFIX)
+        || mime.starts_with(office::MIME_ODF_PREFIX)
+        || mime == office::MIME_RTF_APP
+        || mime == office::MIME_RTF_TEXT
+        || mime == office::MIME_EPUB
+        || mime == office::MIME_XMIND
+        || mime == office::MIME_XMIND_ALT
+        || mime == office::MIME_FREEMIND
+        || mime == office::MIME_MINDNODE
+        || mime == office::MIME_ITMZ
+        || mime == office::MIME_MINDMANAGER
+        || mime == office::MIME_TEXT_PLAIN
+        || mime == office::MIME_TEXT_MARKDOWN
+        || mime == office::MIME_TEXT_RST
+        || mime == office::MIME_TEXT_CSV
+        || mime == office::MIME_TEXT_TSV
+}
+
+/// 扩展名→MIME 反查。`infer` 不识别纯文本 / RTF / iWork / 思维导图等多数办公自定义 mime，
+/// 故 `Exif::open` 在 `sniff_mime` 返空时调用本 fn 兜底。扩展名匹配大小写不敏感。
+/// 返 None 表「无对应 mime」，让上层路径保留空 mime（`is_media=false` 兜底）。
+#[must_use]
+pub(crate) fn mime_from_ext(ext: Option<&str>) -> Option<&'static str> {
+    let lower = ext?.to_ascii_lowercase();
+    let mime = match lower.as_str() {
+        "pdf" => office::MIME_PDF,
+        "docx" => office::MIME_DOCX,
+        "pptx" => office::MIME_PPTX,
+        "xlsx" => office::MIME_XLSX,
+        "doc" => office::MIME_DOC,
+        "ppt" => office::MIME_PPT,
+        "xls" => office::MIME_XLS,
+        "pages" => office::MIME_PAGES,
+        "numbers" => office::MIME_NUMBERS,
+        "key" => office::MIME_KEYNOTE,
+        "odt" => office::MIME_ODT,
+        "ods" => office::MIME_ODS,
+        "odp" => office::MIME_ODP,
+        "odg" => office::MIME_ODG,
+        "rtf" => office::MIME_RTF_APP,
+        "epub" => office::MIME_EPUB,
+        "xmind" => office::MIME_XMIND,
+        "mm" => office::MIME_FREEMIND,
+        "mindnode" => office::MIME_MINDNODE,
+        "itmz" => office::MIME_ITMZ,
+        "mmap" => office::MIME_MINDMANAGER,
+        "txt" | "log" => office::MIME_TEXT_PLAIN,
+        "md" | "markdown" => office::MIME_TEXT_MARKDOWN,
+        "rst" => office::MIME_TEXT_RST,
+        "csv" => office::MIME_TEXT_CSV,
+        "tsv" => office::MIME_TEXT_TSV,
+        _ => return None,
+    };
+    Some(mime)
 }

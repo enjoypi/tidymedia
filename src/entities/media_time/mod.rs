@@ -71,6 +71,15 @@ pub(crate) fn candidates_from_exif(exif: &Exif, default_offset: FixedOffset) -> 
         Some(default_offset),
         true,
     );
+    // 办公文档容器内创建时间已归一为 Unix UTC epoch，无需 offset 推断；offset=None
+    // + inferred_offset=false 与 MkvDateUtc 同口径，让 decision 不当作 naive 解释。
+    push_epoch(
+        &mut out,
+        exif.doc_created(),
+        Source::DocumentCreated,
+        None,
+        false,
+    );
     out
 }
 
@@ -241,5 +250,18 @@ mod tests {
         assert_eq!(cands[0].source, Source::QuickTimeCreationDate);
         assert_eq!(cands[0].offset, Some(utc()));
         assert!(cands[0].inferred_offset);
+    }
+
+    /// 办公文档 `doc_created` → `Source::DocumentCreated`（P0），offset=None，
+    /// inferred=false（与 `MkvDateUtc` 同口径，UTC 已归一无需推断）。
+    #[test]
+    fn doc_created_field_produces_document_created_source() {
+        let exif = Exif::with_mime("application/pdf").with_doc_created(1_700_000_200);
+        let cands = candidates_from_exif(&exif, utc());
+        assert_eq!(cands.len(), 1);
+        assert_eq!(cands[0].source, Source::DocumentCreated);
+        assert_eq!(cands[0].offset, None);
+        assert!(!cands[0].inferred_offset);
+        assert_eq!(cands[0].utc.timestamp(), 1_700_000_200);
     }
 }
