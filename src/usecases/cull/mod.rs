@@ -8,6 +8,7 @@
 //! `face_align` / `identity_cluster` / `face_scoring` 届时新增）。
 
 mod face_align;
+mod face_scoring;
 mod group_writer;
 mod identity_cluster;
 mod phash;
