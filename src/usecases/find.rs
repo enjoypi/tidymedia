@@ -172,14 +172,16 @@ pub(crate) fn render_script(
         for (idx, path) in group.paths.iter().enumerate() {
             let path_str = path.as_str();
             let escaped = escape_py_string(path_str);
-            let protect = match output_prefix {
-                None => true,
-                Some(p) if any_under_prefix => under_prefix(path_str, p),
+            // 把 protect / is_survivor 一并解到 match arm 上，避免下游 `if a && b && c`
+            // 的 && 短路在 LLVM 出 5 个 sub-branch BR，部分组合天然 0-hit 破坏覆盖率。
+            let (protect, is_survivor) = match output_prefix {
+                None => (true, false),
+                Some(p) if any_under_prefix => (under_prefix(path_str, p), false),
                 // 无 path 在 prefix 下：保留首份作 survivor，其余仍删
-                Some(_) => idx == 0,
+                Some(_) => (idx == 0, idx == 0),
             };
             if protect {
-                if output_prefix.is_some() && !any_under_prefix && idx == 0 {
+                if is_survivor {
                     let _ = writeln!(sink, "# SURVIVOR (no copy under output)");
                 }
                 let _ = writeln!(sink, "# os.remove(\"{escaped}\")");

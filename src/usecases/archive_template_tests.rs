@@ -140,4 +140,23 @@ mod test_render {
     fn sanitize_path_segment_passes_empty_through() {
         assert_eq!(super::super::sanitize_path_segment(""), "");
     }
+
+    /// `validate_archive_template` 已拒绝未闭合 `{`，但 render 自身的防御兜底
+    /// （无闭合 `}` early-return + clean_segments）需直接喂模板字面量命中。
+    #[test]
+    fn render_unclosed_brace_preserves_literal_and_returns() {
+        let c = ctx("2024", "01", "15", "", None);
+        let result = render("{year}/{unclos", &c);
+        assert!(result.contains("2024"), "got: {result}");
+        assert!(result.contains("{unclos"), "got: {result}");
+    }
+
+    /// 未知占位符（`validate_archive_template` 已拒绝，但 render 自身保留字面）：
+    /// 走 `resolved: None` 防御兜底分支，原样写回 `{name}` 字面段。
+    #[test]
+    fn render_unknown_placeholder_preserves_literal() {
+        let c = ctx("2024", "01", "15", "", None);
+        let result = render("{year}/{foo}/x", &c);
+        assert_eq!(result, "2024/{foo}/x");
+    }
 }

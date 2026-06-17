@@ -46,16 +46,12 @@ pub(super) fn populate_image_dates(
     let mut parser = MediaParser::new();
     let Ok(iter) = parser.parse_exif(ms) else {
         // nom-exif 整体 Err（如 Canon EOS 7D MakerNotes 偏移异常）→ 先试 JPEG APP1
-        // 裸 IFD 自解析；再无 EXIF 落回 XMP packet 兜底。
-        // APP1 fallback 命中但 IFD0 仅含 Make/Model（dates 全 None，re-tag 后常见
-        // 场景）时 apply_tiff_ifd 不会填日期 → 双 0 与主路径同样需要 XMP 兜底，
-        // 否则 photoshop:DateCreated 仍存在但被静默忽略，文件落 mtime P4。
+        // 裸 IFD 自解析；APP1 仅含 Make/Model（re-tag 后 IFD0 仅剩 ModifyDate）的
+        // 情况通过共享 helper 再退 XMP，与主路径同口径。
         if let Some(tiff) = parse_jpeg_app1_exif(&head) {
             apply_tiff_ifd(exif, tiff, local_offset);
         }
-        if exif.date_time_original == 0 && exif.create_date == 0 {
-            populate_image_xmp_fallback(&head, exif);
-        }
+        populate_image_xmp_fallback_if_empty(&head, exif);
         return;
     };
     let parsed: nom_exif::Exif = iter.into();
@@ -82,8 +78,15 @@ pub(super) fn populate_image_dates(
 
     // XMP fallback：EXIF DTO/CreateDate 均缺（re-tag 后 IFD0 仅剩 ModifyDate 类
     // 场景）时扫已 buffer 的头部，从 XMP packet 补 P0/P1 候选。
+    populate_image_xmp_fallback_if_empty(&head, exif);
+}
+
+/// 主路径 + APP1 fallback 路径共享的"空日期才退 XMP"决策点。单点 `&&` short-circuit
+/// 让 LLVM 仅生成一组 BR，避免两调用点各自的 BR 子分支分散导致 multi-instance
+/// 累加下某些 sub-branch 0-hit。
+fn populate_image_xmp_fallback_if_empty(head: &[u8], exif: &mut Exif) {
     if exif.date_time_original == 0 && exif.create_date == 0 {
-        populate_image_xmp_fallback(&head, exif);
+        populate_image_xmp_fallback(head, exif);
     }
 }
 

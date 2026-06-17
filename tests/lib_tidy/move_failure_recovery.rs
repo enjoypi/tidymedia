@@ -8,7 +8,7 @@
 use std::sync::Arc;
 
 use tempfile::tempdir;
-use tidymedia::{Backend, CommandResult, Commands, FakeBackend, FakeOp, tidy_with};
+use tidymedia::{Backend, CommandResult, Commands, FakeBackend, FakeOp, tidy, tidy_with};
 
 use super::{DATA_DIR, FakeBackendFactory, local, smb_loc};
 
@@ -318,5 +318,40 @@ fn copy_reports_failure_when_unique_name_exhausted() {
     assert_eq!(
         report.failed, 1,
         "exhausted unique-name target must count as one failure: {report:?}"
+    );
+}
+
+// `tidy()` 公开入口（CLI 退出码语义）：CopyReport.failed > 0 时返 Err，让脚本/CI
+// `$?` 能区分"全部成功"与"部分失败"。与上方 `tidy_with` 测试对偶——后者绕过
+// dispatch.rs::tidy() 的 partial-failure 检查；本测试在 lib unit instance 命中
+// dispatch.rs:26-31 Err arm。用 DefaultBackendFactory（Local 真实 fs）触发。
+#[test]
+fn tidy_returns_err_when_copy_partial_failure() {
+    let src_dir = tempdir().unwrap();
+    let src_file = src_dir.path().join("sample-with-offset.jpg");
+    std::fs::copy(format!("{DATA_DIR}/sample-with-offset.jpg"), &src_file)
+        .expect("copy fixture to tempdir");
+
+    let out = tempdir().unwrap();
+    let sub = out.path().join("2024").join("05");
+    std::fs::create_dir_all(&sub).unwrap();
+    std::fs::write(sub.join("sample-with-offset.jpg"), b"").unwrap();
+    for i in 1..=10 {
+        std::fs::write(sub.join(format!("sample-with-offset_{i}.jpg")), b"").unwrap();
+    }
+
+    let err = tidy(Commands::Copy {
+        dry_run: false,
+        include_non_media: false,
+        sources: vec![local(src_dir.path().to_str().unwrap())],
+        output: local(out.path().to_str().unwrap()),
+        archive_template: None,
+        report: None,
+    })
+    .expect_err("tidy must surface partial failure as Err for non-zero CLI exit");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("partial failure") && msg.contains("failed"),
+        "Err message must enumerate counts: {msg}"
     );
 }
