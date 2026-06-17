@@ -217,6 +217,16 @@ fn sanitize_face(face: &mut FaceConfig) {
         face.sharpness_min = defaults.sharpness_min;
     }
     sanitize_face_unit_open(
+        &mut face.scrfd_score_threshold,
+        defaults.scrfd_score_threshold,
+        "backend.face.scrfd_score_threshold",
+    );
+    sanitize_face_unit_open(
+        &mut face.scrfd_nms_iou,
+        defaults.scrfd_nms_iou,
+        "backend.face.scrfd_nms_iou",
+    );
+    sanitize_face_unit_open(
         &mut face.face_cosine_min,
         defaults.face_cosine_min,
         "backend.face.face_cosine_min",
@@ -230,6 +240,11 @@ fn sanitize_face(face: &mut FaceConfig) {
         &mut face.eye_blink_score_max,
         defaults.eye_blink_score_max,
         "backend.face.eye_blink_score_max",
+    );
+    sanitize_face_unit_open(
+        &mut face.eye_crop_radius_ratio,
+        defaults.eye_crop_radius_ratio,
+        "backend.face.eye_crop_radius_ratio",
     );
     sanitize_face_weight(
         &mut face.w_sharpness,
@@ -351,7 +366,7 @@ fn resolve_var(body: &str) -> String {
                 operation = "expand_env",
                 result = "unset_var_empty_substitution",
                 var = body,
-                "bare ${{{body}}} unset; substituting empty string. Use ${{{body}:-default}} to silence."
+                "placeholder var unset without default; substituting empty string. Use ':-default' suffix to silence."
             );
             String::new()
         })

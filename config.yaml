@@ -50,6 +50,10 @@ backend:
   face:
     # SCRFD-10G-bn-kps（人脸 bbox + 5 点关键点；antelopev2 默认变体）
     scrfd_model_path: ${TIDYMEDIA_FACE_SCRFD_MODEL:-models/scrfd_10g_bnkps.onnx}
+    # SCRFD anchor 置信度阈值（光线差/合影密集脸场景可调低到 0.3）
+    scrfd_score_threshold: ${TIDYMEDIA_FACE_SCRFD_SCORE:-0.5}
+    # SCRFD 非极大值抑制 IoU 阈值（密集脸场景调 0.3 增强去重）
+    scrfd_nms_iou: ${TIDYMEDIA_FACE_SCRFD_NMS_IOU:-0.4}
     # MobileFaceNet（112×112 → 128 维 embedding；foamliu/MobileFaceNet 训练规格）
     facenet_model_path: ${TIDYMEDIA_FACE_FACENET_MODEL:-models/mobilefacenet.onnx}
     # MediaPipe FaceMesh（468 点 3D 关键点；PINTO_model_zoo 192×192 静态版）
@@ -66,6 +70,8 @@ backend:
     ear_blink_max: ${TIDYMEDIA_FACE_EAR_MAX:-0.21}
     # EyeState 模型闭眼概率阈值
     eye_blink_score_max: ${TIDYMEDIA_FACE_BLINK_SCORE:-0.5}
+    # 眼部 crop 半径相对人脸 bbox 高度的比例（儿童/老人/宽镜头可调 0.12~0.15）
+    eye_crop_radius_ratio: ${TIDYMEDIA_FACE_EYE_CROP_RATIO:-0.10}
     # 综合评分中清晰度权重
     w_sharpness: ${TIDYMEDIA_FACE_W_SHARPNESS:-1.0}
     # 综合评分中闭眼惩罚权重

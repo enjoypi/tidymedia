@@ -8,7 +8,7 @@ use std::io;
 use std::sync::Arc;
 
 use camino::{Utf8Path, Utf8PathBuf};
-use tracing::debug;
+use tracing::{debug, warn};
 
 use crate::entities::backend::{Backend, Entry, EntryKind, MediaReader, MediaWriter, Metadata};
 use crate::entities::uri::Location;
@@ -140,6 +140,12 @@ pub(crate) fn map_remote_error(e: io::Error, extra_not_found: &[&str]) -> io::Er
 
 /// 统一记录远端 op 失败并套用协议级错误映射（R3：外部调用失败不静默）。
 /// 非泛型：日志逻辑只编译一份，避免 monomorphization 覆盖率重复计数。
+///
+/// 级别分流：
+/// - `NotFound` / `AlreadyExists` → `debug!`：`exists()` 探测、`mkdir_recursive`
+///   容忍等高频预期态，info+ 级别下静默；
+/// - 其余（`PermissionDenied` / `TimedOut` / IO 链路错误）→ `warn!`：用户感知
+///   的远端业务错误，默认 info 级别下必须可见。
 fn map_and_log(
     scheme: &'static str,
     operation: &'static str,
@@ -150,15 +156,30 @@ fn map_and_log(
     let mapped = map(e);
     let err = mapped.to_string();
     let path = path.as_str();
-    debug!(
-        feature = "backend",
-        scheme,
-        operation,
-        path,
-        result = "error",
-        err,
-        "remote op failed"
-    );
+    if matches!(
+        mapped.kind(),
+        io::ErrorKind::NotFound | io::ErrorKind::AlreadyExists
+    ) {
+        debug!(
+            feature = "backend",
+            scheme,
+            operation,
+            path,
+            result = "error",
+            err,
+            "remote op failed"
+        );
+    } else {
+        warn!(
+            feature = "backend",
+            scheme,
+            operation,
+            path,
+            result = "error",
+            err,
+            "remote op failed"
+        );
+    }
     mapped
 }
 

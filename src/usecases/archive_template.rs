@@ -99,6 +99,7 @@ fn read_exif_field(
         warn!(
             feature = FEATURE_COPY,
             operation = "render_template",
+            result = "missing_exif_field",
             placeholder,
             "EXIF field not found; substituting \"unknown\""
         );

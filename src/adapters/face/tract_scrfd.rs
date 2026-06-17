@@ -22,8 +22,6 @@ use crate::usecases::config::FaceConfig;
 pub(crate) type ScrfdModel = Arc<TypedRunnableModel>;
 
 pub(crate) const INPUT_SIDE: u32 = 640;
-const SCORE_THRESHOLD: f32 = 0.5;
-const NMS_IOU: f32 = 0.4;
 
 pub(crate) trait RawScrfd: Send + Sync {
     /// 接预处理 NCHW `[1, 3, 640, 640]` f32；返已解码 + NMS 的人脸列表。
@@ -70,8 +68,8 @@ impl TractScrfdDetector {
         let model = load_runnable(Path::new(&self.cfg.scrfd_model_path))?;
         *guard = Some(Box::new(TractRawScrfd {
             model,
-            score_threshold: SCORE_THRESHOLD,
-            nms_iou: NMS_IOU,
+            score_threshold: self.cfg.scrfd_score_threshold,
+            nms_iou: self.cfg.scrfd_nms_iou,
             scale_meta: self.scale_meta.clone(),
         }));
         Ok(())

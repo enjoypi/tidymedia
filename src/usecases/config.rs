@@ -183,6 +183,12 @@ pub struct FaceConfig {
     /// SCRFD-10G-bn-kps（人脸 bbox + 5 点关键点；antelopev2 默认变体）ONNX 路径；
     /// 空 = 调用时报 `InvalidInput`。
     pub scrfd_model_path: String,
+    /// SCRFD 检测置信度阈值；低于此值的 anchor 丢弃。范围 `(0, 1)`。
+    /// 光线差 / 模型变体需调；合影密集脸场景可调低到 0.3。
+    pub scrfd_score_threshold: f32,
+    /// SCRFD 非极大值抑制 `IoU` 阈值；超此值的重叠 bbox 折叠为一个。范围 `(0, 1)`。
+    /// 密集脸场景调 0.3 增强去重；稀疏场景默认 0.4。
+    pub scrfd_nms_iou: f32,
     /// `MobileFaceNet`（112×112 → 128 维 embedding；foamliu/MobileFaceNet 训练规格）ONNX 路径。
     /// 切换 512 维变体需同步改 `EMBED_DIM` 与 `FaceEmbedder` trait 接口。
     pub facenet_model_path: String,
@@ -201,6 +207,9 @@ pub struct FaceConfig {
     pub ear_blink_max: f32,
     /// `EyeState` 模型闭眼概率阈值。范围 `(0, 1)`。
     pub eye_blink_score_max: f32,
+    /// 眼部 crop 半径相对人脸 bbox 高度的比例；左/右眼各按此半径方形 crop 喂 `EyeState`。
+    /// 范围 `(0, 1)`。儿童 / 老人脸型或宽距镜头可调 0.12~0.15 扩大感受野。
+    pub eye_crop_radius_ratio: f32,
     /// 综合评分中清晰度权重。
     pub w_sharpness: f32,
     /// 综合评分中闭眼惩罚权重。
@@ -216,6 +225,8 @@ impl Default for FaceConfig {
     fn default() -> Self {
         Self {
             scrfd_model_path: String::new(),
+            scrfd_score_threshold: 0.5,
+            scrfd_nms_iou: 0.4,
             facenet_model_path: String::new(),
             facemesh_model_path: String::new(),
             eyestate_model_path: String::new(),
@@ -224,6 +235,7 @@ impl Default for FaceConfig {
             face_cosine_min: 0.5,
             ear_blink_max: 0.21,
             eye_blink_score_max: 0.5,
+            eye_crop_radius_ratio: 0.10,
             w_sharpness: 1.0,
             w_blink: 2.0,
             w_smile: 0.5,
@@ -270,6 +282,8 @@ mod tests {
         assert!((c.backend.ocr.min_text_pixel_ratio - 0.005).abs() < f32::EPSILON);
         assert_eq!(c.backend.ocr.resize_max_side, 736);
         assert_eq!(c.backend.face.scrfd_model_path, "");
+        assert!((c.backend.face.scrfd_score_threshold - 0.5).abs() < f32::EPSILON);
+        assert!((c.backend.face.scrfd_nms_iou - 0.4).abs() < f32::EPSILON);
         assert_eq!(c.backend.face.facenet_model_path, "");
         assert_eq!(c.backend.face.facemesh_model_path, "");
         assert_eq!(c.backend.face.eyestate_model_path, "");
@@ -278,6 +292,7 @@ mod tests {
         assert!((c.backend.face.face_cosine_min - 0.5).abs() < f32::EPSILON);
         assert!((c.backend.face.ear_blink_max - 0.21).abs() < f32::EPSILON);
         assert!((c.backend.face.eye_blink_score_max - 0.5).abs() < f32::EPSILON);
+        assert!((c.backend.face.eye_crop_radius_ratio - 0.10).abs() < f32::EPSILON);
         assert!((c.backend.face.w_sharpness - 1.0).abs() < f32::EPSILON);
         assert!((c.backend.face.w_blink - 2.0).abs() < f32::EPSILON);
         assert!((c.backend.face.w_smile - 0.5).abs() < f32::EPSILON);

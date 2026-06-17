@@ -38,9 +38,6 @@ use crate::usecases::report::ReportError;
 const FEATURE: &str = "cull";
 const MIME_SNIFF_BYTES: usize = 256;
 
-/// 眼部 crop 半径相对 face bbox 高度的比例（左右眼各 crop 一次给 `EyeState` 模型）。
-const EYE_CROP_RADIUS_RATIO: f32 = 0.10;
-
 /// 单文件扫描结果。`raw_bytes`/`decoded` 装 `Arc` 让 `pick_best` 阶段复用，省二次 IO 与 decode。
 struct ScannedFile {
     src_loc: Location,
@@ -368,7 +365,9 @@ fn pick_best_for_group(
         Vec::with_capacity(indices.len());
     for &i in indices {
         let item = &scanned[i];
-        let Some(analysis) = analyze_image(item, scrfd, facenet, facemesh, eyestate, report) else {
+        let Some(analysis) =
+            analyze_image(item, scrfd, facenet, facemesh, eyestate, face_cfg, report)
+        else {
             per_image_embeddings.push(Vec::new());
             continue;
         };
@@ -416,6 +415,7 @@ fn analyze_image(
     facenet: &dyn FaceEmbedder,
     facemesh: &dyn FaceMeshDetector,
     eyestate: &dyn EyeStateClassifier,
+    face_cfg: &FaceConfig,
     report: &mut CullReport,
 ) -> Option<ImageAnalysis> {
     let detections = match scrfd.detect_faces(item.src_loc.path(), &item.raw_bytes) {
@@ -441,7 +441,7 @@ fn analyze_image(
         let mesh = facemesh
             .detect_mesh(item.src_loc.path(), &crop_face_bbox(&item.decoded, face))
             .unwrap_or_default();
-        let eye_pair = classify_eye_pair(item, face, eyestate);
+        let eye_pair = classify_eye_pair(item, face, eyestate, face_cfg.eye_crop_radius_ratio);
         analysis.faces.push(*face);
         analysis.embeddings.push(embedding);
         analysis.meshes.push(mesh);
@@ -473,9 +473,10 @@ fn classify_eye_pair(
     item: &ScannedFile,
     face: &FaceDetection,
     eyestate: &dyn EyeStateClassifier,
+    eye_crop_radius_ratio: f32,
 ) -> (f32, f32) {
     let bbox_h = (face.bbox[3] - face.bbox[1]).max(1.0);
-    let radius = (bbox_h * EYE_CROP_RADIUS_RATIO).round();
+    let radius = (bbox_h * eye_crop_radius_ratio).round();
     let left_crop = crop_eye_around(&item.decoded, face.landmarks_5pt[0], radius);
     let right_crop = crop_eye_around(&item.decoded, face.landmarks_5pt[1], radius);
     let left = eyestate
