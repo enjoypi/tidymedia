@@ -256,6 +256,37 @@ fn binary_emits_debug_log_to_stderr_when_log_level_debug() {
     );
 }
 
+/// spawn `tidymedia copy --include-non-media --dry-run` 跑 PDF fixture 让 bin
+/// instance 走 `office::pdf` 业务路径，消除 LLVM multi-instance phantom miss
+/// （CLAUDE.md「--branch multi-binary instance 陷阱」套路）。
+#[test]
+fn binary_copy_with_pdf_walks_office_pdf_path() {
+    let src = tempdir().unwrap();
+    std::fs::copy(
+        format!("{DATA_DIR}/sample-pdf-dated.pdf"),
+        src.path().join("sample-pdf-dated.pdf"),
+    )
+    .expect("seed pdf fixture into tempdir");
+    let out = tempdir().unwrap();
+    let outp = std::process::Command::new(env!("CARGO_BIN_EXE_tidymedia"))
+        .args([
+            "copy",
+            "--include-non-media",
+            "--dry-run",
+            "--output",
+            out.path().to_str().unwrap(),
+            src.path().to_str().unwrap(),
+        ])
+        .env_remove("RUST_LOG")
+        .output()
+        .expect("spawn tidymedia binary");
+    assert!(
+        outp.status.success(),
+        "binary copy with pdf fixture must succeed; stderr: {}",
+        String::from_utf8_lossy(&outp.stderr)
+    );
+}
+
 /// spawn `tidymedia cull --dry-run` 让 subprocess instance 也跑 cull pub fn 主流程，
 /// 消除 multi-binary LLVM region phantom miss（CLAUDE.md「--branch multi-binary
 /// instance 陷阱」套路：subprocess 必须真跑到该业务路径，instance 才计入 covered）。
