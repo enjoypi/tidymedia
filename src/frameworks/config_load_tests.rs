@@ -376,6 +376,20 @@ fn load_sanitizes_undersized_max_image_bytes_to_default() {
 }
 
 #[test]
+fn load_sanitizes_midrange_max_image_bytes_to_default() {
+    // 5000 字节在 (1024+1024=2048, 1024*1024=1048576) 之间 → 杀掉
+    // `1024 * 1024` → `1024 + 1024` 变异：原代码 5000 < 1048576 触发回退，
+    // 变异代码 5000 > 2048 不触发回退保持 5000，断言行为不一致。
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("face_max_bytes_mid.yaml");
+    std::fs::write(&path, "backend:\n  face:\n    max_image_bytes: 5000\n").unwrap();
+    set_env_var("TIDYMEDIA_CONFIG", path.to_str().unwrap());
+    let cfg = load();
+    assert_eq!(cfg.backend.face.max_image_bytes, 50 * 1024 * 1024);
+    remove_env_var("TIDYMEDIA_CONFIG");
+}
+
+#[test]
 fn load_keeps_valid_face_fields_unchanged() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("face_ok.yaml");
