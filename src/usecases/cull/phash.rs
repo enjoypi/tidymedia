@@ -85,6 +85,22 @@ mod tests {
     }
 
     #[test]
+    fn ahash_mixed_pixels_yield_below_mean_bits() {
+        // 半亮半暗 → resize 后 8×8 含 < mean 的像素，命中 line 21 false 分支
+        let mut img = image::RgbImage::new(16, 16);
+        for y in 0..16 {
+            for x in 0..16 {
+                let v = if x < 8 { 0 } else { 255 };
+                img.put_pixel(x, y, image::Rgb([v, v, v]));
+            }
+        }
+        let h = ahash(&img);
+        // 既有 1 位也有 0 位 → 既不是全 0 也不是全 1
+        assert_ne!(h, 0);
+        assert_ne!(h, u64::MAX);
+    }
+
+    #[test]
     fn hamming_zero_for_equal() {
         assert_eq!(hamming(0xDEAD_BEEF_BAAD_F00D, 0xDEAD_BEEF_BAAD_F00D), 0);
     }
@@ -125,5 +141,14 @@ mod tests {
         let g = group_by_hash(&[42], 5);
         assert_eq!(g.len(), 1);
         assert_eq!(g[0], vec![0]);
+    }
+
+    #[test]
+    fn group_by_hash_redundant_union_hits_same_root() {
+        // 4 个 hash 两两 hamming ≤ 2 → 全连通 → 多次 union 同组触发 ra == rb 分支
+        let hashes = vec![0b00_u64, 0b01, 0b10, 0b11];
+        let g = group_by_hash(&hashes, 2);
+        assert_eq!(g.len(), 1);
+        assert_eq!(g[0].len(), 4);
     }
 }

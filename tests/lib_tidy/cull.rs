@@ -57,6 +57,57 @@ fn dispatch_returns_invalid_input_when_scrfd_path_empty() {
 }
 
 #[test]
+fn dispatch_returns_invalid_input_when_facenet_path_empty() {
+    let _cfg = write_temp_config("/tmp/m1", "", "/tmp/m3", "/tmp/m4");
+    let src = tempdir().unwrap();
+    let out = tempdir().unwrap();
+    let err = tidy(Commands::Cull {
+        dry_run: true,
+        sources: vec![local(src.path().to_str().unwrap())],
+        output: local(out.path().to_str().unwrap()),
+        phash_max: None,
+        report: None,
+    })
+    .unwrap_err();
+    let msg = err.to_string();
+    assert!(msg.contains("facenet_model_path is empty"), "got: {msg}");
+}
+
+#[test]
+fn dispatch_returns_invalid_input_when_facemesh_path_empty() {
+    let _cfg = write_temp_config("/tmp/m1", "/tmp/m2", "", "/tmp/m4");
+    let src = tempdir().unwrap();
+    let out = tempdir().unwrap();
+    let err = tidy(Commands::Cull {
+        dry_run: true,
+        sources: vec![local(src.path().to_str().unwrap())],
+        output: local(out.path().to_str().unwrap()),
+        phash_max: None,
+        report: None,
+    })
+    .unwrap_err();
+    let msg = err.to_string();
+    assert!(msg.contains("facemesh_model_path is empty"), "got: {msg}");
+}
+
+#[test]
+fn dispatch_returns_invalid_input_when_eyestate_path_empty() {
+    let _cfg = write_temp_config("/tmp/m1", "/tmp/m2", "/tmp/m3", "");
+    let src = tempdir().unwrap();
+    let out = tempdir().unwrap();
+    let err = tidy(Commands::Cull {
+        dry_run: true,
+        sources: vec![local(src.path().to_str().unwrap())],
+        output: local(out.path().to_str().unwrap()),
+        phash_max: None,
+        report: None,
+    })
+    .unwrap_err();
+    let msg = err.to_string();
+    assert!(msg.contains("eyestate_model_path is empty"), "got: {msg}");
+}
+
+#[test]
 fn dispatch_ok_path_writes_report_when_source_has_no_image() {
     let _cfg = write_temp_config(
         "/nonexistent/scrfd.onnx",
@@ -78,6 +129,27 @@ fn dispatch_ok_path_writes_report_when_source_has_no_image() {
     let contents = fs::read_to_string(&report_path).expect("report written");
     assert!(contents.contains("\"scanned\": 0"), "got: {contents}");
     assert!(contents.contains("\"grouped\": 0"), "got: {contents}");
+}
+
+#[test]
+fn dispatch_non_dry_run_creates_output_dir() {
+    // 让 lib_tidy 集成 instance 也走 dry_run=false 路径，覆盖 cull 的 if !dry_run 分支
+    let _cfg = write_temp_config(
+        "/nonexistent/scrfd.onnx",
+        "/nonexistent/facenet.onnx",
+        "/nonexistent/facemesh.onnx",
+        "/nonexistent/eyestate.onnx",
+    );
+    let src = tempdir().unwrap();
+    let out = tempdir().unwrap();
+    tidy(Commands::Cull {
+        dry_run: false,
+        sources: vec![local(src.path().to_str().unwrap())],
+        output: local(out.path().to_str().unwrap()),
+        phash_max: None,
+        report: None,
+    })
+    .expect("空 source + 非 dry-run → mkdir_p 成功，不调 detector");
 }
 
 #[test]

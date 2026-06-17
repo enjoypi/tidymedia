@@ -61,6 +61,18 @@ mod tests {
     }
 
     #[test]
+    fn variance_zero_on_zero_height_image() {
+        let img = image::GrayImage::new(5, 0);
+        assert!(laplacian_variance(&img).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn variance_zero_on_zero_width_image() {
+        let img = image::GrayImage::new(0, 5);
+        assert!(laplacian_variance(&img).abs() < f32::EPSILON);
+    }
+
+    #[test]
     fn variance_high_on_checker_pattern() {
         let mut img = image::GrayImage::new(8, 8);
         for y in 0..8 {

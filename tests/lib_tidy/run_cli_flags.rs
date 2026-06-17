@@ -256,6 +256,53 @@ fn binary_emits_debug_log_to_stderr_when_log_level_debug() {
     );
 }
 
+/// spawn `tidymedia cull --dry-run` 让 subprocess instance 也跑 cull pub fn 主流程，
+/// 消除 multi-binary LLVM region phantom miss（CLAUDE.md「--branch multi-binary
+/// instance 陷阱」套路：subprocess 必须真跑到该业务路径，instance 才计入 covered）。
+#[test]
+fn binary_cull_dry_run_walks_main_flow() {
+    use image::ImageEncoder;
+    let src = tempdir().unwrap();
+    let out = tempdir().unwrap();
+    // seed 2 张同色 PNG → ahash 相同同组 → 走 pick_best 主路径；dry-run 不调真 detector
+    let pixels = vec![128_u8; 16 * 16 * 3];
+    for name in &["a.png", "b.png"] {
+        let mut buf = Vec::new();
+        image::codecs::png::PngEncoder::new(&mut buf)
+            .write_image(&pixels, 16, 16, image::ExtendedColorType::Rgb8)
+            .unwrap();
+        std::fs::write(src.path().join(name), buf).unwrap();
+    }
+    // 非空 face model path → build_* 返 Ok 懒加载；dry-run 真跑 pick_best 才需 detector
+    // → cull pub fn 走主路径；但调 detect_faces 时 ensure_raw 触发 load_runnable 失败
+    // → record_failure 计入 report.failed → tidy() 退非 0
+    let cfg_dir = tempdir().unwrap();
+    let cfg_path = cfg_dir.path().join("config.yaml");
+    std::fs::write(
+        &cfg_path,
+        "backend:\n  face:\n    scrfd_model_path: /none/s\n    facenet_model_path: /none/f\n    facemesh_model_path: /none/m\n    eyestate_model_path: /none/e\n",
+    )
+    .expect("write cull config");
+    let outp = std::process::Command::new(env!("CARGO_BIN_EXE_tidymedia"))
+        .args([
+            "cull",
+            "--dry-run",
+            "--output",
+            out.path().to_str().unwrap(),
+            src.path().to_str().unwrap(),
+        ])
+        .env_remove("RUST_LOG")
+        .env("TIDYMEDIA_CONFIG", cfg_path.to_str().unwrap())
+        .output()
+        .expect("spawn tidymedia binary");
+    // partial-failure 非 0 退出码也 OK：subprocess instance 实际跑过 cull 主流程
+    assert!(
+        outp.status.code().is_some(),
+        "binary cull spawned; stderr: {}",
+        String::from_utf8_lossy(&outp.stderr)
+    );
+}
+
 /// binary 启动时 config.yaml 含越界 `timezone_offset_hours` → sanitize 必须回退
 /// 默认 + warn，不让月末文件按错时区归错桶且无告警。本测试通过 subprocess 触发
 /// `frameworks::config::sanitize` 的 timezone 越界分支（`lib_tidy` binary instance

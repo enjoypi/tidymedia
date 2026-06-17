@@ -151,6 +151,14 @@ pub fn cull(
     }
     report.moved = moved;
 
+    log_cull_summary(&report, dry_run);
+    Ok(report)
+}
+
+/// `cull` 末尾的 debug! summary 抽到独立 helper：release 默认不订阅 debug 级别，
+/// 内部 closure-form micro-region 永 0-hit，整 fn `coverage(off)` 让计数不漂移。
+#[cfg_attr(coverage_nightly, coverage(off))]
+fn log_cull_summary(report: &CullReport, dry_run: bool) {
     debug!(
         feature = FEATURE,
         operation = "summary",
@@ -164,7 +172,6 @@ pub fn cull(
         dry_run,
         "cull summary"
     );
-    Ok(report)
 }
 
 fn ensure_sources_outside_output(sources: &[Location], output_prefix: &str) -> common::Result<()> {
