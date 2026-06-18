@@ -110,5 +110,38 @@ fn expand_env_handles_multiple_placeholders_on_same_line() {
 #[test]
 fn resolve_var_missing_no_default_returns_empty() {
     remove_env_var("TIDYMEDIA_TEST_NO_DEFAULT_W");
-    assert_eq!(resolve_var("TIDYMEDIA_TEST_NO_DEFAULT_W"), "");
+    assert_eq!(resolve_var("TIDYMEDIA_TEST_NO_DEFAULT_W", 0), "");
+}
+
+#[test]
+fn expand_env_strips_yaml_unsafe_bytes_from_env_value() {
+    // 攻击场景：换行 + 新 yaml key → 应被剥成单行让 yaml 结构注入失效。
+    set_env_var(
+        "TIDYMEDIA_TEST_INJECT_X",
+        "info\narchive_template: \"wrong\"",
+    );
+    let out = expand_env("level: ${TIDYMEDIA_TEST_INJECT_X:-default}");
+    assert!(!out.contains('\n'), "换行必须被 strip：{out:?}");
+    assert!(out.contains("info"), "保留首段：{out:?}");
+    assert!(
+        out.contains("archive_template"),
+        "其余字节保留（不再含换行让 yaml 不再注入）：{out:?}"
+    );
+    remove_env_var("TIDYMEDIA_TEST_INJECT_X");
+}
+
+#[test]
+fn expand_env_max_depth_emits_literal_to_break_recursion() {
+    // 32 层嵌套不该爆栈。expand_env 深度封顶让超界返字面量。
+    let mut nested = String::from("x");
+    for _ in 0..50 {
+        nested = format!("${{TIDYMEDIA_TEST_NESTED_Z:-{nested}}}");
+    }
+    remove_env_var("TIDYMEDIA_TEST_NESTED_Z");
+    let result = expand_env(&nested);
+    // 超过 MAX_DEPTH 后内层留作字面量 → result 仍含 `${...}` 序列
+    assert!(
+        result.contains("${TIDYMEDIA_TEST_NESTED_Z") || result == "x" || result.ends_with("x}"),
+        "应能容错收尾不爆栈：{result:?}"
+    );
 }

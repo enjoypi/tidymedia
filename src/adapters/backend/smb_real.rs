@@ -140,9 +140,12 @@ impl RemoteClient<SmbTarget> for RealSmbClient {
             }
             let kind = kind_from_dirent(e.get_type());
             let child = self.child_target(target, name);
-            // list_dir 不带 size：file 时再 stat 一次；目录给 0（visit_location 只对 file 看 size）。
+            // list_dir 不带 size：file 时二次 stat 取真值；目录给 0（visit_location 只对 file 看 size）。
+            // 二次 stat 失败 MUST 上抛（Err 整次 list）：旧实现 `map_or(0, ...)` 让 size 静默归 0，
+            // 走到 file_info::ensure_hashable 后被当空文件 reject，目标文件被静默丢出归档。
+            // 违反 CLAUDE.md「存在性查询 Err MUST 传播」。
             let size = if matches!(kind, EntryKind::File) {
-                self.stat(&child).map_or(0, |m| m.size)
+                self.stat(&child)?.size
             } else {
                 0
             };

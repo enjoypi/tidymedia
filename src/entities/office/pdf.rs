@@ -100,7 +100,11 @@ pub(super) fn parse_pdf_d_format(s: &str) -> Option<u64> {
         .single()
         .expect("internal: FixedOffset never produces ambiguous local time");
     let secs = dt.timestamp();
-    if secs <= 0 { None } else { Some(secs.cast_unsigned()) }
+    if secs <= 0 {
+        None
+    } else {
+        Some(secs.cast_unsigned())
+    }
 }
 
 /// `from_utf8` 对 ASCII 子串永不 Err；用于 PDF 日期前缀（YYYY/MM/DD）切片转 &str。

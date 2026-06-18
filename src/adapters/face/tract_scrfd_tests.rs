@@ -9,14 +9,14 @@ struct ConstRaw {
 }
 
 impl RawScrfd for ConstRaw {
-    fn run(&self, _input: Tensor) -> io::Result<Vec<FaceDetection>> {
+    fn run(&self, _input: Tensor, _meta: ScaleMeta) -> io::Result<Vec<FaceDetection>> {
         Ok(self.detections.clone())
     }
 }
 
 struct FailRaw;
 impl RawScrfd for FailRaw {
-    fn run(&self, _input: Tensor) -> io::Result<Vec<FaceDetection>> {
+    fn run(&self, _input: Tensor, _meta: ScaleMeta) -> io::Result<Vec<FaceDetection>> {
         Err(io::Error::other("stub scrfd failed"))
     }
 }

@@ -33,14 +33,22 @@ fn extract_dates_no_tags_returns_zeros() {
 
 #[test]
 fn scan_element_text_with_attributes() {
-    let buf = br#"<dcterms:created xsi:type="dcterms:W3CDTF">2017-02-14T10:30:00Z</dcterms:created>"#;
+    let buf =
+        br#"<dcterms:created xsi:type="dcterms:W3CDTF">2017-02-14T10:30:00Z</dcterms:created>"#;
     let text = scan_element_text(buf, b"<dcterms:created", b"</dcterms:created>").unwrap();
     assert_eq!(text, "2017-02-14T10:30:00Z");
 }
 
 #[test]
 fn scan_element_text_no_open_tag_returns_none() {
-    assert!(scan_element_text(b"<other>x</other>", b"<dcterms:created", b"</dcterms:created>").is_none());
+    assert!(
+        scan_element_text(
+            b"<other>x</other>",
+            b"<dcterms:created",
+            b"</dcterms:created>"
+        )
+        .is_none()
+    );
 }
 
 #[test]

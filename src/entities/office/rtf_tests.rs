@@ -122,3 +122,47 @@ fn find_subslice_basic() {
     assert_eq!(find_subslice(b"hello world", b"world"), Some(6));
     assert!(find_subslice(b"hello", b"world").is_none());
 }
+
+// ============= group bounding =============
+
+#[test]
+fn scan_time_group_missing_yr_does_not_leak_to_next_group() {
+    // \creatim 组内无 \yr，但紧跟的 \revtim 组含 \yr2024：组边界让前者返 None
+    // 而不是错读 2024 作为创建年（旧无界扫描的 bug）。
+    let rtf = br"{\rtf1\info{\creatim\mo6\dy15}{\revtim\yr2024\mo1\dy1}}";
+    let (created, modified) = extract_dates(rtf);
+    assert_eq!(
+        created, 0,
+        "\\creatim 缺 \\yr → 不应跨段拾取 \\revtim 的 2024"
+    );
+    assert!(modified > 0, "\\revtim 自己的 \\yr2024 仍可读出");
+}
+
+#[test]
+fn scan_time_group_creatim_mo_default_when_next_group_has_mo() {
+    // \creatim 仅给 \yr2017；mo/dy 默认 1（而不是跨段读 \revtim 的 mo6）。
+    let rtf = br"{\creatim\yr2017}{\revtim\yr2018\mo6\dy15}";
+    let result = scan_time_group(rtf, b"\\creatim");
+    // 2017-01-01 00:00:00 UTC
+    assert_eq!(result, Some(1_483_228_800));
+}
+
+#[test]
+fn find_group_end_handles_nested_braces() {
+    // depth 计数：嵌套 `{...}` 不应误判外层 `}` 为结束。
+    let buf = br"abc{xy}def}rest";
+    assert_eq!(find_group_end(buf, 0), 10);
+}
+
+#[test]
+fn find_group_end_skips_rtf_escape() {
+    // RTF 转义 `\{` `\}` `\\` 不参与 brace depth 计数。
+    let buf = br"\{\}\\}rest";
+    assert_eq!(find_group_end(buf, 0), 6);
+}
+
+#[test]
+fn find_group_end_unterminated_returns_buf_len() {
+    let buf = br"abc no close";
+    assert_eq!(find_group_end(buf, 0), buf.len());
+}

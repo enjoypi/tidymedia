@@ -120,8 +120,17 @@ pub fn cull(
         if grp_indices.len() < 2 {
             continue;
         }
+        // sharpness_min：多图组里剔除低于阈值的模糊图（yaml 注释承诺"单图组例外保留"，
+        // len<2 已在上面 continue 跳过 → 此处过滤仅触发于多图组）。
+        // 过滤后剩 < 2 张同样跳过：组失去比较意义。
+        let (filtered_indices, dropped) =
+            filter_blurry(&grp_indices, &scanned, face_cfg.sharpness_min);
+        report.dropped_blurry += dropped;
+        if filtered_indices.len() < 2 {
+            continue;
+        }
         process_group(
-            &grp_indices,
+            &filtered_indices,
             &scanned,
             scrfd,
             facenet,
@@ -230,6 +239,7 @@ fn log_cull_summary(report: &CullReport, dry_run: bool) {
         best_count = report.best_count,
         culled_count = report.culled_count,
         moved = report.moved,
+        dropped_blurry = report.dropped_blurry,
         failed = report.failed,
         dry_run,
         "cull summary"
@@ -246,6 +256,24 @@ fn log_identity_clusters(clusters: &[Vec<usize>]) {
         cluster_count = clusters.len(),
         "identity clusters computed"
     );
+}
+
+/// 按 `sharpness_min` 阈值剔除多图组里的模糊图，返 `(剩余 indices, 剔除数)`。
+/// NaN sharpness 视为合规（不剔除）：score 阶段会让 NaN 退化排序最低。
+fn filter_blurry(indices: &[usize], scanned: &[ScannedFile], min: f32) -> (Vec<usize>, usize) {
+    if !min.is_finite() || min <= 0.0 {
+        return (indices.to_vec(), 0);
+    }
+    let mut kept: Vec<usize> = Vec::with_capacity(indices.len());
+    let mut dropped = 0_usize;
+    for &i in indices {
+        if scanned[i].sharpness.is_finite() && scanned[i].sharpness < min {
+            dropped += 1;
+        } else {
+            kept.push(i);
+        }
+    }
+    (kept, dropped)
 }
 
 fn ensure_sources_outside_output(sources: &[Location], output_prefix: &str) -> common::Result<()> {
@@ -276,6 +304,10 @@ fn scan_source(
         let entry = match entry {
             Ok(e) => e,
             Err(e) => {
+                // walker_errors 也算 scanned：与 CopyReport.scanned 同口径
+                //（= indexed + skipped_empty + skipped_unreadable + walker_errors）。
+                // 旧实现只增 failed 不增 scanned 让汇总日志 failed > scanned 误导排查。
+                report.scanned += 1;
                 record_failure(report, source.display(), &e);
                 continue;
             }

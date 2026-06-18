@@ -6,7 +6,7 @@
 
 use std::io::Read;
 
-use chrono::{NaiveDate};
+use chrono::NaiveDate;
 
 use crate::entities::backend::MediaReader;
 
@@ -34,9 +34,15 @@ pub(super) fn extract_dates(buf: &[u8]) -> (u64, u64) {
 
 /// 查 `tag` 后的 `\yr<n>\mo<n>\dy<n>\hr<n>\min<n>\sec<n>` 控制字组。
 /// RTF 时间组允许字段缺失（默认 0）；至少 `\yr` 必须出现，否则视为无效。
+///
+/// `rest` 切到当前组的 `}` 边界（[`find_group_end`]），防止 `\creatim` 缺某字段
+/// 时跨入紧随的 `\revtim` 段拾取错误值（典型场景：`{\creatim}{\revtim\yr2024...}`
+/// 旧实现把 `\revtim` 的 `\yr2024` 当 `\creatim` 的年读出，归错桶）。
 pub(super) fn scan_time_group(buf: &[u8], tag: &[u8]) -> Option<u64> {
     let pos = find_subslice(buf, tag)?;
-    let rest = &buf[pos + tag.len()..];
+    let body_start = pos + tag.len();
+    let body_end = find_group_end(buf, body_start);
+    let rest = &buf[body_start..body_end];
     let yr = scan_int_after(rest, b"\\yr")?;
     let mo = scan_int_after(rest, b"\\mo").unwrap_or(1);
     let dy = scan_int_after(rest, b"\\dy").unwrap_or(1);
@@ -51,6 +57,32 @@ pub(super) fn scan_time_group(buf: &[u8], tag: &[u8]) -> Option<u64> {
     } else {
         None
     }
+}
+
+/// 从 `start`（视为已在组内 depth=1）出发找匹配的 `}`，跳过 RTF 转义 `\{` `\}` `\\`。
+/// 文档破损时回退到 buf 末尾（lenient：保留前缀字段，与 [`crate::entities::tiff_ifd`]
+/// 同套思路）。
+fn find_group_end(buf: &[u8], start: usize) -> usize {
+    let mut depth: i32 = 1;
+    let mut i = start;
+    while i < buf.len() {
+        match buf[i] {
+            b'\\' if i + 1 < buf.len() && matches!(buf[i + 1], b'{' | b'}' | b'\\') => {
+                i += 2;
+                continue;
+            }
+            b'{' => depth += 1,
+            b'}' => {
+                depth -= 1;
+                if depth == 0 {
+                    return i;
+                }
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    buf.len()
 }
 
 /// 在 buf 内找 `key` 字面量，跳过后读连续 ASCII 数字解析为整数。

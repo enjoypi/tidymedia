@@ -29,7 +29,10 @@ fn extract_dates_missing_both_returns_zeros() {
 
 #[test]
 fn parse_odf_datetime_rfc3339_with_z() {
-    assert_eq!(parse_odf_datetime("2017-02-14T10:30:00Z"), Some(1_487_068_200));
+    assert_eq!(
+        parse_odf_datetime("2017-02-14T10:30:00Z"),
+        Some(1_487_068_200)
+    );
 }
 
 #[test]
@@ -42,7 +45,10 @@ fn parse_odf_datetime_rfc3339_with_offset() {
 
 #[test]
 fn parse_odf_datetime_naive_falls_back_to_utc() {
-    assert_eq!(parse_odf_datetime("2017-02-14T10:30:00"), Some(1_487_068_200));
+    assert_eq!(
+        parse_odf_datetime("2017-02-14T10:30:00"),
+        Some(1_487_068_200)
+    );
 }
 
 #[test]
@@ -71,17 +77,38 @@ fn scan_element_text_with_attributes() {
 
 #[test]
 fn scan_element_text_no_open_tag_returns_none() {
-    assert!(scan_element_text(b"<other>x</other>", b"<meta:creation-date", b"</meta:creation-date>").is_none());
+    assert!(
+        scan_element_text(
+            b"<other>x</other>",
+            b"<meta:creation-date",
+            b"</meta:creation-date>"
+        )
+        .is_none()
+    );
 }
 
 #[test]
 fn scan_element_text_no_gt_returns_none() {
-    assert!(scan_element_text(b"<meta:creation-date attr=\"", b"<meta:creation-date", b"</meta:creation-date>").is_none());
+    assert!(
+        scan_element_text(
+            b"<meta:creation-date attr=\"",
+            b"<meta:creation-date",
+            b"</meta:creation-date>"
+        )
+        .is_none()
+    );
 }
 
 #[test]
 fn scan_element_text_no_close_returns_none() {
-    assert!(scan_element_text(b"<meta:creation-date>text", b"<meta:creation-date", b"</meta:creation-date>").is_none());
+    assert!(
+        scan_element_text(
+            b"<meta:creation-date>text",
+            b"<meta:creation-date",
+            b"</meta:creation-date>"
+        )
+        .is_none()
+    );
 }
 
 #[test]

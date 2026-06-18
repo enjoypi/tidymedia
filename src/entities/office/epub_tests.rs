@@ -145,7 +145,10 @@ fn scan_element_text_non_utf8_returns_none() {
 
 #[test]
 fn parse_iso8601_basic() {
-    assert_eq!(parse_iso8601_to_epoch("2017-02-14T10:30:00Z"), Some(1_487_068_200));
+    assert_eq!(
+        parse_iso8601_to_epoch("2017-02-14T10:30:00Z"),
+        Some(1_487_068_200)
+    );
 }
 
 #[test]

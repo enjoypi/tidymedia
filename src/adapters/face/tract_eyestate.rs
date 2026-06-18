@@ -141,12 +141,16 @@ pub(crate) fn preprocess(img: &image::RgbImage) -> Tensor {
 
     if src_w > 0 && src_h > 0 {
         let side_f = f32::from(u16::try_from(INPUT_SIDE).expect("640 fits u16"));
-        let scale = (side_f / orig_max_dim(src_w, src_h)).min(1.0);
+        // scale = side / max(src_w, src_h)：不再 `.min(1.0)` 限制 upscale。
+        // eye crop 输入典型 40~80 px，旧实现保持原尺寸落 canvas 角落让 YOLOv8 anchor
+        // 几乎无激活（输入仅占 canvas 1.5%），永远判睁眼；标准 YOLO letterbox
+        // (ultralytics) 允许 upscale 让小目标占主体面积；与 SCRFD preprocess 同口径。
+        let scale = side_f / orig_max_dim(src_w, src_h);
         #[expect(
             clippy::cast_precision_loss,
             clippy::cast_possible_truncation,
             clippy::cast_sign_loss,
-            reason = "scale ∈ (0, 1]，乘原维度后截断到 u32 安全"
+            reason = "scale > 0，乘原维度后 round + min(INPUT_SIDE) 钳上界，u32 cast 安全"
         )]
         let new_w = ((src_w as f32) * scale).round().max(1.0) as u32;
         #[expect(

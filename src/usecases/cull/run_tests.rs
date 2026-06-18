@@ -61,11 +61,27 @@ impl BackendFactory for MapFactory {
 fn write_png(path: &std::path::Path, fill: [u8; 3]) {
     use image::ImageEncoder;
     let mut out = Vec::new();
-    let pixels = vec![fill[0]; 16 * 16 * 3];
+    // 64×64 噪声 pattern：让 laplacian_variance 自然 > sharpness_min(默认 100)
+    // 通过 cull 的 filter_blurry 过滤；同时同 seed pattern 让两张 fill 相同的图
+    // 仍 phash 相等可分到同组（pHash 对绝对亮度不敏感）。
+    let mut pixels = Vec::with_capacity(64 * 64 * 3);
+    for i in 0_u32..(64 * 64) {
+        let noise = noise_byte(i);
+        pixels.push(fill[0].wrapping_add(noise));
+        pixels.push(fill[1].wrapping_add(noise));
+        pixels.push(fill[2].wrapping_add(noise));
+    }
     image::codecs::png::PngEncoder::new(&mut out)
-        .write_image(&pixels, 16, 16, image::ExtendedColorType::Rgb8)
+        .write_image(&pixels, 64, 64, image::ExtendedColorType::Rgb8)
         .unwrap();
     std::fs::write(path, out).unwrap();
+}
+
+/// PRNG-ish 噪声字节生成器：mul 37 + xor shift，截 u8。让 64×64 灰度
+/// laplacian variance 自然超过默认 `sharpness_min=100`。
+fn noise_byte(i: u32) -> u8 {
+    let v = i.wrapping_mul(37) ^ (i >> 3);
+    (v & 0xff) as u8
 }
 
 #[test]

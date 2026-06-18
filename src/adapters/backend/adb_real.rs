@@ -175,8 +175,11 @@ impl RemoteClient<AdbTarget> for RealAdbClient {
     }
 
     fn unlink(&self, target: &AdbTarget) -> io::Result<()> {
-        // adb sync 无原生 unlink：走 shell rm -f <quoted>。shell_quote 防注入。
-        let cmd = format!("rm -f {}", shell_quote(target.path.as_str()));
+        // adb sync 无原生 unlink：走 shell `rm <quoted>`（不带 -f）。shell_quote 防注入。
+        // 不用 -f：ENOENT 走 exit=1 + stderr "No such file or directory"，由
+        // `super::AdbBackend` 的 map_error 重映射为 NotFound 让 caller 区分；
+        // -f 会把 ENOENT 吃成 exit=0 致 move 模式下错路径源被认为已删（静默错配）。
+        let cmd = format!("rm {}", shell_quote(target.path.as_str()));
         let mut stderr_buf: Vec<u8> = Vec::new();
         let code = self
             .device
@@ -224,15 +227,24 @@ fn join_abs(parent: &camino::Utf8Path, name: &str) -> camino::Utf8PathBuf {
     camino::Utf8PathBuf::from(format!("{p}/{name}"))
 }
 
-/// shell 命令的 exit code 检查：非 0 退出转成 `io::Error::other` 携带 stderr。
+/// shell 命令的 exit code 检查：非 0 退出 / None（异常退出/连接断开）转成
+/// `io::Error::other` 携带 stderr。
+///
+/// `None` MUST 视为失败：旧实现 `unwrap_or(0)` 把 `adb_client` 报回的"shell 命令未带
+/// 退出码"等价为成功，让 unlink/mkdir 在连接断开时静默返 Ok，move 模式 src 被认
+/// 为已删而实际仍在；违反 CLAUDE.md「跨设备 rename fallback copy+remove 半态文案
+/// 必须含错误」。
 fn check_shell_exit(code: Option<u8>, stderr: &[u8], op: &str) -> io::Result<()> {
-    let exit = code.unwrap_or(0);
-    if exit == 0 {
-        return Ok(());
-    }
     let tail = String::from_utf8_lossy(stderr);
-    Err(io::Error::other(format!(
-        "adb shell {op} exit={exit}: {}",
-        tail.trim()
-    )))
+    match code {
+        Some(0) => Ok(()),
+        Some(exit) => Err(io::Error::other(format!(
+            "adb shell {op} exit={exit}: {}",
+            tail.trim()
+        ))),
+        None => Err(io::Error::other(format!(
+            "adb shell {op} exit=unknown (shell terminated without status): {}",
+            tail.trim()
+        ))),
+    }
 }

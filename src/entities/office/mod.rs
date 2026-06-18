@@ -8,10 +8,7 @@
 
 // 占位实现：commit 2-10 接入各子模块解析主体后逐个移除本节 allow；首版 stub
 // 让装配链路（types.rs 分流 + Source 注入 + e2e fixture）先编译通过。
-#![allow(
-    dead_code,
-    reason = "占位实现：commit 2-10 接入各子模块解析主体后移除"
-)]
+#![allow(dead_code, reason = "占位实现：commit 2-10 接入各子模块解析主体后移除")]
 
 use crate::entities::backend::MediaReader;
 

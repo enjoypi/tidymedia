@@ -109,7 +109,21 @@ fn decode_rejects_short_output() {
         .unwrap()
         .into_tensor();
     let e = decode(&t).unwrap_err();
-    assert!(e.to_string().contains("dim 64 < expected 128"), "got: {e}");
+    let msg = e.to_string();
+    assert!(msg.contains("dim 64 != expected 128"), "got: {msg}");
+}
+
+#[test]
+fn decode_rejects_oversized_output() {
+    // 错配 InsightFace 512 维模型场景：旧守卫 `< 128` 放行让前 128 维被截取做 L2 归一，
+    // embedding 空间与真 128 维不兼容 → 修复后严格 `!=` 检查直接 Err。
+    let t = tract_ndarray::Array2::from_shape_vec((1, 512), vec![0.0_f32; 512])
+        .unwrap()
+        .into_tensor();
+    let e = decode(&t).unwrap_err();
+    let msg = e.to_string();
+    assert!(msg.contains("dim 512 != expected 128"), "got: {msg}");
+    assert!(msg.contains("InsightFace"), "提示用户错配模型: {msg}");
 }
 
 #[test]

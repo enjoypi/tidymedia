@@ -5,7 +5,6 @@
 
 use std::io;
 use std::path::Path;
-use std::sync::Arc;
 
 use tract_onnx::prelude::*;
 
@@ -28,16 +27,17 @@ pub(crate) fn load_runnable(path: &Path) -> io::Result<ScrfdModel> {
     Ok(model)
 }
 
-/// 真实 SCRFD detector：跑 model + anchor 解码 + NMS。
+/// 真实 SCRFD detector：跑 model + anchor 解码 + NMS。`meta` 随 input 透传，
+/// 不持有共享可变状态（避免并发 `detect_faces` 时 meta 互相覆盖产生错框）。
 pub(crate) struct TractRawScrfd {
     pub(crate) model: ScrfdModel,
     pub(crate) score_threshold: f32,
     pub(crate) nms_iou: f32,
-    pub(crate) scale_meta: Arc<parking_lot::Mutex<Option<ScaleMeta>>>,
 }
 
 /// preprocess 阶段记录 letterbox scale + padding，让 postprocess 把 bbox 坐标
-/// 逆映射回原图。
+/// 逆映射回原图。Copy + 按值传递避免共享可变状态。
+#[derive(Clone, Copy, Debug)]
 pub(crate) struct ScaleMeta {
     pub(crate) scale: f32,
     pub(crate) pad_x: f32,
@@ -46,16 +46,12 @@ pub(crate) struct ScaleMeta {
 
 impl RawScrfd for TractRawScrfd {
     #[cfg_attr(coverage_nightly, coverage(off))]
-    fn run(&self, input: Tensor) -> io::Result<Vec<FaceDetection>> {
+    fn run(&self, input: Tensor, meta: ScaleMeta) -> io::Result<Vec<FaceDetection>> {
         let outputs = self
             .model
             .run(tvec!(input.into_tvalue()))
             .map_err(|e| io::Error::other(format!("tract SCRFD run failed: {e}")))?;
-        let meta_guard = self.scale_meta.lock();
-        let meta = meta_guard
-            .as_ref()
-            .ok_or_else(|| io::Error::other("SCRFD scale_meta missing (preprocess not called)"))?;
-        decode_outputs(&outputs, self.score_threshold, self.nms_iou, meta)
+        decode_outputs(&outputs, self.score_threshold, self.nms_iou, &meta)
     }
 }
 

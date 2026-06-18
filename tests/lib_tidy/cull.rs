@@ -189,12 +189,19 @@ fn tidy_returns_err_when_cull_partial_failure() {
         "/nonexistent/eyestate.onnx",
     );
     let src = tempdir().unwrap();
-    // 写两张 16×16 PNG（同色 → 同 ahash）
+    // 写两张 64×64 噪声 PNG（同 seed pattern → 同 phash 入同组；高 laplacian variance
+    // 保证 sharpness > sharpness_min=100 通过 filter_blurry，否则 grouped=0 不触发
+    // SCRFD load_runnable Err 无法到达 partial-failure arm）。
     for name in &["a.png", "b.png"] {
         let mut buf = Vec::new();
-        let pixels = vec![128_u8; 16 * 16 * 3];
+        let mut pixels = Vec::with_capacity(64 * 64 * 3);
+        for i in 0_u32..(64 * 64) {
+            let v = i.wrapping_mul(37) ^ (i >> 3);
+            let noise = (v & 0xff) as u8;
+            pixels.extend_from_slice(&[noise, noise, noise]);
+        }
         image::codecs::png::PngEncoder::new(&mut buf)
-            .write_image(&pixels, 16, 16, image::ExtendedColorType::Rgb8)
+            .write_image(&pixels, 64, 64, image::ExtendedColorType::Rgb8)
             .unwrap();
         fs::write(src.path().join(name), buf).unwrap();
     }

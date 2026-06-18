@@ -399,9 +399,7 @@ fn is_office_mime_keynote_true() {
 
 #[test]
 fn is_office_mime_iwork_prefix_true() {
-    assert!(super::is_office_mime(
-        "application/x-iwork-pages-sffpages"
-    ));
+    assert!(super::is_office_mime("application/x-iwork-pages-sffpages"));
 }
 
 #[test]

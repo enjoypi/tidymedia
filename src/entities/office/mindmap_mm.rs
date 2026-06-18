@@ -33,8 +33,12 @@ pub(super) fn extract_dates(buf: &[u8]) -> (u64, u64) {
     // 限制扫描在 `<node` 后到 `>` 之间（属性段内）。
     let attr_end = find_byte(after, b'>').unwrap_or(after.len());
     let attrs = &after[..attr_end];
-    let created = scan_quoted_u64(attrs, ATTR_CREATED).and_then(millis_to_secs).unwrap_or(0);
-    let modified = scan_quoted_u64(attrs, ATTR_MODIFIED).and_then(millis_to_secs).unwrap_or(0);
+    let created = scan_quoted_u64(attrs, ATTR_CREATED)
+        .and_then(millis_to_secs)
+        .unwrap_or(0);
+    let modified = scan_quoted_u64(attrs, ATTR_MODIFIED)
+        .and_then(millis_to_secs)
+        .unwrap_or(0);
     (created, modified)
 }
 

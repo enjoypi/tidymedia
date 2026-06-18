@@ -13,19 +13,23 @@ use tract_onnx::prelude::*;
 
 use super::tract_dbnet::DetModel;
 
-/// 读 ONNX 文件 → `InferenceModel` → optimized `TypedModel` → `Arc<RunnableModel>`
-/// （`into_runnable()` 本身已 Arc 包装）。失败统一映射为 `io::Error::Other` 让 dispatch
-/// 层透传到 CLI 错误退出码。
+/// 读 ONNX 文件 → `TypedModel`（不调 `into_optimized`）→ `Arc<RunnableModel>`。
+///
+/// **不 optimize**：`PaddleOCR` `DBNet` `det.onnx` 是 dynamic H/W 输入（`[1, 3, ?, ?]`），
+/// tract `into_optimized()` 对未固化的 symbolic dim 做不了形状传播，加载即失败；
+/// 4 个 face 模型经 `scripts/simplify_onnx.py` 化简到静态 shape 后才能 optimize，
+/// `DBNet` 不在该脚本范围内（用户自备 onnx）。`into_typed` 仅做类型推导不需要静态 shape，
+/// `into_runnable` 接受 typed model 直接出 `RunnableModel`。
 ///
 /// # Errors
 ///
-/// 文件不存在、ONNX 解析失败、模型优化失败或形状推导失败时返回 `Err`。
+/// 文件不存在、ONNX 解析失败、类型推导失败或 runnable 装配失败时返回 `Err`。
 pub(crate) fn load_runnable(path: &Path) -> io::Result<DetModel> {
     let model = tract_onnx::onnx()
         .model_for_path(path)
         .map_err(|e| io::Error::other(format!("load DBNet ONNX {}: {e}", path.display())))?
-        .into_optimized()
-        .map_err(|e| io::Error::other(format!("optimize DBNet model: {e}")))?
+        .into_typed()
+        .map_err(|e| io::Error::other(format!("type DBNet model: {e}")))?
         .into_runnable()
         .map_err(|e| io::Error::other(format!("make DBNet runnable: {e}")))?;
     Ok(model)

@@ -17,6 +17,9 @@ pub struct CullReport {
     pub culled_count: usize,
     /// 实际搬迁成功数（`dry_run` 时 = 0）。
     pub moved: usize,
+    /// 因 `backend.face.sharpness_min` 阈值在多图组里被剔除的模糊图数；
+    /// 单图组（pHash 后 len=1）不参与阈值过滤（避免误丢唯一证据）。
+    pub dropped_blurry: usize,
     /// 失败计数（任一阶段 IO/解码/模型 Err）。
     pub failed: usize,
     pub dry_run: bool,

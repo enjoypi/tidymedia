@@ -2,7 +2,7 @@
 //!
 //! 设计：
 //! - preprocess letterbox 到 640×640（保持长宽比 + 灰色 padding）；scale + padding
-//!   meta 存 `Mutex<Option<ScaleMeta>>` 让 postprocess 把坐标逆映射回原图
+//!   meta 与 input 一起透传给 `RawScrfd::run`，无共享可变状态保证 `Send + Sync` 真并发安全
 //! - 真实 model.run + 三 stride anchor 解码 + NMS 在 `tract_scrfd_real.rs`
 //!   （ignore-regex 排除整文件，CI 无 ONNX 模型不可触发）
 //! - 单元测试用 `Vec<FaceDetection>` 直返的 stub `RawScrfd` 验装配 + preprocess
@@ -24,19 +24,22 @@ pub(crate) type ScrfdModel = Arc<TypedRunnableModel>;
 pub(crate) const INPUT_SIDE: u32 = 640;
 
 pub(crate) trait RawScrfd: Send + Sync {
-    /// 接预处理 NCHW `[1, 3, 640, 640]` f32；返已解码 + NMS 的人脸列表。
+    /// 接预处理 NCHW `[1, 3, 640, 640]` f32 + letterbox meta；返已解码 + NMS 的人脸列表。
     /// trait 一步返结果（不暴露 raw tensor），让 stub 简单，anchor 算法集中真实路径。
+    ///
+    /// **`meta` 随 input 透传**：旧实现把 meta 写到 `Arc<Mutex<Option<ScaleMeta>>>`
+    /// 共享可变状态，并发 `detect_faces` 时线程 B 的 meta 会覆盖线程 A 的，让 A 用 B 的
+    /// scale/pad 逆映射坐标输出错框（违反 `FaceDetector: Send+Sync` 契约）。
     ///
     /// # Errors
     ///
     /// 模型推理失败、输出维度异常或 anchor 解码失败时返回 `Err`。
-    fn run(&self, input: Tensor) -> io::Result<Vec<FaceDetection>>;
+    fn run(&self, input: Tensor, meta: ScaleMeta) -> io::Result<Vec<FaceDetection>>;
 }
 
 pub struct TractScrfdDetector {
     cfg: FaceConfig,
     raw: Mutex<Option<Box<dyn RawScrfd>>>,
-    scale_meta: Arc<Mutex<Option<ScaleMeta>>>,
 }
 
 impl std::fmt::Debug for TractScrfdDetector {
@@ -44,7 +47,6 @@ impl std::fmt::Debug for TractScrfdDetector {
         f.debug_struct("TractScrfdDetector")
             .field("scrfd_model_path", &self.cfg.scrfd_model_path)
             .field("loaded", &self.raw.lock().is_some())
-            .field("scale_meta_set", &self.scale_meta.lock().is_some())
             .finish()
     }
 }
@@ -55,7 +57,6 @@ impl TractScrfdDetector {
         Self {
             cfg,
             raw: Mutex::new(Some(raw)),
-            scale_meta: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -70,7 +71,6 @@ impl TractScrfdDetector {
             model,
             score_threshold: self.cfg.scrfd_score_threshold,
             nms_iou: self.cfg.scrfd_nms_iou,
-            scale_meta: self.scale_meta.clone(),
         }));
         Ok(())
     }
@@ -80,13 +80,12 @@ impl FaceDetector for TractScrfdDetector {
     fn detect_faces(&self, _path: &Utf8Path, image_bytes: &[u8]) -> io::Result<Vec<FaceDetection>> {
         self.ensure_raw()?;
         let (input, meta) = preprocess(image_bytes)?;
-        *self.scale_meta.lock() = Some(meta);
         let detections = {
             let guard = self.raw.lock();
             guard
                 .as_ref()
                 .expect("ensure_raw set Some before lock release")
-                .run(input)?
+                .run(input, meta)?
         };
         Ok(detections)
     }
@@ -107,7 +106,6 @@ pub fn build_scrfd_detector(cfg: &FaceConfig) -> io::Result<Box<dyn FaceDetector
     Ok(Box::new(TractScrfdDetector {
         cfg: cfg.clone(),
         raw: Mutex::new(None),
-        scale_meta: Arc::new(Mutex::new(None)),
     }))
 }
 

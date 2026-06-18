@@ -154,6 +154,10 @@ pub(crate) fn preprocess(img: &image::RgbImage) -> Tensor {
 }
 
 /// 取 `[1, 128]` embedding 并 L2 normalize → `[f32; 128]`。
+///
+/// 严格匹配 `EMBED_DIM`：不允许截断/补零。错配模型（如 `InsightFace` 512 维 `w600k_r50.onnx`）
+/// 输出 `slice.len()=512` 时旧 `< EMBED_DIM` 守卫放行让 `copy_from_slice` 截取前 128 维做 L2，
+/// embedding 空间与正确 128 维不兼容 → cosine 比较产生随机聚类（同人多张照片判作不同身份）。
 pub(crate) fn decode(output: &Tensor) -> io::Result<[f32; 128]> {
     let cast = output
         .cast_to::<f32>()
@@ -162,9 +166,11 @@ pub(crate) fn decode(output: &Tensor) -> io::Result<[f32; 128]> {
     let slice = view
         .as_slice::<f32>()
         .map_err(|e| io::Error::other(format!("facenet output slice: {e}")))?;
-    if slice.len() < EMBED_DIM {
+    if slice.len() != EMBED_DIM {
         return Err(io::Error::other(format!(
-            "facenet output dim {} < expected {EMBED_DIM}",
+            "facenet output dim {} != expected {EMBED_DIM} \
+             (check backend.face.facenet_model_path: must be 128-dim MobileFaceNet, \
+             not 512-dim InsightFace variant)",
             slice.len()
         )));
     }

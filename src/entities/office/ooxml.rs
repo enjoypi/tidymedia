@@ -34,7 +34,11 @@ pub(super) fn parse(reader: &mut dyn MediaReader, _mime: &str) -> (u64, u64) {
         return (0, 0);
     };
     let mut content = Vec::with_capacity(CORE_XML_MAX_BYTES);
-    if entry.take(CORE_XML_MAX_BYTES as u64).read_to_end(&mut content).is_err() {
+    if entry
+        .take(CORE_XML_MAX_BYTES as u64)
+        .read_to_end(&mut content)
+        .is_err()
+    {
         return (0, 0);
     }
     extract_dates(&content)
@@ -73,7 +77,11 @@ fn scan_element_text<'a>(buf: &'a [u8], open_tag: &[u8], close_tag: &[u8]) -> Op
 fn parse_iso8601_to_epoch(s: &str) -> Option<u64> {
     let dt = DateTime::parse_from_rfc3339(s.trim()).ok()?;
     let secs = dt.timestamp();
-    if secs <= 0 { None } else { Some(secs.cast_unsigned()) }
+    if secs <= 0 {
+        None
+    } else {
+        Some(secs.cast_unsigned())
+    }
 }
 
 fn find_byte(haystack: &[u8], byte: u8) -> Option<usize> {

@@ -33,7 +33,10 @@ fn build_plist_with_dates(created_secs: Option<u64>, modified_secs: Option<u64>)
 #[test]
 fn extract_dates_happy_path() {
     let buf = build_plist_with_dates(Some(1_487_068_200), Some(1_514_808_000));
-    assert_eq!(extract_dates_from_plist(&buf), (1_487_068_200, 1_514_808_000));
+    assert_eq!(
+        extract_dates_from_plist(&buf),
+        (1_487_068_200, 1_514_808_000)
+    );
 }
 
 #[test]
@@ -76,7 +79,10 @@ fn extract_dates_non_dict_root_returns_zeros() {
 fn extract_dates_non_date_value_returns_zero_for_that_field() {
     // createdDate 是 String 而非 Date → as_date 返 None → 0。
     let mut dict = plist::Dictionary::new();
-    dict.insert(KEY_CREATED.into(), plist::Value::String("not a date".into()));
+    dict.insert(
+        KEY_CREATED.into(),
+        plist::Value::String("not a date".into()),
+    );
     let value = plist::Value::Dictionary(dict);
     let mut buf = Vec::new();
     value.to_writer_binary(Cursor::new(&mut buf)).unwrap();

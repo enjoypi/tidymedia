@@ -78,7 +78,10 @@ fn copy_archives_txt_falls_back_to_mtime_or_filename() {
     })
     .expect("copy with --include-non-media should succeed for txt");
     let bucket = out.path().join("2020").join("06");
-    assert!(bucket.exists(), "txt with mtime 2020-06-15 should land in 2020/06");
+    assert!(
+        bucket.exists(),
+        "txt with mtime 2020-06-15 should land in 2020/06"
+    );
 }
 
 fn walk(p: &std::path::Path) -> Vec<std::path::PathBuf> {
