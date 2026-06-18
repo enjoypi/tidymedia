@@ -84,9 +84,9 @@ impl Exif {
     /// `sniff_mime` 在原 reader 上 seek(0) 之后把句柄交给 [`Self::from_reader`] 解析。
     /// 单次 `open_read` 减少远端 backend 的往返次数。
     ///
-    /// `sniff_mime` 返空时调 [`super::mime::mime_from_ext`] 按 location 扩展名兜底，
-    /// 让 `infer` 不识别的纯文本 / RTF / iWork / 思维导图等办公自定义 mime 仍能命中
-    /// `from_reader` 的 office 分支（路由本身 stub 阶段返 0，但保留为后续 commit 接入）。
+    /// `sniff_mime` 返空 OR 返 `application/zip` 时调 [`super::mime::mime_from_ext`]
+    /// 按 location 扩展名兜底 —— infer 把 OOXML/ODF/iWork/EPUB/思维导图 zip 容器
+    /// 一律识别为 `application/zip`，需扩展名重映射到具体 office mime 才能命中 office 路由。
     pub fn open(
         loc: &Location,
         backend: &Arc<dyn Backend>,
@@ -94,9 +94,9 @@ impl Exif {
     ) -> common::Result<Self> {
         let mut reader = backend.open_read(loc)?;
         let sniffed = sniff_mime(reader.as_mut())?;
-        let mime_type = if sniffed.is_empty() {
+        let mime_type = if sniffed.is_empty() || sniffed == "application/zip" {
             super::mime::mime_from_ext(loc.path().extension())
-                .map_or(String::new(), str::to_string)
+                .map_or_else(|| sniffed.clone(), str::to_string)
         } else {
             sniffed
         };

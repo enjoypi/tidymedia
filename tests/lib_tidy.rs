@@ -107,3 +107,6 @@ mod move_text_shot;
 
 #[path = "lib_tidy/cull.rs"]
 mod cull;
+
+#[path = "lib_tidy/office_archive.rs"]
+mod office_archive;
