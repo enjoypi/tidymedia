@@ -22,6 +22,7 @@
 - tidymedia debug 走 stderr；`| tail -N` 会截 copy_file 行让 summary `copied=N` 与日志行数对不上 → 重定向文件再 grep
 - MSVC 链接固化在 `.cargo/config.toml`（PATH 中 GNU coreutils `link` 会抢 `link.exe`、vcvars64 在精简 shell 不可用）；换 MSVC/SDK 版本需同步该文件
 - rustup default-host + 全部工具链 MUST `x86_64-pc-windows-msvc`（gnu 与 MSVC 链接不兼容）；cargo-llvm-cov 安装不带 `--locked`
+- **MSVC build cc-rs 找不到 cl.exe/lib.exe**（tract-linalg 等 build-dep 直调 `cc::windows_registry::find`，绕过 `.cargo/config.toml linker`）：VS18/preview 不被 cc-rs 注册表识别 → 写 `.cmd` 脚本 `call "<vs>\VC\Auxiliary\Build\vcvars64.bat"` + 内嵌 `cargo build/nextest/clippy`，**直接执行该 .cmd**（非 `cmd //c "..."` 包装，否则 `VCToolsInstallDir` 不传子进程让 cargo 子进程仍找不到工具链）
 - git commit 格式：`type: 中文描述`（本项目无 TASK-ID），按主题拆分
 
 ## 系统依赖与库特性
@@ -84,6 +85,7 @@
 - **branch miss 精确定位**：`llvm-cov report --release --lcov` 过滤 `BRDA` 第 4 字段 0
 - **逻辑不可达的 `?` 死区消除**：循环边界用 `while let Some(x) = buf.get(start..end)` 替手写哨兵（参考 `entities/riff.rs`）；`buf.get(idx..)?` 当 idx 来自 `position()`/`find()` 时改 `&buf[idx..]`（`?` Err arm 不可达，参考 `entities/xmp.rs::find_xmp_packet` / `find_attr_rfc3339`）；纯类型安抚用 `unwrap_or(常量)` 替 `.ok()?`
 - **fn pointer 依赖注入测 Err arm**：thin wrapper 在生产路径下 OK arm 必触发但 Err arm 难真触发（如 `walk_entry_to_io` 的 `entry.metadata()` 失败、`rename_or_fallback` 的 `remove` 失败）→ 抽 `*_with(fn pointer)` 参数化版本，生产入口默认传 real fn，测试注 mock 返 Err 命中 `.map_err` 闭包 region（参考 `local.rs::walk_entry_to_io_with` / `rename_or_fallback_with`）
+- **私有 fn 加新必填参数 → `#[cfg(test)]` shim + `use … as 原名` alias 让 N 处测试调用零改动**：例 `ops.rs::do_copy` 加 `mkdir_cache: &mut HashSet<Location>` 后，同模块加 `#[cfg(test)] pub(super) fn do_copy_with_default_cache(...) { let mut mc = HashSet::new(); do_copy(..., &mut mc, ...) }`，`mod.rs::#[cfg(test)] use self::ops::do_copy_with_default_cache as do_copy;` 让 `super::super::*` glob import 后 12 处测试调用 `do_copy(` 完全不动；生产路径走原 fn 持 loop 级状态，测试桩每次新建默认值。比起加默认参数（破坏强制决策语义）或成片 sed 测试同步更整洁
 - **`DummyCtx::fail_after(n: usize)` 模式**：`from_location` 第 N 次调用之后开始返 Err，让 `walk_recursive` 的子项 `from_location` Err arm 在根 `build_target` 成功的前提下被命中（用 `Arc<AtomicUsize>` 计数；参考 `remote_test_helpers.rs::DummyCtx`）
 - **assert! `&&` 拆两条 assert**：`assert!(a && b, ...)` 让 LLVM 把 `&&` 短路为两 sub-branch BR，False 路径（assert 失败）天然 0-hit；拆 `assert!(a); assert!(b);` 单 contains 不分子分支，BR 100%
 - **`assert!(cond, "got: {}", expr)` panic 路径子表达式 region miss**：assert 通过时 panic 输出闭包内 `expr` 不求值 → LLVM 算 0-hit region；改 `let val = expr; assert!(cond, "got: {val}");` 提前求值消除（与「assert! `&&` 拆两条」同类，专攻"assert 失败 panic 路径"的 phantom miss）
@@ -255,6 +257,7 @@
 - **远端 `RemoteClient::read` 整文件入堆**（已知限制，trait 文档有 WHY）：pavao `SmbFile` 借用 client 生命周期装不进 `Box<dyn MediaReader + 'static>`、`adb_client` pull 是回调式写入 API——真正流式需换库或线程+管道，YAGNI；大视频在内存受限环境（Android）有 OOM 风险
 - **远端 `mkdir_p` 是真递归**（`remote.rs::mkdir_recursive`）：自底向上 stat 找存在的祖先再逐层 mkdir（`AlreadyExists` 容忍、stat 非 NotFound 直接传播）。`FakeRemoteClient::mkdir` 不校验父目录，单层 vs 递归差异 fake 测不出来，须用「中间层注入错误/断言中间层 metadata」类测试钉行为
 - **存在性查询 Err MUST 传播，MUST NOT `unwrap_or(false)`**：吞 Err 让后续 `open_write` truncate 覆盖已有文件、move 模式连源一起删；保守兜底方向是 `true` 而非 `false`。**`std::path::Path::exists` / `camino::Utf8Path::exists` 返 `bool`、内部吞 `PermissionDenied` 成 false 是同类陷阱**——`LocalBackend::exists` MUST 用 `path.as_std_path().try_exists()?` 让 Err 经 `?` 上抛
+- **mkdir/exists 类 best-effort 缓存 set MUST `contains + insert` 而非 `insert-returns-bool`**：`if !cache.contains(&k) { try_op(&k)?; cache.insert(k); }` 让 try_op 失败时 `?` 上抛且 set 未污染；反例 `if cache.insert(k.clone()) { try_op(&k)?; }` 让 try_op Err 后 set 已含 k 致后续命中跳过 try_op 但实际状态未建立（mkdir_p 失败永驻"已建"假态致后续 write 缺父目录全失败）。`do_copy::mkdir_cache` 与未来 dir-listing cache / sidecar exists cache 均适用
 - **测试 shim 必须 `#[cfg(test)]` gate**：`Info::from` / `Index::visit_dir` / `Exif::from_path_with_offset` / `adapters/backend/fake_remote` 是包 backend-aware API 的旧入口，仅测试用；未 gate 让 release build 报 `dead_code`
 - **`#[cfg(test)]` 标在方法/import 上，不要标在 `impl Foo {}` 块上**：同块生产方法会被一起 gate 掉
 - **`--all-features` clippy 与 `#[cfg(not(feature))]` test 联动**：启用全 feature 后，gate 掉的 test fn 对应 imports 必须用同样 `#[cfg(not(all(feature = "smb-backend", feature = "mtp-backend", feature = "adb-backend")))]` 包裹，否则 `unused_import` error
@@ -283,6 +286,7 @@
     - Python `re` alternation 是 leftmost-first 不是 POSIX leftmost-longest，迁 awk regex MUST 把长 token 放前（`(1[012]|0?[1-9])` 而非 `(0?[1-9]|1[012])`）
 - **`tracing::*!` message 含 `{name}` 会被当 named placeholder**：`warn!(... "use ${VAR:-default}")` 让 macro 找名为 `VAR` 的变量编译失败；转义 `{{VAR}}` 合规但读怪，最干净改措辞避开 `{` `}`（如 `"use ':-default' suffix"`），字段引用走具名字段（`var = body`）而非 message 内嵌
 - **`MediaWriter::finish` flush MUST `?` 传播不 `.ok()`**：当前 `std::fs::File::flush` 是 noop（std 文档保证），但 BufWriter 包装后 disk-full / cancel 在 finish 阶段才暴露，move 模式 src 随后删即永久丢失。新增 writer impl 同样要求；同款套路适用 `RemoteBufferedWriter::finish` 等 trait 实现
+- **`BufWriter::into_inner` MUST 三阶段闭合**：BufWriter Drop 默认 flush + **忽略 Err**，disk-full / 远端 commit 失败在 Drop 静默丢失；显式 `bw.flush()?; let inner = bw.into_inner().map_err(IntoInnerError::into_error)?; inner.finish()?` 让 Err 经 `?` 传播。`into_inner` 内部会再 flush 但 buf 已空——`flush()?` 先暴露 Err，into_inner 成功后 inner 已 move 进 finish 路径，Drop 不再重入。与「`MediaWriter::finish` flush MUST `?`」同口径，专攻"BufWriter 包远端 writer"场景
 - **`/code-review` agent 假阳性识别**：recall 模式过度报；「dead variant」先 `rg` 查测试引用 + 评估对称设计价值；「fake silent Ok」核对真实后端 POSIX 行为再判；「stub map_error」按未来接入价值评估。全文件审查不分派 `git diff` 时用 7 个 module-group agent 并行（backend / face+ocr / adapters顶层+uri / EXIF+容器 / file_info+media_time / usecases / frameworks+lib+bin），每 agent 返 ≤6 JSON findings，主线程独立 Read 验证
 - **find 删除脚本统一 Python 输出**：`render_script` 输出 `#!/usr/bin/env python3` shebang + `import os` 头 + `os.remove("...")` 待删 / `# os.remove("...")` 注释保护，按 `DuplicateGroup` size 降序分组。**路径转义**：`s.replace('\\', "\\\\").replace('"', "\\\"")`；含 `\n` 控制字符暂不处理（YAGNI）
 - **tract `outputs[i].cast_to::<f32>()` 返 `Cow<Tensor>` 不能直接 `.as_slice()`**：MUST 三步走 `let cow = ...?; let view = cow.view(); let slice = view.as_slice::<f32>().map_err(io::Error::other)?;`。`view().as_slice::<T>()` 返 `Result<&[T], TractError>`（不是 Option，`.ok_or_else` 编译失败）。`tract_dbnet.rs` 用 `.expect(...)` 掩盖了 API 形态——新接 tract 模型 MUST 用 `map_err` 让 Err 可传播；多输出模型（如 SCRFD 9 tensors）每个 tensor 独立 `view()` 持 binding 防 borrowed value dropped
