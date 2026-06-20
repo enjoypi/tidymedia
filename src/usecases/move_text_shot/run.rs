@@ -10,7 +10,7 @@
 use std::io::{self, Read};
 use std::sync::Arc;
 
-use camino::{Utf8Path, Utf8PathBuf};
+use camino::Utf8Path;
 use tracing::{debug, error};
 
 use super::report::MoveTextShotReport;
@@ -357,12 +357,11 @@ fn relative_to<'a>(src: &'a Utf8Path, source: &Utf8Path) -> &'a Utf8Path {
 /// 都通过 `Location::with_path` 单点扩展（CLAUDE.md「跨 scheme sibling 路径用 `with_path`
 /// 单点」）。
 fn target_dir(output: &Location, rel_dir: Option<&Utf8Path>) -> Location {
-    let new_path = match rel_dir {
-        None => output.path().to_path_buf(),
-        Some(p) if p.as_str().is_empty() => output.path().to_path_buf(),
-        Some(p) => output.path().join(p),
-    };
-    output.with_path(new_path)
+    match rel_dir {
+        None => output.clone(),
+        Some(p) if p.as_str().is_empty() => output.clone(),
+        Some(p) => output.join_path(p.as_str()),
+    }
 }
 
 /// 同 `copy::naming::generate_unique_name` 的 `_1.._N` 算法，但 template 固定为
@@ -382,8 +381,7 @@ fn unique_name_in_dir(
         } else {
             format!("{}_{}.{}", stem_ext.0, i, stem_ext.1)
         };
-        let candidate_path: Utf8PathBuf = dir.path().join(&candidate_name);
-        let candidate_loc = dir.with_path(candidate_path);
+        let candidate_loc = dir.join_path(&candidate_name);
         if !backend.exists(&candidate_loc)? {
             return Ok(Some(candidate_loc));
         }

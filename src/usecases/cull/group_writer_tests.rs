@@ -14,7 +14,12 @@ fn compute_group_dir_uses_relative_path() {
     let root = local_loc("/src");
     let output = local_loc("/out");
     let group = compute_group_dir(&best, &root, &output, 1);
-    assert_eq!(group.path().as_str(), "/out/2024/05/group-001");
+    // Local backend 用 OS 分隔符；Path::ends_with 段级匹配跨平台
+    assert!(
+        std::path::Path::new(group.path().as_str()).ends_with("out/2024/05/group-001"),
+        "unexpected group dir: {}",
+        group.path()
+    );
 }
 
 #[test]
@@ -23,7 +28,11 @@ fn compute_group_dir_handles_root_level_file() {
     let root = local_loc("/src");
     let output = local_loc("/out");
     let group = compute_group_dir(&best, &root, &output, 7);
-    assert_eq!(group.path().as_str(), "/out/group-007");
+    assert!(
+        std::path::Path::new(group.path().as_str()).ends_with("out/group-007"),
+        "unexpected group dir: {}",
+        group.path()
+    );
 }
 
 #[test]

@@ -179,6 +179,29 @@ impl Location {
         }
     }
 
+    /// 在 path 末尾追加一段，按 scheme 决定分隔符：Local 用 `Utf8PathBuf::join`
+    /// （Windows 走 `\`、Unix 走 `/`，符合 `fs::File` 调用要求），远端
+    /// （Smb/Mtp/Adb）始终用 `/` 字符串拼，保 POSIX 协议路径不被 Windows host
+    /// 注入反斜杠（ADB shell / pavao SMB / libmtp 都接收 path 字符串原样下发）。
+    /// segment 多段（如 `year/month`）直接拼接，调用方自行清理 `..`/`.`。
+    #[must_use]
+    pub fn join_path(&self, segment: &str) -> Self {
+        match self {
+            Self::Local(p) => Self::Local(p.join(segment)),
+            Self::Smb { .. } | Self::Mtp { .. } | Self::Adb { .. } => {
+                let base = self.path().as_str();
+                let combined = if base.is_empty() {
+                    segment.to_string()
+                } else if base.ends_with('/') {
+                    format!("{base}{segment}")
+                } else {
+                    format!("{base}/{segment}")
+                };
+                self.with_path(Utf8PathBuf::from(combined))
+            }
+        }
+    }
+
     /// 保留 scheme + 连接参数（user/host/share / device/storage / serial），
     /// 覆写 path 字段。用于在远端 backend 下 join 子目录
     /// （如 `output.with_path(year/month/file)`）。

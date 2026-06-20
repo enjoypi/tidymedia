@@ -117,12 +117,11 @@ fn compute_group_dir(
         .and_then(camino::Utf8Path::parent)
         .map_or_else(Utf8PathBuf::new, Utf8PathBuf::from);
     let group_name = format!("group-{group_id:03}");
-    let combined = if rel_dir.as_str().is_empty() {
-        output.path().join(&group_name)
+    if rel_dir.as_str().is_empty() {
+        output.join_path(&group_name)
     } else {
-        output.path().join(&rel_dir).join(&group_name)
-    };
-    output.with_path(combined)
+        output.join_path(rel_dir.as_str()).join_path(&group_name)
+    }
 }
 
 /// basename 冲突走 `unique_name`：`a.jpg` 存在则 `a_1.jpg` / `a_2.jpg`。
@@ -133,7 +132,7 @@ fn unique_name_in_dir(
     backend: &Arc<dyn Backend>,
     dry_run: bool,
 ) -> io::Result<Location> {
-    let base_loc = dir.with_path(dir.path().join(file_name));
+    let base_loc = dir.join_path(file_name);
     if dry_run {
         return Ok(base_loc);
     }
@@ -147,7 +146,7 @@ fn unique_name_in_dir(
         } else {
             format!("{stem}_{i}.{ext}")
         };
-        let loc = dir.with_path(dir.path().join(&candidate));
+        let loc = dir.join_path(&candidate);
         if !backend.exists(&loc)? {
             return Ok(loc);
         }
@@ -246,7 +245,7 @@ fn write_manifest(
         dst: &'a str,
         score: f32,
     }
-    let manifest_loc = group_dir.with_path(group_dir.path().join(MANIFEST_NAME));
+    let manifest_loc = group_dir.join_path(MANIFEST_NAME);
     let m = Manifest {
         group_id: report.group_id,
         best: BestEntry {

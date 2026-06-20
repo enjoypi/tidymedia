@@ -286,7 +286,11 @@ fn generate_unique_name_drops_dot_and_dotdot_segments() {
         "subdir must not contain dotdot, got: {sub_dir_str}"
     );
     assert!(target.path().as_str().starts_with(out_str.as_str()));
-    assert!(target.path().as_str().ends_with("target/photo.png"));
+    assert!(
+        std::path::Path::new(target.path().as_str()).ends_with("target/photo.png"),
+        "unexpected target tail: {}",
+        target.path()
+    );
 }
 
 // output 是已存在文件（非目录），backend.mkdir_p 失败 → 覆盖 copy() 内 `?` Err 分支。
