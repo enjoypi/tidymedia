@@ -19,6 +19,7 @@ pub(crate) mod png;
 pub(crate) mod riff;
 #[cfg(test)]
 pub(crate) mod test_common;
+pub(crate) mod threadpool;
 pub(crate) mod tiff_ifd;
 pub mod uri;
 pub(crate) mod xmp;

@@ -1,5 +1,6 @@
 //! copy 主流程编排：扫源建索引 → 解析 EXIF → 循环 `do_copy` → 汇总报告。
 
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use chrono::FixedOffset;
@@ -310,15 +311,27 @@ fn run_copy_loop(
     let mut ignored = 0usize;
     let mut failed = 0usize;
     let mut errors: Vec<ReportError> = Vec::new();
+    // mkdir 缓存：同 {year}/{month} 桶下所有文件共享一次 mkdir_p，远端 backend
+    // 单 source 万文件分布 12 个月份只触发 12 次 mkdir_recursive 而非 10000 次。
+    // 仅命中已成功路径；mkdir_p 失败的 dir 不入缓存让下次仍尝试创建（避开
+    // 「首次失败永驻 false-positive」陷阱）。
+    let mut mkdir_cache: HashSet<Location> = HashSet::new();
 
-    // HashMap.values() 迭代顺序受哈希种子影响；move 模式下两份同 hash 源文件，
+    // HashMap.values() 迭代顺序受哈希种子影响；move 模式下两份同 hash 源文件,
     // 哪份留下哪份删随版本/进程变化致结果不可重现。按 full_path 排序后迭代保证
     // 同输入同输出，便于审计回放和测试断言。
     let mut entries: Vec<_> = source.files().values().collect();
     entries.sort_by(|a, b| a.full_path.cmp(&b.full_path));
 
     for src in entries {
-        match do_copy(src, output_loc, output_backend, &mut output_index, opts) {
+        match do_copy(
+            src,
+            output_loc,
+            output_backend,
+            &mut output_index,
+            &mut mkdir_cache,
+            opts,
+        ) {
             Ok(true) => {
                 copied += 1;
             }

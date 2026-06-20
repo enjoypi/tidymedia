@@ -15,6 +15,7 @@ use super::common;
 use super::exif;
 use super::file_info::Info;
 use super::media_time;
+use super::threadpool::install_io;
 use super::uri::Location;
 // 测试 helper `Index::visit_dir` 需要构造 LocalBackend instance。仅 #[cfg(test)]
 // 下引用 adapters，生产代码 visit_location 走 backend trait 注入（CA 规则）。
@@ -313,10 +314,15 @@ impl Index {
             locs.push(entry.location);
         }
 
-        let infos: Vec<_> = locs
-            .par_iter()
-            .map(|loc| Info::open(loc, Arc::clone(backend)))
-            .collect();
+        // 跑在 I/O 专用线程池（CPU × 4，clamp [8, 64]）：远端 backend 的
+        // Info::open → metadata + open_read + fast_hash_stream 是同步阻塞 IO，
+        // 走全局 rayon 池会让远端 RTT 占满 CPU 核数线程让后续 CPU-bound 阶段
+        // 饿死。本地 backend 也受益（更高并发隐藏 stat 抖动）。
+        let infos: Vec<_> = install_io(|| {
+            locs.par_iter()
+                .map(|loc| Info::open(loc, Arc::clone(backend)))
+                .collect()
+        });
         for (loc, result) in locs.iter().zip(infos) {
             match result {
                 Ok(info) => _ = self.add(info),
@@ -340,21 +346,29 @@ impl Index {
     /// 静默跳过（"尽力而为"语义）。从不返回错误。
     /// `local_offset` 用于解释 EXIF 内无时区的 NaiveDateTime（相机本地时区）。
     pub fn parse_exif(&mut self, local_offset: FixedOffset) {
-        self.files.par_iter_mut().for_each(|(_, info)| {
-            if let Ok(e) = exif::Exif::open(info.location(), &info.backend(), local_offset) {
-                info.set_exif(e);
-            }
+        // 同 visit_location：Exif::open 内调 backend.open_read（远端是整文件
+        // 同步下载）是 I/O-bound，包 I/O 池避免阻塞 CPU 池线程。
+        install_io(|| {
+            self.files.par_iter_mut().for_each(|(_, info)| {
+                if let Ok(e) = exif::Exif::open(info.location(), &info.backend(), local_offset) {
+                    info.set_exif(e);
+                }
+            });
         });
     }
 
     /// 并行对每个 indexed 文件调用 provider 注入额外时间候选（P3 sidecar 等），
     /// 与 `parse_exif` 同为"尽力而为"富集步骤：无 sidecar 时 provider 返空即可。
     pub fn enrich_candidates(&mut self, provider: CandidateProvider) {
-        self.files.par_iter_mut().for_each(|(_, info)| {
-            let candidates = provider(info.location(), &info.backend());
-            if !candidates.is_empty() {
-                info.add_candidates(candidates);
-            }
+        // provider 通常调 backend.read_to_string 读 sidecar（远端 stat + read），
+        // 同 visit_location 是 I/O-bound，包 I/O 池。
+        install_io(|| {
+            self.files.par_iter_mut().for_each(|(_, info)| {
+                let candidates = provider(info.location(), &info.backend());
+                if !candidates.is_empty() {
+                    info.add_candidates(candidates);
+                }
+            });
         });
     }
 }

@@ -495,6 +495,52 @@ mod test_advanced {
         );
     }
 
+    /// F4 mkdir 缓存命中分支：2 个源文件同月份归档 → `output_backend.mkdir_p`
+    /// 应只调一次同 `target_dir`，而非每文件一次。计入 `output_loc` 顶层 `mkdir_p`
+    /// （`copy_with_sidecar:142`），总共 = 2 次（顶层 + 同 `target_dir` 一次），
+    /// 而非 3 次（顶层 + 每文件各一次）。验证 `ops.rs::do_copy` 内 `HashSet` 命中跳过。
+    #[test]
+    fn mkdir_cache_skips_repeated_mkdir_for_same_target_dir() {
+        use crate::adapters::backend::fake::FakeBackend;
+        use std::sync::Arc;
+
+        let src_dir = tempdir().unwrap();
+        // 两个媒体文件，归档时按 mtime 固定到同一 {year}/{month} 桶。
+        tc::copy_png_to(src_dir.path(), "a.png").unwrap();
+        tc::copy_png_to(src_dir.path(), "b.png").unwrap();
+
+        // output 用 FakeBackend("smb")：scheme != "local" 强制走 stream_copy +
+        // mkdir_p 路径，避开 rename fast-path（fast-path 不调 mkdir_p）。
+        let fake_out = Arc::new(FakeBackend::new("smb"));
+        let out_loc = Location::Smb {
+            user: None,
+            host: "nas".into(),
+            port: None,
+            share: "photos".into(),
+            path: Utf8PathBuf::from("out"),
+        };
+        fake_out.add_dir(out_loc.clone());
+        let fake_out_handle = Arc::clone(&fake_out);
+        let backend_arc: Arc<dyn Backend> = fake_out;
+
+        copy(
+            &[local_source(src_dir.path())],
+            (out_loc, backend_arc),
+            false,
+            false,
+            false,
+            None,
+            None,
+        )
+        .unwrap();
+
+        let calls = fake_out_handle.mkdir_p_calls();
+        assert_eq!(
+            calls, 2,
+            "expected 2 mkdir_p calls (1 output root + 1 target dir, cache reuses target); got {calls}"
+        );
+    }
+
     #[test]
     fn copy_empty_source_with_report_writes_zero_counts() {
         let src = tempdir().unwrap();

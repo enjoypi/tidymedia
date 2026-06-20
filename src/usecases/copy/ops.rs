@@ -1,5 +1,7 @@
 //! 单文件复制/移动操作：重复检测 → 媒体过滤 → 唯一命名 → fast-path rename 或流式拷贝。
 
+use std::collections::HashSet;
+use std::io::{BufReader, BufWriter, Write};
 use std::sync::Arc;
 
 use tracing::debug;
@@ -12,6 +14,12 @@ use crate::entities::common;
 use crate::entities::file_index::Index;
 use crate::entities::file_info::Info;
 use crate::entities::uri::Location;
+
+/// `stream_copy` 的 `BufReader`/`BufWriter` 容量：1 MiB 与 `STREAM_CHUNK` 同口径，
+/// 对远端单文件 5 GiB 视频比 `std::io::copy` 默认 8 KiB 减少 ~128× syscall/RTT
+/// 次数；与 `FAST_READ_SIZE` = 4 KiB 区别在前者是 hash 嗅探固定上限，本常量服务
+/// 于 stream 整文件路径。本地 buffered IO 仍受益（每 1 MiB 一次 write syscall）。
+const STREAM_BUFFER_BYTES: usize = 1 << 20;
 
 // multi-binary instance + tracing macro region 拆分：lib unit 与 lib_tidy 集成
 // binary 共享 lib rlib codegen（hash 同）；`tidymedia` bin（subprocess 通过
@@ -30,6 +38,7 @@ pub(super) fn do_copy(
     output_dir: &Location,
     output_backend: &Arc<dyn Backend>,
     output_index: &mut Index,
+    mkdir_cache: &mut HashSet<Location>,
     opts: &CopyOpts<'_>,
 ) -> common::Result<bool> {
     let src_loc = src.location().clone();
@@ -79,7 +88,13 @@ pub(super) fn do_copy(
             return Ok(true);
         }
 
-        output_backend.mkdir_p(&target_dir_loc)?;
+        // mkdir 缓存：同 {year}/{month} 桶被 N 个文件命中时，N-1 次 mkdir_p 是远端
+        // 2D 次 RTT 浪费（stat 链 + mkdir 链）。LocalBackend 本地 stat 廉价但仍走
+        // syscall；远端 backend 是单点 RTT 杀手。失败不入缓存，下次重试。
+        if !mkdir_cache.contains(&target_dir_loc) {
+            output_backend.mkdir_p(&target_dir_loc)?;
+            mkdir_cache.insert(target_dir_loc);
+        }
 
         if opts.remove && src.backend().scheme() == "local" && output_backend.scheme() == "local" {
             // 同 LocalBackend + remove → 走 fs::rename fast-path：同卷 OS 原子完成，
@@ -162,16 +177,50 @@ fn remove_src_after_stream_copy(
         .map_err(common::Error::from)
 }
 
+/// 测试 shim：调原 [`do_copy`] 时按需构造空 `mkdir_cache`。生产路径走
+/// `run_copy_loop` 持有的 loop 级缓存（命中已建目录跳过重复 `mkdir_p` RTT），
+/// 测试桩不关心缓存复用，每次空 set 入参等价旧行为；既保留 `mkdir_cache` 参数
+/// 强制每次调用决策（不退化为隐式默认），又让 12 处测试调用零改动。
+#[cfg(test)]
+pub(super) fn do_copy_with_default_cache(
+    src: &Info,
+    output_dir: &Location,
+    output_backend: &Arc<dyn Backend>,
+    output_index: &mut Index,
+    opts: &CopyOpts<'_>,
+) -> common::Result<bool> {
+    let mut mc: HashSet<Location> = HashSet::new();
+    do_copy(src, output_dir, output_backend, output_index, &mut mc, opts)
+}
+
 /// 用源 Info 的 backend 读 + 输出 backend 写。两个 backend 同一实例时与 `copy_file`
 /// 等价；不同实例（跨 scheme）时仍工作。`open_read` Err 由
 /// `do_copy_file_copy_fails_when_source_unreadable` 覆盖；其余 Err 分支由
 /// `FakeBackend` reader/writer 注入的集成测试覆盖。
+///
+/// reader / writer 都包 1 MiB `BufReader`/`BufWriter`（`STREAM_BUFFER_BYTES`），
+/// 把 `std::io::copy` 默认 8 KiB stack buffer 的 128× syscall/RTT 次数收敛到
+/// 1 MiB 块。远端大视频从「128 次 read RTT」降到 1 次（`read_to_end` 限制下，
+/// 单文件单 RTT 已是上限；buffered 让 writer flush 也按 MiB 触发）。
 #[inline(never)]
 fn stream_copy(src: &Info, target: &Location, out_be: &dyn Backend) -> common::Result<()> {
     let src_be = src.backend();
-    let mut reader = src_be.open_read(src.location())?;
-    let mut writer = out_be.open_write(target, false)?;
-    let result = std::io::copy(&mut reader, &mut writer).and_then(|_| writer.finish());
+    let reader = src_be.open_read(src.location())?;
+    let writer = out_be.open_write(target, false)?;
+    let mut br = BufReader::with_capacity(STREAM_BUFFER_BYTES, reader);
+    let mut bw = BufWriter::with_capacity(STREAM_BUFFER_BYTES, writer);
+    // 三阶段闭合：copy 字节、flush 缓冲、finish 提交。BufWriter::into_inner
+    // 在 flush 失败时把 inner 一并返回让 caller 决定释放策略——这里只取 io::Error
+    // 让 best-effort 清理半截目标。BufWriter Drop 会再次 flush 忽略 Err，但 inner
+    // 已 move 进 finish 路径，不会重入；写失败语义一次性可观测。
+    let result: std::io::Result<()> = (|| {
+        std::io::copy(&mut br, &mut bw)?;
+        bw.flush()?;
+        let inner = bw
+            .into_inner()
+            .map_err(std::io::IntoInnerError::into_error)?;
+        inner.finish()
+    })();
     if let Err(e) = result {
         // open_write 已 create/truncate 目标；中途失败必须清理半截文件，否则残留
         // 占据路径槽位且无告警。best-effort：清理失败不掩盖原始传输错误。

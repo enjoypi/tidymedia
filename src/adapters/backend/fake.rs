@@ -10,6 +10,7 @@
 use std::collections::HashMap;
 
 use std::io::{self, Cursor, Write};
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
 
@@ -50,6 +51,11 @@ struct State {
 pub struct FakeBackend {
     scheme: &'static str,
     state: Arc<Mutex<State>>,
+    /// `mkdir_p` 累计调用次数（每次 entry 都 +1，含 cache miss 与首次调用）。
+    /// F4 mkdir 缓存测试用：同 `target_dir` 多次 `do_copy` 应只触发 1 次 `mkdir_p`。
+    /// 原子计数避开主 state 锁，杜绝「best-effort 调用替换成 no-op」类 mutation
+    /// 把 `mkdir_p` 改为 no-op 后让缓存测试静默通过。
+    mkdir_p_calls: Arc<AtomicU32>,
 }
 
 fn file_meta(size: u64) -> Metadata {
@@ -67,7 +73,14 @@ impl FakeBackend {
         Self {
             scheme,
             state: Arc::new(Mutex::new(State::default())),
+            mkdir_p_calls: Arc::new(AtomicU32::new(0)),
         }
+    }
+
+    /// `mkdir_p` 累计调用次数；F4 mkdir 缓存的旁路验证点。
+    #[must_use]
+    pub fn mkdir_p_calls(&self) -> u32 {
+        self.mkdir_p_calls.load(Ordering::SeqCst)
     }
 
     pub fn add_file(&self, loc: Location, data: Vec<u8>) {
@@ -230,6 +243,10 @@ impl Backend for FakeBackend {
     }
 
     fn mkdir_p(&self, loc: &Location) -> io::Result<()> {
+        // 计数先于 check_error：注 Err 场景也应统计「业务尝试调用」次数，让 F4 缓存
+        // miss 与 Err 路径都能从 mkdir_p_calls 观察到（避免 inject_error 后 cache
+        // 命中测试无法分辨「未调用」与「调用 + Err」）。
+        self.mkdir_p_calls.fetch_add(1, Ordering::SeqCst);
         self.check_error(loc, Op::MkdirP)?;
         let mut s = self.state.lock().unwrap();
         s.metas.entry(loc.clone()).or_insert(Metadata {
