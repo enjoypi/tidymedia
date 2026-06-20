@@ -90,7 +90,7 @@ impl TractFacenetEmbedder {
 impl FaceEmbedder for TractFacenetEmbedder {
     fn embed_face(&self, _path: &Utf8Path, aligned: &image::RgbImage) -> io::Result<[f32; 128]> {
         self.ensure_raw()?;
-        let input = preprocess(aligned);
+        let input = preprocess(aligned)?;
         let output = {
             let guard = self.raw.lock();
             guard
@@ -122,7 +122,11 @@ pub fn build_facenet_embedder(cfg: &FaceConfig) -> io::Result<Box<dyn FaceEmbedd
 
 /// 输入 112×112 RGB → `[-1, 1]` 归一化 NCHW `[1, 3, 112, 112]` f32。
 /// 非 112×112 入参用 Triangle filter 强制 resize（与 `ArcFace` 训练一致）。
-pub(crate) fn preprocess(img: &image::RgbImage) -> Tensor {
+///
+/// # Errors
+///
+/// `Array4::from_shape_vec` 形状失配返 Err（const 形状下数学上不可达，留 ? 让未来动态 shape 兼容）。
+pub(crate) fn preprocess(img: &image::RgbImage) -> io::Result<Tensor> {
     // 已对齐 INPUT_SIDE 时 Cow::Borrowed 零拷贝；P0 §3 借用参数避免不必要克隆。
     let resized: std::borrow::Cow<'_, image::RgbImage> =
         if img.width() == INPUT_SIDE && img.height() == INPUT_SIDE {
@@ -148,9 +152,12 @@ pub(crate) fn preprocess(img: &image::RgbImage) -> Tensor {
             chw[ch * plane + y * side + x] = v;
         }
     }
+    // 形状 const、vec 长度数学上严格匹配 → Err arm 实际不可达，但 CLAUDE.md 要求
+    // tract 模型用 map_err 让 Err 可传播（避免 .expect 掩盖 API 形态），同时未来若
+    // INPUT_SIDE 变量化（动态 shape）自动兼容。caller 经 ? 上抛由上游 record_failure 计入。
     tract_ndarray::Array4::from_shape_vec((1, 3, side, side), chw)
-        .expect("internal: chw vec sized exactly 1*3*112*112")
-        .into_tensor()
+        .map_err(|e| io::Error::other(format!("facenet preprocess shape: {e}")))
+        .map(IntoTensor::into_tensor)
 }
 
 /// 取 `[1, 128]` embedding 并 L2 normalize → `[f32; 128]`。

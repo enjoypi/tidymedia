@@ -146,7 +146,7 @@ fn decode_rejects_zero_anchors() {
 fn preprocess_letterbox_square_input() {
     // 正方形输入 → 无 padding，整图占满 640×640
     let exact = image::RgbImage::from_pixel(320, 320, image::Rgb([100, 100, 100]));
-    let t = preprocess(&exact);
+    let t = preprocess(&exact).unwrap();
     assert_eq!(t.shape(), [1, 3, 640, 640]);
 }
 
@@ -154,14 +154,14 @@ fn preprocess_letterbox_square_input() {
 fn preprocess_letterbox_landscape_pads_vertical() {
     // 横向 640×320 → resize 长边 640 后 height=320，上下各 padding 160 行 114/255
     let wide = image::RgbImage::from_pixel(640, 320, image::Rgb([200, 100, 50]));
-    let t = preprocess(&wide);
+    let t = preprocess(&wide).unwrap();
     assert_eq!(t.shape(), [1, 3, 640, 640]);
 }
 
 #[test]
 fn preprocess_handles_zero_dim_input() {
     let empty = image::RgbImage::new(0, 10);
-    let t = preprocess(&empty);
+    let t = preprocess(&empty).unwrap();
     assert_eq!(t.shape(), [1, 3, 640, 640]);
 }
 

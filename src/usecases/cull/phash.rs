@@ -53,6 +53,13 @@ fn hash_from_block(dct: &[[f32; DCT_SIDE]; DCT_SIDE]) -> u64 {
     let mut without_dc: Vec<f32> = block[1..].to_vec();
     without_dc.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
     let median = without_dc[without_dc.len() / 2];
+    // 常数信号（全黑/全白/纯色图）所有 AC 高频系数 ≈ 0 → median ≈ 0 → 全部
+    // `v >= 0` 命中致 hash=u64::MAX，两张完全不同的纯色图碰撞为同 hash。
+    // median ≈ 0 时短路返 0：让纯色图都映射到独立桶（u64=0）外的「无效 hash」
+    // 即 0，与正常含纹理图（hash 几乎不可能为 0）冲突概率最小。
+    if median.abs() < f32::EPSILON {
+        return 0;
+    }
     let mut hash: u64 = 0;
     for (i, &v) in block.iter().enumerate() {
         if v >= median {

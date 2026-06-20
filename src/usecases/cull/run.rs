@@ -12,12 +12,15 @@
 //!    跨图身份簇日志；选 `breakdown.total` 最高者为 best
 //! 5. **落盘**：调 `group_writer::write_group` 写 group 目录
 
-use std::io::{self, Read};
+use std::io;
 use std::sync::Arc;
 
-use image::{DynamicImage, RgbImage};
-use tracing::{debug, error};
+use image::RgbImage;
 
+use super::crop::{crop_eye_around, crop_face_bbox, total_cmp_nan_as_neg_inf};
+// 测试侧 `use super::*` 经此 re-export 拿到 `u32_from_f32_clamped` 微测试入口。
+#[cfg(test)]
+use super::crop::u32_from_f32_clamped;
 use super::face_align;
 use super::face_scoring;
 use super::group_writer::{GroupPlan, write_group};
@@ -25,6 +28,10 @@ use super::identity_cluster;
 use super::phash::{group_by_hash, phash};
 use super::report::{CullReport, ScoreBreakdown};
 use super::sharpness::laplacian_variance;
+use super::util::{
+    ensure_sources_outside_output, is_image, log_cull_summary, log_identity_clusters, read_all,
+    record_failure,
+};
 use crate::entities::backend::factory::BackendFactory;
 use crate::entities::backend::{Backend, EntryKind};
 use crate::entities::common::{self, canonical_prefix, under_prefix};
@@ -33,10 +40,6 @@ use crate::usecases::config::{FaceConfig, config};
 use crate::usecases::face::{
     EyeStateClassifier, FaceDetection, FaceDetector, FaceEmbedder, FaceMeshDetector,
 };
-use crate::usecases::report::ReportError;
-
-const FEATURE: &str = "cull";
-const MIME_SNIFF_BYTES: usize = 256;
 
 /// 单文件扫描结果。`raw_bytes`/`decoded` 装 `Arc` 让 `pick_best` 阶段复用，省二次 IO 与 decode。
 struct ScannedFile {
@@ -208,6 +211,8 @@ fn process_group(
     };
     // 计数搬到 Ok arm 内：write_group Err 时 groups 不 push，best_count/culled_count
     // 也必须保持原子（曾经在外提前累加，让 best_count != groups.len() 误导消费方）。
+    // group_id 同口径：Err 时不消耗 ID，保 group-NNN 目录在 report.groups 序列连续，
+    // 否则按 ID 枚举 group 目录的外部脚本出现缺号无法判断是失败遗留还是已处理。
     match write_group(
         &plan,
         &best.source_root,
@@ -220,42 +225,10 @@ fn process_group(
             report.best_count += 1;
             report.culled_count += culled_len;
             report.groups.push(g);
+            *next_group_id += 1;
         }
         Err(e) => record_failure(report, best.src_loc.display(), &e),
     }
-    *next_group_id += 1;
-}
-
-/// `cull` 末尾的 debug! summary 抽到独立 helper：release 默认不订阅 debug 级别，
-/// 内部 closure-form micro-region 永 0-hit，整 fn `coverage(off)` 让计数不漂移。
-#[cfg_attr(coverage_nightly, coverage(off))]
-fn log_cull_summary(report: &CullReport, dry_run: bool) {
-    debug!(
-        feature = FEATURE,
-        operation = "summary",
-        result = if report.failed == 0 { "ok" } else { "partial" },
-        scanned = report.scanned,
-        grouped = report.grouped,
-        best_count = report.best_count,
-        culled_count = report.culled_count,
-        moved = report.moved,
-        dropped_blurry = report.dropped_blurry,
-        failed = report.failed,
-        dry_run,
-        "cull summary"
-    );
-}
-
-/// 同 `log_cull_summary` 套路：身份簇 debug! 输出抽独立 fn，release 不订阅 → 0-hit。
-#[cfg_attr(coverage_nightly, coverage(off))]
-fn log_identity_clusters(clusters: &[Vec<usize>]) {
-    debug!(
-        feature = FEATURE,
-        operation = "identity_cluster",
-        result = "ok",
-        cluster_count = clusters.len(),
-        "identity clusters computed"
-    );
 }
 
 /// 按 `sharpness_min` 阈值剔除多图组里的模糊图，返 `(剩余 indices, 剔除数)`。
@@ -274,22 +247,6 @@ fn filter_blurry(indices: &[usize], scanned: &[ScannedFile], min: f32) -> (Vec<u
         }
     }
     (kept, dropped)
-}
-
-fn ensure_sources_outside_output(sources: &[Location], output_prefix: &str) -> common::Result<()> {
-    for src in sources {
-        let prefix = canonical_prefix(src);
-        if under_prefix(&prefix, output_prefix) {
-            return Err(common::Error::Io(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                format!(
-                    "source {prefix} is inside output {output_prefix}; \
-                     cull would archive files into themselves"
-                ),
-            )));
-        }
-    }
-    Ok(())
 }
 
 fn scan_source(
@@ -370,7 +327,9 @@ fn scan_entry(
         }
     };
     let hash = phash(&img);
-    let luma = image::imageops::grayscale(&DynamicImage::ImageRgb8(img.clone()));
+    // grayscale 接 GenericImageView，直接传 &img 避免 DynamicImage::ImageRgb8(img.clone())
+    // 整图克隆（20 MiB 大图 peak RSS 三倍放大致批量扫 OOM 风险）。
+    let luma = image::imageops::grayscale(&img);
     let sharp = laplacian_variance(&luma);
     Some(ScannedFile {
         src_loc: location.clone(),
@@ -422,22 +381,23 @@ fn pick_best_for_group(
             face_cfg,
         ));
     }
+    // TODO: per-identity 策略接入：clusters 当前仅产 debug 日志，pick_best 按全组
+    // max(total) 选 best 不区分身份；若需「同人多张里选最佳 + 不同人各自保留」语义，
+    // 在此按 clusters 分桶再于每桶内 max_by_key 取首张 → 当前 face_cosine_min 才有效。
     let clusters =
         identity_cluster::cluster_identities(&per_image_embeddings, face_cfg.face_cosine_min);
     log_identity_clusters(&clusters);
 
-    // 选最高 total；NaN 退化为 Equal（不破坏序）。indices.len() >= 2（调用方保证），
-    // breakdowns 同长 → max_by 不返 None。
+    // 选最高 total；NaN 视为 -∞ 让 NaN total 永远输给 finite 同分 → max_by 在
+    // 全 finite 同分时 Rust 标准取末尾元素，配 `>` 严格比较保稳定（同 total 取首张
+    // 即「先扫描的更优」直觉）；NaN 同 NaN 视为 Equal，返首个 NaN。
+    // indices.len() >= 2（调用方保证）+ breakdowns 同长 → ok_or_else 兜底返
+    // 第 0 项 breakdown 防 caller-contract 失守。
     let best_pos = breakdowns
         .iter()
         .enumerate()
-        .max_by(|(_, a), (_, b)| {
-            a.total
-                .partial_cmp(&b.total)
-                .unwrap_or(std::cmp::Ordering::Equal)
-        })
-        .map(|(p, _)| p)
-        .expect("internal: indices/breakdowns guaranteed non-empty by caller");
+        .max_by(|(_, a), (_, b)| total_cmp_nan_as_neg_inf(a.total, b.total))
+        .map_or(0, |(p, _)| p);
     let best_idx = indices[best_pos];
     let best_breakdown = breakdowns[best_pos];
     (best_idx, best_breakdown, breakdowns)
@@ -487,24 +447,6 @@ fn analyze_image(
     Some(analysis)
 }
 
-/// 用 SCRFD bbox 从原图裁出人脸区域（clamp 到图像边界）。空 bbox 返 1×1 占位让下游不 panic。
-fn crop_face_bbox(image: &RgbImage, face: &FaceDetection) -> RgbImage {
-    let w = image.width();
-    let h = image.height();
-    let x0 = face.bbox[0].max(0.0).round();
-    let y0 = face.bbox[1].max(0.0).round();
-    let x1 = face.bbox[2].max(0.0).round();
-    let y1 = face.bbox[3].max(0.0).round();
-    let xu = u32_from_f32_clamped(x0, w);
-    let yu = u32_from_f32_clamped(y0, h);
-    let xe = u32_from_f32_clamped(x1, w);
-    let ye = u32_from_f32_clamped(y1, h);
-    if xe <= xu || ye <= yu {
-        return RgbImage::new(1, 1);
-    }
-    image::imageops::crop_imm(image, xu, yu, xe - xu, ye - yu).to_image()
-}
-
 /// 用 SCRFD 5 点的左/右眼坐标各 crop 一个方形眼区域调 EyeState，返左/右闭眼概率对。
 fn classify_eye_pair(
     item: &ScannedFile,
@@ -523,67 +465,6 @@ fn classify_eye_pair(
         .classify_eye(item.src_loc.path(), &right_crop)
         .unwrap_or(0.0);
     (left, right)
-}
-
-fn crop_eye_around(image: &RgbImage, center: [f32; 2], radius: f32) -> RgbImage {
-    let w = image.width();
-    let h = image.height();
-    let cx = center[0];
-    let cy = center[1];
-    let x0 = u32_from_f32_clamped(cx - radius, w);
-    let y0 = u32_from_f32_clamped(cy - radius, h);
-    let x1 = u32_from_f32_clamped(cx + radius, w);
-    let y1 = u32_from_f32_clamped(cy + radius, h);
-    if x1 <= x0 || y1 <= y0 {
-        return RgbImage::new(1, 1);
-    }
-    image::imageops::crop_imm(image, x0, y0, x1 - x0, y1 - y0).to_image()
-}
-
-/// `f32` 像素坐标 clamp 到 `[0, limit]` 并安全转 `u32`。NaN/超限 → 0 / limit。
-fn u32_from_f32_clamped(v: f32, limit: u32) -> u32 {
-    if !v.is_finite() || v < 0.0 {
-        return 0;
-    }
-    #[expect(
-        clippy::cast_precision_loss,
-        reason = "limit ≤ 图像宽高 < 65536 << f32 mantissa 边界"
-    )]
-    let limit_f = limit as f32;
-    let clamped = v.min(limit_f);
-    #[expect(
-        clippy::cast_possible_truncation,
-        clippy::cast_sign_loss,
-        reason = "上行已 clamp 到 [0, limit_f]，u32 cast 安全"
-    )]
-    let u = clamped as u32;
-    u
-}
-
-fn read_all(backend: &Arc<dyn Backend>, loc: &Location) -> io::Result<Vec<u8>> {
-    let mut reader = backend.open_read(loc)?;
-    let mut buf = Vec::new();
-    reader.read_to_end(&mut buf)?;
-    Ok(buf)
-}
-
-fn is_image(bytes: &[u8]) -> bool {
-    let head_len = MIME_SNIFF_BYTES.min(bytes.len());
-    infer::get(&bytes[..head_len]).is_some_and(|t| t.mime_type().starts_with("image/"))
-}
-
-fn record_failure(report: &mut CullReport, path: String, e: &io::Error) {
-    let msg = e.to_string();
-    error!(
-        feature = FEATURE,
-        operation = "process_entry",
-        result = "error",
-        source = %path,
-        error = %msg,
-        "cull item failed"
-    );
-    report.errors.push(ReportError { path, message: msg });
-    report.failed += 1;
 }
 
 #[cfg(test)]

@@ -91,7 +91,7 @@ impl FaceMeshDetector for TractFaceMeshDetector {
         face_crop: &image::RgbImage,
     ) -> io::Result<Vec<[f32; 3]>> {
         self.ensure_raw()?;
-        let input = preprocess(face_crop);
+        let input = preprocess(face_crop)?;
         let output = {
             let guard = self.raw.lock();
             guard
@@ -122,7 +122,11 @@ pub fn build_facemesh(cfg: &FaceConfig) -> io::Result<Box<dyn FaceMeshDetector>>
 }
 
 /// 输入 RGB → 192×192 → `[0, 1]` 归一化 NCHW `[1, 3, 192, 192]`。
-pub(crate) fn preprocess(img: &image::RgbImage) -> Tensor {
+///
+/// # Errors
+///
+/// `Array4::from_shape_vec` 形状失配返 Err（const 形状下数学上不可达，? 兼容未来动态 shape）。
+pub(crate) fn preprocess(img: &image::RgbImage) -> io::Result<Tensor> {
     // 已对齐 INPUT_SIDE 时 Cow::Borrowed 零拷贝；P0 §3 借用参数避免不必要克隆。
     let resized: std::borrow::Cow<'_, image::RgbImage> =
         if img.width() == INPUT_SIDE && img.height() == INPUT_SIDE {
@@ -146,9 +150,10 @@ pub(crate) fn preprocess(img: &image::RgbImage) -> Tensor {
             chw[ch * plane + y * side + x] = f32::from(px.0[ch]) / 255.0;
         }
     }
+    // 同 mobilefacenet.preprocess：const 形状下 Err arm 不可达，map_err 让 caller 经 ? 传播。
     tract_ndarray::Array4::from_shape_vec((1, 3, side, side), chw)
-        .expect("internal: chw vec sized exactly 1*3*192*192")
-        .into_tensor()
+        .map_err(|e| io::Error::other(format!("facemesh preprocess shape: {e}")))
+        .map(IntoTensor::into_tensor)
 }
 
 /// 取 468*3 = 1404 个 f32 → `Vec<[f32; 3]>` 468 项。

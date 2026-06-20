@@ -197,6 +197,7 @@
 - `adapters::backend::factory::BackendFactory` trait + `DefaultBackendFactory` 按 `Location` 装配：Local 直给 `LocalBackend`；SMB/MTP/ADB 走 cfg-gated 分支；MTP 当前 stub 返 `Unsupported`
 - feature off 返 `Unsupported`，`factory.rs` 与 `smb/adb/mtp::new()` 双路径 MUST 共走 `remote::unsupported_backend(feature)` 单点 helper，**不要手写文案**（避免分裂）
 - 测试侧 `tidy_with(factory, command)` 接 `BackendFactory` 注入；集成测试用 `FakeBackendFactory`；`FakeBackend` / `FakeOp` 已 `#[doc(hidden)] pub use` 到 crate 根
+- **`Backend::copy_file` 严格 reject 跨 scheme src/dst**：所有实现校验 src/dst scheme 必须等于自家 scheme（`local.rs::copy_file_rejects_non_local_*_scheme` / `adb_ops_tests::copy_file_rejects_non_adb_scheme_on_either_side` 印证）。跨 scheme（如 source=adb / output=local）MUST 走 `src.open_read` + `dst.open_write` + `io::copy` + `writer.finish` 流式 fallback；同 scheme 仍用 backend 原生 copy 享受同卷 rename / SMB `SRV_COPYCHUNK`。参考 `usecases/cull/group_writer.rs::copy_file_cross_scheme`
 
 ### 远端 backend 测试套路（SMB / MTP / ADB 通用）
 - **手写 Fake\<Smb|Mtp|Adb\>Client**：state 用 `Arc<Mutex<HashMap<...>>>`；`inject(*Op::Read, path, ErrorKind::TimedOut)` 注入逐 op + 逐 path 错误，无须 `mockall`
@@ -301,3 +302,9 @@
 - **office 子模块 stub 签名用 `&mut dyn MediaReader` 而非 `Box<dyn>`**：stub 阶段 reader 不消费让 clippy `needless_pass_by_value` 抓不到；后续 commit 接入主体时 `zip::ZipArchive::new(&mut R)` / `cfb::CompoundFile::open(R)` / `read_to_end` 都接 `R: Read + Seek`，`&mut dyn MediaReader` 兼容，签名零改动
 - **sed 批量加 doc_markdown 反引号陷阱**：`sed 's/PID_FOO/\`PID_FOO\`/g'` 会把 `const PID_FOO:` 定义本身改成 `const \`PID_FOO\`:` 编译失败；sed 后 MUST grep 校验 const / use / struct / enum variant 定义点未被错改（与「测试 env helper sed 自身递归」套路相同的预防原则）
 - **`clippy::duration_suboptimal_units` (pedantic) 在测试 `Duration::from_secs(epoch_secs)`**：被建议改 `from_mins(epoch_secs/60)` 但 epoch 秒数语义直观 → 测试 module-level `#![allow(clippy::duration_suboptimal_units, reason = "Unix epoch 秒数语义直观")]` 合规
+- **`serde_json::to_vec_pretty` 对 f32 NaN/Inf 字段返 Err 不写 null**：含 `ScoreBreakdown`/`f32` 字段的 manifest/report 生产路径 MUST `match` 处理 Err 而非 `.expect("never fails")`（cull manifest 已踩坑：上游 EyeState/FaceMesh NaN 经 unwrap_or 之外传染让 serialize 失败致 .expect panic）。best-effort 类落盘走 warn + early-return 与 `JsonFileReportSink` 同口径
+- **phash 全纯色图（全黑/全白）median=0 致 hash 碰撞 u64::MAX**：DCT 高频系数对常数信号≈0，without_dc 中位数=0 让所有 bit 命中 `v>=median` 致 u64::MAX；`hash_from_block` 在 `median.abs() < EPSILON` 时短路返 0 让纯色图独立桶。改 median→mean 等算法时同样要测两张不同纯色图 Hamming 距离>0
+- **`max_by` 选最大 f32 项 MUST 把 NaN 视为 -∞ 而非 Equal**：`partial_cmp().unwrap_or(Ordering::Equal)` 让 NaN==finite==NaN，Rust max_by 等值取末尾致 NaN 被选中 best（cull pick_best 已踩坑）。抽 `total_cmp_nan_as_neg_inf(a,b)`：双 NaN→Equal、NaN vs finite→Less、finite vs NaN→Greater，否则 partial_cmp。参考 `usecases/cull/crop.rs`
+- **f32→u32 像素坐标 clamp MUST 三态拆**：NaN→0（无意义）/ 负数→0（下边界）/ +Inf→limit（上边界）。旧 `!v.is_finite() → 0` 一锅端把 +Inf 也归零让 SCRFD bbox 超界变 (0,0,0,0) 占位框；注释「超限→limit」与实现矛盾。参考 `usecases/cull/crop.rs::u32_from_f32_clamped`
+- **clippy `neg_cmp_op_on_partial_ord`**：`!(a >= b)` 在 partial_ord 类型（f32 等）上拒绝；NaN-safe 守卫改 `a.is_nan() || a < b`（与 `!(s >= score_threshold)` 在 finite 路径等价 + NaN 显式跳过）。参考 `adapters/face/tract_scrfd_real.rs::decode_outputs`
+- **「我的改动有没有破坏现有测试」验证套路** = `git stash && nextest -E 'test(<疑似失败>)' ; git stash pop`：本机 Windows 路径分隔符 / 平台差异 / nextest 顺序不稳定让本地基线 ≠ 0 常态，对比 main HEAD 同 filter 跑一次即知是否新引入；同 filter 失败数相等 = 我的改动无回归（即使 nextest summary 显示 fail > 0）

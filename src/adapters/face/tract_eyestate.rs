@@ -98,7 +98,7 @@ impl TractEyeStateClassifier {
 impl EyeStateClassifier for TractEyeStateClassifier {
     fn classify_eye(&self, _path: &Utf8Path, eye_crop: &image::RgbImage) -> io::Result<f32> {
         self.ensure_raw()?;
-        let input = preprocess(eye_crop);
+        let input = preprocess(eye_crop)?;
         let output = {
             let guard = self.raw.lock();
             guard
@@ -132,7 +132,11 @@ pub fn build_eyestate_classifier(cfg: &FaceConfig) -> io::Result<Box<dyn EyeStat
 ///
 /// letterbox：保持长边按比例 resize 到 640，短边居中 padding 114（`YOLOv8` 默认填充值）。
 /// 0 尺寸入参降级为全 padding 画布。
-pub(crate) fn preprocess(img: &image::RgbImage) -> Tensor {
+///
+/// # Errors
+///
+/// `Array4::from_shape_vec` 形状失配返 Err（const 形状下数学上不可达，? 兼容未来动态 shape）。
+pub(crate) fn preprocess(img: &image::RgbImage) -> io::Result<Tensor> {
     let (src_w, src_h) = (img.width(), img.height());
     let side = INPUT_SIDE as usize;
     let plane = side * side;
@@ -140,7 +144,8 @@ pub(crate) fn preprocess(img: &image::RgbImage) -> Tensor {
         image::RgbImage::from_pixel(INPUT_SIDE, INPUT_SIDE, image::Rgb([114, 114, 114]));
 
     if src_w > 0 && src_h > 0 {
-        let side_f = f32::from(u16::try_from(INPUT_SIDE).expect("640 fits u16"));
+        // INPUT_SIDE 是编译期 const 640，f32 字面量直替 try_from 运行时不可达分支。
+        let side_f: f32 = 640.0;
         // scale = side / max(src_w, src_h)：不再 `.min(1.0)` 限制 upscale。
         // eye crop 输入典型 40~80 px，旧实现保持原尺寸落 canvas 角落让 YOLOv8 anchor
         // 几乎无激活（输入仅占 canvas 1.5%），永远判睁眼；标准 YOLO letterbox
@@ -179,9 +184,10 @@ pub(crate) fn preprocess(img: &image::RgbImage) -> Tensor {
             chw[ch * plane + y * side + x] = f32::from(px.0[ch]) / 255.0;
         }
     }
+    // 同 mobilefacenet.preprocess：const 形状下 Err arm 不可达，map_err 让 caller 经 ? 传播。
     tract_ndarray::Array4::from_shape_vec((1, 3, side, side), chw)
-        .expect("internal: chw vec sized exactly 1*3*640*640")
-        .into_tensor()
+        .map_err(|e| io::Error::other(format!("eyestate preprocess shape: {e}")))
+        .map(IntoTensor::into_tensor)
 }
 
 /// 取宽高较大者并转 f32（letterbox scale 计算用）。维度 ≤ 65535 时 f32 精度够。

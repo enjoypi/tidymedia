@@ -219,6 +219,8 @@ pub struct FaceConfig {
     /// 全图 Laplacian 方差下限；低于此值视整图模糊丢弃（单图组例外保留）。
     pub sharpness_min: f32,
     /// 跨图人脸 embedding 余弦相似度阈值；≥ 此值判同一身份。范围 `(0, 1)`。
+    /// 当前仅 `cluster_identities` 产 debug 日志消费，`pick_best_for_group` 不消费
+    /// cluster 结果；未来 per-identity 策略接入后此值才影响 best 选择（TODO）。
     pub face_cosine_min: f32,
     /// EAR（眼睑纵横比）阈值；低于此值视为闭眼。范围 `(0, 1)`。
     pub ear_blink_max: f32,

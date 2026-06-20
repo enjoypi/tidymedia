@@ -104,7 +104,10 @@ fn decode_outputs(
                         continue;
                     }
                     let s = score[idx];
-                    if s < score_threshold {
+                    // NaN score（模型量化误差/输入污染时）经 `s < t` 比较恒 false 绕过过滤，
+                    // 让 NaN 框入 NMS 后续污染下游 crop。显式判 NaN：finite 走原 `s < t`
+                    // 等价路径（clippy `neg_cmp_op_on_partial_ord` 拒绝 `!(s >= t)` 写法）。
+                    if s.is_nan() || s < score_threshold {
                         continue;
                     }
                     let bo = idx * 4;

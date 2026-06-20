@@ -641,9 +641,10 @@ fn cull_records_failure_on_corrupt_image() {
 
 #[test]
 fn u32_from_f32_clamped_handles_nan_negative_inf_and_overflow() {
-    // 覆盖 `!v.is_finite() || v < 0.0` 两 sub-branch + clamp 到 limit 主路径
+    // 覆盖 NaN→0、负数→0、+Inf→limit（注释承诺「超限 → limit」对齐）、finite clamp 三路径
     assert_eq!(u32_from_f32_clamped(f32::NAN, 100), 0);
-    assert_eq!(u32_from_f32_clamped(f32::INFINITY, 100), 0);
+    assert_eq!(u32_from_f32_clamped(f32::INFINITY, 100), 100);
+    assert_eq!(u32_from_f32_clamped(f32::NEG_INFINITY, 100), 0);
     assert_eq!(u32_from_f32_clamped(-1.0, 100), 0);
     assert_eq!(u32_from_f32_clamped(50.0, 100), 50);
     assert_eq!(u32_from_f32_clamped(150.0, 100), 100);

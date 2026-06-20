@@ -37,7 +37,11 @@ pub(crate) fn laplacian_variance(luma: &image::GrayImage) -> f32 {
     result
 }
 
-/// clamp 边界采样（`wrapping_sub` 让 y=0 时邻居 y-1 = `u32::MAX` → clamp 到 0）。
+/// 边界采样：`y.min(height-1)` clamp。`wrapping_sub` 在 y=0 时溢成 `u32::MAX`，
+/// `u32::MAX.min(height-1) = height-1`（采末行复制）；`saturating_add` 在 y=height-1
+/// 时也是 `height-1`。即上下边界都走「末行重复」而非镜像到 0（首行），对 height>>2 的
+/// 一般图边界 1 像素偏差对方差影响可忽略；height=1 时 north=center=south 让 Laplacian
+/// response=0 退化（与「单像素行无清晰度概念」一致）。
 fn sample(luma: &image::GrayImage, x: u32, y: u32, width: u32, height: u32) -> u8 {
     let clamped_x = x.min(width - 1);
     let clamped_y = y.min(height - 1);

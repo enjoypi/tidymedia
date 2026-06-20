@@ -116,7 +116,9 @@ pub(crate) fn preprocess(bytes: &[u8]) -> io::Result<(Tensor, ScaleMeta)> {
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, format!("decode image: {e}")))?;
     let rgb = img.to_rgb8();
     let (orig_w, orig_h) = (rgb.width(), rgb.height());
-    let side_f = f32::from(u16::try_from(INPUT_SIDE).expect("640 fits u16"));
+    // INPUT_SIDE 是编译期 const 640，f32 字面量直接表达 letterbox scale 计算用值，
+    // 替 `f32::from(u16::try_from(640).expect("640 fits u16"))` 的运行时不可达 try_from。
+    let side_f: f32 = 640.0;
     #[expect(clippy::cast_precision_loss, reason = "图像维度 ≤ 65535，f32 精度够")]
     let scale = (side_f / orig_w as f32).min(side_f / orig_h as f32);
     #[expect(
@@ -156,8 +158,9 @@ pub(crate) fn preprocess(bytes: &[u8]) -> io::Result<(Tensor, ScaleMeta)> {
             chw[ch * plane + y * side + x] = (f32::from(px.0[ch]) - 127.5) / 128.0;
         }
     }
+    // 同 mobilefacenet.preprocess：const 形状下 Err arm 不可达，map_err 让 caller 经 ? 传播。
     let tensor = tract_ndarray::Array4::from_shape_vec((1, 3, side, side), chw)
-        .expect("internal: chw vec sized exactly 1*3*640*640")
+        .map_err(|e| io::Error::other(format!("SCRFD preprocess shape: {e}")))?
         .into_tensor();
     #[expect(clippy::cast_precision_loss, reason = "pad ≤ 640，f32 精确")]
     let meta = ScaleMeta {
