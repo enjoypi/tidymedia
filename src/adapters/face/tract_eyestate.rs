@@ -14,7 +14,7 @@
 
 use std::io;
 use std::path::Path;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use camino::Utf8Path;
 use parking_lot::Mutex;
@@ -62,14 +62,18 @@ impl RawEyeState for TractRawEyeState {
 
 pub struct TractEyeStateClassifier {
     cfg: FaceConfig,
-    raw: Mutex<Option<Box<dyn RawEyeState>>>,
+    // OnceLock 让 lazy init 后 inference 无锁并发（同 SCRFD：旧 Mutex 串行化所有 worker）。
+    raw: OnceLock<Box<dyn RawEyeState>>,
+    // load 阶段互斥避免 N worker 重复 load model（详见 tract_scrfd.rs 同字段注释）。
+    load_lock: Mutex<()>,
 }
 
 impl std::fmt::Debug for TractEyeStateClassifier {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("TractEyeStateClassifier")
             .field("eyestate_model_path", &self.cfg.eyestate_model_path)
-            .field("loaded", &self.raw.lock().is_some())
+            .field("loaded", &self.raw.get().is_some())
+            .field("load_lock", &self.load_lock)
             .finish()
     }
 }
@@ -77,35 +81,40 @@ impl std::fmt::Debug for TractEyeStateClassifier {
 impl TractEyeStateClassifier {
     #[cfg(test)]
     pub(crate) fn with_raw(cfg: FaceConfig, raw: Box<dyn RawEyeState>) -> Self {
+        let cell = OnceLock::new();
+        let _ = cell.set(raw);
         Self {
             cfg,
-            raw: Mutex::new(Some(raw)),
+            raw: cell,
+            load_lock: Mutex::new(()),
         }
     }
 
     #[cfg_attr(coverage_nightly, coverage(off))]
-    fn ensure_raw(&self) -> io::Result<()> {
-        let mut guard = self.raw.lock();
-        if guard.is_some() {
-            return Ok(());
+    fn ensure_raw(&self) -> io::Result<&dyn RawEyeState> {
+        if let Some(r) = self.raw.get() {
+            return Ok(r.as_ref());
+        }
+        let _guard = self.load_lock.lock();
+        if let Some(r) = self.raw.get() {
+            return Ok(r.as_ref());
         }
         let model = load_runnable(Path::new(&self.cfg.eyestate_model_path))?;
-        *guard = Some(Box::new(TractRawEyeState { model }));
-        Ok(())
+        let boxed: Box<dyn RawEyeState> = Box::new(TractRawEyeState { model });
+        let _ = self.raw.set(boxed);
+        Ok(self
+            .raw
+            .get()
+            .expect("OnceLock set by self under load_lock")
+            .as_ref())
     }
 }
 
 impl EyeStateClassifier for TractEyeStateClassifier {
     fn classify_eye(&self, _path: &Utf8Path, eye_crop: &image::RgbImage) -> io::Result<f32> {
-        self.ensure_raw()?;
+        let raw = self.ensure_raw()?;
         let input = preprocess(eye_crop)?;
-        let output = {
-            let guard = self.raw.lock();
-            guard
-                .as_ref()
-                .expect("ensure_raw set Some before lock release")
-                .run(input)?
-        };
+        let output = raw.run(input)?;
         decode(&output)
     }
 }
@@ -124,7 +133,8 @@ pub fn build_eyestate_classifier(cfg: &FaceConfig) -> io::Result<Box<dyn EyeStat
     }
     Ok(Box::new(TractEyeStateClassifier {
         cfg: cfg.clone(),
-        raw: Mutex::new(None),
+        raw: OnceLock::new(),
+        load_lock: Mutex::new(()),
     }))
 }
 

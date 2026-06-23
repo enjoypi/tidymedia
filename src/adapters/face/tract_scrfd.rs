@@ -9,7 +9,7 @@
 
 use std::io;
 use std::path::Path;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use camino::Utf8Path;
 use parking_lot::Mutex;
@@ -39,14 +39,22 @@ pub(crate) trait RawScrfd: Send + Sync {
 
 pub struct TractScrfdDetector {
     cfg: FaceConfig,
-    raw: Mutex<Option<Box<dyn RawScrfd>>>,
+    // OnceLock 让 lazy init 后 inference 无锁并发：旧 Mutex<Option<...>> 让每次
+    // detect_faces 都加锁，rayon 并行评分时所有 worker 串行化在同一把锁上。
+    raw: OnceLock<Box<dyn RawScrfd>>,
+    // 仅 load 阶段互斥：35 worker 同时进 ensure_raw 时若都各自调 load_runnable，
+    // 250 MB SCRFD model parse + tract optimize 会被并行执行 N 次（OnceLock::set
+    // race 只有 1 个生效，其它 N-1 个 worker 已浪费了 load 时间）。double-checked
+    // locking 让 load 只跑 1 次；inference 仍走 OnceLock::get 无锁。
+    load_lock: Mutex<()>,
 }
 
 impl std::fmt::Debug for TractScrfdDetector {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("TractScrfdDetector")
             .field("scrfd_model_path", &self.cfg.scrfd_model_path)
-            .field("loaded", &self.raw.lock().is_some())
+            .field("loaded", &self.raw.get().is_some())
+            .field("load_lock", &self.load_lock)
             .finish()
     }
 }
@@ -54,40 +62,46 @@ impl std::fmt::Debug for TractScrfdDetector {
 impl TractScrfdDetector {
     #[cfg(test)]
     pub(crate) fn with_raw(cfg: FaceConfig, raw: Box<dyn RawScrfd>) -> Self {
+        let cell = OnceLock::new();
+        let _ = cell.set(raw);
         Self {
             cfg,
-            raw: Mutex::new(Some(raw)),
+            raw: cell,
+            load_lock: Mutex::new(()),
         }
     }
 
     #[cfg_attr(coverage_nightly, coverage(off))]
-    fn ensure_raw(&self) -> io::Result<()> {
-        let mut guard = self.raw.lock();
-        if guard.is_some() {
-            return Ok(());
+    fn ensure_raw(&self) -> io::Result<&dyn RawScrfd> {
+        // 快路径：已 load 直接 OnceLock::get 无锁返。
+        if let Some(r) = self.raw.get() {
+            return Ok(r.as_ref());
+        }
+        // 慢路径：拿 load_lock 串行 load；双查避免 N worker 都 load 一次。
+        let _guard = self.load_lock.lock();
+        if let Some(r) = self.raw.get() {
+            return Ok(r.as_ref());
         }
         let model = load_runnable(Path::new(&self.cfg.scrfd_model_path))?;
-        *guard = Some(Box::new(TractRawScrfd {
+        let boxed: Box<dyn RawScrfd> = Box::new(TractRawScrfd {
             model,
             score_threshold: self.cfg.scrfd_score_threshold,
             nms_iou: self.cfg.scrfd_nms_iou,
-        }));
-        Ok(())
+        });
+        let _ = self.raw.set(boxed);
+        Ok(self
+            .raw
+            .get()
+            .expect("OnceLock set by self under load_lock")
+            .as_ref())
     }
 }
 
 impl FaceDetector for TractScrfdDetector {
     fn detect_faces(&self, _path: &Utf8Path, image_bytes: &[u8]) -> io::Result<Vec<FaceDetection>> {
-        self.ensure_raw()?;
+        let raw = self.ensure_raw()?;
         let (input, meta) = preprocess(image_bytes)?;
-        let detections = {
-            let guard = self.raw.lock();
-            guard
-                .as_ref()
-                .expect("ensure_raw set Some before lock release")
-                .run(input, meta)?
-        };
-        Ok(detections)
+        raw.run(input, meta)
     }
 }
 
@@ -105,7 +119,8 @@ pub fn build_scrfd_detector(cfg: &FaceConfig) -> io::Result<Box<dyn FaceDetector
     }
     Ok(Box::new(TractScrfdDetector {
         cfg: cfg.clone(),
-        raw: Mutex::new(None),
+        raw: OnceLock::new(),
+        load_lock: Mutex::new(()),
     }))
 }
 

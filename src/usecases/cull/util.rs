@@ -47,6 +47,95 @@ pub(super) fn log_identity_clusters(clusters: &[Vec<usize>]) {
     );
 }
 
+/// `scan_source` 入口：source URI + 配置（P0 §14 核心业务 debug 串联 AI 分析）。
+#[cfg_attr(coverage_nightly, coverage(off))]
+pub(super) fn log_scan_source_start(source: &str, max_image_bytes: u64) {
+    debug!(
+        feature = FEATURE,
+        operation = "scan_source_start",
+        source = %source,
+        max_image_bytes,
+        "cull scan started"
+    );
+}
+
+/// `scan_source` 出口：valid/walker 错误/oversize/解码失败累计。
+#[cfg_attr(coverage_nightly, coverage(off))]
+pub(super) fn log_scan_source_complete(source: &str, valid: usize, total_entries: usize) {
+    debug!(
+        feature = FEATURE,
+        operation = "scan_source_complete",
+        result = "ok",
+        source = %source,
+        valid,
+        total_entries,
+        "cull scan completed"
+    );
+}
+
+/// `scan_entry` 成功：单图的 hash + sharpness 让 AI 可分析分组前的特征分布。
+#[cfg_attr(coverage_nightly, coverage(off))]
+pub(super) fn log_scan_entry_ok(source: &str, size: u64, hash: u64, sharpness: f32) {
+    debug!(
+        feature = FEATURE,
+        operation = "scan_entry",
+        result = "ok",
+        source = %source,
+        size,
+        hash = format!("{hash:016x}"),
+        sharpness,
+        "cull scan entry"
+    );
+}
+
+/// `analyze_image` 单图：SCRFD detections + 成功 embed/对齐的 face 数（外部调用 req/resp）。
+#[cfg_attr(coverage_nightly, coverage(off))]
+pub(super) fn log_analyze_image(source: &str, detections: usize, embedded: usize) {
+    debug!(
+        feature = FEATURE,
+        operation = "analyze_image",
+        result = "ok",
+        source = %source,
+        detections,
+        embedded,
+        "cull analyze image"
+    );
+}
+
+/// `pick_best_for_group` 完成：组规模 + 选中的 best 与最高分。
+#[cfg_attr(coverage_nightly, coverage(off))]
+pub(super) fn log_pick_best(group_size: usize, best_idx: usize, best_total: f32) {
+    debug!(
+        feature = FEATURE,
+        operation = "pick_best",
+        result = "ok",
+        group_size,
+        best_idx,
+        best_total,
+        "cull pick best"
+    );
+}
+
+/// `commit_scored_group` 完成：`group_id` + best 路径 + culled 数（写盘前最后的业务事件）。
+#[cfg_attr(coverage_nightly, coverage(off))]
+pub(super) fn log_commit_group(
+    group_id: usize,
+    best_path: &str,
+    culled_count: usize,
+    dry_run: bool,
+) {
+    debug!(
+        feature = FEATURE,
+        operation = "commit_group",
+        result = "ok",
+        group_id,
+        best_path = %best_path,
+        culled_count,
+        dry_run,
+        "cull commit group"
+    );
+}
+
 /// source ⊆ output 重叠保护：避免 cull 把文件归档到自身路径下导致循环搬迁。
 pub(super) fn ensure_sources_outside_output(
     sources: &[Location],

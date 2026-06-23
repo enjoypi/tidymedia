@@ -5,7 +5,7 @@
 
 use std::io;
 use std::path::Path;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use camino::Utf8Path;
 use parking_lot::Mutex;
@@ -51,14 +51,18 @@ impl RawFaceMesh for TractRawFaceMesh {
 
 pub struct TractFaceMeshDetector {
     cfg: FaceConfig,
-    raw: Mutex<Option<Box<dyn RawFaceMesh>>>,
+    // OnceLock 让 lazy init 后 inference 无锁并发（同 SCRFD：旧 Mutex 串行化所有 worker）。
+    raw: OnceLock<Box<dyn RawFaceMesh>>,
+    // load 阶段互斥避免 N worker 重复 load model（详见 tract_scrfd.rs 同字段注释）。
+    load_lock: Mutex<()>,
 }
 
 impl std::fmt::Debug for TractFaceMeshDetector {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("TractFaceMeshDetector")
             .field("facemesh_model_path", &self.cfg.facemesh_model_path)
-            .field("loaded", &self.raw.lock().is_some())
+            .field("loaded", &self.raw.get().is_some())
+            .field("load_lock", &self.load_lock)
             .finish()
     }
 }
@@ -66,21 +70,32 @@ impl std::fmt::Debug for TractFaceMeshDetector {
 impl TractFaceMeshDetector {
     #[cfg(test)]
     pub(crate) fn with_raw(cfg: FaceConfig, raw: Box<dyn RawFaceMesh>) -> Self {
+        let cell = OnceLock::new();
+        let _ = cell.set(raw);
         Self {
             cfg,
-            raw: Mutex::new(Some(raw)),
+            raw: cell,
+            load_lock: Mutex::new(()),
         }
     }
 
     #[cfg_attr(coverage_nightly, coverage(off))]
-    fn ensure_raw(&self) -> io::Result<()> {
-        let mut guard = self.raw.lock();
-        if guard.is_some() {
-            return Ok(());
+    fn ensure_raw(&self) -> io::Result<&dyn RawFaceMesh> {
+        if let Some(r) = self.raw.get() {
+            return Ok(r.as_ref());
+        }
+        let _guard = self.load_lock.lock();
+        if let Some(r) = self.raw.get() {
+            return Ok(r.as_ref());
         }
         let model = load_runnable(Path::new(&self.cfg.facemesh_model_path))?;
-        *guard = Some(Box::new(TractRawFaceMesh { model }));
-        Ok(())
+        let boxed: Box<dyn RawFaceMesh> = Box::new(TractRawFaceMesh { model });
+        let _ = self.raw.set(boxed);
+        Ok(self
+            .raw
+            .get()
+            .expect("OnceLock set by self under load_lock")
+            .as_ref())
     }
 }
 
@@ -90,15 +105,9 @@ impl FaceMeshDetector for TractFaceMeshDetector {
         _path: &Utf8Path,
         face_crop: &image::RgbImage,
     ) -> io::Result<Vec<[f32; 3]>> {
-        self.ensure_raw()?;
+        let raw = self.ensure_raw()?;
         let input = preprocess(face_crop)?;
-        let output = {
-            let guard = self.raw.lock();
-            guard
-                .as_ref()
-                .expect("ensure_raw set Some before lock release")
-                .run(input)?
-        };
+        let output = raw.run(input)?;
         decode(&output)
     }
 }
@@ -117,7 +126,8 @@ pub fn build_facemesh(cfg: &FaceConfig) -> io::Result<Box<dyn FaceMeshDetector>>
     }
     Ok(Box::new(TractFaceMeshDetector {
         cfg: cfg.clone(),
-        raw: Mutex::new(None),
+        raw: OnceLock::new(),
+        load_lock: Mutex::new(()),
     }))
 }
 
