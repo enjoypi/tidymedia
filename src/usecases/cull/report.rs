@@ -24,6 +24,9 @@ pub struct CullReport {
     pub failed: usize,
     pub dry_run: bool,
     pub errors: Vec<ReportError>,
+    /// `errors` Vec 是否因 [`crate::usecases::report::ERRORS_SOFT_CAP`] 截断；
+    /// `true` = 存在未记入 `errors` 的失败项，用户应看 `failed` 总数与日志。
+    pub errors_truncated: bool,
     pub groups: Vec<GroupReport>,
 }
 

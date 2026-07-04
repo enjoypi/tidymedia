@@ -1,3 +1,7 @@
+#![expect(
+    clippy::doc_markdown,
+    reason = "既有测试 doc 注释批量描述性中文夹标识符，clippy 1.95 `doc_markdown` 扩大后大量新增命中；测试文档不构成公开 API 契约，批量加反引号 ROI 低"
+)]
 //! `move_text_shot` 主流程单元测试：`FakeBackend` + `FakeTextDetector` 覆盖所有分支。
 //!
 //! 覆盖目标（与 plan 文件「branch miss 高危点」一一对应）：
@@ -16,6 +20,7 @@ use crate::adapters::backend::fake::FakeBackend;
 use crate::adapters::ocr::fake::FakeTextDetector;
 use crate::entities::backend::factory::BackendFactory;
 use crate::entities::common::Error;
+use crate::usecases::report::ERRORS_SOFT_CAP;
 use camino::Utf8PathBuf;
 use std::io;
 
@@ -971,8 +976,8 @@ fn move_text_shot_skips_too_large_via_direct_process_entry() {
         &out_backend,
         &canonical_prefix(&out),
         &cache,
-        8,      // max_image_bytes < 264
-        true,   // dry_run 避免真副作用
+        8,    // max_image_bytes < 264
+        true, // dry_run 避免真副作用
     );
     assert_eq!(delta.skipped_too_large, 1);
     assert_eq!(delta.moved, 0);
@@ -990,12 +995,14 @@ fn merge_delta_marks_errors_truncated_when_cap_exceeded() {
             message: "prefilled".into(),
         });
     }
-    let mut extra = SourceDelta::default();
-    extra.failed = 1;
-    extra.errors.push(ReportError {
-        path: "extra".into(),
-        message: "over cap".into(),
-    });
+    let extra = SourceDelta {
+        failed: 1,
+        errors: vec![ReportError {
+            path: "extra".into(),
+            message: "over cap".into(),
+        }],
+        ..SourceDelta::default()
+    };
     merge_delta(&mut report, extra);
     assert_eq!(report.failed, 1);
     assert!(report.errors_truncated);
@@ -1007,11 +1014,13 @@ fn merge_delta_marks_errors_truncated_when_cap_exceeded() {
 #[test]
 fn merge_delta_keeps_truncated_false_when_under_cap() {
     let mut report = MoveTextShotReport::default();
-    let mut delta = SourceDelta::default();
-    delta.errors.push(ReportError {
-        path: "a".into(),
-        message: "m".into(),
-    });
+    let delta = SourceDelta {
+        errors: vec![ReportError {
+            path: "a".into(),
+            message: "m".into(),
+        }],
+        ..SourceDelta::default()
+    };
     merge_delta(&mut report, delta);
     assert!(!report.errors_truncated);
     assert_eq!(report.errors.len(), 1);
@@ -1020,20 +1029,24 @@ fn merge_delta_keeps_truncated_false_when_under_cap() {
 /// `reduce_delta` 两个非空 SourceDelta 合并计数与 errors 汇总。
 #[test]
 fn reduce_delta_sums_counts_and_extends_errors() {
-    let mut a = SourceDelta::default();
-    a.scanned = 3;
-    a.moved = 1;
-    a.errors.push(ReportError {
-        path: "x".into(),
-        message: "e1".into(),
-    });
-    let mut b = SourceDelta::default();
-    b.scanned = 2;
-    b.deduplicated = 5;
-    b.errors.push(ReportError {
-        path: "y".into(),
-        message: "e2".into(),
-    });
+    let a = SourceDelta {
+        scanned: 3,
+        moved: 1,
+        errors: vec![ReportError {
+            path: "x".into(),
+            message: "e1".into(),
+        }],
+        ..SourceDelta::default()
+    };
+    let b = SourceDelta {
+        scanned: 2,
+        deduplicated: 5,
+        errors: vec![ReportError {
+            path: "y".into(),
+            message: "e2".into(),
+        }],
+        ..SourceDelta::default()
+    };
     let r = reduce_delta(a, b);
     assert_eq!(r.scanned, 5);
     assert_eq!(r.moved, 1);
@@ -1337,7 +1350,8 @@ fn move_text_shot_fast_path_rename_when_local_to_local() {
     )];
     let output = Location::Local(Utf8PathBuf::from_path_buf(out_dir.path().to_path_buf()).unwrap());
     let detector = FakeTextDetector::new(true);
-    let report = move_text_shot(&detector, &DefaultBackendFactory, &sources, &output, false).unwrap();
+    let report =
+        move_text_shot(&detector, &DefaultBackendFactory, &sources, &output, false).unwrap();
     assert_eq!(report.moved, 1);
     assert_eq!(report.failed, 0);
     // fast-path fs::rename 走完源已不在

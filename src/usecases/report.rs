@@ -3,11 +3,14 @@
 
 use serde_derive::Serialize;
 
-/// 结构化日志 `feature` 维度值：copy / move 共用。copy use case、report sink、
-/// `archive_template` 三处共享此单点，避免三份独立字符串常量任一漂移导致
-/// tracing 聚合分裂。
+/// 结构化日志 `feature` 维度值：copy / move / find / cull / `move_text_shot`
+/// 单点定义。所有 use case + report sink 从此 `use`，避免任一处 const 漂移让
+/// tracing 聚合按 feature 维度分裂。
 pub const FEATURE_COPY: &str = "copy";
 pub const FEATURE_MOVE: &str = "move";
+pub const FEATURE_FIND: &str = "find";
+pub const FEATURE_CULL: &str = "cull";
+pub const FEATURE_MOVE_TEXT_SHOT: &str = "move_text_shot";
 
 /// Move 复用 copy 流程（remove=true 即 move）；日志 feature 按用户实际子命令
 /// 呈现，避免 `move` 命令输出 feature="copy" 误导排障。
@@ -16,8 +19,42 @@ pub fn feature_of(remove: bool) -> &'static str {
     if remove { FEATURE_MOVE } else { FEATURE_COPY }
 }
 
+/// `Report.errors` Vec 软上限：海量失败让 Vec + JSON pretty-print 累积到 40+ MB
+/// 驻留（Android 2 GB RAM FFI 场景 OOM）。所有 use case 共用此单点。
+pub const ERRORS_SOFT_CAP: usize = 1000;
+
+/// 把 `err` 追加到 `errors`，若已达 [`ERRORS_SOFT_CAP`] 则丢弃并置 `truncated=true`。
+/// `failed` 计数不受 cap 限制，让 caller 独立累加（详情列表被截断不影响总数可观测）。
+pub fn push_error_capped(errors: &mut Vec<ReportError>, truncated: &mut bool, err: ReportError) {
+    if errors.len() >= ERRORS_SOFT_CAP {
+        *truncated = true;
+    } else {
+        errors.push(err);
+    }
+}
+
+/// 把 `src` 全部 error 追加到 `dst`，同样受 cap 保护；`src_truncated=true` 也
+/// 传染到 `dst_truncated`。用于 rayon `tree-reduce` 归并 delta.errors。
+pub fn extend_errors_capped(
+    dst: &mut Vec<ReportError>,
+    dst_truncated: &mut bool,
+    src: Vec<ReportError>,
+    src_truncated: bool,
+) {
+    if src_truncated {
+        *dst_truncated = true;
+    }
+    for e in src {
+        push_error_capped(dst, dst_truncated, e);
+    }
+}
+
 /// copy / move 操作报告。`scanned` = walker 触达的所有文件总数（含被识别为非媒体而
 /// 跳过、空文件、读不到的）；`copied` / `ignored` / `failed` 反映 `do_copy` 决策计数。
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "dry_run / remove / include_non_media / errors_truncated 四态互相独立，无法收敛为单一 enum：dry_run 是 CLI flag、remove 区分 copy/move、include_non_media 是媒体过滤、errors_truncated 是软 cap 命中指示"
+)]
 #[derive(Debug, Serialize)]
 pub struct CopyReport {
     /// walker 触达的源端文件总数（含 `skipped_empty` / `skipped_unreadable` / `walker_errors`）。
@@ -35,6 +72,9 @@ pub struct CopyReport {
     pub remove: bool,
     pub include_non_media: bool,
     pub errors: Vec<ReportError>,
+    /// `errors` Vec 是否因 [`ERRORS_SOFT_CAP`] 截断；`true` = 存在未记入 `errors`
+    /// 的失败项，用户应看 `failed` 总数与结构化日志。
+    pub errors_truncated: bool,
 }
 
 /// find 操作报告。`scanned` = Index 中实际入索引的文件总数（不仅是重复组路径数）；
@@ -77,4 +117,73 @@ pub enum Report<'a> {
 /// `write_find` 双方法 boilerplate（同时保持对象安全）。
 pub trait ReportSink: Send + Sync {
     fn write(&self, report: &Report<'_>);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn err(path: &str) -> ReportError {
+        ReportError {
+            path: path.to_owned(),
+            message: "m".to_owned(),
+        }
+    }
+
+    /// cap 未超时正常 push；truncated 不翻转。
+    #[test]
+    fn push_error_capped_under_cap() {
+        let mut v = Vec::new();
+        let mut t = false;
+        push_error_capped(&mut v, &mut t, err("a"));
+        assert_eq!(v.len(), 1);
+        assert!(!t);
+    }
+
+    /// cap 达到时丢弃新 err 并置 truncated=true；Vec 长度保持 cap。
+    #[test]
+    fn push_error_capped_at_cap_sets_truncated() {
+        let mut v = (0..ERRORS_SOFT_CAP)
+            .map(|i| err(&format!("f{i}")))
+            .collect();
+        let mut t = false;
+        push_error_capped(&mut v, &mut t, err("over"));
+        assert_eq!(v.len(), ERRORS_SOFT_CAP);
+        assert!(t);
+    }
+
+    /// `extend_errors_capped` 的 `src_truncated=true` arm：即便 dst 未满，
+    /// src 声明自身已 truncate 也应传染让 `dst_truncated=true`（防 delta 侧
+    /// 早已丢失记录但 merge 后误报"完整"）。
+    #[test]
+    fn extend_errors_capped_propagates_src_truncated() {
+        let mut dst = Vec::new();
+        let mut dst_t = false;
+        extend_errors_capped(
+            &mut dst,
+            &mut dst_t,
+            vec![err("a")],
+            /* src_truncated = */ true,
+        );
+        assert_eq!(dst.len(), 1);
+        assert!(dst_t, "src_truncated=true 必须传染到 dst_truncated");
+    }
+
+    /// `extend_errors_capped` 的 `src_truncated=false` 常规路径：合并 src 全量到 dst 且
+    /// `dst_truncated` 保持 false。
+    #[test]
+    fn extend_errors_capped_keeps_false_when_neither_full() {
+        let mut dst = vec![err("prev")];
+        let mut dst_t = false;
+        extend_errors_capped(&mut dst, &mut dst_t, vec![err("a"), err("b")], false);
+        assert_eq!(dst.len(), 3);
+        assert!(!dst_t);
+    }
+
+    /// `feature_of(true)` = MOVE，`feature_of(false)` = COPY（双 arm 覆盖）。
+    #[test]
+    fn feature_of_maps_remove_flag() {
+        assert_eq!(feature_of(true), FEATURE_MOVE);
+        assert_eq!(feature_of(false), FEATURE_COPY);
+    }
 }

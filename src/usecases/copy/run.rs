@@ -22,7 +22,8 @@ use crate::entities::threadpool::install_io;
 use crate::entities::uri::Location;
 use crate::usecases::config::config;
 use crate::usecases::report::{
-    CopyReport, FEATURE_COPY, FEATURE_MOVE, Report, ReportError, ReportSink, feature_of,
+    CopyReport, FEATURE_COPY, FEATURE_MOVE, Report, ReportError, ReportSink, extend_errors_capped,
+    feature_of, push_error_capped,
 };
 
 // FEATURE_COPY / FEATURE_MOVE / feature_of 均从 usecases::report 单点导入；
@@ -132,6 +133,7 @@ pub fn copy_with_sidecar(
             0,
             0,
             Vec::new(),
+            false,
         ));
     }
 
@@ -152,7 +154,7 @@ pub fn copy_with_sidecar(
         include_non_media,
         template,
     };
-    let (copied, ignored, failed, errors) =
+    let (copied, ignored, failed, errors, errors_truncated) =
         run_copy_loop(&source, &output_loc, &output_backend, &opts);
 
     log_operation_summary(
@@ -172,6 +174,7 @@ pub fn copy_with_sidecar(
         ignored,
         failed,
         errors,
+        errors_truncated,
     ))
 }
 
@@ -222,6 +225,10 @@ fn log_operation_summary(
     );
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "finalize 与 make_report / run_copy_loop 返回项一一对应；折 struct 让唯一调用点更绕"
+)]
 fn finalize(
     sink: Option<&dyn ReportSink>,
     flags: ReportFlags,
@@ -230,6 +237,7 @@ fn finalize(
     ignored: usize,
     failed: usize,
     errors: Vec<ReportError>,
+    errors_truncated: bool,
 ) -> CopyReport {
     let report = make_report(
         flags.dry_run,
@@ -240,6 +248,7 @@ fn finalize(
         ignored,
         failed,
         errors,
+        errors_truncated,
     );
     emit_report(sink, &report);
     report
@@ -304,7 +313,7 @@ fn run_copy_loop(
     output_loc: &Location,
     output_backend: &Arc<dyn Backend>,
     opts: &CopyOpts<'_>,
-) -> (usize, usize, usize, Vec<ReportError>) {
+) -> (usize, usize, usize, Vec<ReportError>, bool) {
     let mut output_index = Index::new();
     output_index.visit_location(output_loc, output_backend);
     // freeze 成 shared &Index：Index 内 DashMap 让 add / exists / contains_target 均
@@ -359,7 +368,13 @@ fn run_copy_loop(
             .reduce(CopyDelta::default, CopyDelta::merge)
     });
 
-    (delta.copied, delta.ignored, delta.failed, delta.errors)
+    (
+        delta.copied,
+        delta.ignored,
+        delta.failed,
+        delta.errors,
+        delta.errors_truncated,
+    )
 }
 
 /// 单个 `fast_hash` 桶内的串行处理。桶间调用者并行，桶内保持字典序遍历让
@@ -410,10 +425,14 @@ fn process_group(
                     error = %msg,
                     "copy item failed"
                 );
-                local.errors.push(ReportError {
-                    path: src.full_path.to_string(),
-                    message: msg,
-                });
+                push_error_capped(
+                    &mut local.errors,
+                    &mut local.errors_truncated,
+                    ReportError {
+                        path: src.full_path.to_string(),
+                        message: msg,
+                    },
+                );
             }
         }
     }
@@ -421,13 +440,14 @@ fn process_group(
 }
 
 /// `par_iter` map-reduce 汇总项：每 worker 局部累加避免全局 `Mutex` 串行化；
-/// rayon tree-reduce 归并到根，`errors` 用 `Vec::extend` 拼接。
+/// rayon tree-reduce 归并到根，`errors` 经 [`extend_errors_capped`] 受 soft cap 保护。
 #[derive(Default)]
 struct CopyDelta {
     copied: usize,
     ignored: usize,
     failed: usize,
     errors: Vec<ReportError>,
+    errors_truncated: bool,
 }
 
 impl CopyDelta {
@@ -435,7 +455,12 @@ impl CopyDelta {
         a.copied += b.copied;
         a.ignored += b.ignored;
         a.failed += b.failed;
-        a.errors.extend(b.errors);
+        extend_errors_capped(
+            &mut a.errors,
+            &mut a.errors_truncated,
+            b.errors,
+            b.errors_truncated,
+        );
         a
     }
 }
@@ -446,6 +471,10 @@ impl CopyDelta {
     clippy::too_many_arguments,
     reason = "report 字段与 run_copy_loop 返回值一一对应；合并结构体反而在唯一调用点更绕"
 )]
+#[expect(
+    clippy::fn_params_excessive_bools,
+    reason = "dry_run/remove/include_non_media/errors_truncated 与 CopyReport 字段一一对应，收敛 enum 反让调用点更绕"
+)]
 fn make_report(
     dry_run: bool,
     remove: bool,
@@ -455,6 +484,7 @@ fn make_report(
     ignored: usize,
     failed: usize,
     errors: Vec<ReportError>,
+    errors_truncated: bool,
 ) -> CopyReport {
     // indexed = copied + ignored + failed（do_copy 三态都来自已入索引的文件）。
     let indexed = copied + ignored + failed;
@@ -473,6 +503,7 @@ fn make_report(
         remove,
         include_non_media,
         errors,
+        errors_truncated,
     }
 }
 

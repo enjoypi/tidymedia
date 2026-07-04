@@ -100,10 +100,15 @@ impl RealSmbClient {
     }
 
     fn child_target(&self, parent: &SmbTarget, name: &str) -> SmbTarget {
+        // 直接 forward-slash 拼字符串，避免 Windows host 上 Utf8PathBuf::join 注入
+        // `\` 进 SMB 路径致 url_for 产 `smb://h/share/dir\file` malformed URL
+        // （pavao 拒解析 → 多层目录 walk 静默丢失所有子项）。
+        // 对齐 adb_real::join_abs 单点 helper。
         let child_path = if parent.path.as_str().is_empty() {
             camino::Utf8PathBuf::from(name)
         } else {
-            parent.path.join(name)
+            let p = parent.path.as_str().trim_end_matches('/');
+            camino::Utf8PathBuf::from(format!("{p}/{name}"))
         };
         SmbTarget {
             user: self.user.clone(),

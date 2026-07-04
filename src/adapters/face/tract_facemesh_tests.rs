@@ -81,7 +81,19 @@ fn decode_rejects_short_output() {
     let t = tract_ndarray::Array1::from_vec(vec![0.0_f32; 100]).into_tensor();
     let e = decode(&t).unwrap_err();
     assert!(
-        e.to_string().contains("len 100 < expected 1404"),
+        e.to_string().contains("len 100 != expected 1404"),
+        "got: {e}"
+    );
+}
+
+/// `FaceMesh` 严格 `!=` 校验：output len 大于 expected（如 attention refinement 版
+/// 1434）时也拒绝，避免取前 1404 得到与静态版不同顶点顺序的错位面部点集。
+#[test]
+fn decode_rejects_longer_than_expected_output() {
+    let t = tract_ndarray::Array1::from_vec(vec![0.0_f32; 1434]).into_tensor();
+    let e = decode(&t).unwrap_err();
+    assert!(
+        e.to_string().contains("len 1434 != expected 1404"),
         "got: {e}"
     );
 }

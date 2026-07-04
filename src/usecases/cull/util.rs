@@ -10,9 +10,12 @@ use super::report::CullReport;
 use crate::entities::backend::Backend;
 use crate::entities::common::{self, canonical_prefix, under_prefix};
 use crate::entities::uri::Location;
-use crate::usecases::report::ReportError;
+use crate::usecases::report::{FEATURE_CULL, ReportError, push_error_capped};
 
-pub(super) const FEATURE: &str = "cull";
+/// 从 `usecases::report` 单点 re-export，让 super 模块（`cull::run` / `group_writer`）
+/// 直接 `use super::util::FEATURE` 无需再 import report 模块，同时保证与
+/// `report_sink` 共用同一字符串防漂移。
+pub(super) const FEATURE: &str = FEATURE_CULL;
 const MIME_SNIFF_BYTES: usize = 256;
 
 /// `cull` 末尾的 debug! summary 抽独立 helper：release 默认不订阅 debug 级别，
@@ -178,6 +181,10 @@ pub(super) fn record_failure(report: &mut CullReport, path: String, e: &io::Erro
         error = %msg,
         "cull item failed"
     );
-    report.errors.push(ReportError { path, message: msg });
+    push_error_capped(
+        &mut report.errors,
+        &mut report.errors_truncated,
+        ReportError { path, message: msg },
+    );
     report.failed += 1;
 }

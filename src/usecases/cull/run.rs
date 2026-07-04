@@ -122,21 +122,9 @@ pub fn cull(
     let groups = group_by_hash(&hashes, phash_max_hamming);
 
     // 阶段 A：模糊过滤串行（写 report.dropped_blurry）+ 收集合规多图组。
-    let mut filtered: Vec<Vec<usize>> = Vec::new();
-    for grp_indices in groups {
-        if grp_indices.len() < 2 {
-            continue;
-        }
-        // sharpness_min：多图组里剔除低于阈值的模糊图（yaml 注释承诺"单图组例外保留"，
-        // len<2 已在上面 continue 跳过 → 此处过滤仅触发于多图组）。
-        let (kept, dropped) = filter_blurry(&grp_indices, &scanned, face_cfg.sharpness_min);
-        report.dropped_blurry += dropped;
-        // 过滤后剩 < 2 张同样跳过：组失去比较意义。
-        if kept.len() < 2 {
-            continue;
-        }
-        filtered.push(kept);
-    }
+    let (filtered, blurry_dropped) =
+        filter_multi_image_groups(groups, &scanned, face_cfg.sharpness_min);
+    report.dropped_blurry += blurry_dropped;
 
     // 阶段 B：组级 ONNX 评分并行（4 个 face trait 都是 Send+Sync，
     // tract `TypedRunnableModel::run(&self,...)` 支持 `&self` 并发调用）。
@@ -275,6 +263,31 @@ fn commit_scored_group(
         }
         Err(e) => record_failure(report, best.src_loc.display(), &e),
     }
+}
+
+/// 阶段 A 抽出的单点：过滤单图组 + 应用 `sharpness_min` + 舍弃过滤后 <2 组。
+/// 返 `(合规多图组, dropped_blurry 总数)`。抽独立 fn 让 branch counter 收敛到
+/// 单 codegen instance（原本 inline 在 `cull_impl` 内被多个 e2e 测试触发 multi-instance
+/// phantom miss），并让单元测试直接测「单元素组 skip」「filter 后 <2 skip」两 arm。
+fn filter_multi_image_groups(
+    groups: Vec<Vec<usize>>,
+    scanned: &[ScannedFile],
+    sharpness_min: f32,
+) -> (Vec<Vec<usize>>, usize) {
+    let mut filtered: Vec<Vec<usize>> = Vec::new();
+    let mut dropped_total: usize = 0;
+    for grp_indices in groups {
+        if grp_indices.len() < 2 {
+            continue;
+        }
+        let (kept, dropped) = filter_blurry(&grp_indices, scanned, sharpness_min);
+        dropped_total += dropped;
+        if kept.len() < 2 {
+            continue;
+        }
+        filtered.push(kept);
+    }
+    (filtered, dropped_total)
 }
 
 /// 按 `sharpness_min` 阈值剔除多图组里的模糊图，返 `(剩余 indices, 剔除数)`。

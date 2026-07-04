@@ -14,8 +14,9 @@ use super::report::GroupReport;
 use crate::entities::backend::{Backend, stream_copy as backend_stream_copy};
 use crate::entities::uri::Location;
 use crate::usecases::config::config;
+use crate::usecases::report::FEATURE_CULL;
 
-const FEATURE: &str = "cull";
+const FEATURE: &str = FEATURE_CULL;
 const BEST_PREFIX: &str = "BEST_";
 const MANIFEST_NAME: &str = "MANIFEST.json";
 

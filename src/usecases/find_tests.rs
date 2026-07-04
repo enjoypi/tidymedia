@@ -4,6 +4,7 @@ use camino::Utf8PathBuf;
 use tempfile::tempdir;
 
 use super::compute_output_prefix;
+use super::decide_protect;
 use super::find_duplicates;
 use super::render_script;
 use crate::adapters::backend::local::LocalBackend;
@@ -182,6 +183,60 @@ fn render_script_escapes_double_quote_in_path() {
     );
 }
 
+/// 路径含 `\n` 换行符必须转义成 `\n` 字面量而非真换行——真换行会让 Python
+/// `os.remove("a` 行未终结字符串致 SyntaxError，用户执行删除脚本首行即中断。
+/// Linux/macOS 允许文件名含 `\n`（罕见但真实），Windows 拒绝。
+#[test]
+fn render_script_escapes_newline_in_path() {
+    let groups = vec![DuplicateGroup {
+        size: 1,
+        paths: vec![Utf8PathBuf::from("/tmp/with\nnewline.jpg")],
+    }];
+    let out = run_render(&groups, None);
+    assert!(
+        out.contains(r#"# os.remove("/tmp/with\nnewline.jpg")"#),
+        "newline must escape to \\n: {out}"
+    );
+    // 反向断言：生成脚本单行不含真换行（除末尾）
+    let os_line = out
+        .lines()
+        .find(|l| l.contains("os.remove"))
+        .expect("expect os.remove line");
+    assert!(
+        !os_line.contains('\n'),
+        "os.remove line must be single-line: {os_line}"
+    );
+}
+
+/// `\r` / `\t` / NUL 等控制字符走 `\xNN`（NUL 除外，`\t` 有专用字面量）；
+/// 与 Python 字符串规范一致，避免 CRLF 或制表符打断脚本布局。
+#[test]
+fn render_script_escapes_control_chars_in_path() {
+    let groups = vec![DuplicateGroup {
+        size: 1,
+        paths: vec![Utf8PathBuf::from("/tmp/a\rb\tc\x01d.jpg")],
+    }];
+    let out = run_render(&groups, None);
+    assert!(out.contains(r"\r"), "CR must escape to \\r: {out}");
+    assert!(out.contains(r"\t"), "TAB must escape to \\t: {out}");
+    assert!(out.contains(r"\x01"), "0x01 must escape to \\x01: {out}");
+}
+
+/// DEL 字符 (0x7f) 也走 `\xNN`：`escape_py_string` guard `c < 0x20 || c == '\x7f'`
+/// 的第二 sub-branch 需独立触达（`\x01` 只覆盖 `< 0x20`）。
+#[test]
+fn render_script_escapes_delete_char_in_path() {
+    let groups = vec![DuplicateGroup {
+        size: 1,
+        paths: vec![Utf8PathBuf::from("/tmp/before\x7fafter.jpg")],
+    }];
+    let out = run_render(&groups, None);
+    assert!(
+        out.contains(r"\x7f"),
+        "DEL (0x7f) must escape to \\x7f: {out}"
+    );
+}
+
 /// 同 size 不同 content 的两组重复集必须独立保留（旧 `BTreeMap<size, _>` 实现会覆盖）。
 #[test]
 fn search_same_preserves_distinct_groups_with_identical_size() {
@@ -295,6 +350,42 @@ fn compute_output_prefix_local_falls_back_when_canonicalize_fails() {
     let pair = (out_loc, LocalBackend::arc());
     let prefix = compute_output_prefix(Some(&pair)).expect("Some");
     assert_eq!(prefix, "no_such_relative_dir_xyz_abc");
+}
+
+/// `decide_protect` 三 arm 直测让 branch counter 收敛（消 multi-instance phantom miss）：
+/// 无 prefix / 有 prefix + `any_under_prefix` / 有 prefix + 无 `any_under_prefix`。
+#[test]
+fn decide_protect_no_prefix_protects_all() {
+    assert_eq!(decide_protect(0, None, "/x", false), (true, false));
+    assert_eq!(decide_protect(3, None, "/y", true), (true, false));
+}
+
+#[test]
+fn decide_protect_prefix_and_any_under_protects_only_under() {
+    // any_under_prefix=true 且 path 在 prefix 下 → protect=true, survivor=false
+    assert_eq!(
+        decide_protect(0, Some("/keep"), "/keep/a", true),
+        (true, false)
+    );
+    // any_under_prefix=true 但 path 在 prefix 外 → protect=false (active remove)
+    assert_eq!(
+        decide_protect(1, Some("/keep"), "/other/b", true),
+        (false, false)
+    );
+}
+
+#[test]
+fn decide_protect_prefix_but_none_under_keeps_first_as_survivor() {
+    // any_under_prefix=false 组：首份 idx==0 → survivor + protect
+    assert_eq!(
+        decide_protect(0, Some("/keep"), "/other/a", false),
+        (true, true)
+    );
+    // 其余 idx>0 → active remove
+    assert_eq!(
+        decide_protect(1, Some("/keep"), "/other/b", false),
+        (false, false)
+    );
 }
 
 /// `compute_output_prefix` 的 `other => other.display()` arm：

@@ -12,9 +12,7 @@ use crate::entities::file_info;
 use crate::entities::uri::Location;
 
 use super::copy::Source;
-use super::report::{DuplicateGroupReport, FindReport};
-
-const FEATURE_FIND: &str = "find";
+use super::report::{DuplicateGroupReport, FEATURE_FIND, FindReport};
 
 // 返回完整 FindReport（scanned = 入索引文件数；bytes_read 来自 Index 累计；
 // groups 为 DuplicateGroup 列表），dispatch 层直接落 JSON 而无需重新统计。
@@ -175,14 +173,8 @@ pub(crate) fn render_script(
         for (idx, path) in group.paths.iter().enumerate() {
             let path_str = path.as_str();
             let escaped = escape_py_string(path_str);
-            // 把 protect / is_survivor 一并解到 match arm 上，避免下游 `if a && b && c`
-            // 的 && 短路在 LLVM 出 5 个 sub-branch BR，部分组合天然 0-hit 破坏覆盖率。
-            let (protect, is_survivor) = match output_prefix {
-                None => (true, false),
-                Some(p) if any_under_prefix => (under_prefix(path_str, p), false),
-                // 无 path 在 prefix 下：保留首份作 survivor，其余仍删
-                Some(_) => (idx == 0, idx == 0),
-            };
+            let (protect, is_survivor) =
+                decide_protect(idx, output_prefix, path_str, any_under_prefix);
             if protect {
                 if is_survivor {
                     let _ = writeln!(sink, "# SURVIVOR (no copy under output)");
@@ -196,10 +188,47 @@ pub(crate) fn render_script(
     }
 }
 
-/// Python 字符串字面量转义：`\` → `\\`、`"` → `\"`。
-/// 路径含 `\n` 等控制字符极罕见，转 `\xNN` 留给后续如有需要再加。
+/// 一条 `os.remove` 应否被注释（protect）以及是否是 survivor（组内无 path 在
+/// prefix 下的首份保留）。抽独立 fn 让 branch counter 收敛到单 codegen instance，
+/// 消除 `render_script` 在 lib unit + subprocess 双 instance 下的 phantom miss。
+/// 三 arm 由 `decide_protect_*` 测试完整覆盖。
+fn decide_protect(
+    idx: usize,
+    output_prefix: Option<&str>,
+    path_str: &str,
+    any_under_prefix: bool,
+) -> (bool, bool) {
+    match output_prefix {
+        None => (true, false),
+        Some(p) if any_under_prefix => (under_prefix(path_str, p), false),
+        // 无 path 在 prefix 下：保留首份作 survivor，其余仍删
+        Some(_) => (idx == 0, idx == 0),
+    }
+}
+
+/// Python 字符串字面量转义：`\` → `\\`、`"` → `\"`；控制字符 `\n` / `\r` / `\t`
+/// / NUL / 其他 ASCII 控制字符转 `\xNN`。Linux/macOS 允许文件名含 `\n`，未转义会
+/// 让生成的 `os.remove("...")` 脚本行被拆到下一行致 Python SyntaxError（P0 §2 用
+/// 户输入 MUST NOT panic 精神下延到脚本生成侧）。非 ASCII UTF-8 字符按原样输出
+/// （Python 3 源文件默认 UTF-8）。
 fn escape_py_string(s: &str) -> String {
-    s.replace('\\', "\\\\").replace('"', "\\\"")
+    let mut out = String::with_capacity(s.len());
+    for ch in s.chars() {
+        match ch {
+            '\\' => out.push_str("\\\\"),
+            '"' => out.push_str("\\\""),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            // 其余 ASCII 控制字符（NUL / BEL / VT / FF / DEL 等）走 \xNN 兜底。
+            c if (c as u32) < 0x20 || c == '\x7f' => {
+                use std::fmt::Write as _;
+                let _ = write!(out, "\\x{:02x}", c as u32);
+            }
+            c => out.push(c),
+        }
+    }
+    out
 }
 
 #[cfg(test)]

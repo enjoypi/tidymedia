@@ -4,6 +4,7 @@
 //! 三套 90% 同构的 Backend 实现收敛到一个泛型 [`RemoteBackend<A>`] 上，消除 ~600 行
 //! 重复骨架代码。
 
+use std::collections::HashSet;
 use std::io;
 use std::sync::Arc;
 
@@ -229,8 +230,16 @@ fn walk_recursive<A: RemoteAdapter>(
     root: &A::Target,
     out: &mut Vec<io::Result<Entry>>,
 ) {
+    // symlink/junction 环防护：远端 FS（ADB Android /sdcard、SMB DFS/junction）
+    // 可能含循环 symlink 或挂载点回环，若 `kind_from_mode` 归类为 Dir → stack 无
+    // 限 push 同一子树致 Vec<Target> 堆爆 OOM。visited 按 path 字符串 dedup 让环
+    // 退化为 DAG。key 用 owned String（&Utf8Path 借用与 stack pop 生命周期冲突）；
+    // deep tree 内存开销 O(unique dirs) 可接受，比 SIGSEGV/OOM 好数量级。
+    // `LocalBackend::walk` 走 `ignore::WalkBuilder` 有 follow_links=false 缺省，此处对齐。
     let mut stack: Vec<A::Target> = Vec::with_capacity(16);
+    let mut visited: HashSet<String> = HashSet::new();
     stack.push(root.clone());
+    visited.insert(root.path().as_str().to_owned());
     while let Some(target) = stack.pop() {
         let listed = adapter
             .client()
@@ -246,7 +255,13 @@ fn walk_recursive<A: RemoteAdapter>(
         for entry in entries {
             if entry.kind == EntryKind::Dir {
                 match A::Target::from_location(&entry.location, adapter.ctx()) {
-                    Ok(sub) => stack.push(sub),
+                    Ok(sub) => {
+                        // 已 visit（环/symlink loop 或 backend 重复返子项）直接跳
+                        // 过下钻；entry 本身仍 push 让 caller 得目录节点事件。
+                        if visited.insert(sub.path().as_str().to_owned()) {
+                            stack.push(sub);
+                        }
+                    }
                     Err(e) => {
                         // Dir entry 反向 from_location 失败：子树无法下钻，本目录条目
                         // 也跳过 Ok push——否则 caller 既收到 Err（已记 walker_errors）

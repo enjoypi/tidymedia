@@ -237,6 +237,7 @@ fn sample_copy_report() -> CopyReport {
         remove: false,
         include_non_media: false,
         errors: Vec::new(),
+        errors_truncated: false,
     }
 }
 

@@ -118,6 +118,42 @@ fn from_path_jpeg_app1_broken_falls_back_to_self_parse() {
     assert_eq!(exif.model(), Some("Model"));
 }
 
+/// seek/seekable Err 路径也走 APP1 fallback（对齐 nom-exif Err 分支）：把带
+/// 完整 EXIF APP1 的 JPEG 头字节包 `FailSeek` reader → `populate_image_dates`
+/// 首 seek(0) 就 Err 早退到 `populate_image_from_head_only`，从 head 恢复 Make。
+/// 修 image.rs:42 原本 seek Err 只退 XMP fallback 丢失 APP1 可恢复 EXIF 的 bug。
+#[test]
+fn populate_image_dates_seek_err_falls_back_to_app1() {
+    use std::io::{self, Cursor, Read, Seek, SeekFrom};
+
+    #[derive(Debug)]
+    struct FailSeek(Cursor<Vec<u8>>);
+    impl Read for FailSeek {
+        fn read(&mut self, b: &mut [u8]) -> io::Result<usize> {
+            self.0.read(b)
+        }
+    }
+    impl Seek for FailSeek {
+        fn seek(&mut self, _: SeekFrom) -> io::Result<u64> {
+            Err(io::Error::other("seek disabled"))
+        }
+    }
+
+    // 读带完整 APP1 EXIF 的 fixture（同 from_path_jpeg_app1_broken_falls_back_to_self_parse）
+    let data = std::fs::read(common::DATA_JPEG_APP1_BROKEN).unwrap();
+    let mut exif = mk_exif("image/jpeg", |_| {});
+    let reader: Box<dyn super::MediaReader> = Box::new(FailSeek(Cursor::new(data)));
+    super::populate_image_dates(reader, &mut exif, super::tests_common::utc());
+    // Fix 前：seek Err → 直接 populate_image_xmp_fallback（无 XMP）→ 字段全 0
+    // Fix 后：seek Err → populate_image_from_head_only → APP1 fallback 恢复 Make/DTO
+    assert_eq!(
+        exif.make(),
+        Some("Cam"),
+        "APP1 fallback 应从 seek-Err reader 恢复 Make"
+    );
+    assert_eq!(exif.date_time_original(), 1_487_068_200);
+}
+
 /// 截断 JPEG：nom-exif `parse_exif` Err + `parse_jpeg_app1_exif` 也找不到 Exif APP1
 /// → fallback 链最后退到 XMP fallback（无 packet）→ 字段全 0。覆盖 image.rs L50 None 分支。
 #[test]

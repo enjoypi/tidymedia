@@ -4,11 +4,10 @@
 use tracing::warn;
 
 use crate::entities::common;
-use crate::usecases::report::{FEATURE_COPY, FEATURE_MOVE, Report, ReportSink};
-
-const FEATURE_FIND: &str = "find";
-const FEATURE_MOVE_TEXT_SHOT: &str = "move_text_shot";
-const FEATURE_CULL: &str = "cull";
+use crate::usecases::report::{
+    FEATURE_COPY, FEATURE_CULL, FEATURE_FIND, FEATURE_MOVE, FEATURE_MOVE_TEXT_SHOT, Report,
+    ReportSink,
+};
 
 /// 把报告原子写到 `path`（先写临时文件再 persist）。
 /// 写盘失败仅 warn，不阻断主流程。

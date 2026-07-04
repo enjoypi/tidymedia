@@ -29,18 +29,21 @@ pub(super) fn populate_image_dates(
     local_offset: FixedOffset,
 ) {
     // 先 buffer 头部供 XMP fallback；seek 回起点后再喂给 nom-exif。
-    // seek 失败时跳过 nom-exif 主路径但仍尝试 XMP fallback——head 已读入，
-    // 仅靠头部字节即可补 P0/P1 候选，比 mtime 兜底准确得多。
+    // seek / seekable 失败时跳过 nom-exif 主路径但仍尝试 JPEG APP1 fallback 再退
+    // XMP——head 已读入，APP1 EXIF 段（若为 JPEG）与 XMP packet 都是纯字节扫描
+    // 无 seek 依赖，比直接退到 mtime 兜底准确得多。原本 seek/seekable Err 路径
+    // 直接跳 XMP 让 Canon EOS 7D 类 MakerNotes 异常 + 不可 seek 组合场景丢失
+    // APP1 可恢复的 DTO/CreateDate（image.rs 三态闭合对称性缺失）。
     let mut head = vec![0u8; XMP_SCAN_BYTES];
     let head_len = read_fill(reader.as_mut(), &mut head).unwrap_or(0);
     head.truncate(head_len);
     if reader.seek(io::SeekFrom::Start(0)).is_err() {
-        populate_image_xmp_fallback(&head, exif);
+        populate_image_from_head_only(&head, exif, local_offset);
         return;
     }
 
     let Ok(ms) = MediaSource::seekable(reader) else {
-        populate_image_xmp_fallback(&head, exif);
+        populate_image_from_head_only(&head, exif, local_offset);
         return;
     };
     let mut parser = MediaParser::new();
@@ -79,6 +82,16 @@ pub(super) fn populate_image_dates(
     // XMP fallback：EXIF DTO/CreateDate 均缺（re-tag 后 IFD0 仅剩 ModifyDate 类
     // 场景）时扫已 buffer 的头部，从 XMP packet 补 P0/P1 候选。
     populate_image_xmp_fallback_if_empty(&head, exif);
+}
+
+/// 仅靠已 buffer 的 head 字节恢复 EXIF（seek/seekable Err 路径共用）：先试 JPEG APP1
+/// 裸 IFD 扫描（非 JPEG 直接返 None），再退 XMP fallback。与 nom-exif 主路径 Err arm
+/// 同套路，对齐 image.rs 三态闭合对称性。
+fn populate_image_from_head_only(head: &[u8], exif: &mut Exif, local_offset: FixedOffset) {
+    if let Some(tiff) = parse_jpeg_app1_exif(head) {
+        apply_tiff_ifd(exif, tiff, local_offset);
+    }
+    populate_image_xmp_fallback_if_empty(head, exif);
 }
 
 /// 主路径 + APP1 fallback 路径 + PNG eXIf 路径共享的"空日期才退 XMP"决策点。
