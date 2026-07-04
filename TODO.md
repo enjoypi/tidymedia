@@ -33,8 +33,6 @@
 
 ### P3 测试与覆盖率
 - [x] 严格覆盖率 4 项 100%（region/function/line/branch）：`RUSTFLAGS="--cfg=coverage_nightly" cargo +nightly llvm-cov --release nextest --summary-only --branch --ignore-filename-regex='(adapters/backend/[a-z]+_real\.rs|adapters/(ocr|face)/tract_[a-z]+\.rs)$' --all-features`（`usecases/cull/run.rs` + 5 个 `tract_*_real.rs` 已回收：前者 `filter_blurry`/`analyze_image` 私有微测试补齐，后者 5 个 `load_runnable` 加 `#[coverage(off)]`；ignore-regex 只留 backend `_real.rs`（大文件+真环境）与 tract 主体（subprocess phantom）；口径 = 聚合 lcov DA/BRDA 真值 100%，summary 剩 monomorphize instance phantom 属已知）
-- [x] mutation 增量验证（`cargo mutants --in-diff`）发现 `sanitize_max_image_bytes` 的 `*` → `+` 等价变异 missed，已补 `load_sanitizes_midrange_max_image_bytes_to_default` 用 5000 字节边界值杀掉。336 全量 mutant 受时长限制（每 mutant ~1–2 min × 336 ≈ 6 h）未跑完整，CI 增量已通
-- [x] `.cargo/mutants.toml exclude_re` 扩展 `'replace build_(scrfd|facenet|facemesh|eyestate)_'` + `'replace .* with .* in face_scoring::score_image'`
 
 ### P4 Android FFI 集成（首版未包）
 - [ ] `src/frameworks/mobile.rs` 新增 `tidy_cull(sources, output) -> MobileCullReport`（uniffi Record）

@@ -17,10 +17,6 @@
 # Claude Code 个人本地上下文
 .claude.local.md
 
-# cargo-mutants 输出
-/mutants.out*/
-/mutants-reverify/
-
 # 本地 `cargo vendor` 输出，仅离线构建用
 /pavao/
 
