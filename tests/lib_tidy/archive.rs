@@ -4,7 +4,7 @@
 use std::sync::Arc;
 
 use tempfile::tempdir;
-use tidymedia::{Backend, Commands, FakeBackend, tidy, tidy_with};
+use tidymedia::{Backend, Commands, DefaultDetectorFactory, FakeBackend, tidy, tidy_with};
 
 use super::{DATA_DIR, FakeBackendFactory, adb_loc, local, smb_loc};
 
@@ -210,6 +210,7 @@ fn tidy_with_copy_adb_source_to_smb_output() {
 
     tidy_with(
         &factory,
+        &DefaultDetectorFactory,
         Commands::Copy {
             dry_run: false,
             include_non_media: true,

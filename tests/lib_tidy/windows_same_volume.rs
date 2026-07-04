@@ -19,7 +19,7 @@ use std::process::Command;
 use std::time::SystemTime;
 
 use tempfile::tempdir;
-use tidymedia::{CommandResult, Commands, tidy_with};
+use tidymedia::{CommandResult, Commands, DefaultDetectorFactory, tidy_with};
 
 use super::{DATA_DIR, FakeBackendFactory, local};
 
@@ -105,7 +105,12 @@ fn move_via_subst_same_volume_preserves_mtime() {
     let out_dir = root.path().join("out");
 
     let factory = FakeBackendFactory::new();
-    let r = tidy_with(&factory, move_cmd(&src_dir_via_subst, &out_dir)).expect("move via subst");
+    let r = tidy_with(
+        &factory,
+        &DefaultDetectorFactory,
+        move_cmd(&src_dir_via_subst, &out_dir),
+    )
+    .expect("move via subst");
     let CommandResult::Copy(report) = r else {
         panic!("expected Copy report");
     };
@@ -150,7 +155,12 @@ fn move_via_junction_same_volume_preserves_mtime() {
     let out_dir = root.path().join("out");
 
     let factory = FakeBackendFactory::new();
-    let r = tidy_with(&factory, move_cmd(&junction, &out_dir)).expect("move via junction");
+    let r = tidy_with(
+        &factory,
+        &DefaultDetectorFactory,
+        move_cmd(&junction, &out_dir),
+    )
+    .expect("move via junction");
     let CommandResult::Copy(report) = r else {
         panic!("expected Copy report");
     };

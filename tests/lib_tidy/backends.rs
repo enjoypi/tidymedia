@@ -4,7 +4,7 @@
 use std::sync::Arc;
 
 use tempfile::tempdir;
-use tidymedia::{Backend, Commands, FakeBackend, FakeOp, tidy, tidy_with};
+use tidymedia::{Backend, Commands, DefaultDetectorFactory, FakeBackend, FakeOp, tidy, tidy_with};
 
 use super::{FakeBackendFactory, adb_loc, local, mtp_loc, smb_loc};
 
@@ -25,6 +25,7 @@ fn tidy_with_copy_fake_smb_to_local_writes_file() {
 
     tidy_with(
         &factory,
+        &DefaultDetectorFactory,
         Commands::Copy {
             dry_run: false,
             include_non_media: true,
@@ -65,6 +66,7 @@ fn tidy_with_find_mixed_local_smb_mtp_sources() {
 
     tidy_with(
         &factory,
+        &DefaultDetectorFactory,
         Commands::Find {
             secure: false,
             sources: vec![
@@ -98,6 +100,7 @@ fn tidy_with_move_local_to_fake_mtp_removes_src() {
 
     tidy_with(
         &factory,
+        &DefaultDetectorFactory,
         Commands::Move {
             dry_run: false,
             include_non_media: true,
@@ -201,6 +204,7 @@ fn tidy_with_propagates_smb_open_read_error() {
 
     tidy_with(
         &factory,
+        &DefaultDetectorFactory,
         Commands::Copy {
             dry_run: false,
             include_non_media: true,
@@ -236,6 +240,7 @@ fn tidy_with_propagates_smb_walk_error() {
 
     tidy_with(
         &factory,
+        &DefaultDetectorFactory,
         Commands::Find {
             secure: true,
             sources: vec![smb_root],
@@ -297,6 +302,7 @@ fn tidy_with_copy_fake_adb_to_local_writes_file() {
 
     tidy_with(
         &factory,
+        &DefaultDetectorFactory,
         Commands::Copy {
             dry_run: false,
             include_non_media: true,
@@ -336,6 +342,7 @@ fn tidy_with_find_mixed_local_smb_adb_sources() {
 
     tidy_with(
         &factory,
+        &DefaultDetectorFactory,
         Commands::Find {
             secure: false,
             sources: vec![
@@ -367,6 +374,7 @@ fn tidy_with_move_local_to_fake_adb_removes_src() {
 
     tidy_with(
         &factory,
+        &DefaultDetectorFactory,
         Commands::Move {
             dry_run: false,
             include_non_media: true,

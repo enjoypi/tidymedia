@@ -1,7 +1,7 @@
 //! Move 幂等性集成测试。验收手册 §B4 「同命令重跑期望 copied=0」对应契约。
 
 use tempfile::tempdir;
-use tidymedia::{CommandResult, Commands, tidy_with};
+use tidymedia::{CommandResult, Commands, DefaultDetectorFactory, tidy_with};
 
 use super::{DATA_DIR, FakeBackendFactory, local};
 
@@ -31,8 +31,12 @@ fn move_local_to_local_second_run_is_noop() {
 
     let factory = FakeBackendFactory::new();
 
-    let r1 =
-        tidy_with(&factory, move_cmd(src_dir.path(), out_dir.path(), false)).expect("first move");
+    let r1 = tidy_with(
+        &factory,
+        &DefaultDetectorFactory,
+        move_cmd(src_dir.path(), out_dir.path(), false),
+    )
+    .expect("first move");
     let CommandResult::Copy(report1) = r1 else {
         panic!("expected Copy report, got {r1:?}");
     };
@@ -42,8 +46,12 @@ fn move_local_to_local_second_run_is_noop() {
     );
     assert!(!src_file.exists(), "first move must remove src");
 
-    let r2 =
-        tidy_with(&factory, move_cmd(src_dir.path(), out_dir.path(), false)).expect("second move");
+    let r2 = tidy_with(
+        &factory,
+        &DefaultDetectorFactory,
+        move_cmd(src_dir.path(), out_dir.path(), false),
+    )
+    .expect("second move");
     let CommandResult::Copy(report2) = r2 else {
         panic!("expected Copy report, got {r2:?}");
     };
@@ -59,8 +67,12 @@ fn move_dry_run_does_not_touch_src_or_output() {
     let src_file = copy_fixture(src_dir.path(), "sample-with-offset.jpg");
 
     let factory = FakeBackendFactory::new();
-    let result =
-        tidy_with(&factory, move_cmd(src_dir.path(), out_dir.path(), true)).expect("dry-run move");
+    let result = tidy_with(
+        &factory,
+        &DefaultDetectorFactory,
+        move_cmd(src_dir.path(), out_dir.path(), true),
+    )
+    .expect("dry-run move");
     let CommandResult::Copy(report) = result else {
         panic!("expected Copy report");
     };
@@ -81,7 +93,12 @@ fn move_local_fastpath_src_deleted_dst_exists() {
     let src_file = copy_fixture(src_dir.path(), "sample-with-offset.jpg");
 
     let factory = FakeBackendFactory::new();
-    let r = tidy_with(&factory, move_cmd(src_dir.path(), out_dir.path(), false)).expect("move");
+    let r = tidy_with(
+        &factory,
+        &DefaultDetectorFactory,
+        move_cmd(src_dir.path(), out_dir.path(), false),
+    )
+    .expect("move");
     let CommandResult::Copy(report) = r else {
         panic!("expected Copy report, got {r:?}");
     };
@@ -112,7 +129,12 @@ fn move_local_fastpath_dst_mtime_matches_src() {
     filetime::set_file_mtime(&src_file, pinned).expect("set src mtime");
 
     let factory = FakeBackendFactory::new();
-    tidy_with(&factory, move_cmd(src_dir.path(), out_dir.path(), false)).expect("move");
+    tidy_with(
+        &factory,
+        &DefaultDetectorFactory,
+        move_cmd(src_dir.path(), out_dir.path(), false),
+    )
+    .expect("move");
 
     let archived = out_dir
         .path()
@@ -142,14 +164,23 @@ fn move_dry_run_then_real_run_completes() {
 
     let factory = FakeBackendFactory::new();
 
-    let dry = tidy_with(&factory, move_cmd(src_dir.path(), out_dir.path(), true)).expect("dry-run");
+    let dry = tidy_with(
+        &factory,
+        &DefaultDetectorFactory,
+        move_cmd(src_dir.path(), out_dir.path(), true),
+    )
+    .expect("dry-run");
     let CommandResult::Copy(dry_report) = dry else {
         panic!("expected Copy report");
     };
     assert!(dry_report.dry_run);
 
-    let real =
-        tidy_with(&factory, move_cmd(src_dir.path(), out_dir.path(), false)).expect("real run");
+    let real = tidy_with(
+        &factory,
+        &DefaultDetectorFactory,
+        move_cmd(src_dir.path(), out_dir.path(), false),
+    )
+    .expect("real run");
     let CommandResult::Copy(real_report) = real else {
         panic!("expected Copy report");
     };
@@ -178,6 +209,7 @@ fn copy_counts_duplicate_source_as_ignored_exactly_once() {
     let factory = FakeBackendFactory::new();
     let result = tidy_with(
         &factory,
+        &DefaultDetectorFactory,
         Commands::Copy {
             dry_run: false,
             include_non_media: false,
@@ -219,6 +251,7 @@ fn copy_report_scanned_sums_all_skip_categories_exactly() {
     let factory = FakeBackendFactory::new();
     let result = tidy_with(
         &factory,
+        &DefaultDetectorFactory,
         Commands::Copy {
             dry_run: false,
             include_non_media: false,
@@ -260,6 +293,7 @@ fn find_with_valid_output_dir_scans_sources() {
     let factory = FakeBackendFactory::new();
     let result = tidy_with(
         &factory,
+        &DefaultDetectorFactory,
         Commands::Find {
             secure: false,
             sources: vec![local(DATA_DIR)],

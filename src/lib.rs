@@ -28,6 +28,12 @@ pub use entities::common::Result;
 pub use entities::media_time;
 pub use entities::uri::{Location, ParseError as LocationParseError};
 
+// ── Detector Factory Port + Default 装配 ──
+// Port 在 usecases（推理 Port 内层规则），Default 装配在 frameworks（"decide-which
+// -concrete-impl" 归最外层）。dispatch 通过 trait 消费，不直接引用 adapters::{face,ocr}。
+pub use frameworks::detector::DefaultDetectorFactory;
+pub use usecases::detector::DetectorFactory;
+
 // Sidecar Gateway 的公开入口：协议解析在 adapters，路径名独立于 media_time 模块以
 // 体现"外部数据格式适配器"职责。
 pub use adapters::sidecar;

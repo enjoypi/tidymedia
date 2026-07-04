@@ -100,6 +100,7 @@
 - **新增子命令** → `Commands` enum + `CommandResult` variant + `tidy()` partial-failure arm + `tidy_with` match + `dispatch_<sub>` fn + `usecases/<name>/` 目录 + `usecases/report.rs::Report` variant + `report_sink.rs::FEATURE_<NAME>` 常量 + match + `lib.rs` re-export
 - **新增 path 拼接调用点** MUST 用 `Location::join_path(segment)` 不直接 `loc.path().join(...)`（Windows host 上 std `PathBuf::push` 走 `\`）；纯 Local 计算保留 OS 分隔符
 - **新增 Output Port trait** MUST 落到内层：推理类（face/ocr/embedding）→ `usecases/<feature>/mod.rs`；基础设施类（`BackendFactory`）→ `entities/backend/`；具体 impl 留 `adapters/`；**反例**：trait 留 `adapters/` 破坏 CA 内向规则
+- **新增装配 Port**（factory 类，如 `DetectorFactory`/`BackendFactory`）→ trait 在内层（推理类 `usecases/<feature>` / 基础设施类 `entities/backend`）+ `Default<X>Factory` impl 在 `frameworks/<x>.rs`（"决定用哪个具体实现"归最外层；`adapters` 只留 Port 具体 impl）+ `dispatch::tidy_with` 签名增 `&dyn <X>Factory` 参数走 trait 消费 + `lib.rs` re-export `Default<X>Factory` + `<X>Factory` + 所有 `tidy_with` 调用点（含集成测试 ~30 处）扩参（Python `re` 脚本：多行 `tidy_with\(\n(\s+)&EXPR,\n` + 单行 `tidy_with\((&[^,\n\)]+),\s*` 两模式）
 - **新增 face 算法常量** MUST 入 `FaceConfig` 不留模块顶 const；helper-style 私有 fn 接单字段 `ratio: f32` 保持纯净便于微测试
 - **改 `FaceEmbedder` 维度** → trait + 真实 impl（`EMBED_DIM` + decode 返回类型）+ `fake.rs`（字段/构造/impl）+ 单测 + 集成测试所有 `FakeFaceEmbedder::new([0.0; N])`；sed 批量套路可靠。**MUST 用 `[f32; identity_cluster::EMBED_DIM]` 单点常量**
 - **推理 metadata MUST 与 input 一起按值透传** 不用 `Arc<Mutex<Option<Meta>>>` 共享可变状态（并发 `detect_faces` 时错框）；letterbox preprocess MUST 不带 `.min(1.0)`

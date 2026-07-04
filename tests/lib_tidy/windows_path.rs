@@ -7,7 +7,7 @@
 #![cfg(windows)]
 
 use tempfile::tempdir;
-use tidymedia::{CommandResult, Commands, tidy_with};
+use tidymedia::{CommandResult, Commands, DefaultDetectorFactory, tidy_with};
 
 use super::{DATA_DIR, FakeBackendFactory, local};
 
@@ -28,6 +28,7 @@ fn copy_with_chinese_src_directory_preserves_chars() {
     let factory = FakeBackendFactory::new();
     let result = tidy_with(
         &factory,
+        &DefaultDetectorFactory,
         Commands::Copy {
             dry_run: false,
             include_non_media: false,
@@ -61,6 +62,7 @@ fn copy_preserves_chinese_filename() {
     let factory = FakeBackendFactory::new();
     tidy_with(
         &factory,
+        &DefaultDetectorFactory,
         Commands::Copy {
             dry_run: false,
             include_non_media: false,
@@ -99,6 +101,7 @@ fn copy_into_long_root_path_reports_failures_if_any() {
     let factory = FakeBackendFactory::new();
     let result = tidy_with(
         &factory,
+        &DefaultDetectorFactory,
         Commands::Copy {
             dry_run: false,
             include_non_media: false,

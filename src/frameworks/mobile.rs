@@ -20,6 +20,7 @@ use crate::adapters::backend::factory::DefaultBackendFactory;
 use crate::adapters::cli::Commands;
 use crate::adapters::dispatch::{CommandResult, tidy_with};
 use crate::entities::uri::Location;
+use crate::frameworks::detector::DefaultDetectorFactory;
 use crate::usecases::report::{CopyReport, FindReport};
 
 /// 一次 tidy copy 调用的统计。UI 用这些字段显示进度。
@@ -129,6 +130,7 @@ pub fn tidy_find_duplicates(
     let locs = parse_locations(sources)?;
     let result = tidy_with(
         &DefaultBackendFactory,
+        &DefaultDetectorFactory,
         Commands::Find {
             secure,
             sources: locs,
@@ -172,6 +174,7 @@ fn run_copy_internal(src: &str, output: &str, dry_run: bool) -> Result<TidyStats
     })?;
     let result = tidy_with(
         &DefaultBackendFactory,
+        &DefaultDetectorFactory,
         Commands::Copy {
             dry_run,
             include_non_media: false,

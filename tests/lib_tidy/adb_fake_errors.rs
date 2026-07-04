@@ -7,7 +7,7 @@
 use std::sync::Arc;
 
 use tempfile::tempdir;
-use tidymedia::{CommandResult, Commands, FakeBackend, FakeOp, tidy_with};
+use tidymedia::{CommandResult, Commands, DefaultDetectorFactory, FakeBackend, FakeOp, tidy_with};
 
 use super::{FakeBackendFactory, adb_loc, local};
 
@@ -29,6 +29,7 @@ fn adb_copy_reader_error_treats_file_as_skipped() {
 
     let result = tidy_with(
         &factory,
+        &DefaultDetectorFactory,
         Commands::Copy {
             dry_run: false,
             include_non_media: true,
@@ -77,6 +78,7 @@ fn adb_copy_mixed_files_one_failure_does_not_block_others() {
 
     let result = tidy_with(
         &factory,
+        &DefaultDetectorFactory,
         Commands::Copy {
             dry_run: false,
             include_non_media: true,
@@ -121,6 +123,7 @@ fn adb_find_walk_error_is_swallowed() {
 
     tidy_with(
         &factory,
+        &DefaultDetectorFactory,
         Commands::Find {
             secure: false,
             sources: vec![adb_root],

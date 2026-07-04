@@ -14,7 +14,7 @@ use tempfile::tempdir;
     feature = "adb-backend"
 )))]
 use tidymedia::Location;
-use tidymedia::{Commands, run_cli, tidy, tidy_with};
+use tidymedia::{Commands, DefaultDetectorFactory, run_cli, tidy, tidy_with};
 
 use super::FakeBackendFactory;
 #[cfg(not(feature = "adb-backend"))]
@@ -346,6 +346,7 @@ fn tidy_find_propagates_permission_denied_metadata_error() {
 
     let err = tidy_with(
         &factory,
+        &DefaultDetectorFactory,
         Commands::Find {
             secure: false,
             sources: vec![local(DATA_DIR)],

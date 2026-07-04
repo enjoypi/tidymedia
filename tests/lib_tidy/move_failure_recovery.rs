@@ -8,7 +8,9 @@
 use std::sync::Arc;
 
 use tempfile::tempdir;
-use tidymedia::{Backend, CommandResult, Commands, FakeBackend, FakeOp, tidy, tidy_with};
+use tidymedia::{
+    Backend, CommandResult, Commands, DefaultDetectorFactory, FakeBackend, FakeOp, tidy, tidy_with,
+};
 
 use super::{DATA_DIR, FakeBackendFactory, local, smb_loc};
 
@@ -39,6 +41,7 @@ fn move_keeps_src_when_target_open_write_fails() {
 
     let result = tidy_with(
         &factory,
+        &DefaultDetectorFactory,
         Commands::Move {
             dry_run: false,
             include_non_media: true,
@@ -87,6 +90,7 @@ fn move_keeps_src_and_dst_when_remove_file_fails() {
 
     let result = tidy_with(
         &factory,
+        &DefaultDetectorFactory,
         Commands::Move {
             dry_run: false,
             include_non_media: true,
@@ -140,6 +144,7 @@ fn move_retry_after_target_open_write_failure_succeeds() {
 
     let r1 = tidy_with(
         &factory1,
+        &DefaultDetectorFactory,
         Commands::Move {
             dry_run: false,
             include_non_media: true,
@@ -165,6 +170,7 @@ fn move_retry_after_target_open_write_failure_succeeds() {
 
     let r2 = tidy_with(
         &factory2,
+        &DefaultDetectorFactory,
         Commands::Move {
             dry_run: false,
             include_non_media: true,
@@ -210,6 +216,7 @@ fn move_keeps_src_when_target_write_fails() {
 
     let result = tidy_with(
         &factory,
+        &DefaultDetectorFactory,
         Commands::Move {
             dry_run: false,
             include_non_media: true,
@@ -259,6 +266,7 @@ fn copy_succeeds_when_dst_open_read_would_fail_after_transfer() {
 
     let result = tidy_with(
         &factory,
+        &DefaultDetectorFactory,
         Commands::Copy {
             dry_run: false,
             include_non_media: true,
@@ -302,6 +310,7 @@ fn copy_reports_failure_when_unique_name_exhausted() {
     let factory = FakeBackendFactory::new();
     let result = tidy_with(
         &factory,
+        &DefaultDetectorFactory,
         Commands::Copy {
             dry_run: false,
             include_non_media: false,

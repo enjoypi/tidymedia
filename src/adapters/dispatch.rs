@@ -4,8 +4,10 @@ use crate::adapters::report_sink::JsonFileReportSink;
 use crate::entities::backend::factory::BackendFactory;
 use crate::entities::common::{Error, Result};
 use crate::entities::uri::Location;
+use crate::frameworks::detector::DefaultDetectorFactory;
 use crate::usecases::config::validate_archive_template;
 use crate::usecases::cull::CullReport;
+use crate::usecases::detector::DetectorFactory;
 use crate::usecases::move_text_shot::MoveTextShotReport;
 use crate::usecases::report::{CopyReport, FindReport, Report, ReportSink};
 
@@ -20,15 +22,16 @@ pub enum CommandResult {
     Cull(CullReport),
 }
 
-/// 用默认 backend factory 跑命令；旧入口，等价于 `tidy_with(&DefaultBackendFactory, ...)`。
+/// 用默认 backend / detector factory 跑命令；旧入口，等价于
+/// `tidy_with(&DefaultBackendFactory, &DefaultDetectorFactory, ...)`。
 ///
 /// # Errors
 ///
-/// 当命令执行过程中发生 IO 错误、backend 构造失败、业务逻辑出错，或 Copy/Move
-/// 出现非零 failed（部分文件复制失败）时返回 `Err`，让 CLI 退出码非 0 让 CI/cron
-/// 脚本能区分"全部成功"与"部分失败"。
+/// 当命令执行过程中发生 IO 错误、backend / detector 构造失败、业务逻辑出错，或
+/// Copy/Move 出现非零 failed（部分文件复制失败）时返回 `Err`，让 CLI 退出码非 0
+/// 让 CI/cron 脚本能区分"全部成功"与"部分失败"。
 pub fn tidy(command: Commands) -> Result<()> {
-    let result = tidy_with(&DefaultBackendFactory, command)?;
+    let result = tidy_with(&DefaultBackendFactory, &DefaultDetectorFactory, command)?;
     match result {
         CommandResult::Copy(report) if report.failed > 0 => {
             // report.remove 区分 copy 与 move：错文案会让 CI 脚本按 "copy" 误判子命令。
@@ -61,13 +64,18 @@ pub fn tidy(command: Commands) -> Result<()> {
     }
 }
 
-/// 注入版入口：调用方提供 [`BackendFactory`]，常用于集成测试用 fake 装配混合 scheme。
+/// 注入版入口：调用方提供 [`BackendFactory`] 与 [`DetectorFactory`]，常用于集成测试
+/// 用 fake 装配混合 scheme + 直接跑 Copy/Move/Find 而不加载 ONNX 模型。
 /// 返回结构化 [`CommandResult`]：CLI 路径直接 `?` 丢弃，mobile 路径 match 取 report。
 ///
 /// # Errors
 ///
-/// 当 backend 构造失败、IO 操作出错或业务逻辑出错时返回 `Err`。
-pub fn tidy_with(factory: &dyn BackendFactory, command: Commands) -> Result<CommandResult> {
+/// 当 backend / detector 构造失败、IO 操作出错或业务逻辑出错时返回 `Err`。
+pub fn tidy_with(
+    factory: &dyn BackendFactory,
+    detectors: &dyn DetectorFactory,
+    command: Commands,
+) -> Result<CommandResult> {
     match command {
         Commands::Copy {
             dry_run,
@@ -114,7 +122,14 @@ pub fn tidy_with(factory: &dyn BackendFactory, command: Commands) -> Result<Comm
             sources,
             output,
             report,
-        } => dispatch_move_text_shot(factory, sources, output, dry_run, report.as_deref()),
+        } => dispatch_move_text_shot(
+            factory,
+            detectors,
+            sources,
+            output,
+            dry_run,
+            report.as_deref(),
+        ),
         Commands::Cull {
             dry_run,
             sources,
@@ -123,6 +138,7 @@ pub fn tidy_with(factory: &dyn BackendFactory, command: Commands) -> Result<Comm
             report,
         } => dispatch_cull(
             factory,
+            detectors,
             sources,
             output,
             dry_run,
@@ -191,13 +207,13 @@ fn dispatch_find(
 )]
 fn dispatch_move_text_shot(
     factory: &dyn BackendFactory,
+    detectors: &dyn DetectorFactory,
     sources: Vec<Location>,
     output: Location,
     dry_run: bool,
     report_path: Option<&str>,
 ) -> Result<CommandResult> {
-    let ocr_cfg = &crate::usecases::config::config().backend.ocr;
-    let detector = crate::adapters::ocr::build_detector(ocr_cfg)?;
+    let detector = detectors.build_text_detector()?;
     let move_report =
         crate::usecases::move_text_shot(detector.as_ref(), factory, &sources, &output, dry_run)?;
     if let Some(path) = report_path {
@@ -213,17 +229,19 @@ fn dispatch_move_text_shot(
 )]
 fn dispatch_cull(
     factory: &dyn BackendFactory,
+    detectors: &dyn DetectorFactory,
     sources: Vec<Location>,
     output: Location,
     dry_run: bool,
     phash_max: Option<u8>,
     report_path: Option<&str>,
 ) -> Result<CommandResult> {
+    let scrfd = detectors.build_face_detector()?;
+    let facenet = detectors.build_face_embedder()?;
+    let facemesh = detectors.build_face_mesh()?;
+    let eyestate = detectors.build_eye_state_classifier()?;
+    // phash_hamming_max 默认从 face config 取；detector 构造已完成后仍需 config 值。
     let face_cfg = &crate::usecases::config::config().backend.face;
-    let scrfd = crate::adapters::face::build_scrfd_detector(face_cfg)?;
-    let facenet = crate::adapters::face::build_facenet_embedder(face_cfg)?;
-    let facemesh = crate::adapters::face::build_facemesh(face_cfg)?;
-    let eyestate = crate::adapters::face::build_eyestate_classifier(face_cfg)?;
     let cull_report = crate::usecases::cull(
         scrfd.as_ref(),
         facenet.as_ref(),

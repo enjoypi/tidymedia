@@ -208,6 +208,7 @@ fn mkparent<A: RemoteAdapter>(target: &A::Target, client: &Arc<dyn RemoteClient<
 #[cfg_attr(coverage_nightly, coverage(off))]
 fn log_mkparent_err<A: RemoteAdapter>(parent: &A::Target, e: &io::Error) {
     debug!(
+        feature = "backend",
         scheme = A::scheme(),
         operation = "mkparent",
         path = %parent.path(),

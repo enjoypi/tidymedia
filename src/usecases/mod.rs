@@ -6,6 +6,7 @@ pub(super) use find::find_duplicates;
 pub(super) use move_text_shot::move_text_shot;
 
 pub(crate) mod config;
+pub(crate) mod detector;
 pub(crate) mod face;
 pub(crate) mod ocr;
 
