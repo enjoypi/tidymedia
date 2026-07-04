@@ -1,8 +1,8 @@
 //! 单文件复制/移动操作：重复检测 → 媒体过滤 → 唯一命名 → fast-path rename 或流式拷贝。
 
-use std::collections::HashSet;
 use std::sync::Arc;
 
+use dashmap::DashSet;
 use tracing::debug;
 use tracing::warn;
 
@@ -31,8 +31,8 @@ pub(super) fn do_copy(
     src: &Info,
     output_dir: &Location,
     output_backend: &Arc<dyn Backend>,
-    output_index: &mut Index,
-    mkdir_cache: &mut HashSet<Location>,
+    output_index: &Index,
+    mkdir_cache: &DashSet<Location>,
     opts: &CopyOpts<'_>,
 ) -> common::Result<bool> {
     let src_loc = src.location().clone();
@@ -89,7 +89,7 @@ pub(super) fn do_copy(
             // f.secure_hash() → output_backend.open_read(target_loc)，dry-run 下
             // target 未真写返 NotFound 让 do_copy 假失败。
             src.secure_hash()?;
-            _ = output_index.add(src.cloned_at(target_loc, Arc::clone(output_backend)));
+            output_index.add(src.cloned_at(target_loc, Arc::clone(output_backend)));
             return Ok(true);
         }
 
@@ -129,7 +129,7 @@ pub(super) fn do_copy(
                     // size / EXIF 入 output_index，避免对刚写完的 dst 重新 stat +
                     // 读 4 KiB；同时消除旧实现 Info::open(dst) 在 NFS ESTALE / 防病毒
                     // 抢占下失败让后续同 hash 源写重复副本的漏洞。
-                    _ = output_index.add(src.cloned_at(target_loc, Arc::clone(output_backend)));
+                    output_index.add(src.cloned_at(target_loc, Arc::clone(output_backend)));
                     return Ok(true);
                 }
                 Err(e) => {
@@ -141,7 +141,7 @@ pub(super) fn do_copy(
                     // 后缀又写一份物理副本。stream_copy 分支已通过「先 add 再 remove」
                     // 顺序修好此漏洞，fast-path 补齐同款救援。
                     if e.to_string().contains("cannot remove source") {
-                        _ = output_index
+                        output_index
                             .add(src.cloned_at(target_loc.clone(), Arc::clone(output_backend)));
                     }
                     return Err(e.into());
@@ -154,7 +154,7 @@ pub(super) fn do_copy(
         // dst 已写入：先入索引让后续同 hash 源命中去重，再尝试 remove。
         // 若 remove 失败仍向上传 Err 计 failed，但 dst 已登记 → 重跑或下批同
         // hash 源不会再写一份副本（旧实现 ? 直接传 Err 跳过 add 致重复副本）。
-        _ = output_index.add(src.cloned_at(target_loc.clone(), Arc::clone(output_backend)));
+        output_index.add(src.cloned_at(target_loc.clone(), Arc::clone(output_backend)));
         if opts.remove {
             remove_src_after_stream_copy(src, &src_loc, src_display, &target_loc)?;
         }
@@ -212,11 +212,11 @@ pub(super) fn do_copy_with_default_cache(
     src: &Info,
     output_dir: &Location,
     output_backend: &Arc<dyn Backend>,
-    output_index: &mut Index,
+    output_index: &Index,
     opts: &CopyOpts<'_>,
 ) -> common::Result<bool> {
-    let mut mc: HashSet<Location> = HashSet::new();
-    do_copy(src, output_dir, output_backend, output_index, &mut mc, opts)
+    let mc: DashSet<Location> = DashSet::new();
+    do_copy(src, output_dir, output_backend, output_index, &mc, opts)
 }
 
 /// 用源 Info 的 backend 读 + 输出 backend 写。经 `backend::stream_copy` 单点 helper

@@ -70,7 +70,7 @@ pub(crate) fn find_duplicates(
     }
 
     let scan_stats = index.stats();
-    let scanned = index.files().len();
+    let scanned = index.len();
     let bytes_read = index.bytes_read();
     debug!(
         feature = FEATURE_FIND,
@@ -78,7 +78,7 @@ pub(crate) fn find_duplicates(
         result = "ok",
         secure,
         files = scanned,
-        similar_files = index.similar_files().len(),
+        similar_files = index.similar_bucket_count(),
         bytes_read,
         skipped_empty = scan_stats.skipped_empty,
         skipped_unreadable = scan_stats.skipped_unreadable,

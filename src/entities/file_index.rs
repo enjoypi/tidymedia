@@ -1,13 +1,16 @@
-use std::collections::HashMap;
 use std::collections::HashSet;
 use std::fmt;
 use std::hash::Hash;
 use std::io;
 use std::sync::Arc;
 
-use camino::Utf8PathBuf;
+use camino::{Utf8Path, Utf8PathBuf};
 use chrono::FixedOffset;
-use rayon::iter::{IntoParallelRefIterator, IntoParallelRefMutIterator, ParallelIterator};
+use dashmap::DashMap;
+use dashmap::mapref::entry::Entry;
+use dashmap::mapref::one::Ref;
+use parking_lot::Mutex;
+use rayon::iter::{IntoParallelRefIterator, ParallelBridge, ParallelIterator};
 use tracing::warn;
 
 use super::backend::{Backend, EntryKind};
@@ -48,11 +51,15 @@ pub struct VisitStats {
     pub walker_errors: u64,
 }
 
+/// F1 并行化：`DashMap` 让 `exists`/`add`/`remove_under_prefix` 全 `&self`，
+/// `run_copy_loop` 才能在 `par_iter` 内共享 `&Index`。`similar_files` 桶用
+/// `Mutex<HashSet>` 而非嵌套 `DashSet`——dashmap 同一 shard 递归拿锁会 deadlock
+/// （issue #79）。
 pub struct Index {
     // fast hash -> file path, maybe same fast hash
-    similar_files: HashMap<u64, HashSet<Utf8PathBuf>>,
+    similar_files: DashMap<u64, Mutex<HashSet<Utf8PathBuf>>>,
     // file path -> file meta
-    files: HashMap<Utf8PathBuf, Info>,
+    files: DashMap<Utf8PathBuf, Info>,
     stats: VisitStats,
 }
 
@@ -72,10 +79,11 @@ impl Default for Index {
 impl Index {
     /// 零依赖构造：Index 不再绑定单一 Backend；每条 [`Info`] 自带其 backend 句柄，
     /// 跨 scheme 索引由调用方按需 `visit_location(loc, backend)` 多次注入。
+    #[must_use]
     pub fn new() -> Self {
         Self {
-            files: HashMap::new(),
-            similar_files: HashMap::new(),
+            files: DashMap::new(),
+            similar_files: DashMap::new(),
             stats: VisitStats::default(),
         }
     }
@@ -84,12 +92,49 @@ impl Index {
         self.stats
     }
 
-    pub fn files(&self) -> &HashMap<Utf8PathBuf, Info> {
-        &self.files
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.files.len()
     }
 
-    pub fn similar_files(&self) -> &HashMap<u64, HashSet<Utf8PathBuf>> {
-        &self.similar_files
+    #[cfg(test)]
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.files.is_empty()
+    }
+
+    #[cfg(test)]
+    #[must_use]
+    pub fn contains_key(&self, key: &Utf8Path) -> bool {
+        self.files.contains_key(key)
+    }
+
+    /// 拿单条 `Info` 的 shard-lock guard；调用方持有期间禁与另一 file entry 嵌套操作
+    /// （同 shard 递归 deadlock）。
+    pub fn get(&self, key: &Utf8Path) -> Option<Ref<'_, Utf8PathBuf, Info>> {
+        self.files.get(key)
+    }
+
+    /// 遍历所有 file 条目；元素是 shard-lock guard，短临界区内解出 `kv.value()` 后
+    /// 立即消费，避免与 `add` / `remove_under_prefix` 长时并发。
+    pub fn iter(&self) -> dashmap::iter::Iter<'_, Utf8PathBuf, Info> {
+        self.files.iter()
+    }
+
+    /// `similar_files` 桶内所有 path 的 snapshot（clone）；调用方拿到 owned Vec 后
+    /// bucket lock 立即释放，避免长时持锁与 `add` 并发冲突。
+    #[must_use]
+    pub fn similar_paths(&self, fast_hash: u64) -> Vec<Utf8PathBuf> {
+        self.similar_files
+            .get(&fast_hash)
+            .map(|bucket| bucket.value().lock().iter().cloned().collect())
+            .unwrap_or_default()
+    }
+
+    /// `similar_files` 桶数（不同 `fast_hash` 值的个数）；调试日志用。
+    #[must_use]
+    pub fn similar_bucket_count(&self) -> usize {
+        self.similar_files.len()
     }
 
     /// 判定 target `Location` 是否已入索引：key 构造与 [`Info::cloned_at`] /
@@ -107,16 +152,23 @@ impl Index {
         self.files.contains_key(&key)
     }
 
-    pub fn some_files(&self, n: usize) -> Vec<&Info> {
-        let mut ret: Vec<_> = self.files().iter().take(n).map(|x| x.1).collect();
-        ret.sort_by(|x1, x2| x1.full_path.cmp(&x2.full_path));
+    /// tracing debug 展示样本用；F1 后 `Info` 不再可克隆（内含 `Mutex<Lazy>`），
+    /// 返 owned path 让 caller 拿到独立所有权，不与 `Index` 后续 mutation 竞态。
+    pub fn some_files(&self, n: usize) -> Vec<Utf8PathBuf> {
+        let mut ret: Vec<Utf8PathBuf> = self
+            .files
+            .iter()
+            .take(n)
+            .map(|kv| kv.key().clone())
+            .collect();
+        ret.sort();
         ret
     }
 
     pub fn bytes_read(&self) -> u64 {
         let mut bytes_read = 0;
-        for info in self.files.values() {
-            bytes_read += info.bytes_read();
+        for kv in &self.files {
+            bytes_read += kv.value().bytes_read();
         }
 
         bytes_read
@@ -125,15 +177,18 @@ impl Index {
     /// 判等流程：先用 `fast_hash` 找 bucket，size 必须相同，再按 `secure` 选择 hash：
     /// `true` → SHA-512（用于 copy/move 这种涉及物理修改的判等，杜绝碰撞）
     /// `false` → `xxh3_64（用于` find 默认快速模式）
+    ///
+    /// F1 两阶段访问：先 clone bucket paths 释放 similar shard 锁 → 再挨个查 files，
+    /// 严禁 similar / files shard guard 嵌套持有（同 shard 递归会 deadlock）。
     pub fn exists(&self, src_file: &Info, secure: bool) -> io::Result<Option<Utf8PathBuf>> {
-        let Some(paths) = self.similar_files.get(&src_file.fast_hash) else {
+        let paths = self.similar_paths(src_file.fast_hash);
+        if paths.is_empty() {
             return Ok(None);
-        };
-        for path in paths {
-            let f = self
-                .files
-                .get(path)
-                .expect("similar_files entries must point to a known file");
+        }
+        // filter_map 吸收「并发 remove 后 bucket 有 stale path」的 defensive None
+        // 分支，让主循环只处理已解析的 entry；单点循环体便于覆盖率工具聚合 region。
+        for entry in paths.iter().filter_map(|p| self.files.get(p)) {
+            let f = entry.value();
             if f.size != src_file.size {
                 continue;
             }
@@ -149,24 +204,42 @@ impl Index {
         Ok(None)
     }
 
-    pub fn calc_same<F, T>(&self, calc: F) -> Vec<HashMap<(u64, T), HashSet<Utf8PathBuf>>>
+    pub fn calc_same<F, T>(
+        &self,
+        calc: F,
+    ) -> Vec<std::collections::HashMap<(u64, T), HashSet<Utf8PathBuf>>>
     where
         F: Fn(&Info) -> io::Result<T> + Send + Sync,
         T: Eq + Hash + Send,
     {
-        self.similar_files
+        let bucket_paths: Vec<(u64, Vec<Utf8PathBuf>)> = self
+            .similar_files
+            .iter()
+            .filter_map(|kv| {
+                let paths: Vec<Utf8PathBuf> = kv.value().lock().iter().cloned().collect();
+                if paths.len() > 1 {
+                    Some((*kv.key(), paths))
+                } else {
+                    None
+                }
+            })
+            .collect();
+        bucket_paths
             .par_iter()
-            .filter(|(_, paths)| paths.len() > 1)
             .map(|(_, paths)| {
-                let mut same = HashMap::new();
-                for path in paths {
-                    let info = self
-                        .files
-                        .get(path)
-                        .expect("internal: similar_files entries must point to a known file");
+                let mut same: std::collections::HashMap<(u64, T), HashSet<Utf8PathBuf>> =
+                    std::collections::HashMap::new();
+                // filter_map 吸收「并发 remove 后 bucket 内 path 已 stale」的
+                // defensive None 分支；同 exists 套路让覆盖率不需 subprocess 时序精确
+                // 触发 None arm。
+                for (path, entry) in paths
+                    .iter()
+                    .filter_map(|p| self.files.get(p).map(|e| (p, e)))
+                {
+                    let info = entry.value();
                     if let Ok(key) = calc(info) {
                         same.entry((info.size, key))
-                            .or_insert_with(HashSet::new)
+                            .or_default()
                             .insert(path.clone());
                     }
                 }
@@ -176,12 +249,12 @@ impl Index {
     }
 
     pub fn search_same(&self) -> Vec<DuplicateGroup> {
-        let results: Vec<_> = self.calc_same(super::file_info::Info::secure_hash);
+        let results = self.calc_same(super::file_info::Info::secure_hash);
         Self::filter_and_sort(&results)
     }
 
     pub fn fast_search_same(&self) -> Vec<DuplicateGroup> {
-        let results: Vec<_> = self.calc_same(super::file_info::Info::calc_full_hash);
+        let results = self.calc_same(super::file_info::Info::calc_full_hash);
         Self::filter_and_sort(&results)
     }
 
@@ -190,7 +263,9 @@ impl Index {
     // 见 calc_same 的 (size, hash) 复合 key）。Vec 形式保留每组独立性，size 仅作 metadata。
     // 排序：size 降序（render_script 沿用 iter().rev()-style 大文件先报）；size 相同时
     // 按组内首路径字典序，保证输出稳定。
-    fn filter_and_sort<T>(map: &[HashMap<(u64, T), HashSet<Utf8PathBuf>>]) -> Vec<DuplicateGroup> {
+    fn filter_and_sort<T>(
+        map: &[std::collections::HashMap<(u64, T), HashSet<Utf8PathBuf>>],
+    ) -> Vec<DuplicateGroup> {
         let mut groups: Vec<DuplicateGroup> = Vec::new();
         for same in map {
             for ((size, _), paths) in same {
@@ -212,60 +287,73 @@ impl Index {
     /// 用于 copy/move 的重叠保护：output 位于 source 子树内时，把已归档文件从
     /// source 索引剔除，避免被再次复制或在 move 模式下被当作重复副本删除。
     /// `similar_files` 反向同步清理——残留 bucket 指针会让 [`Self::exists`] panic。
-    pub fn remove_under_prefix(&mut self, prefix: &str) -> usize {
+    ///
+    /// F1 两阶段：先 collect keys 释放 files 读锁 → 再逐个 remove 拿写锁；
+    /// dashmap `iter()` 持读锁与 `remove()` 写锁若嵌套同 shard 会 deadlock。
+    pub fn remove_under_prefix(&self, prefix: &str) -> usize {
         let to_remove: Vec<Utf8PathBuf> = self
             .files
-            .keys()
-            .filter(|p| common::under_prefix(p.as_str(), prefix))
-            .cloned()
-            .collect();
-        // to_remove 刚取自 files.keys() → remove 必 Some，filter_map 折叠该不变式；
-        // bucket 清理的防御分支收敛进 detach_from_bucket 以便直测（不可达侧无法
-        // 经本入口触发，见该 fn 注释）。
-        let removed: Vec<Info> = to_remove
             .iter()
-            .filter_map(|p| self.files.remove(p))
+            .filter(|kv| common::under_prefix(kv.key().as_str(), prefix))
+            .map(|kv| kv.key().clone())
             .collect();
-        for info in &removed {
-            Self::detach_from_bucket(&mut self.similar_files, info.fast_hash, &info.full_path);
-        }
-        removed.len()
+        // filter_map 吸收「并发另一 remove 已抢先删除」的 defensive None arm；
+        // 计数用 inspect + count 让主循环体单一路径便于覆盖率聚合。
+        to_remove
+            .iter()
+            .filter_map(|path| self.files.remove(path))
+            .inspect(|(_, info)| {
+                Self::detach_from_bucket(&self.similar_files, info.fast_hash, &info.full_path);
+            })
+            .count()
     }
 
     /// 把 path 从 `fast_hash` bucket 摘除，空 bucket 整体移除。bucket 缺失时静默
     /// 容忍——调用方不变式（[`Self::add`] 同步建 bucket）下不可达，独立成 fn 供
     /// 测试直接喂「bucket 缺失」输入覆盖防御分支。
     fn detach_from_bucket(
-        similar: &mut HashMap<u64, HashSet<Utf8PathBuf>>,
+        similar: &DashMap<u64, Mutex<HashSet<Utf8PathBuf>>>,
         hash: u64,
         path: &Utf8PathBuf,
     ) {
-        if let Some(bucket) = similar.get_mut(&hash) {
-            bucket.remove(path);
-            if bucket.is_empty() {
-                similar.remove(&hash);
-            }
+        let mut empty = false;
+        if let Some(bucket) = similar.get(&hash) {
+            let mut set = bucket.value().lock();
+            set.remove(path);
+            empty = set.is_empty();
+        }
+        if empty {
+            similar.remove(&hash);
         }
     }
 
-    pub fn add(&mut self, info: Info) -> &Info {
-        use std::collections::hash_map::Entry;
+    /// F1：`&self` + `()` 返值——所有 caller 均 `_ = ...add(...)` 忽略旧返 `&Info`。
+    /// 关键顺序：`files.entry` 的 slot.insert 完成后 guard 在 statement 边界 drop，
+    /// 再操作 `similar_files`——避免持 files shard guard 时去拿 similar shard guard
+    /// 产生同 shard 递归 deadlock 窗口。
+    pub fn add(&self, info: Info) {
+        let key = info.full_path.clone();
+        let hash = info.fast_hash;
         match self.files.entry(info.full_path.clone()) {
-            Entry::Occupied(e) => e.into_mut(),
+            Entry::Occupied(_) => return,
             Entry::Vacant(slot) => {
-                self.similar_files
-                    .entry(info.fast_hash)
-                    .or_default()
-                    .insert(info.full_path.clone());
-                slot.insert(info)
+                slot.insert(info);
             }
         }
+        // files entry guard 已在上一 statement 边界 drop；此处独立拿 similar shard 锁。
+        self.similar_files
+            .entry(hash)
+            .or_insert_with(|| Mutex::new(HashSet::new()))
+            .value()
+            .lock()
+            .insert(key);
     }
 
     #[cfg(test)]
-    pub fn insert(&mut self, path: &str) -> std::io::Result<&Info> {
+    pub fn insert(&self, path: &str) -> std::io::Result<()> {
         let info = Info::from(path)?;
-        Ok(self.add(info))
+        self.add(info);
+        Ok(())
     }
 
     /// 旧入口：本地路径字符串。`visit_location` 的 Local shim，让测试
@@ -293,6 +381,8 @@ impl Index {
     /// - 0 字节文件 → `skipped_empty += 1`
     /// - `Info::open` 失败（chmod 000 / 中途删除等）→ `skipped_unreadable += 1`
     ///
+    /// F1：入口保持 `&mut self` 语义（顶层唯一入口，`stats` 单线程更新）；内部
+    /// `add` 是 `&self`，仍可并发调用但本 fn 主循环串行走 for-loop。
     pub fn visit_location(&mut self, root: &Location, backend: &Arc<dyn Backend>) {
         let mut locs: Vec<Location> = Vec::new();
         for entry_res in backend.walk(root) {
@@ -340,7 +430,7 @@ impl Index {
         });
         for (loc, result) in locs.iter().zip(infos) {
             match result {
-                Ok(info) => _ = self.add(info),
+                Ok(info) => self.add(info),
                 Err(e) => {
                     self.stats.skipped_unreadable += 1;
                     let loc_str = loc.display();
@@ -360,11 +450,15 @@ impl Index {
     /// 并行对每个 indexed 文件用 nom-exif + infer 读取元数据；解析失败的文件被
     /// 静默跳过（"尽力而为"语义）。从不返回错误。
     /// `local_offset` 用于解释 EXIF 内无时区的 NaiveDateTime（相机本地时区）。
+    ///
+    /// F1：`&mut self` 保留供顶层调用感知阶段边界；内部走 `DashMap` 的 `iter_mut`
+    /// 拿各 shard 写锁（rayon `par_bridge` 上转并行 iter，跨 shard 天然无竞争）。
     pub fn parse_exif(&mut self, local_offset: FixedOffset) {
         // 同 visit_location：Exif::open 内调 backend.open_read（远端是整文件
         // 同步下载）是 I/O-bound，包 I/O 池避免阻塞 CPU 池线程。
         install_io(|| {
-            self.files.par_iter_mut().for_each(|(_, info)| {
+            self.files.iter_mut().par_bridge().for_each(|mut kv| {
+                let info = kv.value_mut();
                 if let Ok(e) = exif::Exif::open(info.location(), &info.backend(), local_offset) {
                     info.set_exif(e);
                 }
@@ -378,7 +472,8 @@ impl Index {
         // provider 通常调 backend.read_to_string 读 sidecar（远端 stat + read），
         // 同 visit_location 是 I/O-bound，包 I/O 池。
         install_io(|| {
-            self.files.par_iter_mut().for_each(|(_, info)| {
+            self.files.iter_mut().par_bridge().for_each(|mut kv| {
+                let info = kv.value_mut();
                 let candidates = provider(info.location(), &info.backend());
                 if !candidates.is_empty() {
                     info.add_candidates(candidates);

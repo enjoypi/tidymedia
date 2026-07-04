@@ -1,10 +1,13 @@
 //! copy 主流程编排：扫源建索引 → 解析 EXIF → 循环 `do_copy` → 汇总报告。
 
-use std::collections::HashSet;
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
+use camino::Utf8PathBuf;
 use chrono::FixedOffset;
 use chrono::Offset;
+use dashmap::DashSet;
+use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use time::UtcOffset;
 use tracing::debug;
 use tracing::error;
@@ -15,6 +18,7 @@ use crate::entities::backend::Backend;
 use crate::entities::common;
 use crate::entities::common::{canonical_prefix, under_prefix};
 use crate::entities::file_index::{CandidateProvider, Index, VisitStats};
+use crate::entities::threadpool::install_io;
 use crate::entities::uri::Location;
 use crate::usecases::config::config;
 use crate::usecases::report::{
@@ -110,7 +114,7 @@ pub fn copy_with_sidecar(
     let feature = feature_of(remove);
     let source = build_source_index(sources, &output_prefix, sidecar, feature);
 
-    let total_files = source.files().len();
+    let total_files = source.len();
     let scan_stats = source.stats();
     log_scan_summary(feature, total_files, scan_stats);
 
@@ -292,7 +296,9 @@ fn build_source_index(
     source
 }
 
-// 拆出循环体，让 copy() 保持在 100 行内。
+// F1 分桶并行：按 fast_hash 分桶（BTreeMap 保序）+ 桶内 full_path 字典序，让同
+// hash 组内 winner 顺序在并行下仍可重现；桶间 par_iter 并行执行，桶内串行处理
+// 让 do_copy 的 output_index.exists → add 序列在每桶内保持原有 dedup 语义。
 fn run_copy_loop(
     source: &Index,
     output_loc: &Location,
@@ -301,50 +307,98 @@ fn run_copy_loop(
 ) -> (usize, usize, usize, Vec<ReportError>) {
     let mut output_index = Index::new();
     output_index.visit_location(output_loc, output_backend);
+    // freeze 成 shared &Index：Index 内 DashMap 让 add / exists / contains_target 均
+    // &self 语义，跨 par_iter 边界安全并发。
+    let output_index = output_index;
 
     // 提出宏外：tracing 字段表达式仅在事件被订阅时求值，留在宏内会成为
     // 测试中永不执行的 region，破坏 100% 覆盖率口径。
     let feature = feature_of(opts.remove);
 
-    let mut copied = 0usize;
-    let mut ignored = 0usize;
-    let mut failed = 0usize;
-    let mut errors: Vec<ReportError> = Vec::new();
     // mkdir 缓存：同 {year}/{month} 桶下所有文件共享一次 mkdir_p，远端 backend
     // 单 source 万文件分布 12 个月份只触发 12 次 mkdir_recursive 而非 10000 次。
     // 仅命中已成功路径；mkdir_p 失败的 dir 不入缓存让下次仍尝试创建（避开
-    // 「首次失败永驻 false-positive」陷阱）。
-    let mut mkdir_cache: HashSet<Location> = HashSet::new();
+    // 「首次失败永驻 false-positive」陷阱）。DashSet 让跨 par_iter 边界并发 contains
+    // + insert，双 worker 撞同桶最坏多一次 mkdir_p RTT，mkdir_p 幂等可接受。
+    let mkdir_cache: DashSet<Location> = DashSet::new();
 
-    // HashMap.values() 迭代顺序受哈希种子影响；move 模式下两份同 hash 源文件,
-    // 哪份留下哪份删随版本/进程变化致结果不可重现。按 full_path 排序后迭代保证
-    // 同输入同输出，便于审计回放和测试断言。
-    //
-    // TODO(perf): 主循环当前完全串行，远端 backend 场景 10K 文件 × ~50ms RTT × 3-4
-    // 次 IO ≈ 30 min 纯网络阻塞。output_index / mkdir_cache 是共享 &mut 阻止 rayon
-    // par_iter；按 archive 桶（year/month）分组后组间并行（每组独立 target_dir_loc
-    // + 独立 unique-name 空间）可安全并行，8 路预期 wall time 减 75%。改动跨
-    // output_index 状态模型（HashMap → DashMap 或每桶 shard），非本次重构范围。
-    let mut entries: Vec<_> = source.files().values().collect();
-    entries.sort_by(|a, b| a.full_path.cmp(&b.full_path));
+    // Phase A：按 fast_hash 分桶 + 桶内 full_path 字典序。同 fast_hash 组内的 winner
+    // 顺序（谁先入 output_index → 后续同 hash src 命中 exists → ignored）由此串行序
+    // 决定，跨桶无 hash 交互可安全并行。BTreeMap 遍历顺序按 u64 升序确定，让
+    // groups 索引可重现。
+    let mut by_hash: BTreeMap<u64, Vec<Utf8PathBuf>> = BTreeMap::new();
+    for kv in source.iter() {
+        by_hash
+            .entry(kv.value().fast_hash)
+            .or_default()
+            .push(kv.key().clone());
+    }
+    for g in by_hash.values_mut() {
+        g.sort();
+    }
+    let groups: Vec<Vec<Utf8PathBuf>> = by_hash.into_values().collect();
 
-    for src in entries {
+    // Phase B：桶间 par_iter 并行；每桶内串行处理，reduce 汇总 CopyDelta。
+    // install_io 让循环走 I/O 池（CPU×4 clamp[8,64]）；do_copy 内的远端 open_read /
+    // mkdir_p / rename 是同步阻塞 IO，走全局 rayon 池会挤占 CPU-bound 阶段。
+    let delta = install_io(|| {
+        groups
+            .par_iter()
+            .map(|grp| {
+                process_group(
+                    grp,
+                    source,
+                    &output_index,
+                    &mkdir_cache,
+                    opts,
+                    output_loc,
+                    output_backend,
+                    feature,
+                )
+            })
+            .reduce(CopyDelta::default, CopyDelta::merge)
+    });
+
+    (delta.copied, delta.ignored, delta.failed, delta.errors)
+}
+
+/// 单个 `fast_hash` 桶内的串行处理。桶间调用者并行，桶内保持字典序遍历让
+/// dedup 语义（先入者留，后入者 ignored）确定性。
+#[expect(
+    clippy::too_many_arguments,
+    reason = "桶内串行需要 caller 的全部并行上下文透传；折结构体反让 par_iter 闭包更绕"
+)]
+fn process_group(
+    grp: &[Utf8PathBuf],
+    source: &Index,
+    output_index: &Index,
+    mkdir_cache: &DashSet<Location>,
+    opts: &CopyOpts<'_>,
+    output_loc: &Location,
+    output_backend: &Arc<dyn Backend>,
+    feature: &'static str,
+) -> CopyDelta {
+    let mut local = CopyDelta::default();
+    for key in grp {
+        // grp 内 key 来自本次 build_source_index 后 source.iter() 的 snapshot；
+        // 本 fn 运行期间无人 remove，`.get()` 必 Some。若真 None 表示 Index 状态破坏，
+        // 内部 bug 直接 panic 让上游可查（CLAUDE.md「不可达用 `.expect("internal: ...")`」）。
+        let kv = source
+            .get(key.as_path())
+            .expect("internal: fast_hash group key must resolve in source snapshot");
+        let src = kv.value();
         match do_copy(
             src,
             output_loc,
             output_backend,
-            &mut output_index,
-            &mut mkdir_cache,
+            output_index,
+            mkdir_cache,
             opts,
         ) {
-            Ok(true) => {
-                copied += 1;
-            }
-            Ok(false) => {
-                ignored += 1;
-            }
+            Ok(true) => local.copied += 1,
+            Ok(false) => local.ignored += 1,
             Err(e) => {
-                failed += 1;
+                local.failed += 1;
                 let msg = e.to_string();
                 error!(
                     feature,
@@ -356,14 +410,34 @@ fn run_copy_loop(
                     error = %msg,
                     "copy item failed"
                 );
-                errors.push(ReportError {
+                local.errors.push(ReportError {
                     path: src.full_path.to_string(),
                     message: msg,
                 });
             }
         }
     }
-    (copied, ignored, failed, errors)
+    local
+}
+
+/// `par_iter` map-reduce 汇总项：每 worker 局部累加避免全局 `Mutex` 串行化；
+/// rayon tree-reduce 归并到根，`errors` 用 `Vec::extend` 拼接。
+#[derive(Default)]
+struct CopyDelta {
+    copied: usize,
+    ignored: usize,
+    failed: usize,
+    errors: Vec<ReportError>,
+}
+
+impl CopyDelta {
+    fn merge(mut a: Self, b: Self) -> Self {
+        a.copied += b.copied;
+        a.ignored += b.ignored;
+        a.failed += b.failed;
+        a.errors.extend(b.errors);
+        a
+    }
 }
 
 // 构造 CopyReport 值对象；抽出避免参数列表过长。

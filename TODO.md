@@ -57,12 +57,12 @@
 
 ### 待新会话（按 ROI 排序）
 
-#### F1 `run_copy_loop` 并行化（~2h，最大 ROI）
-- `Index` 内 `HashMap` 改 `DashMap<Utf8PathBuf, Info>` + `DashMap<u64, DashSet<Utf8PathBuf>>`；`Index::exists` / `add` / `remove_under_prefix` 全 `&self`
-- `do_copy` 改接 `&Index` 共享；`run_copy_loop` 用 `install_io(|| entries.par_iter().map(do_copy))`
-- `mkdir_cache` 改 `DashSet<Location>`
-- 警惕：move 模式 winner 顺序需仍按 `full_path` 字典序保证可重现
-- 测试 `run_copy_loop_parallel_correctness`（10 文件并发结果与串行等价）
+#### ~~F1 `run_copy_loop` 并行化~~（已完成 2026-07-04）
+- [x] `Index` 内 `HashMap` 改 `DashMap<Utf8PathBuf, Info>` + `DashMap<u64, Mutex<HashSet<Utf8PathBuf>>>`（内嵌 `DashSet` 有同 shard 递归死锁风险，issue #79）；`Index::exists` / `add` / `remove_under_prefix` 全 `&self`
+- [x] `do_copy` 改接 `&Index` + `&DashSet<Location> mkdir_cache`；`run_copy_loop` 用 `install_io(|| groups.par_iter().reduce(CopyDelta::merge))`
+- [x] Phase A 按 `fast_hash` 分桶 + 桶内 `full_path` 字典序 → 同 hash 组 winner 确定性；桶间并行、桶内串行
+- [x] 测试 `run_copy_loop_parallel_correctness_deterministic`（10 轮独立跑断言 (10 copied, 5 ignored, 0 failed) 稳定）+ `run_copy_loop_dedup_produces_single_winner_deterministically` + `add_concurrent_lands_all_entries_and_groups_by_fast_hash` + `add_concurrent_same_fast_hash_bucket_holds_all_paths` + `remove_under_prefix_concurrent_with_readers_does_not_deadlock`
+- [x] 严格覆盖率 4 项与 main HEAD 基线完全对齐（21 region miss 全在 main 已有 miss 文件：naming.rs / crop.rs / group_writer.rs / uri.rs / config.rs，未引入新 miss）
 
 #### F3 合并 Info::open + Exif::open + sniff_mime（~3h）
 - 新 `Info::open_full(loc, backend, with_exif: bool)`：单次 `open_read` → `fast_hash_stream` + 头 64 KiB head buffer + `sniff_mime`（前 256 B）+ `secure_hash_stream`（同流 sha-512）
@@ -120,7 +120,7 @@
 - 加 `system_time_to_offsetdatetime` 三段守护的单元测试：`SystemTime::UNIX_EPOCH + Duration::from_secs(u64::MAX)` / `SystemTime::UNIX_EPOCH - Duration::from_secs(1)` 触发各 arm 返 None
 
 ### 落地建议
-1. 先做 F1（解锁 N 倍吞吐，其他 fix 的 RTT 缩减才被并行放大见效）
+1. ~~先做 F1~~（已完成 2026-07-04）
 2. F3 + F10 一起做（共享 cache 基础设施）
 3. F5 / F6 / F9 / F15 / F16 一并改 RemoteClient trait（避免多次破坏；F15+F16 复用同一批 backend override 骨架）
 4. 落地后跑 Linux + `--all-features` `cargo +nightly llvm-cov --branch` 严格 4 项 100% 验证

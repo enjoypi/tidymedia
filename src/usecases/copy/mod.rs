@@ -42,3 +42,7 @@ mod generate_tests;
 #[cfg(test)]
 #[path = "copy_overlap_tests.rs"]
 mod overlap_tests;
+
+#[cfg(test)]
+#[path = "copy_parallel_tests.rs"]
+mod parallel_tests;

@@ -137,12 +137,12 @@ fn do_copy_stream_failure_removes_partial_target() {
     fake.inject_reader_error(src_loc, std::io::ErrorKind::TimedOut);
 
     let out = tempdir().unwrap();
-    let mut idx = crate::entities::file_index::Index::new();
+    let idx = crate::entities::file_index::Index::new();
     let err = do_copy(
         &info,
         &local_loc(out.path()),
         &local_arc(),
-        &mut idx,
+        &idx,
         &default_opts(DEFAULT_TMPL),
     )
     .expect_err("stream copy must fail");
@@ -172,12 +172,12 @@ fn do_copy_propagates_stream_open_read_error() {
     );
 
     let out = tempdir().unwrap();
-    let mut idx = crate::entities::file_index::Index::new();
+    let idx = crate::entities::file_index::Index::new();
     let err = do_copy(
         &info,
         &local_loc(out.path()),
         &local_arc(),
-        &mut idx,
+        &idx,
         &default_opts(DEFAULT_TMPL),
     )
     .expect_err("stream_copy open_read must propagate Err");
@@ -212,12 +212,12 @@ fn do_copy_errors_when_unique_name_exhausted() {
     let info = make_media_info(src.path(), "photo.png");
     let out = tempdir().unwrap();
     fill_collisions(&out.path().join("2024").join("01"));
-    let mut idx = crate::entities::file_index::Index::new();
+    let idx = crate::entities::file_index::Index::new();
     let err = do_copy(
         &info,
         &local_loc(out.path()),
         &local_arc(),
-        &mut idx,
+        &idx,
         &default_opts(DEFAULT_TMPL),
     )
     .expect_err("must error after collisions");
@@ -247,14 +247,14 @@ fn do_copy_dry_run_reports_target_but_writes_nothing() {
     let src = tempdir().unwrap();
     let info = make_media_info(src.path(), "photo.png");
     let out = tempdir().unwrap();
-    let mut idx = crate::entities::file_index::Index::new();
+    let idx = crate::entities::file_index::Index::new();
     let opts = CopyOpts {
         dry_run: true,
         remove: false,
         include_non_media: false,
         template: DEFAULT_TMPL,
     };
-    let did_copy = do_copy(&info, &local_loc(out.path()), &local_arc(), &mut idx, &opts).unwrap();
+    let did_copy = do_copy(&info, &local_loc(out.path()), &local_arc(), &idx, &opts).unwrap();
     assert!(did_copy);
     assert_eq!(fs::read_dir(out.path()).unwrap().count(), 0);
 }

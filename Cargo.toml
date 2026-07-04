@@ -38,6 +38,7 @@ camino = { version = "1.2", features = ["serde1"] }
 cfb = "0.7"
 chrono = "0.4"
 clap = { version = "4.6", features = ["derive"] }
+dashmap = "6"
 generic-array = "0"
 hex = "0.4"
 ignore = "0.4"

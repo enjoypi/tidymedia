@@ -69,7 +69,7 @@ mod test_advanced {
 
         let info_src = Info::from(src_path.to_str().unwrap()).unwrap();
 
-        let mut idx = crate::entities::file_index::Index::new();
+        let idx = crate::entities::file_index::Index::new();
         idx.insert(indexed_path.to_str().unwrap()).unwrap();
         fs::remove_file(&indexed_path).unwrap();
 
@@ -78,7 +78,7 @@ mod test_advanced {
             &info_src,
             &out_dir,
             &local_arc(),
-            &mut idx,
+            &idx,
             &default_opts(DEFAULT_TMPL),
         )
         .unwrap_err();
@@ -96,7 +96,7 @@ mod test_advanced {
         let png_path = tc::copy_png_to(&src_parent, "photo.png").unwrap();
         let info = Info::from(png_path.to_str().unwrap()).unwrap();
 
-        let mut idx = crate::entities::file_index::Index::new();
+        let idx = crate::entities::file_index::Index::new();
         idx.insert(png_path.to_str().unwrap()).unwrap();
 
         let mut perms = fs::metadata(&src_parent).unwrap().permissions();
@@ -111,7 +111,7 @@ mod test_advanced {
             include_non_media: false,
             template: DEFAULT_TMPL,
         };
-        let res = do_copy(&info, &out_dir, &local_arc(), &mut idx, &opts);
+        let res = do_copy(&info, &out_dir, &local_arc(), &idx, &opts);
 
         perms.set_mode(original_mode);
         fs::set_permissions(&src_parent, perms).unwrap();
@@ -126,12 +126,12 @@ mod test_advanced {
         let info = make_media_info(src.path(), "photo.png");
         let out = tempdir().unwrap();
         fs::write(out.path().join("2024"), b"i am a file").unwrap();
-        let mut idx = crate::entities::file_index::Index::new();
+        let idx = crate::entities::file_index::Index::new();
         let err = do_copy(
             &info,
             &local_loc(out.path()),
             &local_arc(),
-            &mut idx,
+            &idx,
             &default_opts(DEFAULT_TMPL),
         )
         .unwrap_err();
@@ -152,12 +152,12 @@ mod test_advanced {
         fs::set_permissions(info.full_path.as_str(), perms.clone()).unwrap();
 
         let out = tempdir().unwrap();
-        let mut idx = crate::entities::file_index::Index::new();
+        let idx = crate::entities::file_index::Index::new();
         let res = do_copy(
             &info,
             &local_loc(out.path()),
             &local_arc(),
-            &mut idx,
+            &idx,
             &default_opts(DEFAULT_TMPL),
         );
 
@@ -182,7 +182,7 @@ mod test_advanced {
 
         let out = root.path().join("out");
         fs::create_dir(&out).unwrap();
-        let mut idx = crate::entities::file_index::Index::new();
+        let idx = crate::entities::file_index::Index::new();
 
         let mut perms = fs::metadata(&src_parent).unwrap().permissions();
         let original_mode = perms.mode();
@@ -195,7 +195,7 @@ mod test_advanced {
             include_non_media: false,
             template: DEFAULT_TMPL,
         };
-        let res = do_copy(&info, &local_loc(&out), &local_arc(), &mut idx, &opts);
+        let res = do_copy(&info, &local_loc(&out), &local_arc(), &idx, &opts);
 
         perms.set_mode(original_mode);
         fs::set_permissions(&src_parent, perms).unwrap();
@@ -252,14 +252,14 @@ mod test_advanced {
         let out = tempdir().unwrap();
         let info = Info::from(src.path().join("doc.txt").to_str().unwrap()).unwrap();
         assert!(!info.is_media());
-        let mut idx = crate::entities::file_index::Index::new();
+        let idx = crate::entities::file_index::Index::new();
         let opts = CopyOpts {
             dry_run: false,
             remove: false,
             include_non_media: true,
             template: DEFAULT_TMPL,
         };
-        let did = do_copy(&info, &local_loc(out.path()), &local_arc(), &mut idx, &opts).unwrap();
+        let did = do_copy(&info, &local_loc(out.path()), &local_arc(), &idx, &opts).unwrap();
         assert!(did, "non-media must be copied when include_non_media=true");
     }
 
@@ -270,12 +270,12 @@ mod test_advanced {
         fs::write(src.path().join("doc.txt"), b"plain document").unwrap();
         let out = tempdir().unwrap();
         let info = Info::from(src.path().join("doc.txt").to_str().unwrap()).unwrap();
-        let mut idx = crate::entities::file_index::Index::new();
+        let idx = crate::entities::file_index::Index::new();
         let did = do_copy(
             &info,
             &local_loc(out.path()),
             &local_arc(),
-            &mut idx,
+            &idx,
             &default_opts(DEFAULT_TMPL),
         )
         .unwrap();
@@ -375,13 +375,13 @@ mod test_advanced {
 
         let src_dir = tempdir().unwrap();
         let info = make_media_info(src_dir.path(), "photo.png");
-        let mut idx = crate::entities::file_index::Index::new();
+        let idx = crate::entities::file_index::Index::new();
 
         let err = do_copy(
             &info,
             &local_loc(out_dir.path()),
             &local_arc(),
-            &mut idx,
+            &idx,
             &default_opts(DEFAULT_TMPL),
         )
         .unwrap_err();
@@ -410,13 +410,13 @@ mod test_advanced {
         // 让 open_write target 失败 → stream_copy 内 `if let Err(e) = result` 触发
         fake_out.inject_error(target_loc, Op::OpenWrite, ErrorKind::PermissionDenied);
 
-        let mut idx = crate::entities::file_index::Index::new();
+        let idx = crate::entities::file_index::Index::new();
         let backend_arc: std::sync::Arc<dyn Backend> = fake_out;
         let err = do_copy(
             &info,
             &out_loc,
             &backend_arc,
-            &mut idx,
+            &idx,
             &default_opts(DEFAULT_TMPL),
         )
         .unwrap_err();
@@ -442,13 +442,13 @@ mod test_advanced {
         let target_loc = Location::Local(Utf8PathBuf::from("/fake_out/2024/01/photo.png"));
         fake_out.inject_error(target_loc, Op::OpenRead, ErrorKind::Interrupted);
 
-        let mut idx = crate::entities::file_index::Index::new();
+        let idx = crate::entities::file_index::Index::new();
         let backend_arc: std::sync::Arc<dyn Backend> = fake_out;
         let ok = do_copy(
             &info,
             &out_loc,
             &backend_arc,
-            &mut idx,
+            &idx,
             &default_opts(DEFAULT_TMPL),
         )
         .expect("dst OpenRead Err 不再阻断 copy（cloned_at 路径零 IO）");
@@ -480,7 +480,7 @@ mod test_advanced {
         };
         fake_out.add_dir(out_loc.clone());
 
-        let mut idx = crate::entities::file_index::Index::new();
+        let idx = crate::entities::file_index::Index::new();
         let backend_arc: Arc<dyn Backend> = fake_out;
         let opts = CopyOpts {
             dry_run: false,
@@ -488,7 +488,7 @@ mod test_advanced {
             include_non_media: false,
             template: DEFAULT_TMPL,
         };
-        let ok = do_copy(&info, &out_loc, &backend_arc, &mut idx, &opts).unwrap();
+        let ok = do_copy(&info, &out_loc, &backend_arc, &idx, &opts).unwrap();
         assert!(ok, "stream_copy should succeed");
         assert!(
             !src_path.exists(),

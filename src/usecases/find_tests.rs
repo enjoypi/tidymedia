@@ -199,7 +199,7 @@ fn search_same_preserves_distinct_groups_with_identical_size() {
     let b1 = make("b1.bin", b'B');
     let b2 = make("b2.bin", b'B');
 
-    let mut idx = crate::entities::file_index::Index::new();
+    let idx = crate::entities::file_index::Index::new();
     idx.insert(a1.to_str().unwrap()).unwrap();
     idx.insert(a2.to_str().unwrap()).unwrap();
     idx.insert(b1.to_str().unwrap()).unwrap();
