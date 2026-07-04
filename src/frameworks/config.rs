@@ -189,6 +189,11 @@ fn sanitize_ocr(ocr: &mut OcrConfig) {
         );
         ocr.resize_max_side = defaults.resize_max_side;
     }
+    sanitize_max_image_bytes_field(
+        &mut ocr.max_image_bytes,
+        defaults.max_image_bytes,
+        "backend.ocr.max_image_bytes",
+    );
 }
 
 // 开区间 (0.0, 1.0) 内的有限正数。NaN/Inf 均通过 `is_finite()` 拒绝。
@@ -267,24 +272,29 @@ fn sanitize_face(face: &mut FaceConfig) {
     );
     sanitize_face_weight(&mut face.w_blink, defaults.w_blink, "backend.face.w_blink");
     sanitize_face_weight(&mut face.w_smile, defaults.w_smile, "backend.face.w_smile");
-    sanitize_max_image_bytes(face, &defaults);
+    sanitize_max_image_bytes_field(
+        &mut face.max_image_bytes,
+        defaults.max_image_bytes,
+        "backend.face.max_image_bytes",
+    );
 }
 
-// max_image_bytes 太小会让所有图都被判超限跳过整个 cull pipeline；
+// max_image_bytes 太小会让所有图都被判超限跳过整个 pipeline；
 // 1 MiB 以下没有业务场景（JPEG 缩略图都 > 100 KiB），统一收紧到 ≥ 1 MiB。
-fn sanitize_max_image_bytes(face: &mut FaceConfig, defaults: &FaceConfig) {
+// ocr 与 face 共用同一门限：max_image_bytes 语义（防单文件 OOM）与业务无关。
+fn sanitize_max_image_bytes_field(value: &mut u64, fallback: u64, field: &str) {
     const MIN_IMAGE_BYTES: u64 = 1024 * 1024;
-    if face.max_image_bytes < MIN_IMAGE_BYTES {
+    if *value < MIN_IMAGE_BYTES {
         warn!(
             feature = "config",
             operation = "sanitize",
             result = "invalid_value",
-            field = "backend.face.max_image_bytes",
-            value = face.max_image_bytes,
-            fallback = defaults.max_image_bytes,
+            field,
+            value = *value,
+            fallback,
             "max_image_bytes must be >= 1 MiB; falling back to default"
         );
-        face.max_image_bytes = defaults.max_image_bytes;
+        *value = fallback;
     }
 }
 

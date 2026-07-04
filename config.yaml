@@ -43,6 +43,9 @@ backend:
     min_text_pixel_ratio: ${TIDYMEDIA_OCR_MIN_RATIO:-0.005}
     # 推理前 resize 的短边像素上限；实际按 32 倍数对齐
     resize_max_side: ${TIDYMEDIA_OCR_MAX_SIDE:-736}
+    # 单文件字节上限（防 OOM）；超此值的图 walk 阶段直接 skip 计入 skipped_too_large
+    # 默认 50 MiB = 52428800 字节；文档扫描类大图可调高
+    max_image_bytes: ${TIDYMEDIA_OCR_MAX_BYTES:-52428800}
   # cull 子命令的人脸质量评分后端
   # 4 个 ONNX 模型路径 + pHash/清晰度/EAR 阈值 + 综合评分权重
   # 模型走 git-lfs 存放在 models/，clone 后 `git lfs pull` 拉取；

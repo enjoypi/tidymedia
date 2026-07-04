@@ -72,7 +72,9 @@ fn dispatch_ok_path_writes_report_when_source_has_no_image() {
     })
     .expect("空 source 即无 image 调用，build_detector 懒加载不报错");
     let contents = fs::read_to_string(&report_path).expect("report should be written");
-    assert!(contents.contains("\"scanned\": 0"), "got: {contents}");
+    // scanned 计入 walker 触达 entry（含 tempdir 自身 Dir）；tempdir 空 → 至少 1（root）
+    // 空 source 期望：无 image_files 命中、无 moved
+    assert!(contents.contains("\"image_files\": 0"), "got: {contents}");
     assert!(contents.contains("\"moved\": 0"), "got: {contents}");
 }
 

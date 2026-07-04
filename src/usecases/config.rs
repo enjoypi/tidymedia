@@ -179,6 +179,9 @@ pub struct OcrConfig {
     pub min_text_pixel_ratio: f32,
     /// 推理前 resize 的短边像素上限；DBNet 要求 32 倍数（实际 resize 时按 32 对齐）。
     pub resize_max_side: u32,
+    /// 单文件字节上限；超过此值的图 walk 阶段直接 skip 计入 `skipped_too_large`（防 OOM）。
+    /// 默认 50 MiB，覆盖典型手机/相机截图 + 适度裕度；文档扫描类大图需自行调高。
+    pub max_image_bytes: u64,
 }
 
 impl Default for OcrConfig {
@@ -188,6 +191,7 @@ impl Default for OcrConfig {
             binarize_threshold: 0.3,
             min_text_pixel_ratio: 0.005,
             resize_max_side: 736,
+            max_image_bytes: 50 * 1024 * 1024,
         }
     }
 }
@@ -300,6 +304,7 @@ mod tests {
         assert!((c.backend.ocr.binarize_threshold - 0.3).abs() < f32::EPSILON);
         assert!((c.backend.ocr.min_text_pixel_ratio - 0.005).abs() < f32::EPSILON);
         assert_eq!(c.backend.ocr.resize_max_side, 736);
+        assert_eq!(c.backend.ocr.max_image_bytes, 50 * 1024 * 1024);
         assert_eq!(c.backend.face.scrfd_model_path, "");
         assert!((c.backend.face.scrfd_score_threshold - 0.5).abs() < f32::EPSILON);
         assert!((c.backend.face.scrfd_nms_iou - 0.4).abs() < f32::EPSILON);

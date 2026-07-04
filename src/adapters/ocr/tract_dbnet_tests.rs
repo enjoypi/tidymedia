@@ -47,6 +47,7 @@ fn cfg() -> OcrConfig {
         binarize_threshold: 0.3,
         min_text_pixel_ratio: 0.005,
         resize_max_side: 736,
+        max_image_bytes: 50 * 1024 * 1024,
     }
 }
 

@@ -390,6 +390,19 @@ fn load_sanitizes_midrange_max_image_bytes_to_default() {
 }
 
 #[test]
+fn load_sanitizes_undersized_ocr_max_image_bytes_to_default() {
+    // OcrConfig.max_image_bytes 走同一 `sanitize_max_image_bytes_field` helper
+    // 命中 face 独立分支的镜像口径：< 1 MiB 回退到 OcrConfig 默认 50 MiB。
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("ocr_max_bytes_small.yaml");
+    std::fs::write(&path, "backend:\n  ocr:\n    max_image_bytes: 512\n").unwrap();
+    set_env_var("TIDYMEDIA_CONFIG", path.to_str().unwrap());
+    let cfg = load();
+    assert_eq!(cfg.backend.ocr.max_image_bytes, 50 * 1024 * 1024);
+    remove_env_var("TIDYMEDIA_CONFIG");
+}
+
+#[test]
 fn load_keeps_valid_face_fields_unchanged() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("face_ok.yaml");
