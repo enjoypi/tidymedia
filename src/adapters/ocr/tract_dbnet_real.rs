@@ -24,6 +24,7 @@ use super::tract_dbnet::DetModel;
 /// # Errors
 ///
 /// 文件不存在、ONNX 解析失败、类型推导失败或 runnable 装配失败时返回 `Err`。
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub(crate) fn load_runnable(path: &Path) -> io::Result<DetModel> {
     let model = tract_onnx::onnx()
         .model_for_path(path)

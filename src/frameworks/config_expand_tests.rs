@@ -131,6 +131,27 @@ fn expand_env_strips_yaml_unsafe_bytes_from_env_value() {
 }
 
 #[test]
+fn expand_env_strips_non_lf_control_chars() {
+    // \x01 / \x1F 不是 \n/\r/\0 → 需走 `(b < 0x20 && b != b'\t')` True 分支
+    // 覆盖 yaml_unsafe_byte L436 与 yaml_unsafe_char L440 的 && sub-branch。
+    set_env_var("TIDYMEDIA_TEST_INJECT_CTRL_Y", "abc\x01de\x1ffg");
+    let out = expand_env("v: ${TIDYMEDIA_TEST_INJECT_CTRL_Y:-default}");
+    assert!(!out.contains('\x01'), "0x01 应被 strip：{out:?}");
+    assert!(!out.contains('\x1f'), "0x1f 应被 strip：{out:?}");
+    assert!(out.contains("abcdefg"), "非控制字节保留：{out:?}");
+    remove_env_var("TIDYMEDIA_TEST_INJECT_CTRL_Y");
+}
+
+#[test]
+fn expand_env_preserves_tab_which_is_yaml_safe_control() {
+    // \t 是控制字符但 yaml_unsafe_char 明确豁免；覆盖 && 中 `c != b'\t'` False 分支。
+    set_env_var("TIDYMEDIA_TEST_INJECT_TAB_Y", "a\tb");
+    let out = expand_env("v: ${TIDYMEDIA_TEST_INJECT_TAB_Y:-default}");
+    assert!(out.contains("a\tb"), "TAB 应保留：{out:?}");
+    remove_env_var("TIDYMEDIA_TEST_INJECT_TAB_Y");
+}
+
+#[test]
 fn expand_env_max_depth_emits_literal_to_break_recursion() {
     // 32 层嵌套不该爆栈。expand_env 深度封顶让超界返字面量。
     let mut nested = String::from("x");

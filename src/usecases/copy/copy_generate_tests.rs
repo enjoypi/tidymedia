@@ -184,6 +184,74 @@ fn do_copy_propagates_stream_open_read_error() {
     let _ = err;
 }
 
+// file_name() 缺失（Local path=`/`）走 Ok(None) 而非 expect panic。
+// 覆盖 naming.rs L30-31 let-else 早返分支。用 FakeBackend 承载纯 `/`
+// 让 metadata 视为 file（LocalBackend 上 `/` 是目录会被 ensure_hashable 拒绝）。
+#[test]
+fn generate_unique_name_returns_none_when_full_path_has_no_file_name() {
+    let be = Arc::new(crate::FakeBackend::new("local"));
+    let root_loc = Location::Local(Utf8PathBuf::from("/"));
+    be.add_file(root_loc.clone(), b"data".to_vec());
+    let info = Info::open(&root_loc, Arc::clone(&be) as Arc<dyn Backend>).unwrap();
+    // Path::new("/").file_name() = None → generate_unique_name 早返 Ok(None)
+    assert_eq!(info.full_path.as_str(), "/");
+    let out = tempdir().unwrap();
+    let res = generate_unique_name(
+        &info,
+        &local_loc(out.path()),
+        &local_arc(),
+        DEFAULT_TMPL,
+        &Index::new(),
+    )
+    .unwrap();
+    assert!(res.is_none(), "无 file_name 应早返 Ok(None)");
+}
+
+// output_index 已含目标 target → naming 跳过原名走 _1 后缀分支。
+// 覆盖 naming.rs L93-94 continue 分支：同 basename+同月+不同 hash 场景。
+#[test]
+fn generate_unique_name_skips_target_when_index_already_contains_it() {
+    let src = tempdir().unwrap();
+    let info = make_media_info(src.path(), "photo.png");
+    let out = tempdir().unwrap();
+    // out/1970/01/photo.png 目录不存在（真跑 fs::exists → false）
+    // 但索引提前 add 该 target → naming 应跳到 _1 后缀
+    let idx = Index::new();
+    // copy_png_to 钉 FIXED_MEDIA_MTIME=2024-01-01 00:00:00 UTC+8 → 桶 2024/01
+    let sentinel = Location::Local(Utf8PathBuf::from(
+        out.path()
+            .join("2024")
+            .join("01")
+            .join("photo.png")
+            .to_str()
+            .unwrap(),
+    ));
+    // 用 add_raw 或直接构造：Index::add 需要 Info；测试用 API 有 contains_target 但无
+    // 直接 add(Location) 入口 → 走 Info::cloned_at 或 add 完整 Info。
+    // 简洁做法：add 一个 Info 其 location=sentinel（用 FakeBackend 承载）。
+    let be = Arc::new(crate::FakeBackend::new("local"));
+    be.add_file(sentinel.clone(), b"aaa".to_vec());
+    let sentinel_info = Info::open(&sentinel, Arc::clone(&be) as Arc<dyn Backend>).unwrap();
+    idx.add(sentinel_info);
+    // 索引确已含 sentinel target
+    assert!(idx.contains_target(&sentinel));
+
+    let (_, target) = generate_unique_name(
+        &info,
+        &local_loc(out.path()),
+        &local_arc(),
+        DEFAULT_TMPL,
+        &idx,
+    )
+    .unwrap()
+    .expect("unique name should be generated");
+    let target_str = target.display();
+    assert!(
+        target_str.ends_with("photo_1.png"),
+        "应跳过被 index 占用的原名，got {target_str}"
+    );
+}
+
 // exists 的 IO 错误必须传播而非被当作"不存在"：吞错会让 stream_copy 覆盖已存在目标。
 #[test]
 fn generate_unique_name_propagates_exists_error() {

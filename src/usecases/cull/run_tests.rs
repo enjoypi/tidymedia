@@ -812,3 +812,107 @@ fn cull_skips_face_when_embedder_returns_err() {
     assert_eq!(report.scanned, 2);
     assert_eq!(report.best_count, 1);
 }
+
+// ── crop::total_cmp_nan_as_neg_inf 4 arm 覆盖 ────────────────────────────
+#[test]
+fn total_cmp_nan_as_neg_inf_covers_all_arms() {
+    use std::cmp::Ordering;
+    assert_eq!(
+        total_cmp_nan_as_neg_inf(f32::NAN, f32::NAN),
+        Ordering::Equal
+    );
+    assert_eq!(total_cmp_nan_as_neg_inf(f32::NAN, 1.0), Ordering::Less);
+    assert_eq!(total_cmp_nan_as_neg_inf(1.0, f32::NAN), Ordering::Greater);
+    assert_eq!(total_cmp_nan_as_neg_inf(1.0, 2.0), Ordering::Less);
+}
+
+// ── filter_blurry 早返与 NaN 保留 ────────────────────────────────────
+fn make_scanned(sharpness: f32) -> ScannedFile {
+    ScannedFile {
+        src_loc: local_loc("/x"),
+        src_backend: LocalBackend::arc(),
+        source_root: local_loc("/"),
+        hash: 0,
+        sharpness,
+    }
+}
+
+#[test]
+fn filter_blurry_early_returns_when_min_not_finite() {
+    let scanned = [make_scanned(50.0), make_scanned(200.0)];
+    let (kept, dropped) = filter_blurry(&[0, 1], &scanned, f32::NAN);
+    assert_eq!(kept, vec![0, 1]);
+    assert_eq!(dropped, 0);
+}
+
+#[test]
+fn filter_blurry_early_returns_when_min_non_positive() {
+    let scanned = [make_scanned(50.0), make_scanned(200.0)];
+    let (kept, dropped) = filter_blurry(&[0, 1], &scanned, 0.0);
+    assert_eq!(kept, vec![0, 1]);
+    assert_eq!(dropped, 0);
+}
+
+#[test]
+fn filter_blurry_drops_below_min_keeps_nan_and_ge_min() {
+    let scanned = [
+        make_scanned(200.0),
+        make_scanned(50.0),
+        make_scanned(f32::NAN),
+    ];
+    let (kept, dropped) = filter_blurry(&[0, 1, 2], &scanned, 100.0);
+    assert_eq!(kept, vec![0, 2]);
+    assert_eq!(dropped, 1);
+}
+
+// ── analyze_image Err arm：read_all Err / decode Err ────────────────
+fn call_analyze_image(item: &ScannedFile, failures: &mut Vec<(String, io::Error)>) -> Option<()> {
+    let scrfd = FakeFaceDetector::new(vec![]);
+    let facenet = FakeFaceEmbedder::new([0.0; 128]);
+    let facemesh = FakeFaceMeshDetector::new(vec![[0.0; 3]; 468]);
+    let eyestate = FakeEyeStateClassifier::new(0.0);
+    let face_cfg = &crate::usecases::config::config().backend.face;
+    analyze_image(
+        item, &scrfd, &facenet, &facemesh, &eyestate, face_cfg, failures,
+    )
+    .map(|_| ())
+}
+
+#[test]
+fn analyze_image_records_failure_on_read_all_err() {
+    let fake = Arc::new(FakeBackend::new("smb"));
+    let loc = smb_loc("/src/x.png");
+    fake.add_file(loc.clone(), b"whatever".to_vec());
+    fake.inject_reader_error(loc.clone(), io::ErrorKind::TimedOut);
+    let item = ScannedFile {
+        src_loc: loc,
+        src_backend: fake as Arc<dyn Backend>,
+        source_root: smb_loc("/src"),
+        hash: 0,
+        sharpness: 100.0,
+    };
+    let mut failures = Vec::new();
+    let out = call_analyze_image(&item, &mut failures);
+    assert!(out.is_none());
+    assert_eq!(failures.len(), 1);
+    assert!(failures[0].1.to_string().contains("timed out"));
+}
+
+#[test]
+fn analyze_image_records_failure_on_decode_err() {
+    let fake = Arc::new(FakeBackend::new("smb"));
+    let loc = smb_loc("/src/y.png");
+    fake.add_file(loc.clone(), b"not-image-bytes".to_vec());
+    let item = ScannedFile {
+        src_loc: loc,
+        src_backend: fake as Arc<dyn Backend>,
+        source_root: smb_loc("/src"),
+        hash: 0,
+        sharpness: 100.0,
+    };
+    let mut failures = Vec::new();
+    let out = call_analyze_image(&item, &mut failures);
+    assert!(out.is_none());
+    assert_eq!(failures.len(), 1);
+    assert!(failures[0].1.to_string().contains("decode image"));
+}

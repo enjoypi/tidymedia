@@ -447,21 +447,28 @@ impl<A: RemoteAdapter> std::fmt::Debug for RemoteBufferedWriter<A> {
     }
 }
 
+/// buffer 上限守卫抽独立 helper：`Vec<u8>` 塞 2 GiB 才触上限，测试无法真分配，
+/// 抽 `check_buffer_size(current, incoming)` 让上限判定纯逻辑可单测直触发。
+fn check_buffer_size(current: u64, incoming: u64) -> io::Result<()> {
+    let new_len = current.saturating_add(incoming);
+    if new_len > MAX_REMOTE_WRITE_BUFFER {
+        return Err(io::Error::new(
+            io::ErrorKind::OutOfMemory,
+            format!(
+                "remote write buffer exceeds {MAX_REMOTE_WRITE_BUFFER} bytes limit \
+                 (client.write is not streaming; single-file byte total capped to avoid OOM)"
+            ),
+        ));
+    }
+    Ok(())
+}
+
 impl<A: RemoteAdapter> io::Write for RemoteBufferedWriter<A> {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         // 远端 client.write 一次性提交，buffer 必整体入堆。超 MAX_REMOTE_WRITE_BUFFER
         // 时 fail-fast 让 stream_copy 触发半截 dst 清理，比静默 OOM 崩进程可诊断
         // （Android FFI 2–4 GB RAM 场景尤其致命）。
-        let new_len = (self.buffer.len() as u64).saturating_add(buf.len() as u64);
-        if new_len > MAX_REMOTE_WRITE_BUFFER {
-            return Err(io::Error::new(
-                io::ErrorKind::OutOfMemory,
-                format!(
-                    "remote write buffer exceeds {MAX_REMOTE_WRITE_BUFFER} bytes limit \
-                     (client.write is not streaming; single-file byte total capped to avoid OOM)"
-                ),
-            ));
-        }
+        check_buffer_size(self.buffer.len() as u64, buf.len() as u64)?;
         self.buffer.extend_from_slice(buf);
         Ok(buf.len())
     }

@@ -225,3 +225,7 @@ pub fn stream_copy(
         }
     }
 }
+
+#[cfg(test)]
+#[path = "mod_tests.rs"]
+mod tests;

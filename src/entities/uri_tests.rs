@@ -316,3 +316,30 @@ fn smb_ipv6_bracket_non_numeric_port_is_invalid_port() {
         Err(ParseError::InvalidPort(_))
     ));
 }
+
+// ── join_path 远端 base 空 / 末尾 `/` 三分支覆盖 L193-198 ─────────────
+#[test]
+fn join_path_smb_empty_base_uses_segment_only() {
+    let loc = Location::Smb {
+        user: None,
+        host: "h".into(),
+        port: None,
+        share: "s".into(),
+        path: Utf8PathBuf::new(),
+    };
+    let out = loc.join_path("a/b");
+    assert_eq!(out.path().as_str(), "a/b");
+}
+
+#[test]
+fn join_path_smb_trailing_slash_no_double_separator() {
+    let loc = Location::Smb {
+        user: None,
+        host: "h".into(),
+        port: None,
+        share: "s".into(),
+        path: Utf8PathBuf::from("/x/"),
+    };
+    let out = loc.join_path("y");
+    assert_eq!(out.path().as_str(), "/x/y");
+}

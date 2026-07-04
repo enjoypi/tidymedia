@@ -51,6 +51,28 @@ fn buffered_writer_finish_writes_through() {
 }
 
 #[test]
+fn check_buffer_size_ok_when_within_limit() {
+    // sum <= MAX_REMOTE_WRITE_BUFFER → Ok
+    check_buffer_size(0, 1024).unwrap();
+    check_buffer_size(MAX_REMOTE_WRITE_BUFFER - 1, 1).unwrap();
+}
+
+#[test]
+fn check_buffer_size_err_when_exceeds_limit() {
+    // saturating_add MAX + 1 → 超上限 → OutOfMemory
+    let e = check_buffer_size(MAX_REMOTE_WRITE_BUFFER, 1).unwrap_err();
+    assert_eq!(e.kind(), io::ErrorKind::OutOfMemory);
+    assert!(e.to_string().contains("remote write buffer exceeds"));
+}
+
+#[test]
+fn check_buffer_size_saturating_add_does_not_overflow() {
+    // u64::MAX + u64::MAX 走 saturating_add 不 overflow，仍返 OOM Err
+    let e = check_buffer_size(u64::MAX, u64::MAX).unwrap_err();
+    assert_eq!(e.kind(), io::ErrorKind::OutOfMemory);
+}
+
+#[test]
 fn buffered_writer_finish_write_err_propagates() {
     let c = DummyClient {
         write: Some(io::ErrorKind::TimedOut),

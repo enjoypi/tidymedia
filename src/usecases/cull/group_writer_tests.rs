@@ -460,3 +460,62 @@ fn write_manifest_warns_on_write_failure() {
     };
     write_manifest(&group_dir, &backend, &report, 1.0);
 }
+
+#[test]
+fn write_manifest_serializes_nan_as_null_and_writes_file() {
+    // serde_json 1.0.150 对 NaN 输出 `null`（非 Err）：manifest 仍写入，字段值为 null。
+    // 覆盖 to_vec_pretty 的 happy path + 验证 NaN 上游污染不会阻塞 manifest 落盘。
+    let fake = Arc::new(FakeBackend::new("smb"));
+    let group_dir = smb_loc("/out/group-042");
+    let backend: Arc<dyn Backend> = fake.clone();
+    let report = super::super::report::GroupReport {
+        group_id: 42,
+        best_source: "/src/x.jpg".into(),
+        best_dest: "/out/group-042/BEST_x.jpg".into(),
+        culled: vec![],
+        score_breakdown: super::super::report::ScoreBreakdown::default(),
+    };
+    write_manifest(&group_dir, &backend, &report, f32::NAN);
+    let manifest_loc = smb_loc("/out/group-042/MANIFEST.json");
+    assert!(fake.exists(&manifest_loc).unwrap());
+    let body = fake.read_to_string(&manifest_loc).unwrap();
+    assert!(
+        body.contains("\"score\": null"),
+        "NaN 应序列化为 null：{body}"
+    );
+}
+
+#[test]
+fn write_group_warns_when_remove_partial_dst_fails() {
+    // 分离 src / dst 两 fake 实例 → Arc::ptr_eq=false → copy_file_cross_scheme 走
+    // stream_copy 路径（open_read + open_write + io::copy）。dst 端 inject_writer_error
+    // 让 write 途中 Err → 半截 dst 落盘失败（finish 未调，state 未 add） → caller
+    // 试 remove_file(best_dst) 因 dst 从未 create 返 NotFound Err → 命中 L69 Err arm。
+    let src_be = Arc::new(FakeBackend::new("smb"));
+    let src_root = smb_loc("/src");
+    let src_file = smb_loc("/src/a.jpg");
+    src_be.add_dir(src_root.clone());
+    src_be.add_file(src_file.clone(), b"data-bytes".to_vec());
+
+    let dst_be = Arc::new(FakeBackend::new("smb"));
+    let dst_root = smb_loc("/out");
+    dst_be.add_dir(dst_root.clone());
+    // compute_group_dir("/src/a.jpg", "/src", "/out", 1) = "/out/group-001"
+    // → unique_name_in_dir → "/out/group-001/BEST_a.jpg"
+    let expected_dst = smb_loc("/out/group-001/BEST_a.jpg");
+    dst_be.inject_writer_error(expected_dst, io::ErrorKind::TimedOut);
+
+    let src_be_arc: Arc<dyn Backend> = src_be;
+    let dst_be_arc: Arc<dyn Backend> = dst_be;
+    let plan = GroupPlan {
+        group_id: 1,
+        best_source: &src_file,
+        best_source_backend: &src_be_arc,
+        culled: vec![],
+        best_score: 100.0,
+        score_breakdown: super::super::report::ScoreBreakdown::default(),
+    };
+    let mut moved = 0;
+    let err = write_group(&plan, &src_root, &dst_root, &dst_be_arc, false, &mut moved).unwrap_err();
+    assert_eq!(err.kind(), io::ErrorKind::TimedOut);
+}

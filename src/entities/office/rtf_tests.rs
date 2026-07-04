@@ -166,3 +166,19 @@ fn find_group_end_unterminated_returns_buf_len() {
     let buf = br"abc no close";
     assert_eq!(find_group_end(buf, 0), buf.len());
 }
+
+#[test]
+fn find_group_end_backslash_followed_by_non_escape_is_literal() {
+    // buf[i]=b'\\' 但 buf[i+1] 非 `{` / `}` / `\\` → `matches!` False → 落
+    // `_ => {}` catch-all；覆盖 L70 `matches!(buf[i+1], b'{'|b'}'|b'\\')` 的 False 分支。
+    let buf = br"\a}rest";
+    assert_eq!(find_group_end(buf, 0), 2);
+}
+
+#[test]
+fn find_group_end_trailing_backslash_no_next_byte() {
+    // buf 末尾单个 `\`，i+1 >= buf.len() → guard 短路 False → catch-all；
+    // 覆盖 `i + 1 < buf.len()` 短路 False 分支。
+    let buf = b"a\\";
+    assert_eq!(find_group_end(buf, 0), buf.len());
+}
