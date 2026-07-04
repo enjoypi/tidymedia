@@ -132,6 +132,14 @@ impl Backend for LocalBackend {
         }
         rename_or_fallback(from_path.as_std_path(), to_path.as_std_path())
     }
+
+    /// 双端均 Local 时声明支持原生 rename：`fs::rename` 同卷 OS 原子 +
+    /// `CrossesDevices` fallback 到 `fs::copy` + `fs::remove_file`（半态 wrap Err 标记）。
+    /// OS 内核负责同卷判定（`subst` / junction / mount / bind / btrfs subvol），本层
+    /// 无需自实现 `dev()` 探测。
+    fn supports_native_rename_to(&self, other: &dyn Backend) -> bool {
+        other.scheme() == "local"
+    }
 }
 
 /// 把 [`Location`] 缩成 Local 路径；非 Local scheme 报 `InvalidInput`。

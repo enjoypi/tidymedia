@@ -3,6 +3,19 @@
 
 use serde_derive::Serialize;
 
+/// 结构化日志 `feature` 维度值：copy / move 共用。copy use case、report sink、
+/// `archive_template` 三处共享此单点，避免三份独立字符串常量任一漂移导致
+/// tracing 聚合分裂。
+pub const FEATURE_COPY: &str = "copy";
+pub const FEATURE_MOVE: &str = "move";
+
+/// Move 复用 copy 流程（remove=true 即 move）；日志 feature 按用户实际子命令
+/// 呈现，避免 `move` 命令输出 feature="copy" 误导排障。
+#[must_use]
+pub fn feature_of(remove: bool) -> &'static str {
+    if remove { FEATURE_MOVE } else { FEATURE_COPY }
+}
+
 /// copy / move 操作报告。`scanned` = walker 触达的所有文件总数（含被识别为非媒体而
 /// 跳过、空文件、读不到的）；`copied` / `ignored` / `failed` 反映 `do_copy` 决策计数。
 #[derive(Debug, Serialize)]

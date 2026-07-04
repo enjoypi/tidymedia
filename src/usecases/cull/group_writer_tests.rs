@@ -5,7 +5,7 @@ use crate::adapters::backend::factory::DefaultBackendFactory;
 use crate::entities::backend::factory::BackendFactory;
 
 fn local_loc(path: &str) -> Location {
-Location::Local(camino::Utf8PathBuf::from(path))
+    Location::Local(camino::Utf8PathBuf::from(path))
 }
 
 #[test]
@@ -75,8 +75,7 @@ fn write_group_dry_run_does_not_create_files() {
         score_breakdown: super::super::report::ScoreBreakdown::default(),
     };
     let mut moved = 0;
-    let report =
-        write_group(&plan, &root_loc, &output_loc, &backend, true, &mut moved).unwrap();
+    let report = write_group(&plan, &root_loc, &output_loc, &backend, true, &mut moved).unwrap();
     assert_eq!(report.group_id, 1);
     assert!(report.best_dest.contains("BEST_a.jpg"));
     assert_eq!(moved, 0);
@@ -461,4 +460,3 @@ fn write_manifest_warns_on_write_failure() {
     };
     write_manifest(&group_dir, &backend, &report, 1.0);
 }
-

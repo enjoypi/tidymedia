@@ -4,10 +4,8 @@
 use tracing::warn;
 
 use crate::entities::common;
-use crate::usecases::report::{Report, ReportSink};
+use crate::usecases::report::{FEATURE_COPY, FEATURE_MOVE, Report, ReportSink};
 
-const FEATURE_COPY: &str = "copy";
-const FEATURE_MOVE: &str = "move";
 const FEATURE_FIND: &str = "find";
 const FEATURE_MOVE_TEXT_SHOT: &str = "move_text_shot";
 const FEATURE_CULL: &str = "cull";

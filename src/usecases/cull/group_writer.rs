@@ -11,7 +11,7 @@ use camino::Utf8PathBuf;
 use tracing::warn;
 
 use super::report::GroupReport;
-use crate::entities::backend::Backend;
+use crate::entities::backend::{Backend, stream_copy as backend_stream_copy};
 use crate::entities::uri::Location;
 use crate::usecases::config::config;
 
@@ -164,28 +164,26 @@ fn split_stem_ext(name: &str) -> (&str, &str) {
     }
 }
 
-/// 跨 scheme copy 兜底：`Backend::copy_file` 实现按 scheme 校验 src/dst 必须同自家
-/// scheme（`local.rs::copy_file_rejects_non_local_*_scheme` / `adb_ops_tests::copy_file_rejects_non_adb_scheme_on_either_side`
-/// 等测试印证）。跨 scheme（local↔smb/adb/mtp）必走 stream：`src.open_read` +
-/// `dst.open_write` + `io::copy` + `writer.finish`，保 caller 经 ? 上抛单点。
-/// 同 scheme 仍走 `src_backend.copy_file` 以利用 backend 原生 copy（同卷 rename / SMB
-/// `SRV_COPYCHUNK` 等）。
+/// 复用 `entities::backend::stream_copy` 单点 helper：同一 backend 实例（`Arc::ptr_eq`）
+/// 且同 scheme 时走 `copy_file` 原生 op（Local `fs::copy` sendfile / reflink；远端
+/// 未来可加 `SMB2` `SRV_COPYCHUNK`），否则走 1 MiB buffered stream + 三阶段闭合 +
+/// 半截 dst 清理。旧版走 stdlib 8 KiB buffer 让远端大视频 128× RTT，抽 helper 后与
+/// `copy/ops.rs::stream_copy` 同款高效骨架（CLAUDE.md「`stream_copy` 与
+/// `copy_file_cross_scheme` 双份实现」finding 修复）。
 fn copy_file_cross_scheme(
     src_backend: &Arc<dyn Backend>,
     src: &Location,
     dst_backend: &Arc<dyn Backend>,
     dst: &Location,
 ) -> io::Result<u64> {
-    if src_backend.scheme() == dst_backend.scheme() {
-        return src_backend.copy_file(src, dst, false);
-    }
-    let mut reader = src_backend.open_read(src)?;
-    let mut writer = dst_backend.open_write(dst, false)?;
-    let bytes = io::copy(&mut reader, &mut writer)?;
-    // finish 失败让 disk-full / 远端 commit Err 经 ? 上抛而非 Drop 静默吞
-    // （MediaWriter::finish MUST ? 传播，CLAUDE.md 项目 gotcha 同口径）。
-    writer.finish()?;
-    Ok(bytes)
+    let same_instance = Arc::ptr_eq(src_backend, dst_backend);
+    backend_stream_copy(
+        src_backend.as_ref(),
+        src,
+        dst_backend.as_ref(),
+        dst,
+        same_instance,
+    )
 }
 
 /// best-effort partial dst 清理失败时 warn：远端 SMB/ADB 会话断开让 remove 也 Err
@@ -208,11 +206,14 @@ fn move_file(
     output_backend: &Arc<dyn Backend>,
     target_loc: &Location,
 ) -> io::Result<()> {
-    if src_backend.scheme() == output_backend.scheme() && src_backend.scheme() == "local" {
+    // Backend capability query 替 scheme=="local" 硬门禁：LocalBackend 双端返 true
+    // 走 fs::rename；未来远端 backend 可 override 接入 SMB2 SET_INFO / adb shell mv
+    // 原生原子 rename 无需改本层。
+    if src_backend.supports_native_rename_to(output_backend.as_ref()) {
         return src_backend.rename(src_loc, target_loc, false);
     }
-    // 跨 scheme：copy + remove；copy 走 cross-scheme helper（直传 src/output backend
-    // 内部按 scheme 分流：同 scheme→backend.copy_file 原子；跨 scheme→stream copy）。
+    // 跨 scheme / 非原生原子：copy + remove；copy 走 cross-scheme helper（内部按
+    // scheme 分流：同 scheme→backend.copy_file 原生；跨 scheme→stream copy）。
     copy_file_cross_scheme(src_backend, src_loc, output_backend, target_loc)?;
     src_backend.remove_file(src_loc).map_err(|re| {
         io::Error::new(

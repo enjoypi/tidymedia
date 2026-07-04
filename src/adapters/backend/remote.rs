@@ -91,6 +91,13 @@ pub fn unsupported_backend(feature: &str) -> io::Error {
 /// 共享上限是同口径防御。
 pub(crate) const MAX_TEXT_BYTES: u64 = 8 << 20;
 
+/// `RemoteBufferedWriter` 缓冲上限：远端 `client.write` 是"一次性把整个 buffer 提交"
+/// 语义（pavao `SmbFile` / adb push / libmtp 都不支持真流式），单文件必须整体入堆。
+/// 2 GiB 上限让 Android FFI (feature `android-app`, 2–4 GB RAM) 场景 fail-fast 而非
+/// 静默 OOM 崩进程；桌面通常 RAM 充足此值不触发。极端超大文件（4K 全片视频 >2 GiB）
+/// 会 fail 但比默默死机可诊断。CLAUDE.md 例外「IO 边界常量」类，不外置到 config。
+pub(crate) const MAX_REMOTE_WRITE_BUFFER: u64 = 2 << 30;
+
 /// 泛型远端 Backend：对任意 [`RemoteAdapter`] 实现 [`Backend`] trait 的全部 12 个方法。
 /// SMB / ADB / MTP 三套实现收敛到此单一泛型。
 pub struct RemoteBackend<A: RemoteAdapter> {
@@ -211,37 +218,47 @@ fn log_mkparent_err<A: RemoteAdapter>(parent: &A::Target, e: &io::Error) {
 
 /// 递归扫描远端目录树，把所有 entry（含 Dir，与 `LocalBackend::walk` 行为对齐）收集到 `out`。
 /// 单 list 失败即记 Err 不再下钻该子树；其余子树继续以"尽力而为"语义扫描。
+///
+/// **显式栈迭代（非递归）**：远端 Time Machine / rsync `--link-dest` 类深层备份
+/// 目录树可达数千层，递归调用会消耗线程栈（每帧 KB 级 + Vec 分配）致 SIGSEGV，
+/// 尤其在 `io_pool` 工作线程（默认 8 MiB）上更易触发。改用堆上 `Vec<Target>` worklist
+/// 后深度只受堆内存约束，与 `LocalBackend::walk` 用 `ignore::WalkBuilder` (heap-based)
+/// 的稳定性对齐。
 fn walk_recursive<A: RemoteAdapter>(
     adapter: &A,
-    target: &A::Target,
+    root: &A::Target,
     out: &mut Vec<io::Result<Entry>>,
 ) {
-    let listed = adapter
-        .client()
-        .list(target)
-        .map_err(|e| map_and_log(A::scheme(), "list", target.path(), A::map_error, e));
-    let entries = match listed {
-        Ok(v) => v,
-        Err(e) => {
-            out.push(Err(e));
-            return;
-        }
-    };
-    for entry in entries {
-        if entry.kind == EntryKind::Dir {
-            match A::Target::from_location(&entry.location, adapter.ctx()) {
-                Ok(sub) => walk_recursive::<A>(adapter, &sub, out),
-                Err(e) => {
-                    // Dir entry 反向 from_location 失败：子树无法下钻，本目录条目
-                    // 也跳过 Ok push——否则 caller 既收到 Err（已记 walker_errors）
-                    // 又收到 Ok(Dir) 重复事件，且后者随后被 visit_location 静默
-                    // 过滤掉，纯属噪声。
-                    out.push(Err(e));
-                    continue;
+    let mut stack: Vec<A::Target> = Vec::with_capacity(16);
+    stack.push(root.clone());
+    while let Some(target) = stack.pop() {
+        let listed = adapter
+            .client()
+            .list(&target)
+            .map_err(|e| map_and_log(A::scheme(), "list", target.path(), A::map_error, e));
+        let entries = match listed {
+            Ok(v) => v,
+            Err(e) => {
+                out.push(Err(e));
+                continue;
+            }
+        };
+        for entry in entries {
+            if entry.kind == EntryKind::Dir {
+                match A::Target::from_location(&entry.location, adapter.ctx()) {
+                    Ok(sub) => stack.push(sub),
+                    Err(e) => {
+                        // Dir entry 反向 from_location 失败：子树无法下钻，本目录条目
+                        // 也跳过 Ok push——否则 caller 既收到 Err（已记 walker_errors）
+                        // 又收到 Ok(Dir) 重复事件，且后者随后被 visit_location 静默
+                        // 过滤掉，纯属噪声。
+                        out.push(Err(e));
+                        continue;
+                    }
                 }
             }
+            out.push(Ok(entry));
         }
-        out.push(Ok(entry));
     }
 }
 
@@ -392,6 +409,12 @@ impl<A: RemoteAdapter> Backend for RemoteBackend<A> {
     }
 
     fn copy_file(&self, src: &Location, dst: &Location, mkparents: bool) -> io::Result<u64> {
+        // TODO(perf): 当前是 read(整文件到本地) + write(整文件回远端) 两次全量 RTT +
+        // 全文件堆分配。pavao 支持 SMB2 FSCTL_SRV_COPYCHUNK 服务端复制（零字节回
+        // 客户端），adb 同设备可走 `shell cp /sdcard/A /sdcard/B`，libmtp 有
+        // MoveObject API——同 scheme 同 host 场景理想上应先试 server-side copy，
+        // 失败再 fallback 到 read+write。改动依赖 RemoteClient trait 加
+        // `server_side_copy` 方法 + 每 adapter 实现，非本次重构范围。
         let src_target = self.build_target(src)?;
         let dst_target = self.build_target(dst)?;
         if mkparents {
@@ -426,6 +449,19 @@ impl<A: RemoteAdapter> std::fmt::Debug for RemoteBufferedWriter<A> {
 
 impl<A: RemoteAdapter> io::Write for RemoteBufferedWriter<A> {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        // 远端 client.write 一次性提交，buffer 必整体入堆。超 MAX_REMOTE_WRITE_BUFFER
+        // 时 fail-fast 让 stream_copy 触发半截 dst 清理，比静默 OOM 崩进程可诊断
+        // （Android FFI 2–4 GB RAM 场景尤其致命）。
+        let new_len = (self.buffer.len() as u64).saturating_add(buf.len() as u64);
+        if new_len > MAX_REMOTE_WRITE_BUFFER {
+            return Err(io::Error::new(
+                io::ErrorKind::OutOfMemory,
+                format!(
+                    "remote write buffer exceeds {MAX_REMOTE_WRITE_BUFFER} bytes limit \
+                     (client.write is not streaming; single-file byte total capped to avoid OOM)"
+                ),
+            ));
+        }
         self.buffer.extend_from_slice(buf);
         Ok(buf.len())
     }

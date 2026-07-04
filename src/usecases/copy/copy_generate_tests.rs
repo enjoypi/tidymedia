@@ -11,6 +11,7 @@ use tempfile::tempdir;
 use super::*;
 use crate::adapters::backend::local::LocalBackend;
 use crate::entities::backend::Backend;
+use crate::entities::file_index::Index;
 use crate::entities::test_common as tc;
 use crate::entities::uri::Location;
 
@@ -68,10 +69,15 @@ fn generate_unique_name_uses_suffix_when_first_taken() {
     fs::create_dir_all(&sub).unwrap();
     fs::write(sub.join("photo.png"), b"x").unwrap();
     let _ = out_utf8;
-    let (_, target) =
-        generate_unique_name(&info, &local_loc(out.path()), &local_arc(), DEFAULT_TMPL)
-            .unwrap()
-            .expect("unique name should be generated");
+    let (_, target) = generate_unique_name(
+        &info,
+        &local_loc(out.path()),
+        &local_arc(),
+        DEFAULT_TMPL,
+        &Index::new(),
+    )
+    .unwrap()
+    .expect("unique name should be generated");
     let target_str = target.display();
     assert!(target_str.ends_with("photo_1.png"), "got {target_str}");
 }
@@ -82,8 +88,14 @@ fn generate_unique_name_none_after_max_collisions() {
     let info = make_media_info(src.path(), "photo.png");
     let out = tempdir().unwrap();
     fill_collisions(&out.path().join("2024").join("01"));
-    let res =
-        generate_unique_name(&info, &local_loc(out.path()), &local_arc(), DEFAULT_TMPL).unwrap();
+    let res = generate_unique_name(
+        &info,
+        &local_loc(out.path()),
+        &local_arc(),
+        DEFAULT_TMPL,
+        &Index::new(),
+    )
+    .unwrap();
     assert!(
         res.is_none(),
         "should exhaust after max_attempts+1 collisions"
@@ -100,10 +112,15 @@ fn generate_unique_name_no_extension_omits_trailing_dot() {
     let sub = out.path().join("2024").join("01");
     fs::create_dir_all(&sub).unwrap();
     fs::write(sub.join("photo"), b"x").unwrap();
-    let (_, target) =
-        generate_unique_name(&info, &local_loc(out.path()), &local_arc(), DEFAULT_TMPL)
-            .unwrap()
-            .expect("unique name should be generated");
+    let (_, target) = generate_unique_name(
+        &info,
+        &local_loc(out.path()),
+        &local_arc(),
+        DEFAULT_TMPL,
+        &Index::new(),
+    )
+    .unwrap()
+    .expect("unique name should be generated");
     let target_str = target.display();
     assert!(target_str.ends_with("photo_1"), "got {target_str}");
 }
@@ -178,8 +195,14 @@ fn generate_unique_name_propagates_exists_error() {
     let target = Location::Local(Utf8PathBuf::from("/out/1970/01/photo.png"));
     be.inject_error(target, crate::FakeOp::Exists, std::io::ErrorKind::TimedOut);
     let out_loc = Location::Local(Utf8PathBuf::from("/out"));
-    let err =
-        generate_unique_name(&info, &out_loc, &(be as Arc<dyn Backend>), DEFAULT_TMPL).unwrap_err();
+    let err = generate_unique_name(
+        &info,
+        &out_loc,
+        &(be as Arc<dyn Backend>),
+        DEFAULT_TMPL,
+        &Index::new(),
+    )
+    .unwrap_err();
     assert_eq!(err.kind(), std::io::ErrorKind::TimedOut);
 }
 
@@ -271,10 +294,15 @@ fn generate_unique_name_drops_dot_and_dotdot_segments() {
     let out = tempdir().unwrap();
     let info = make_media_info(src.path(), "photo.png");
     let template = "{year}/../target/.";
-    let (sub_dir, target) =
-        generate_unique_name(&info, &local_loc(out.path()), &local_arc(), template)
-            .unwrap()
-            .expect("path generated");
+    let (sub_dir, target) = generate_unique_name(
+        &info,
+        &local_loc(out.path()),
+        &local_arc(),
+        template,
+        &Index::new(),
+    )
+    .unwrap()
+    .expect("path generated");
     let sub_dir_str = sub_dir.path().as_str();
     let out_str = utf8(out.path());
     assert!(

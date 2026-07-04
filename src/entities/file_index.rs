@@ -92,6 +92,21 @@ impl Index {
         &self.similar_files
     }
 
+    /// 判定 target `Location` 是否已入索引：key 构造与 [`Info::cloned_at`] /
+    /// [`Info::open`] 完全一致（Local = `Utf8PathBuf.clone()`；远端 = `display()`），
+    /// 让 `naming::generate_unique_name` 在 dry-run 下也能识别「本次已假设写过」的
+    /// 目标名，避免同 basename 多源被静默分派到同一 target 字符串致 dry-run 报表
+    /// 与真跑归档路径分裂。真跑路径下同 hash src 走 `exists` 判去重，此 helper
+    /// 只对「未真写但已 add `cloned_at`」的 dry-run 语义生效。
+    #[must_use]
+    pub fn contains_target(&self, loc: &Location) -> bool {
+        let key: Utf8PathBuf = match loc {
+            Location::Local(p) => p.clone(),
+            other => other.display().into(),
+        };
+        self.files.contains_key(&key)
+    }
+
     pub fn some_files(&self, n: usize) -> Vec<&Info> {
         let mut ret: Vec<_> = self.files().iter().take(n).map(|x| x.1).collect();
         ret.sort_by(|x1, x2| x1.full_path.cmp(&x2.full_path));

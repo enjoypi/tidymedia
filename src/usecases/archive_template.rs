@@ -9,8 +9,7 @@
 use tracing::warn;
 
 use crate::entities::exif::Exif;
-
-const FEATURE_COPY: &str = "copy";
+use crate::usecases::report::FEATURE_COPY;
 
 /// `render` 支持的全部占位符名。`validate_archive_template` 据此拒绝未知占位符
 ///（未知名渲染时不被替换，会产生形如 `{foo}` 的字面目录段）。

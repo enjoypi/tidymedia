@@ -15,12 +15,13 @@ pub fn full_path(path: &str) -> io::Result<Utf8PathBuf> {
     Ok(Utf8PathBuf::from(strip_windows_unc(full.as_str())))
 }
 
+// pub(crate) 让 common::canonical_prefix 直接调（跨 entities 子模块）。
 #[cfg(target_os = "windows")]
-pub(super) fn strip_windows_unc(path: &str) -> &str {
+pub(crate) fn strip_windows_unc(path: &str) -> &str {
     path.strip_prefix(r"\\?\").unwrap_or(path)
 }
 
 #[cfg(not(target_os = "windows"))]
-pub(super) fn strip_windows_unc(path: &str) -> &str {
+pub(crate) fn strip_windows_unc(path: &str) -> &str {
     path
 }

@@ -1,4 +1,4 @@
-use super::{io_pool, install_io};
+use super::{install_io, io_pool};
 
 // io_pool 单例：多次调用返回同一 ThreadPool 引用（OnceLock 语义）。
 #[test]

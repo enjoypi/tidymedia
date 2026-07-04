@@ -25,17 +25,28 @@ pub fn under_prefix(path: &str, prefix: &str) -> bool {
     rest.is_empty() || rest.starts_with('/') || rest.starts_with('\\')
 }
 
-/// 把 [`Location`] 规范化为 prefix 字符串：Local 路径 canonicalize（解析符号
-/// 链接 + 相对路径转绝对）；远端 backend 直接 display。copy / move / cull /
-/// move-text-shot 4 个 use case 的「source 是否在 output 子树」判定共用此助手——
-/// 朴素 `Location::display()` 在 output 是符号链接时（`/tmp/out → /photos/out`）
-/// 会让 src `/photos/out/img.jpg` 与 output prefix `/tmp/out` 字面不匹配，
-/// `under_prefix` 误返 false，move 模式下源被当成"output 外"被搬迁致循环或丢失。
+/// 把 [`Location`] 规范化为 prefix 字符串：Local 路径直接 `std::fs::canonicalize`
+/// **解析符号链接**（Windows UNC `\\?\` 前缀剥离与 `full_path` 同口径）；远端 backend
+/// 直接 display。copy / move / cull / move-text-shot 4 个 use case 的「source 是否
+/// 在 output 子树」判定共用此助手——朴素 `Location::display()` 在 output 是符号链接时
+/// （`/tmp/out → /photos/out`）会让 src `/photos/out/img.jpg` 与 output prefix
+/// `/tmp/out` 字面不匹配，`under_prefix` 误返 false，move 模式下源被当"output 外"
+/// 被搬迁致循环或丢失。
+///
+/// 不复用 `file_info::full_path`：后者对 `is_absolute()` 路径直接返原样以避开
+/// Windows 用户目录跨盘 canonicalize 陷阱（`C:\Users\x → D:\Users\x`），但那是
+/// 「路径索引 key」语义（希望字面稳定），与 `canonical_prefix` 的「重叠判定 by 真实
+/// 物理位置」语义相反——两 helper 独立维护语义正交，避免共用 `full_path` 让 symlink
+/// 检查静默失效。canonicalize 失败（路径不存在，如 dry-run 到不存在的 output）时
+/// fallback 到原字符串（保 CLI 早期语义）。
 #[must_use]
 pub fn canonical_prefix(loc: &Location) -> String {
     match loc {
-        Location::Local(p) => match crate::entities::file_info::full_path(p.as_str()) {
-            Ok(fp) => fp.as_str().to_string(),
+        Location::Local(p) => match std::fs::canonicalize(p.as_std_path()) {
+            Ok(std_path) => {
+                let s = std_path.to_string_lossy();
+                crate::entities::file_info::strip_windows_unc(&s).to_string()
+            }
             Err(_) => p.as_str().to_string(),
         },
         other => other.display(),

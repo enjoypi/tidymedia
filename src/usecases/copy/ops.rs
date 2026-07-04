@@ -1,25 +1,19 @@
 //! 单文件复制/移动操作：重复检测 → 媒体过滤 → 唯一命名 → fast-path rename 或流式拷贝。
 
 use std::collections::HashSet;
-use std::io::{BufReader, BufWriter, Write};
 use std::sync::Arc;
 
 use tracing::debug;
 use tracing::warn;
 
 use super::naming::generate_unique_name;
-use super::run::{CopyOpts, feature_of};
-use crate::entities::backend::Backend;
+use super::run::CopyOpts;
+use crate::entities::backend::{Backend, stream_copy as backend_stream_copy};
 use crate::entities::common;
 use crate::entities::file_index::Index;
 use crate::entities::file_info::Info;
 use crate::entities::uri::Location;
-
-/// `stream_copy` 的 `BufReader`/`BufWriter` 容量：1 MiB 与 `STREAM_CHUNK` 同口径，
-/// 对远端单文件 5 GiB 视频比 `std::io::copy` 默认 8 KiB 减少 ~128× syscall/RTT
-/// 次数；与 `FAST_READ_SIZE` = 4 KiB 区别在前者是 hash 嗅探固定上限，本常量服务
-/// 于 stream 整文件路径。本地 buffered IO 仍受益（每 1 MiB 一次 write syscall）。
-const STREAM_BUFFER_BYTES: usize = 1 << 20;
+use crate::usecases::report::feature_of;
 
 // multi-binary instance + tracing macro region 拆分：lib unit 与 lib_tidy 集成
 // binary 共享 lib rlib codegen（hash 同）；`tidymedia` bin（subprocess 通过
@@ -73,7 +67,7 @@ pub(super) fn do_copy(
     }
 
     if let Some((target_dir_loc, target_loc)) =
-        generate_unique_name(src, output_dir, output_backend, opts.template)?
+        generate_unique_name(src, output_dir, output_backend, opts.template, output_index)?
     {
         if opts.dry_run {
             let target_display = target_loc.display();
@@ -85,6 +79,17 @@ pub(super) fn do_copy(
                 target = %target_display,
                 "would transfer file"
             );
+            // dry_run 也 add：generate_unique_name 后续调用会经 contains_target
+            // 判定「本次已假设写过」，避免同 basename+同月+不同 hash 源被静默
+            // 分派到相同 target 让 dry-run 报表 collision 漏报（真跑走 _N 分裂
+            // 归档，tidy-verify 桶对账拿不到真跑口径）。
+            //
+            // Pre-populate src.secure_hash 让 cloned_at 的 lazy snapshot 携带 SHA-512：
+            // 否则同 hash 后续 src 走 output_index.exists(secure=true) 会触发
+            // f.secure_hash() → output_backend.open_read(target_loc)，dry-run 下
+            // target 未真写返 NotFound 让 do_copy 假失败。
+            src.secure_hash()?;
+            _ = output_index.add(src.cloned_at(target_loc, Arc::clone(output_backend)));
             return Ok(true);
         }
 
@@ -96,34 +101,62 @@ pub(super) fn do_copy(
             mkdir_cache.insert(target_dir_loc);
         }
 
-        if opts.remove && src.backend().scheme() == "local" && output_backend.scheme() == "local" {
-            // 同 LocalBackend + remove → 走 fs::rename fast-path：同卷 OS 原子完成，
-            // 跨卷由 LocalBackend::rename 内部 fallback 到 fs::copy + fs::remove_file。
-            // 不在此处用 dev() / GetVolumeInformationByHandleW 自己判同盘——OS 内核是
-            // same-volume 判定的唯一权威源（识别 subst / junction / mount point /
-            // bind mount / btrfs subvol 等所有边界），自己再判一遍既冗余又会漏边界。
+        if opts.remove
+            && src
+                .backend()
+                .supports_native_rename_to(output_backend.as_ref())
+        {
+            // Backend 声明支持原生原子 rename（LocalBackend override → 双端 local
+            // 即 true；远端 backend 可 override 为 same-host + same-scheme）。
+            // LocalBackend 内部走 fs::rename（同卷 OS 原子）+ CrossesDevices fallback
+            // 到 fs::copy + fs::remove_file（半态用 wrap Err 文案标记）。
+            // 不在此层用 dev() / GetVolumeInformationByHandleW 自己判同盘——OS 内核是
+            // same-volume 判定的唯一权威源（识别 subst / junction / mount / bind /
+            // btrfs subvol 等所有边界），自己再判一遍既冗余又会漏边界。
             // mkparents=false：上方 mkdir_p 已建好父目录。
-            src.backend().rename(&src_loc, &target_loc, false)?;
-        } else {
-            // 跨 backend 或 copy（remove=false）走 stream（mkparents=false 同上）。
-            stream_copy(src, &target_loc, output_backend.as_ref())?;
-            // dst 已写入：先入索引让后续同 hash 源命中去重，再尝试 remove。
-            // 若 remove 失败仍向上传 Err 计 failed，但 dst 已登记 → 重跑或下批同
-            // hash 源不会再写一份副本（旧实现 ? 直接传 Err 跳过 add 致重复副本）。
-            _ = output_index.add(src.cloned_at(target_loc.clone(), Arc::clone(output_backend)));
-            if opts.remove {
-                remove_src_after_stream_copy(src, &src_loc, src_display, &target_loc)?;
+            match src.backend().rename(&src_loc, &target_loc, false) {
+                Ok(()) => {
+                    let target_display = target_loc.display();
+                    debug!(
+                        feature,
+                        operation = "copy_file",
+                        result = "ok",
+                        source = %src_display,
+                        target = %target_display,
+                        "file transferred"
+                    );
+                    // fast-path rename 成功：dst 字节与 src 等同，复用 src 的 hash /
+                    // size / EXIF 入 output_index，避免对刚写完的 dst 重新 stat +
+                    // 读 4 KiB；同时消除旧实现 Info::open(dst) 在 NFS ESTALE / 防病毒
+                    // 抢占下失败让后续同 hash 源写重复副本的漏洞。
+                    _ = output_index.add(src.cloned_at(target_loc, Arc::clone(output_backend)));
+                    return Ok(true);
+                }
+                Err(e) => {
+                    // 跨卷 fallback 半态：LocalBackend rename_or_fallback_with 内 fs::copy
+                    // 成功但 fs::remove_file 失败会返 wrap 文案「cross-device rename:
+                    // copied ... but cannot remove source」。dst 已在 fs 落地——即使
+                    // 本次 do_copy 返 Err(failed+=1)，也 MUST 把 dst 登记入 output_index
+                    // 让下一个同 hash src dedup 生效，否则 exists() 判 dst 存在走 _N
+                    // 后缀又写一份物理副本。stream_copy 分支已通过「先 add 再 remove」
+                    // 顺序修好此漏洞，fast-path 补齐同款救援。
+                    if e.to_string().contains("cannot remove source") {
+                        _ = output_index
+                            .add(src.cloned_at(target_loc.clone(), Arc::clone(output_backend)));
+                    }
+                    return Err(e.into());
+                }
             }
-            let target_display = target_loc.display();
-            debug!(
-                feature,
-                operation = "copy_file",
-                result = "ok",
-                source = %src_display,
-                target = %target_display,
-                "file transferred"
-            );
-            return Ok(true);
+        }
+
+        // 跨 backend 或 copy（remove=false）走 stream（mkparents=false 同上）。
+        stream_copy(src, &target_loc, output_backend.as_ref())?;
+        // dst 已写入：先入索引让后续同 hash 源命中去重，再尝试 remove。
+        // 若 remove 失败仍向上传 Err 计 failed，但 dst 已登记 → 重跑或下批同
+        // hash 源不会再写一份副本（旧实现 ? 直接传 Err 跳过 add 致重复副本）。
+        _ = output_index.add(src.cloned_at(target_loc.clone(), Arc::clone(output_backend)));
+        if opts.remove {
+            remove_src_after_stream_copy(src, &src_loc, src_display, &target_loc)?;
         }
         let target_display = target_loc.display();
         debug!(
@@ -134,13 +167,6 @@ pub(super) fn do_copy(
             target = %target_display,
             "file transferred"
         );
-
-        // fast-path rename 成功路径：dst 字节与 src 等同，复用 src 的 hash / size /
-        // EXIF 入 output_index，避免对刚写完的 dst 重新 stat + 读 4 KiB；同时消除
-        // 旧实现 Info::open(dst) 在 NFS ESTALE / 防病毒抢占下失败 → dst 已写但未
-        // 入索引 → 后续同 hash 源文件再写一份的漏洞。
-        _ = output_index.add(src.cloned_at(target_loc, Arc::clone(output_backend)));
-
         Ok(true)
     } else {
         Err(common::Error::Io(std::io::Error::other(format!(
@@ -193,39 +219,17 @@ pub(super) fn do_copy_with_default_cache(
     do_copy(src, output_dir, output_backend, output_index, &mut mc, opts)
 }
 
-/// 用源 Info 的 backend 读 + 输出 backend 写。两个 backend 同一实例时与 `copy_file`
-/// 等价；不同实例（跨 scheme）时仍工作。`open_read` Err 由
-/// `do_copy_file_copy_fails_when_source_unreadable` 覆盖；其余 Err 分支由
-/// `FakeBackend` reader/writer 注入的集成测试覆盖。
+/// 用源 Info 的 backend 读 + 输出 backend 写。经 `backend::stream_copy` 单点 helper
+/// 完成（跨 scheme / 不同 backend 实例都走 1 MiB buffered stream + 三阶段闭合 +
+/// 半截 dst 清理）。`cull/group_writer` 亦复用同 helper 消除重复实现。
 ///
-/// reader / writer 都包 1 MiB `BufReader`/`BufWriter`（`STREAM_BUFFER_BYTES`），
-/// 把 `std::io::copy` 默认 8 KiB stack buffer 的 128× syscall/RTT 次数收敛到
-/// 1 MiB 块。远端大视频从「128 次 read RTT」降到 1 次（`read_to_end` 限制下，
-/// 单文件单 RTT 已是上限；buffered 让 writer flush 也按 MiB 触发）。
+/// 传 `prefer_native_copy=false`：ops.rs 无法从 `src.backend()` (Arc) 与 `out_be`
+/// (`&dyn`) 判定是否同实例，保守走 stream 路径确保跨实例（Fake vs Local 同 scheme
+/// `"local"`）语义正确；fast-path 优化由 `do_copy` 的 `supports_native_rename_to`
+/// 分支承担。
 #[inline(never)]
 fn stream_copy(src: &Info, target: &Location, out_be: &dyn Backend) -> common::Result<()> {
     let src_be = src.backend();
-    let reader = src_be.open_read(src.location())?;
-    let writer = out_be.open_write(target, false)?;
-    let mut br = BufReader::with_capacity(STREAM_BUFFER_BYTES, reader);
-    let mut bw = BufWriter::with_capacity(STREAM_BUFFER_BYTES, writer);
-    // 三阶段闭合：copy 字节、flush 缓冲、finish 提交。BufWriter::into_inner
-    // 在 flush 失败时把 inner 一并返回让 caller 决定释放策略——这里只取 io::Error
-    // 让 best-effort 清理半截目标。BufWriter Drop 会再次 flush 忽略 Err，但 inner
-    // 已 move 进 finish 路径，不会重入；写失败语义一次性可观测。
-    let result: std::io::Result<()> = (|| {
-        std::io::copy(&mut br, &mut bw)?;
-        bw.flush()?;
-        let inner = bw
-            .into_inner()
-            .map_err(std::io::IntoInnerError::into_error)?;
-        inner.finish()
-    })();
-    if let Err(e) = result {
-        // open_write 已 create/truncate 目标；中途失败必须清理半截文件，否则残留
-        // 占据路径槽位且无告警。best-effort：清理失败不掩盖原始传输错误。
-        let _ = out_be.remove_file(target);
-        return Err(e.into());
-    }
+    backend_stream_copy(src_be.as_ref(), src.location(), out_be, target, false).map(drop)?;
     Ok(())
 }

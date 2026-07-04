@@ -2,6 +2,7 @@
 
 use std::io;
 use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use camino::Utf8Component;
 use camino::Utf8Path;
@@ -9,6 +10,7 @@ use time::OffsetDateTime;
 
 use super::run::{MONTH, configured_chrono_offset, configured_offset};
 use crate::entities::backend::Backend;
+use crate::entities::file_index::Index;
 use crate::entities::file_info::Info;
 use crate::entities::uri::Location;
 use crate::usecases::archive_template::{TemplateContext, render};
@@ -19,22 +21,31 @@ pub(super) fn generate_unique_name(
     output_dir: &Location,
     output_backend: &Arc<dyn Backend>,
     template: &str,
+    output_index: &Index,
 ) -> io::Result<Option<(Location, Location)>> {
     let display_path = Utf8Path::new(src_file.full_path.as_str());
-    let file_name = display_path
-        .file_name()
-        .expect("Info::open guarantees file path has a name");
-    let file_stem = display_path
-        .file_stem()
-        .expect("file with name must have a stem")
-        .to_string();
+    // file_name 缺失（源 Location 是纯 root 如 `smb://host/share/` 或末尾 '/'）
+    // 走 Ok(None) 让 caller 报 "无法为 ... 生成目标目录的文件名"，不再 expect panic
+    // （P0 §2「MUST NOT 因用户输入而 panic」）。
+    let Some(file_name) = display_path.file_name() else {
+        return Ok(None);
+    };
+    let file_stem = display_path.file_stem().unwrap_or(file_name).to_string();
     let ext = display_path.extension().unwrap_or("").to_string();
 
     let create_time = src_file.create_time(
         config().exif.valid_date_time_secs,
         configured_chrono_offset(),
     );
-    let dt = OffsetDateTime::from(create_time).to_offset(configured_offset());
+    // `OffsetDateTime::from(SystemTime)` 内部含 `.expect("Duration doesn't fit into
+    // i64::MAX")` 对越界值 panic（time crate 上限 ~9999 年 + 内部 nanos i64 溢出）。
+    // 未来 kernel / 损坏 FS mtime 越界会让整个 copy 进程崩溃、中间态无法收敛。
+    // 走 `duration_since(UNIX_EPOCH)` + `i64::try_from` + `from_unix_timestamp` 三段
+    // 守护，任一溢出兜底到 `UNIX_EPOCH`，让越界文件归档到 1970/01 桶（用户可后续
+    // 修 EXIF/mtime 手动 re-archive）而非 panic 掉整批。P0 §2 硬约束。
+    let dt = system_time_to_offsetdatetime(create_time)
+        .unwrap_or(OffsetDateTime::UNIX_EPOCH)
+        .to_offset(configured_offset());
     let year = dt.year().to_string();
     let month = MONTH[dt.month() as usize];
     let day = format!("{:02}", dt.day());
@@ -50,37 +61,38 @@ pub(super) fn generate_unique_name(
     };
     let sub_dir_rel = render(template, &template_ctx);
 
-    // render 输出以 '/' 分隔；整串 join 会把 '/' 原样嵌进路径，Windows 下产生
-    // `D:\Pictures\2003/09` 混合分隔符。逐段 join 让分隔符回到 OS 原生形态。
-    // 防御 `..` / `.` 段（archive_template::sanitize_path_segment 已替换 EXIF make/
-    // model 中的危险字符；这里是第二道防线，覆盖 valuable_name 等其他渠道）：
-    // `Utf8PathBuf::join("..")` 是字面拼接不规范化，让 fs::File::create 按字面
-    // 解析致 output 外路径，跨目录写入。
-    let sub_dir_path = sub_dir_rel
+    // 逐段 Location::join_path：按 scheme 分流分隔符（Local 走 OS 原生、Smb/Mtp/Adb
+    // 强制 `/`）。旧实现 `Utf8PathBuf::join` 在 Windows host + 远端 output 时注入
+    // `\` 让 pavao/adb shell/libmtp 找不到路径（CLAUDE.md 「Location::join_path」
+    // 单点规则）。防御 `..` / `.` 段：archive_template::sanitize_path_segment 已洗
+    // EXIF make/model，此为覆盖 valuable_name 等其它渠道的第二道防线。
+    let sub_dir_loc = sub_dir_rel
         .split('/')
         .filter(|seg| !seg.is_empty() && *seg != "." && *seg != "..")
-        .fold(output_dir.path().to_path_buf(), |p, seg| p.join(seg));
-    let sub_dir_loc = output_dir.with_path(sub_dir_path.clone());
+        .fold(output_dir.clone(), |loc, seg| loc.join_path(seg));
 
     let max_attempts = config().copy.unique_name_max_attempts;
     // 范围 `0..=max_attempts`：i=0 试原名，i=1..=N 试 `_1..=_N`，共 N+1 候选；
     // 与配置文档"`unique_name_max_attempts` = N 个数字后缀"一致。旧 `0..N` 让
     // 后缀只到 _{N-1}，N=10 时 _10 永不被尝试，第 11 个同名文件直接失败。
     for i in 0..=max_attempts {
-        let target_path = if i == 0 {
-            sub_dir_path.join(file_name)
-        } else {
+        let candidate_name = if i == 0 {
+            file_name.to_string()
+        } else if ext.is_empty() {
             // 无扩展名文件不拼 '.'：尾点文件名在 Linux 是怪文件，Windows 下
             // CreateFile 会剥掉尾点，使 exists 判定与实际创建路径不一致。
-            let name = if ext.is_empty() {
-                format!("{file_stem}_{i}")
-            } else {
-                format!("{file_stem}_{i}.{ext}")
-            };
-            sub_dir_path.join(name)
+            format!("{file_stem}_{i}")
+        } else {
+            format!("{file_stem}_{i}.{ext}")
         };
-        let target_loc = output_dir.with_path(target_path);
+        let target_loc = sub_dir_loc.join_path(&candidate_name);
 
+        // dry_run 也 add cloned_at 到 output_index（ops.rs），此处校验避免第二个
+        // 同 basename+同月+不同 hash 源被静默分派到同一 target；否则 dry-run 报告
+        // target 相同、真跑却走 _N 后缀，tidy-verify 桶对账漏 collision。
+        if output_index.contains_target(&target_loc) {
+            continue;
+        }
         // 对远端 backend 也通过 backend.exists 检测；同 backend 实例对 Local 等价。
         // exists 的 IO 错误（网络抖动等）必须传播：若吞成"不存在"，后续 open_write
         // 会 truncate 覆盖已存在目标，move 模式下源随后被删即永久数据丢失。
@@ -89,6 +101,16 @@ pub(super) fn generate_unique_name(
         }
     }
     Ok(None)
+}
+
+/// Panic-safe `SystemTime → OffsetDateTime`：`OffsetDateTime::from(SystemTime)` 内含
+/// `.expect(...)` 会在越界（future `mtime` / 损坏 FS）触发 panic 违反 P0 §2。三段
+/// 守护（`duration_since` / `i64::try_from` / `from_unix_timestamp`）任一失败返 None，
+/// 让 caller fallback 到 `UNIX_EPOCH` 归档到 1970/01 桶而非崩进程。
+fn system_time_to_offsetdatetime(t: SystemTime) -> Option<OffsetDateTime> {
+    let dur = t.duration_since(UNIX_EPOCH).ok()?;
+    let secs = i64::try_from(dur.as_secs()).ok()?;
+    OffsetDateTime::from_unix_timestamp(secs).ok()
 }
 
 pub(super) fn any_non_english(s: &str) -> bool {

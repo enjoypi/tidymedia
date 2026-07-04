@@ -17,7 +17,15 @@ use crate::entities::common::{canonical_prefix, under_prefix};
 use crate::entities::file_index::{CandidateProvider, Index, VisitStats};
 use crate::entities::uri::Location;
 use crate::usecases::config::config;
-use crate::usecases::report::{CopyReport, Report, ReportError, ReportSink};
+use crate::usecases::report::{
+    CopyReport, FEATURE_COPY, FEATURE_MOVE, Report, ReportError, ReportSink, feature_of,
+};
+
+// FEATURE_COPY / FEATURE_MOVE / feature_of 均从 usecases::report 单点导入；
+// archive_template / adapters::report_sink 亦共用同一定义，避免任一漂移分裂日志聚合。
+// _ 抑制未直接使用的 re-export lint（FEATURE_MOVE 只出现在 report_sink，本模块经
+// feature_of 间接消费）。
+const _: (&str, &str) = (FEATURE_COPY, FEATURE_MOVE);
 
 /// usecase 入口的 source / output 对：把 [`Location`] 与负责该 scheme 的
 /// [`Backend`] 句柄一起传入，避免内层重新解析 URI。
@@ -26,15 +34,6 @@ pub type Source = (Location, Arc<dyn Backend>);
 pub(super) const MONTH: [&str; 13] = [
     "00", "01", "02", "03", "04", "05", "06", "07", "08", "09", "10", "11", "12",
 ];
-
-pub(super) const FEATURE_COPY: &str = "copy";
-pub(super) const FEATURE_MOVE: &str = "move";
-
-// Move 复用 copy 流程（remove=true 即 move）；日志 feature 按用户实际子命令呈现，
-// 避免 `move` 命令输出 feature="copy" 误导排障。
-pub(super) fn feature_of(remove: bool) -> &'static str {
-    if remove { FEATURE_MOVE } else { FEATURE_COPY }
-}
 
 /// [`do_copy`] 的选项包；把 bool + template 打包，规避 `clippy::too_many_arguments`。
 pub struct CopyOpts<'a> {
@@ -320,6 +319,12 @@ fn run_copy_loop(
     // HashMap.values() 迭代顺序受哈希种子影响；move 模式下两份同 hash 源文件,
     // 哪份留下哪份删随版本/进程变化致结果不可重现。按 full_path 排序后迭代保证
     // 同输入同输出，便于审计回放和测试断言。
+    //
+    // TODO(perf): 主循环当前完全串行，远端 backend 场景 10K 文件 × ~50ms RTT × 3-4
+    // 次 IO ≈ 30 min 纯网络阻塞。output_index / mkdir_cache 是共享 &mut 阻止 rayon
+    // par_iter；按 archive 桶（year/month）分组后组间并行（每组独立 target_dir_loc
+    // + 独立 unique-name 空间）可安全并行，8 路预期 wall time 减 75%。改动跨
+    // output_index 状态模型（HashMap → DashMap 或每桶 shard），非本次重构范围。
     let mut entries: Vec<_> = source.files().values().collect();
     entries.sort_by(|a, b| a.full_path.cmp(&b.full_path));
 
