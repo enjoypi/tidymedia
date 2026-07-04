@@ -96,8 +96,31 @@
 - `RemoteBackend::open_read` 直接转发，移除 `read_to_end` 整文件入堆
 - `stream_copy` 真正流水线（边下边写），单文件峰值内存从 2× size 降到 buffer
 
+#### F15 远端 Backend override 原生原子 rename（~2h，消除 default 非原子 fallback）
+- SMB pavao：SMB2 `SET_INFO` `FileRenameInformation`（1 RTT 服务端原子）
+- ADB：`adb shell mv src dst`（同 fs 原子）
+- MTP libmtp：`SendObjectPropList` Rename op
+- 每 backend override `Backend::rename` 走原生路径，非 default `copy_file + remove_file`（读整文件到本地 + 重传 + 断电半态）
+- 配套 override `supports_native_rename_to` 从 default `false` → same-scheme + same-host `true`，让 `copy/ops::do_copy` fast-path 分支命中
+- 测试：注 fake client 让 native rename 返 Err，caller 走非原子 fallback 分支
+- move SMB→SMB 10K 文件 3 RTT ÷ 1 RTT = 67% wall time 削减
+
+#### F16 远端 Backend `copy_file` server-side copy（~2h，同 backend 归档零字节回客户端）
+- 远端 `copy_file` 现是 `client.read(src) + client.write(dst)` 两次全量 RTT + 全字节回客户端
+- SMB pavao：SMB2 `FSCTL_SRV_COPYCHUNK`（服务器端复制，零字节回客户端）
+- ADB：`adb shell cp /sdcard/A /sdcard/B`（同设备内 shell 复制）
+- MTP libmtp：`SendObjectPropList` Copy op（若协议支持）
+- `RemoteClient` trait 加 `try_server_side_copy(src, dst) -> io::Result<Option<u64>>`：不支持返 Ok(None) 让 caller fallback；协议 Err 上抛
+- `RemoteBackend::copy_file` 先试 server-side，None 时才 read+write
+- SMB→SMB 10K × 500 MiB 视频归档：10 TB 网络流量 → 0（服务端本地复制）
+
+#### F17 边界硬限与配置外置（~1h，YAGNI 补边界）
+- `remote::walk_recursive` 加 MAX_DEPTH=256 硬限：远端深备份树（Time Machine / rsync `--link-dest`）超限中断该子树 + record walker_error，防显式栈+堆内存耗尽
+- `MAX_REMOTE_WRITE_BUFFER = 2 << 30` 外置到 `backend.remote.write_buffer_limit_bytes`，Android FFI 场景可调小到 512 MiB fail-fast，桌面可关（`u64::MAX`）；P0 §13 数值常量 MUST 从配置读取
+- 加 `system_time_to_offsetdatetime` 三段守护的单元测试：`SystemTime::UNIX_EPOCH + Duration::from_secs(u64::MAX)` / `SystemTime::UNIX_EPOCH - Duration::from_secs(1)` 触发各 arm 返 None
+
 ### 落地建议
 1. 先做 F1（解锁 N 倍吞吐，其他 fix 的 RTT 缩减才被并行放大见效）
 2. F3 + F10 一起做（共享 cache 基础设施）
-3. F5 / F6 / F9 一并改 RemoteClient trait（避免多次破坏）
+3. F5 / F6 / F9 / F15 / F16 一并改 RemoteClient trait（避免多次破坏；F15+F16 复用同一批 backend override 骨架）
 4. 落地后跑 Linux + `--all-features` `cargo +nightly llvm-cov --branch` 严格 4 项 100% 验证
