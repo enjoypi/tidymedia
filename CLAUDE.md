@@ -76,6 +76,7 @@
 - **一次性汇总**：`uv run --quiet --no-project scripts/perf-collect.py --sub <copy|move|find|cull|move-text-shot> --data <真实源目录> --output-dir <dir>` → 产 `report.json`（含 `duration_ms`）+ `time-v.txt`（`/usr/bin/time -v` 抓 RSS/CPU/IO）+ `perf-report.md`（单一 markdown 直接扔 LLM 分析）
 - **duration_ms 单点**：4 个 Report（`CopyReport`/`FindReport`/`CullReport`/`MoveTextShotReport`）+ `MobileFindReport` 均含；usecase 入口 `Instant::now()` + `usecases::report::elapsed_ms(start)` 单点计算
 - **产物机器可读**：不产 SVG 火焰图/二进制 pprof profile；深度剖析走 samply attach（补充手段，非默认）
+- **详细指南**：`docs/performance.md`（字段字典 + AI 分析 prompt 模板 + 常见瓶颈判定路径）；用户问「性能怎么测」/ 「如何分析瓶颈」直接指到此文档
 
 ## Fixture
 - `tests/data/` mtime 每次 `git checkout` 重置；时间测试 MUST 用 `filetime::set_file_mtime` 固定（`entities/test_common::copy_png_to` → `FIXED_MEDIA_MTIME` 2024-01-01 12:00:00 UTC）
