@@ -103,6 +103,7 @@ fn find_duplicates_report_clone_and_debug() {
             },
         ],
         bytes_read: 1024,
+        duration_ms: 0,
     };
     let r2 = r.clone();
     assert_eq!(r2.group_count, 2);
@@ -238,6 +239,7 @@ fn sample_copy_report() -> CopyReport {
         include_non_media: false,
         errors: Vec::new(),
         errors_truncated: false,
+        duration_ms: 0,
     }
 }
 

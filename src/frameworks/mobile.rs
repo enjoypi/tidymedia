@@ -49,6 +49,8 @@ pub struct MobileFindReport {
     pub groups: Vec<MobileDuplicateGroup>,
     /// 流式哈希过程中累计读取的字节数。
     pub bytes_read: u64,
+    /// use case 入口到构造 report 的 wall-clock 耗时（毫秒）。
+    pub duration_ms: u64,
 }
 
 /// 一组重复文件：size（组内共享，下游按 size 过滤/排序用）+ 路径集合。
@@ -213,6 +215,7 @@ fn mobile_report_from(report: FindReport) -> MobileFindReport {
             })
             .collect(),
         bytes_read: report.bytes_read,
+        duration_ms: report.duration_ms,
     }
 }
 

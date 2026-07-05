@@ -16,6 +16,7 @@
 
 use std::io::{self, Read};
 use std::sync::Arc;
+use std::time::Instant;
 
 use camino::Utf8Path;
 use dashmap::DashSet;
@@ -53,6 +54,7 @@ pub fn move_text_shot(
     output: &Location,
     dry_run: bool,
 ) -> common::Result<MoveTextShotReport> {
+    let start = Instant::now();
     let output_backend = factory.for_location(output)?;
     let output_prefix = canonical_prefix(output);
 
@@ -84,6 +86,7 @@ pub fn move_text_shot(
         merge_delta(&mut report, delta);
     }
 
+    report.duration_ms = crate::usecases::report::elapsed_ms(start);
     log_summary(&report, dry_run);
     Ok(report)
 }

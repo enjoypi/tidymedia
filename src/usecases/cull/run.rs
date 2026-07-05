@@ -17,6 +17,7 @@
 
 use std::io;
 use std::sync::Arc;
+use std::time::Instant;
 
 use image::RgbImage;
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
@@ -86,6 +87,7 @@ pub fn cull(
     dry_run: bool,
     phash_max_hamming: u8,
 ) -> common::Result<CullReport> {
+    let start = Instant::now();
     let face_cfg = &config().backend.face;
     let output_backend = factory.for_location(output)?;
     // canonical_prefix 让 symlink output（如 /tmp/out → /photos/cull_output）下
@@ -175,6 +177,7 @@ pub fn cull(
     }
     report.moved = moved;
 
+    report.duration_ms = crate::usecases::report::elapsed_ms(start);
     log_cull_summary(&report, dry_run);
     Ok(report)
 }

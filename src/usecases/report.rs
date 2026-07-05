@@ -1,7 +1,18 @@
 // JSON 报告值对象 + 输出抽象。serde derive 在编译期派生，本身不引入运行期序列化器
 // 依赖；具体 JSON 编码 + 原子写盘由 [`ReportSink`] 实现承担（adapters 层）。
 
+use std::time::Instant;
+
 use serde_derive::Serialize;
+
+/// wall-clock 毫秒；`u128 → u64` overflow（~5 亿年不可能触发）走饱和 `u64::MAX`。
+/// 4 个 usecase 入口共用：`let start = Instant::now();` ... `duration_ms: elapsed_ms(start)`。
+/// `coverage(off)`：耗时随宿主时钟波动，无法稳定断言。
+#[cfg_attr(coverage_nightly, coverage(off))]
+#[must_use]
+pub fn elapsed_ms(start: Instant) -> u64 {
+    u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX)
+}
 
 /// 结构化日志 `feature` 维度值：copy / move / find / cull / `move_text_shot`
 /// 单点定义。所有 use case + report sink 从此 `use`，避免任一处 const 漂移让
@@ -75,6 +86,9 @@ pub struct CopyReport {
     /// `errors` Vec 是否因 [`ERRORS_SOFT_CAP`] 截断；`true` = 存在未记入 `errors`
     /// 的失败项，用户应看 `failed` 总数与结构化日志。
     pub errors_truncated: bool,
+    /// use case 入口到 finalize 的 wall-clock 耗时（毫秒）。供 AI 分析吞吐 =
+    /// `bytes_read / duration_ms`。溢出（>= 2^64 ms ≈ 5 亿年）走 `u64::MAX`。
+    pub duration_ms: u64,
 }
 
 /// find 操作报告。`scanned` = Index 中实际入索引的文件总数（不仅是重复组路径数）；
@@ -85,6 +99,8 @@ pub struct FindReport {
     pub scanned: usize,
     pub groups: Vec<DuplicateGroupReport>,
     pub bytes_read: u64,
+    /// use case 入口到构造 report 的 wall-clock 耗时（毫秒）。见 `CopyReport::duration_ms`。
+    pub duration_ms: u64,
 }
 
 /// 单个重复组的报告项：组内文件 size（同组共享）+ 路径列表。

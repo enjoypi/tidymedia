@@ -58,6 +58,7 @@ fn sample_copy_report() -> CopyReport {
         include_non_media: false,
         errors: vec![],
         errors_truncated: false,
+        duration_ms: 0,
     }
 }
 
@@ -69,6 +70,7 @@ fn sample_find_report() -> FindReport {
             paths: vec!["a.jpg".into(), "a_copy.jpg".into()],
         }],
         bytes_read: 1024,
+        duration_ms: 0,
     }
 }
 

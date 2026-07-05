@@ -72,6 +72,11 @@
 - **`epoch_to_candidate(0) → None`**（视 EXIF 未填）vs `fs_time::from_modified(UNIX_EPOCH) → Some`（合法 fs 值）语义不同：抽独立 `convert_secs_to_candidate` helper
 - **验证「我的改动是否破坏现有测试」**：`git stash && nextest -E 'test(...)' ; git stash pop` 同 filter 对比 main HEAD
 
+## 性能采集（AI 分析用）
+- **一次性汇总**：`uv run --quiet --no-project scripts/perf-collect.py --sub <copy|move|find|cull|move-text-shot> --data <真实源目录> --output-dir <dir>` → 产 `report.json`（含 `duration_ms`）+ `time-v.txt`（`/usr/bin/time -v` 抓 RSS/CPU/IO）+ `perf-report.md`（单一 markdown 直接扔 LLM 分析）
+- **duration_ms 单点**：4 个 Report（`CopyReport`/`FindReport`/`CullReport`/`MoveTextShotReport`）+ `MobileFindReport` 均含；usecase 入口 `Instant::now()` + `usecases::report::elapsed_ms(start)` 单点计算
+- **产物机器可读**：不产 SVG 火焰图/二进制 pprof profile；深度剖析走 samply attach（补充手段，非默认）
+
 ## Fixture
 - `tests/data/` mtime 每次 `git checkout` 重置；时间测试 MUST 用 `filetime::set_file_mtime` 固定（`entities/test_common::copy_png_to` → `FIXED_MEDIA_MTIME` 2024-01-01 12:00:00 UTC）
 - MP4 不传 `-metadata creation_time=` 时 nom-exif 返 `Some(1904-01-01)`；要 None 用 MKV
@@ -115,6 +120,7 @@
 - **`FindReport` schema 改动** MUST 三处同步：`usecases/report.rs` + `frameworks/mobile.rs::MobileFindReport` + `report_sink_tests.rs` fixture + JSON 断言
 - **Copy/Move partial-failure 文案分流**：`dispatch.rs::tidy()` 按 `CopyReport.remove` 分 `op/past` 文案 + `report_sink.rs` `FEATURE_COPY`/`FEATURE_MOVE`；条件文案 MUST 双向各 1 测试
 - **新增 `Report.scanned` 字段** MUST 与 `CopyReport` 同口径 = walker 触达数（含 failed/skipped/非媒体）；walk 循环内增量而非末尾 `= success_vec.len()`
+- **新增 Report 时序/资源字段**（如 `duration_ms`）MUST 4 Report + `MobileFindReport` + 相应 fixture 五处同步；耗时统一走 `usecases::report::elapsed_ms(Instant)` 单点（`coverage(off)` 免宿主时钟波动断言）
 - **「best + 多 culled」型 `culled[i].score`** MUST 与 `best.score_breakdown.total` 同口径（综合 total），禁单分量替代
 
 ## 项目分层（Clean Architecture）

@@ -1,4 +1,5 @@
 use std::io::Write;
+use std::time::Instant;
 
 use tracing::debug;
 use tracing::error;
@@ -26,6 +27,7 @@ pub(crate) fn find_duplicates(
     sources: Vec<Source>,
     output: Option<&Source>,
 ) -> common::Result<FindReport> {
+    let start = Instant::now();
     let mut index = file_index::Index::new();
 
     if let Some((loc, backend)) = output {
@@ -120,6 +122,7 @@ pub(crate) fn find_duplicates(
                 paths: g.paths.into_iter().map(|p| p.to_string()).collect(),
             })
             .collect(),
+        duration_ms: super::report::elapsed_ms(start),
     })
 }
 

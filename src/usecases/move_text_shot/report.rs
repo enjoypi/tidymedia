@@ -40,4 +40,6 @@ pub struct MoveTextShotReport {
     pub errors_truncated: bool,
     pub dry_run: bool,
     pub errors: Vec<ReportError>,
+    /// use case 入口到 return 的 wall-clock 耗时（毫秒）。供 AI 分析。
+    pub duration_ms: u64,
 }

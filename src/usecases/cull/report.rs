@@ -28,6 +28,8 @@ pub struct CullReport {
     /// `true` = 存在未记入 `errors` 的失败项，用户应看 `failed` 总数与日志。
     pub errors_truncated: bool,
     pub groups: Vec<GroupReport>,
+    /// use case 入口到 return 的 wall-clock 耗时（毫秒）。供 AI 分析。
+    pub duration_ms: u64,
 }
 
 /// 单个相似组的详细：最佳源 + group 目录里的副本路径 + culled 列表 + 评分细节。

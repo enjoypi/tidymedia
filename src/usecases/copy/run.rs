@@ -2,6 +2,7 @@
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
+use std::time::Instant;
 
 use camino::Utf8PathBuf;
 use chrono::FixedOffset;
@@ -107,6 +108,7 @@ pub fn copy_with_sidecar(
     report_sink: Option<&dyn ReportSink>,
     sidecar: Option<CandidateProvider>,
 ) -> common::Result<CopyReport> {
+    let start = Instant::now();
     let (output_loc, output_backend) = output;
     let template = archive_template.unwrap_or(&config().copy.archive_template);
 
@@ -134,6 +136,7 @@ pub fn copy_with_sidecar(
             0,
             Vec::new(),
             false,
+            crate::usecases::report::elapsed_ms(start),
         ));
     }
 
@@ -175,6 +178,7 @@ pub fn copy_with_sidecar(
         failed,
         errors,
         errors_truncated,
+        crate::usecases::report::elapsed_ms(start),
     ))
 }
 
@@ -238,6 +242,7 @@ fn finalize(
     failed: usize,
     errors: Vec<ReportError>,
     errors_truncated: bool,
+    duration_ms: u64,
 ) -> CopyReport {
     let report = make_report(
         flags.dry_run,
@@ -249,6 +254,7 @@ fn finalize(
         failed,
         errors,
         errors_truncated,
+        duration_ms,
     );
     emit_report(sink, &report);
     report
@@ -485,6 +491,7 @@ fn make_report(
     failed: usize,
     errors: Vec<ReportError>,
     errors_truncated: bool,
+    duration_ms: u64,
 ) -> CopyReport {
     // indexed = copied + ignored + failed（do_copy 三态都来自已入索引的文件）。
     let indexed = copied + ignored + failed;
@@ -504,6 +511,7 @@ fn make_report(
         include_non_media,
         errors,
         errors_truncated,
+        duration_ms,
     }
 }
 
