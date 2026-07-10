@@ -1,8 +1,10 @@
-//! copy use case：主流程编排（run）/ 单文件操作（ops）/ 命名策略（naming）子模块。
-//! 对外路径（`usecases::copy::{copy, Source}`）经 re-export 保持不变。
+//! copy use case：主流程编排（run）/ 单文件操作（ops）/ 命名策略（naming）/
+//! 日志与报告（reporting）子模块。对外路径（`usecases::copy::{copy, Source}`）
+//! 经 re-export 保持不变。
 
 pub(super) mod naming;
 pub(super) mod ops;
+pub(super) mod reporting;
 pub(super) mod run;
 
 pub(crate) use self::run::{Source, copy_with_sidecar};
@@ -15,9 +17,11 @@ use self::naming::{any_non_english, extract_valuable_name, generate_unique_name}
 #[cfg(test)]
 use self::ops::do_copy_with_default_cache as do_copy;
 #[cfg(test)]
+use self::reporting::summary_result;
+#[cfg(test)]
 use self::run::copy;
 #[cfg(test)]
-use self::run::{CopyOpts, chrono_offset_from_hours, offset_from_hours, summary_result};
+use self::run::{CopyOpts, chrono_offset_from_hours, offset_from_hours};
 #[cfg(test)]
 use crate::entities::common::canonical_prefix;
 #[cfg(test)]

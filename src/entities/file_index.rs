@@ -332,14 +332,17 @@ impl Index {
     /// 再操作 `similar_files`——避免持 files shard guard 时去拿 similar shard guard
     /// 产生同 shard 递归 deadlock 窗口。
     pub fn add(&self, info: Info) {
-        let key = info.full_path.clone();
         let hash = info.fast_hash;
-        match self.files.entry(info.full_path.clone()) {
+        // key 在 Vacant 分支内才 clone：Occupied 早退路径免一次白 clone（add 是
+        // 索引装配热路径，每文件一次）。
+        let key = match self.files.entry(info.full_path.clone()) {
             Entry::Occupied(_) => return,
             Entry::Vacant(slot) => {
+                let key = slot.key().clone();
                 slot.insert(info);
+                key
             }
-        }
+        };
         // files entry guard 已在上一 statement 边界 drop；此处独立拿 similar shard 锁。
         self.similar_files
             .entry(hash)
@@ -450,16 +453,23 @@ impl Index {
     /// 并行对每个 indexed 文件用 nom-exif + infer 读取元数据；解析失败的文件被
     /// 静默跳过（"尽力而为"语义）。从不返回错误。
     /// `local_offset` 用于解释 EXIF 内无时区的 NaiveDateTime（相机本地时区）。
+    /// `parse_non_media=false` 时非媒体 MIME 在 sniff 后短路为 mime-only `Exif`
+    /// （跳过 office/zip 整文件解析）；调用方在过滤非媒体文件时传 false 省 IO。
     ///
     /// F1：`&mut self` 保留供顶层调用感知阶段边界；内部走 `DashMap` 的 `iter_mut`
     /// 拿各 shard 写锁（rayon `par_bridge` 上转并行 iter，跨 shard 天然无竞争）。
-    pub fn parse_exif(&mut self, local_offset: FixedOffset) {
-        // 同 visit_location：Exif::open 内调 backend.open_read（远端是整文件
-        // 同步下载）是 I/O-bound，包 I/O 池避免阻塞 CPU 池线程。
+    pub fn parse_exif(&mut self, local_offset: FixedOffset, parse_non_media: bool) {
+        // 同 visit_location：Exif::open_filtered 内调 backend.open_read（远端是
+        // 整文件同步下载）是 I/O-bound，包 I/O 池避免阻塞 CPU 池线程。
         install_io(|| {
             self.files.iter_mut().par_bridge().for_each(|mut kv| {
                 let info = kv.value_mut();
-                if let Ok(e) = exif::Exif::open(info.location(), &info.backend(), local_offset) {
+                if let Ok(e) = exif::Exif::open_filtered(
+                    info.location(),
+                    &info.backend(),
+                    local_offset,
+                    parse_non_media,
+                ) {
                     info.set_exif(e);
                 }
             });

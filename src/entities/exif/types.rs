@@ -80,6 +80,17 @@ impl Exif {
         Self::open(&Location::Local(path.to_path_buf()), &backend, local_offset)
     }
 
+    /// 测试 shim：等价 `open_filtered(..., true)`。生产唯一调用方
+    /// `Index::parse_exif` 已直接走 [`Self::open_filtered`]。
+    #[cfg(test)]
+    pub fn open(
+        loc: &Location,
+        backend: &Arc<dyn Backend>,
+        local_offset: FixedOffset,
+    ) -> common::Result<Self> {
+        Self::open_filtered(loc, backend, local_offset, true)
+    }
+
     /// Backend Gateway 入口：从 [`Location`] 用 backend 打开 reader，
     /// `sniff_mime` 在原 reader 上 seek(0) 之后把句柄交给 [`Self::from_reader`] 解析。
     /// 单次 `open_read` 减少远端 backend 的往返次数。
@@ -87,10 +98,17 @@ impl Exif {
     /// `sniff_mime` 返空 OR 返 `application/zip` 时调 [`super::mime::mime_from_ext`]
     /// 按 location 扩展名兜底 —— infer 把 OOXML/ODF/iWork/EPUB/思维导图 zip 容器
     /// 一律识别为 `application/zip`，需扩展名重映射到具体 office mime 才能命中 office 路由。
-    pub fn open(
+    ///
+    /// `parse_non_media=false` 时非媒体 MIME 在 sniff 后短路返回只含 `mime_type`
+    /// 的 `Exif`，跳过整文件容器解析。`copy`/`move` 在 `--include-non-media` 未
+    /// 开启时非媒体文件最终被 `do_copy` 过滤，office/zip 等整文件解析纯属浪费
+    /// ——远端 backend 下 `open_read` 是整文件下载。短路结果仍足以支撑
+    /// `Exif::is_media` 判定（仅依赖 `mime_type`）。
+    pub fn open_filtered(
         loc: &Location,
         backend: &Arc<dyn Backend>,
         local_offset: FixedOffset,
+        parse_non_media: bool,
     ) -> common::Result<Self> {
         let mut reader = backend.open_read(loc)?;
         let sniffed = sniff_mime(reader.as_mut())?;
@@ -100,6 +118,12 @@ impl Exif {
         } else {
             sniffed
         };
+        if !parse_non_media && !Self::is_media_mime(&mime_type) {
+            return Ok(Self {
+                mime_type,
+                ..Self::default()
+            });
+        }
         Ok(Self::from_reader(reader, &mime_type, local_offset))
     }
 
@@ -200,7 +224,13 @@ impl Exif {
     }
 
     pub fn is_media(&self) -> bool {
-        let mime_type = self.mime_type();
+        Self::is_media_mime(self.mime_type())
+    }
+
+    /// MIME 是否为图片/视频（fpx 排除）。[`Self::open_filtered`] 在整文件解析
+    /// 前用它短路；与 [`Self::is_media`] 共享单一判定。
+    #[must_use]
+    pub fn is_media_mime(mime_type: &str) -> bool {
         (mime_type.starts_with(META_TYPE_IMAGE) || mime_type.starts_with(META_TYPE_VIDEO))
             && !camino::Utf8Path::new(mime_type)
                 .extension()

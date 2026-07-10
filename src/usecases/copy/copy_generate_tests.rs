@@ -75,6 +75,7 @@ fn generate_unique_name_uses_suffix_when_first_taken() {
         &local_arc(),
         DEFAULT_TMPL,
         &Index::new(),
+        false,
     )
     .unwrap()
     .expect("unique name should be generated");
@@ -94,6 +95,7 @@ fn generate_unique_name_none_after_max_collisions() {
         &local_arc(),
         DEFAULT_TMPL,
         &Index::new(),
+        false,
     )
     .unwrap();
     assert!(
@@ -118,6 +120,7 @@ fn generate_unique_name_no_extension_omits_trailing_dot() {
         &local_arc(),
         DEFAULT_TMPL,
         &Index::new(),
+        false,
     )
     .unwrap()
     .expect("unique name should be generated");
@@ -202,6 +205,7 @@ fn generate_unique_name_returns_none_when_full_path_has_no_file_name() {
         &local_arc(),
         DEFAULT_TMPL,
         &Index::new(),
+        false,
     )
     .unwrap();
     assert!(res.is_none(), "无 file_name 应早返 Ok(None)");
@@ -242,6 +246,7 @@ fn generate_unique_name_skips_target_when_index_already_contains_it() {
         &local_arc(),
         DEFAULT_TMPL,
         &idx,
+        false,
     )
     .unwrap()
     .expect("unique name should be generated");
@@ -269,9 +274,88 @@ fn generate_unique_name_propagates_exists_error() {
         &(be as Arc<dyn Backend>),
         DEFAULT_TMPL,
         &Index::new(),
+        false,
     )
     .unwrap_err();
     assert_eq!(err.kind(), std::io::ErrorKind::TimedOut);
+}
+
+// output_index 权威时跳过 backend.exists 探测（远端每文件一次 RTT 的大头）：
+// 对 target 注入 exists 错误，authoritative=true 仍成功返回原名 target，证明
+// 探测未发生（对照 generate_unique_name_propagates_exists_error 的 false 路径）。
+#[test]
+fn generate_unique_name_authoritative_skips_backend_exists() {
+    let be = Arc::new(crate::FakeBackend::new("local"));
+    let src_loc = Location::Local(Utf8PathBuf::from("/src/photo.png"));
+    be.add_file(src_loc.clone(), b"data".to_vec());
+    let info = Info::open(&src_loc, Arc::clone(&be) as Arc<dyn Backend>).unwrap();
+    // FakeBackend 默认 mtime = UNIX_EPOCH → +8h 偏移 → 1970/01 子目录。
+    let target = Location::Local(Utf8PathBuf::from("/out/1970/01/photo.png"));
+    be.inject_error(
+        target.clone(),
+        crate::FakeOp::Exists,
+        std::io::ErrorKind::TimedOut,
+    );
+    let out_loc = Location::Local(Utf8PathBuf::from("/out"));
+    let (_, got) = generate_unique_name(
+        &info,
+        &out_loc,
+        &(be as Arc<dyn Backend>),
+        DEFAULT_TMPL,
+        &Index::new(),
+        true,
+    )
+    .unwrap()
+    .expect("authoritative index miss should yield target without probing");
+    assert_eq!(got.display(), target.display());
+}
+
+// output 扫描遇空文件（不入索引，skipped_empty>0）→ 索引非权威 → 保留磁盘探测：
+// 同名空文件让位 _1 后缀而非被覆盖（安全网端到端回归）。
+#[test]
+fn copy_probes_disk_when_output_scan_skipped_files() {
+    let src = tempdir().unwrap();
+    tc::copy_png_to(src.path(), "photo.png").unwrap();
+    let out = tempdir().unwrap();
+    let sub = out.path().join("2024").join("01");
+    fs::create_dir_all(&sub).unwrap();
+    fs::write(sub.join("photo.png"), b"").unwrap();
+    let report = copy(
+        &[local_source(src.path())],
+        local_source(out.path()),
+        false,
+        false,
+        false,
+        Some(DEFAULT_TMPL),
+        None,
+    )
+    .unwrap();
+    assert_eq!(report.copied, 1);
+    assert!(sub.join("photo_1.png").exists());
+    let empty_len = fs::metadata(sub.join("photo.png")).unwrap().len();
+    assert_eq!(empty_len, 0);
+}
+
+// dry-run 且 output 根不存在（首次归档最常见）：跳过 output walk（索引权威、
+// 零探测 RTT），报告正常 copied 且磁盘无写入。
+#[test]
+fn copy_dry_run_with_missing_output_root_succeeds() {
+    let src = tempdir().unwrap();
+    tc::copy_png_to(src.path(), "photo.png").unwrap();
+    let out = tempdir().unwrap();
+    let missing = out.path().join("not-yet-created");
+    let report = copy(
+        &[local_source(src.path())],
+        (local_loc(&missing), local_arc()),
+        true,
+        false,
+        false,
+        Some(DEFAULT_TMPL),
+        None,
+    )
+    .unwrap();
+    assert_eq!(report.copied, 1);
+    assert!(!missing.exists());
 }
 
 #[test]
@@ -368,6 +452,7 @@ fn generate_unique_name_drops_dot_and_dotdot_segments() {
         &local_arc(),
         template,
         &Index::new(),
+        false,
     )
     .unwrap()
     .expect("path generated");

@@ -22,6 +22,7 @@ pub(super) fn generate_unique_name(
     output_backend: &Arc<dyn Backend>,
     template: &str,
     output_index: &Index,
+    index_authoritative: bool,
 ) -> io::Result<Option<(Location, Location)>> {
     let display_path = Utf8Path::new(src_file.full_path.as_str());
     // file_name 缺失（源 Location 是纯 root 如 `smb://host/share/` 或末尾 '/'）
@@ -61,15 +62,7 @@ pub(super) fn generate_unique_name(
     };
     let sub_dir_rel = render(template, &template_ctx);
 
-    // 逐段 Location::join_path：按 scheme 分流分隔符（Local 走 OS 原生、Smb/Mtp/Adb
-    // 强制 `/`）。旧实现 `Utf8PathBuf::join` 在 Windows host + 远端 output 时注入
-    // `\` 让 pavao/adb shell/libmtp 找不到路径（CLAUDE.md 「Location::join_path」
-    // 单点规则）。防御 `..` / `.` 段：archive_template::sanitize_path_segment 已洗
-    // EXIF make/model，此为覆盖 valuable_name 等其它渠道的第二道防线。
-    let sub_dir_loc = sub_dir_rel
-        .split('/')
-        .filter(|seg| !seg.is_empty() && *seg != "." && *seg != "..")
-        .fold(output_dir.clone(), |loc, seg| loc.join_path(seg));
+    let sub_dir_loc = build_sub_dir(output_dir, &sub_dir_rel);
 
     let max_attempts = config().copy.unique_name_max_attempts;
     // 范围 `0..=max_attempts`：i=0 试原名，i=1..=N 试 `_1..=_N`，共 N+1 候选；
@@ -93,6 +86,13 @@ pub(super) fn generate_unique_name(
         if output_index.contains_target(&target_loc) {
             continue;
         }
+        // output_index 权威（output 扫描零 skip/零 walker 错误，或 root 不存在）
+        // 时索引未命中即目标可用，跳过 backend.exists 探测——远端 backend 下这是
+        // 每文件一次 RTT 的大头。非权威（有 skipped_empty / skipped_unreadable /
+        // walker_errors，即磁盘上存在索引不知道的文件）时保留探测兜底。
+        if index_authoritative {
+            return Ok(Some((sub_dir_loc, target_loc)));
+        }
         // 对远端 backend 也通过 backend.exists 检测；同 backend 实例对 Local 等价。
         // exists 的 IO 错误（网络抖动等）必须传播：若吞成"不存在"，后续 open_write
         // 会 truncate 覆盖已存在目标，move 模式下源随后被删即永久数据丢失。
@@ -101,6 +101,27 @@ pub(super) fn generate_unique_name(
         }
     }
     Ok(None)
+}
+
+/// 把模板渲染出的相对路径挂到 `output_dir` 下。`Location::join_path` 按 scheme
+/// 分流分隔符（Local 走 OS 原生、Smb/Mtp/Adb 强制 `/`）——旧实现 `Utf8PathBuf::join`
+/// 在 Windows host + 远端 output 时注入 `\` 让 pavao/adb shell/libmtp 找不到路径
+/// （CLAUDE.md 「`Location::join_path`」单点规则）。防御 `..` / `.` 段：
+/// `archive_template::sanitize_path_segment` 已洗 EXIF make/model，此为覆盖
+/// `valuable_name` 等其它渠道的第二道防线。清洗后的相对路径一次 `join_path`
+/// （多段拼接是其文档化行为）：旧 fold 逐段 join 让远端 [`Location`] 的
+/// host/share 等 String 字段每段各 clone 一次。
+fn build_sub_dir(output_dir: &Location, sub_dir_rel: &str) -> Location {
+    let clean_rel = sub_dir_rel
+        .split('/')
+        .filter(|seg| !seg.is_empty() && *seg != "." && *seg != "..")
+        .collect::<Vec<_>>()
+        .join("/");
+    if clean_rel.is_empty() {
+        output_dir.clone()
+    } else {
+        output_dir.join_path(&clean_rel)
+    }
 }
 
 /// Panic-safe `SystemTime → OffsetDateTime`：`OffsetDateTime::from(SystemTime)` 内含
@@ -149,6 +170,10 @@ mod tests {
 
     /// pre-epoch `SystemTime` → `duration_since(UNIX_EPOCH)` Err arm 命中，早返 None。
     /// 覆盖 CLAUDE.md「P0 §2 用户输入 MUST NOT panic」防御性 branch。
+    /// 测试自身的 let-else `return;`（Windows/CI 平台差异 skip 路径）在 Linux
+    /// 恒不可达，`coverage(off)` 将其从严格 100% 分母剔除；被测函数本身仍被
+    /// `at_epoch` 用例正常计数。
+    #[cfg_attr(coverage_nightly, coverage(off))]
     #[test]
     fn system_time_to_offsetdatetime_pre_epoch_returns_none() {
         let pre = UNIX_EPOCH.checked_sub(Duration::from_secs(1));
@@ -165,5 +190,30 @@ mod tests {
     fn system_time_to_offsetdatetime_at_epoch_returns_epoch() {
         let got = system_time_to_offsetdatetime(UNIX_EPOCH).expect("UNIX_EPOCH is valid");
         assert_eq!(got.unix_timestamp(), 0);
+    }
+
+    /// 常规多段相对路径一次挂到 output 下（多段 `join_path` 文档化行为）。
+    #[test]
+    fn build_sub_dir_joins_multi_segment_rel_path() {
+        let out = Location::Local(camino::Utf8PathBuf::from("/out"));
+        let got = build_sub_dir(&out, "2024/01");
+        assert!(std::path::Path::new(got.display().as_str()).ends_with("2024/01"));
+    }
+
+    /// `..` / `.` / 空段被第二道防线剥除，不逃逸 output 根。
+    #[test]
+    fn build_sub_dir_strips_dot_and_dotdot_segments() {
+        let out = Location::Local(camino::Utf8PathBuf::from("/out"));
+        let got = build_sub_dir(&out, "../2024/./01//");
+        assert!(std::path::Path::new(got.display().as_str()).ends_with("2024/01"));
+        assert!(!got.display().contains(".."));
+    }
+
+    /// 相对路径全部被剥除时回落 output 本身（不产生尾随分隔符脏路径）。
+    #[test]
+    fn build_sub_dir_all_segments_stripped_falls_back_to_output() {
+        let out = Location::Local(camino::Utf8PathBuf::from("/out"));
+        let got = build_sub_dir(&out, "../..");
+        assert_eq!(got.display(), out.display());
     }
 }

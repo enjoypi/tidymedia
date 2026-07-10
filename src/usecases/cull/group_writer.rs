@@ -11,7 +11,7 @@ use camino::Utf8PathBuf;
 use tracing::warn;
 
 use super::report::GroupReport;
-use crate::entities::backend::{Backend, stream_copy as backend_stream_copy};
+use crate::entities::backend::{Backend, partial_move_error, stream_copy as backend_stream_copy};
 use crate::entities::uri::Location;
 use crate::usecases::config::config;
 use crate::usecases::report::FEATURE_CULL;
@@ -223,7 +223,7 @@ fn move_file(
     // scheme 分流：同 scheme→backend.copy_file 原生；跨 scheme→stream copy）。
     copy_file_cross_scheme(src_backend, src_loc, output_backend, target_loc)?;
     src_backend.remove_file(src_loc).map_err(|re| {
-        io::Error::new(
+        partial_move_error(
             re.kind(),
             format!(
                 "cull: copied {src} -> {dst} but cannot remove source: {re}",

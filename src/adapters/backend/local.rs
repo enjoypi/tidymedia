@@ -11,7 +11,9 @@ use camino::Utf8Path;
 use ignore::WalkBuilder;
 use memmap2::Mmap;
 
-use crate::entities::backend::{Backend, Entry, EntryKind, MediaReader, MediaWriter, Metadata};
+use crate::entities::backend::{
+    Backend, Entry, EntryKind, MediaReader, MediaWriter, Metadata, partial_move_error,
+};
 use crate::entities::uri::Location;
 
 #[derive(Debug, Default)]
@@ -186,7 +188,7 @@ pub(super) fn rename_or_fallback_with(
         Err(e) if e.kind() == io::ErrorKind::CrossesDevices => {
             copy(from, to)?;
             remove(from).map_err(|re| {
-                io::Error::new(
+                partial_move_error(
                     re.kind(),
                     format!(
                         "cross-device rename: copied {} -> {} but cannot remove source: {re}",

@@ -297,6 +297,7 @@ mod test_advanced {
             &local_arc(),
             "{valuable_name}",
             &crate::entities::file_index::Index::new(),
+            false,
         )
         .unwrap()
         .expect("should generate even with empty subdir");

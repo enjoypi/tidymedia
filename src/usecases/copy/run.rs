@@ -15,6 +15,7 @@ use tracing::error;
 use tracing::trace;
 
 use super::ops::do_copy;
+use super::reporting::{ReportFlags, finalize, log_operation_summary, log_scan_summary};
 use crate::entities::backend::Backend;
 use crate::entities::common;
 use crate::entities::common::{canonical_prefix, under_prefix};
@@ -23,7 +24,7 @@ use crate::entities::threadpool::install_io;
 use crate::entities::uri::Location;
 use crate::usecases::config::config;
 use crate::usecases::report::{
-    CopyReport, FEATURE_COPY, FEATURE_MOVE, Report, ReportError, ReportSink, extend_errors_capped,
+    CopyReport, FEATURE_COPY, FEATURE_MOVE, ReportError, ReportSink, extend_errors_capped,
     feature_of, push_error_capped,
 };
 
@@ -115,7 +116,7 @@ pub fn copy_with_sidecar(
     let output_prefix = canonical_prefix(&output_loc);
     ensure_sources_outside_output(sources, &output_prefix)?;
     let feature = feature_of(remove);
-    let source = build_source_index(sources, &output_prefix, sidecar, feature);
+    let source = build_source_index(sources, &output_prefix, sidecar, feature, include_non_media);
 
     let total_files = source.len();
     let scan_stats = source.stats();
@@ -140,6 +141,29 @@ pub fn copy_with_sidecar(
         ));
     }
 
+    execute_copy(
+        &source,
+        (output_loc, output_backend),
+        template,
+        flags,
+        feature,
+        report_sink,
+        start,
+    )
+}
+
+// copy_with_sidecar 的非空源主路径：mkdir → run_copy_loop → 日志 → finalize。
+// 拆出让入口函数保持在 64 行限内（P0 §10）。
+fn execute_copy(
+    source: &Index,
+    output: Source,
+    template: &str,
+    flags: ReportFlags,
+    feature: &'static str,
+    report_sink: Option<&dyn ReportSink>,
+    start: Instant,
+) -> common::Result<CopyReport> {
+    let (output_loc, output_backend) = output;
     trace!(
         feature,
         operation = "sample_files",
@@ -147,22 +171,23 @@ pub fn copy_with_sidecar(
         "first files sample"
     );
 
-    if !dry_run {
+    if !flags.dry_run {
         output_backend.mkdir_p(&output_loc)?;
     }
 
     let opts = CopyOpts {
-        dry_run,
-        remove,
-        include_non_media,
+        dry_run: flags.dry_run,
+        remove: flags.remove,
+        include_non_media: flags.include_non_media,
         template,
     };
     let (copied, ignored, failed, errors, errors_truncated) =
-        run_copy_loop(&source, &output_loc, &output_backend, &opts);
+        run_copy_loop(source, &output_loc, &output_backend, &opts);
 
+    let scan_stats = source.stats();
     log_operation_summary(
         feature,
-        total_files,
+        source.len(),
         copied,
         ignored,
         failed,
@@ -180,84 +205,6 @@ pub fn copy_with_sidecar(
         errors_truncated,
         crate::usecases::report::elapsed_ms(start),
     ))
-}
-
-#[derive(Clone, Copy)]
-struct ReportFlags {
-    dry_run: bool,
-    remove: bool,
-    include_non_media: bool,
-}
-
-fn log_scan_summary(feature: &'static str, total_files: usize, stats: VisitStats) {
-    debug!(
-        feature,
-        operation = "scan_sources",
-        result = "ok",
-        total_files,
-        skipped_empty = stats.skipped_empty,
-        skipped_unreadable = stats.skipped_unreadable,
-        walker_errors = stats.walker_errors,
-        "scanned source files"
-    );
-}
-
-fn log_operation_summary(
-    feature: &'static str,
-    total: usize,
-    copied: usize,
-    ignored: usize,
-    failed: usize,
-    flags: ReportFlags,
-    stats: VisitStats,
-) {
-    debug!(
-        feature,
-        operation = "summary",
-        result = summary_result(failed),
-        total,
-        copied,
-        ignored,
-        failed,
-        dry_run = flags.dry_run,
-        remove = flags.remove,
-        include_non_media = flags.include_non_media,
-        skipped_empty = stats.skipped_empty,
-        skipped_unreadable = stats.skipped_unreadable,
-        walker_errors = stats.walker_errors,
-        "operation summary"
-    );
-}
-
-#[expect(
-    clippy::too_many_arguments,
-    reason = "finalize 与 make_report / run_copy_loop 返回项一一对应；折 struct 让唯一调用点更绕"
-)]
-fn finalize(
-    sink: Option<&dyn ReportSink>,
-    flags: ReportFlags,
-    stats: VisitStats,
-    copied: usize,
-    ignored: usize,
-    failed: usize,
-    errors: Vec<ReportError>,
-    errors_truncated: bool,
-    duration_ms: u64,
-) -> CopyReport {
-    let report = make_report(
-        flags.dry_run,
-        flags.remove,
-        flags.include_non_media,
-        stats,
-        copied,
-        ignored,
-        failed,
-        errors,
-        errors_truncated,
-        duration_ms,
-    );
-    emit_report(sink, &report);
-    report
 }
 
 // 重叠保护：source ⊆ output（canonical 前缀含相等）时，dedup 会把每个源文件判为
@@ -279,11 +226,14 @@ fn ensure_sources_outside_output(sources: &[Source], output_prefix: &str) -> com
 }
 
 // 扫源建索引 + 重叠剔除 + EXIF/P3 富集；拆出让 copy_with_sidecar 保持在 100 行内。
+// include_non_media=false 时 parse_exif 对非媒体 MIME 短路（sniff 后跳过整文件
+// 容器解析）——这些文件后续在 do_copy 被 is_media 过滤，解析成本纯属浪费。
 fn build_source_index(
     sources: &[Source],
     output_prefix: &str,
     sidecar: Option<CandidateProvider>,
     feature: &'static str,
+    include_non_media: bool,
 ) -> Index {
     let mut source = Index::new();
     for (loc, backend) in sources {
@@ -302,7 +252,7 @@ fn build_source_index(
             "excluded already-archived files under output from source index"
         );
     }
-    source.parse_exif(configured_chrono_offset());
+    source.parse_exif(configured_chrono_offset(), include_non_media);
     // P3 富集：adapters 层注入的 sidecar 发现（XMP / Takeout），entities 只消费
     // 转换好的 Candidate（依赖倒置，协议细节不进 usecases）。
     if let Some(provider) = sidecar {
@@ -320,8 +270,19 @@ fn run_copy_loop(
     output_backend: &Arc<dyn Backend>,
     opts: &CopyOpts<'_>,
 ) -> (usize, usize, usize, Vec<ReportError>, bool) {
+    // root 不存在（dry-run 首次归档最常见；非 dry-run 已 mkdir_p 必存在）→ 整树
+    // 为空，跳过 walk。exists 的 Err 不吞成「不存在」：保守按存在处理走 walk，
+    // walk 失败会计 walker_errors 让 index_authoritative=false，后续逐文件
+    // exists 探测时错误自然传播。
+    let walk_output = !matches!(output_backend.exists(output_loc), Ok(false));
     let mut output_index = Index::new();
-    output_index.visit_location(output_loc, output_backend);
+    if walk_output {
+        output_index.visit_location(output_loc, output_backend);
+    }
+    // output 扫描零 skip / 零 walker 错误 ⇒ 索引是 output 的完整快照（权威），
+    // generate_unique_name 可跳过逐文件 backend.exists 探测（远端每文件一次 RTT）。
+    // 有任何 skip（空文件 / 不可读 / walker 错误）⇒ 磁盘上存在索引外文件，保留探测。
+    let index_authoritative = output_index.stats() == VisitStats::default();
     // freeze 成 shared &Index：Index 内 DashMap 让 add / exists / contains_target 均
     // &self 语义，跨 par_iter 边界安全并发。
     let output_index = output_index;
@@ -365,6 +326,7 @@ fn run_copy_loop(
                     source,
                     &output_index,
                     &mkdir_cache,
+                    index_authoritative,
                     opts,
                     output_loc,
                     output_backend,
@@ -394,6 +356,7 @@ fn process_group(
     source: &Index,
     output_index: &Index,
     mkdir_cache: &DashSet<Location>,
+    index_authoritative: bool,
     opts: &CopyOpts<'_>,
     output_loc: &Location,
     output_backend: &Arc<dyn Backend>,
@@ -414,6 +377,7 @@ fn process_group(
             output_backend,
             output_index,
             mkdir_cache,
+            index_authoritative,
             opts,
         ) {
             Ok(true) => local.copied += 1,
@@ -471,60 +435,5 @@ impl CopyDelta {
     }
 }
 
-// 构造 CopyReport 值对象；抽出避免参数列表过长。
-// scanned = 入索引文件数（indexed）+ walker 触达但跳过的（empty/unreadable/walker_errors）。
-#[expect(
-    clippy::too_many_arguments,
-    reason = "report 字段与 run_copy_loop 返回值一一对应；合并结构体反而在唯一调用点更绕"
-)]
-#[expect(
-    clippy::fn_params_excessive_bools,
-    reason = "dry_run/remove/include_non_media/errors_truncated 与 CopyReport 字段一一对应，收敛 enum 反让调用点更绕"
-)]
-fn make_report(
-    dry_run: bool,
-    remove: bool,
-    include_non_media: bool,
-    scan_stats: VisitStats,
-    copied: usize,
-    ignored: usize,
-    failed: usize,
-    errors: Vec<ReportError>,
-    errors_truncated: bool,
-    duration_ms: u64,
-) -> CopyReport {
-    // indexed = copied + ignored + failed（do_copy 三态都来自已入索引的文件）。
-    let indexed = copied + ignored + failed;
-    let skipped_total =
-        scan_stats.skipped_empty + scan_stats.skipped_unreadable + scan_stats.walker_errors;
-    let scanned = indexed + usize::try_from(skipped_total).unwrap_or(usize::MAX);
-    CopyReport {
-        scanned,
-        copied,
-        ignored,
-        failed,
-        skipped_empty: scan_stats.skipped_empty,
-        skipped_unreadable: scan_stats.skipped_unreadable,
-        walker_errors: scan_stats.walker_errors,
-        dry_run,
-        remove,
-        include_non_media,
-        errors,
-        errors_truncated,
-        duration_ms,
-    }
-}
-
-// 结构化日志 summary 的 result 维度值：失败计数为 0 即 "ok"，否则 "partial"。
-pub(super) fn summary_result(failed: usize) -> &'static str {
-    if failed == 0 { "ok" } else { "partial" }
-}
-
-// canonical_prefix 已上提到 entities::common（4 个 use case 共用）。
-
-// 通过注入的 sink 输出报告；None 时跳过（用 case 不知道协议与持久化细节）。
-fn emit_report(sink: Option<&dyn ReportSink>, report: &CopyReport) {
-    if let Some(s) = sink {
-        s.write(&Report::Copy(report));
-    }
-}
+// canonical_prefix 已上提到 entities::common（4 个 use case 共用）；
+// 日志 / CopyReport 构造 / sink 发射已拆至 super::reporting。

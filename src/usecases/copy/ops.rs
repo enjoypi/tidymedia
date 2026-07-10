@@ -8,7 +8,9 @@ use tracing::warn;
 
 use super::naming::generate_unique_name;
 use super::run::CopyOpts;
-use crate::entities::backend::{Backend, stream_copy as backend_stream_copy};
+use crate::entities::backend::{
+    Backend, is_partial_move, partial_move_error, stream_copy as backend_stream_copy,
+};
 use crate::entities::common;
 use crate::entities::file_index::Index;
 use crate::entities::file_info::Info;
@@ -33,6 +35,7 @@ pub(super) fn do_copy(
     output_backend: &Arc<dyn Backend>,
     output_index: &Index,
     mkdir_cache: &DashSet<Location>,
+    index_authoritative: bool,
     opts: &CopyOpts<'_>,
 ) -> common::Result<bool> {
     let src_loc = src.location().clone();
@@ -66,31 +69,16 @@ pub(super) fn do_copy(
         return Ok(false);
     }
 
-    if let Some((target_dir_loc, target_loc)) =
-        generate_unique_name(src, output_dir, output_backend, opts.template, output_index)?
-    {
+    if let Some((target_dir_loc, target_loc)) = generate_unique_name(
+        src,
+        output_dir,
+        output_backend,
+        opts.template,
+        output_index,
+        index_authoritative,
+    )? {
         if opts.dry_run {
-            let target_display = target_loc.display();
-            debug!(
-                feature,
-                operation = "copy_file",
-                result = "dry_run",
-                source = %src_display,
-                target = %target_display,
-                "would transfer file"
-            );
-            // dry_run 也 add：generate_unique_name 后续调用会经 contains_target
-            // 判定「本次已假设写过」，避免同 basename+同月+不同 hash 源被静默
-            // 分派到相同 target 让 dry-run 报表 collision 漏报（真跑走 _N 分裂
-            // 归档，tidy-verify 桶对账拿不到真跑口径）。
-            //
-            // Pre-populate src.secure_hash 让 cloned_at 的 lazy snapshot 携带 SHA-512：
-            // 否则同 hash 后续 src 走 output_index.exists(secure=true) 会触发
-            // f.secure_hash() → output_backend.open_read(target_loc)，dry-run 下
-            // target 未真写返 NotFound 让 do_copy 假失败。
-            src.secure_hash()?;
-            output_index.add(src.cloned_at(target_loc, Arc::clone(output_backend)));
-            return Ok(true);
+            return record_dry_run(src, target_loc, output_backend, output_index, feature);
         }
 
         // mkdir 缓存：同 {year}/{month} 桶被 N 个文件命中时，N-1 次 mkdir_p 是远端
@@ -134,13 +122,13 @@ pub(super) fn do_copy(
                 }
                 Err(e) => {
                     // 跨卷 fallback 半态：LocalBackend rename_or_fallback_with 内 fs::copy
-                    // 成功但 fs::remove_file 失败会返 wrap 文案「cross-device rename:
-                    // copied ... but cannot remove source」。dst 已在 fs 落地——即使
-                    // 本次 do_copy 返 Err(failed+=1)，也 MUST 把 dst 登记入 output_index
-                    // 让下一个同 hash src dedup 生效，否则 exists() 判 dst 存在走 _N
-                    // 后缀又写一份物理副本。stream_copy 分支已通过「先 add 再 remove」
-                    // 顺序修好此漏洞，fast-path 补齐同款救援。
-                    if e.to_string().contains("cannot remove source") {
+                    // 成功但 fs::remove_file 失败会返 partial_move_error（结构化标记，
+                    // 文案「cross-device rename: copied ... but cannot remove source」）。
+                    // dst 已在 fs 落地——即使本次 do_copy 返 Err(failed+=1)，也 MUST 把
+                    // dst 登记入 output_index 让下一个同 hash src dedup 生效，否则
+                    // exists() 判 dst 存在走 _N 后缀又写一份物理副本。stream_copy 分支
+                    // 已通过「先 add 再 remove」顺序修好此漏洞，fast-path 补齐同款救援。
+                    if is_partial_move(&e) {
                         output_index
                             .add(src.cloned_at(target_loc.clone(), Arc::clone(output_backend)));
                     }
@@ -175,6 +163,41 @@ pub(super) fn do_copy(
     }
 }
 
+// dry-run 分支：不落盘，但 add cloned_at 让本次 run 的后续决策拿到与真跑一致的
+// 口径。从 do_copy 抽出（clippy too_many_lines）；`coverage(off)` 理由与 do_copy
+// 相同（multi-binary instance 下 `debug!` micro-region 虚假 miss）。
+//
+// dry_run 也 add：generate_unique_name 后续调用会经 contains_target 判定「本次
+// 已假设写过」，避免同 basename+同月+不同 hash 源被静默分派到相同 target 让
+// dry-run 报表 collision 漏报（真跑走 _N 分裂归档，tidy-verify 桶对账拿不到
+// 真跑口径）。
+//
+// Pre-populate src.secure_hash 让 cloned_at 的 lazy snapshot 携带 SHA-512：
+// 否则同 hash 后续 src 走 output_index.exists(secure=true) 会触发
+// f.secure_hash() → output_backend.open_read(target_loc)，dry-run 下 target
+// 未真写返 NotFound 让 do_copy 假失败。
+#[cfg_attr(coverage_nightly, coverage(off))]
+fn record_dry_run(
+    src: &Info,
+    target_loc: Location,
+    output_backend: &Arc<dyn Backend>,
+    output_index: &Index,
+    feature: &'static str,
+) -> common::Result<bool> {
+    let target_display = target_loc.display();
+    debug!(
+        feature,
+        operation = "copy_file",
+        result = "dry_run",
+        source = %src.full_path,
+        target = %target_display,
+        "would transfer file"
+    );
+    src.secure_hash()?;
+    output_index.add(src.cloned_at(target_loc, Arc::clone(output_backend)));
+    Ok(true)
+}
+
 // stream_copy + remove(=move) 路径下的 src 删除步骤。抽出独立 fn 是为了用
 // `#[cfg_attr(coverage_nightly, coverage(off))]` 把内部 wrap 错误的 closure 从严格
 // 100% region 分母剔除——该 closure 仅在 stream_copy 成功后 remove_file Err 时触发，
@@ -192,7 +215,7 @@ fn remove_src_after_stream_copy(
     src.backend()
         .remove_file(src_loc)
         .map_err(|re| {
-            std::io::Error::new(
+            partial_move_error(
                 re.kind(),
                 format!(
                     "copy: copied {src_display} -> {dst} but cannot remove source: {re}",
@@ -203,10 +226,11 @@ fn remove_src_after_stream_copy(
         .map_err(common::Error::from)
 }
 
-/// 测试 shim：调原 [`do_copy`] 时按需构造空 `mkdir_cache`。生产路径走
-/// `run_copy_loop` 持有的 loop 级缓存（命中已建目录跳过重复 `mkdir_p` RTT），
-/// 测试桩不关心缓存复用，每次空 set 入参等价旧行为；既保留 `mkdir_cache` 参数
-/// 强制每次调用决策（不退化为隐式默认），又让 12 处测试调用零改动。
+/// 测试 shim：调原 [`do_copy`] 时按需构造空 `mkdir_cache`，并固定
+/// `index_authoritative=false`（保守走 `backend.exists` 探测 = 旧行为）。生产
+/// 路径走 `run_copy_loop` 持有的 loop 级缓存（命中已建目录跳过重复 `mkdir_p`
+/// RTT）与 output 扫描 stats 推导的权威标记；测试桩不关心两者，让 12 处测试
+/// 调用零改动。
 #[cfg(test)]
 pub(super) fn do_copy_with_default_cache(
     src: &Info,
@@ -216,7 +240,15 @@ pub(super) fn do_copy_with_default_cache(
     opts: &CopyOpts<'_>,
 ) -> common::Result<bool> {
     let mc: DashSet<Location> = DashSet::new();
-    do_copy(src, output_dir, output_backend, output_index, &mc, opts)
+    do_copy(
+        src,
+        output_dir,
+        output_backend,
+        output_index,
+        &mc,
+        false,
+        opts,
+    )
 }
 
 /// 用源 Info 的 backend 读 + 输出 backend 写。经 `backend::stream_copy` 单点 helper

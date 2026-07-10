@@ -451,6 +451,22 @@ fn move_text_shot_records_failure_on_unique_name_exists_error() {
     assert_eq!(report.failed, 1);
 }
 
+// `unique_name_from_index` 循环内 `_N` 候选 exists Err 必须上抛（吞错会让候选
+// 被误判可用 → 后续 open_write truncate 覆盖）。直调命中 `Err(e) => return Err(e)`
+// arm——上面的 e2e 只注入 base 候选，触不到循环内 arm。
+#[test]
+fn unique_name_from_index_propagates_exists_error() {
+    let fake = Arc::new(FakeBackend::new("local"));
+    fake.inject_error(
+        local_loc("/out/shot_1.png"),
+        crate::FakeOp::Exists,
+        io::ErrorKind::TimedOut,
+    );
+    let backend: Arc<dyn Backend> = fake;
+    let err = unique_name_from_index(&local_loc("/out"), "shot.png", &backend, 1).unwrap_err();
+    assert_eq!(err.kind(), io::ErrorKind::TimedOut);
+}
+
 #[test]
 fn move_text_shot_unique_name_collision_for_extensionless_file() {
     let (fake, factory) = fake_factory();

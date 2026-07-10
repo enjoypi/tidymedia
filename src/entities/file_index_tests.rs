@@ -58,7 +58,7 @@ fn search_same() {
 fn parse_exif() {
     let mut index = Index::new();
     index.visit_dir(common::DATA_DIR);
-    index.parse_exif(chrono::FixedOffset::east_opt(0).unwrap());
+    index.parse_exif(chrono::FixedOffset::east_opt(0).unwrap(), true);
 
     let jpeg_path = file_info::full_path(common::DATA_JPEG_WITH_EXIF).unwrap();
     let entry = index.get(jpeg_path.as_path()).unwrap();
@@ -181,7 +181,7 @@ fn bytes_read_sums_individual() {
 #[test]
 fn parse_exif_empty_index_ok() {
     let mut index = Index::new();
-    index.parse_exif(chrono::FixedOffset::east_opt(0).unwrap());
+    index.parse_exif(chrono::FixedOffset::east_opt(0).unwrap(), true);
     assert_eq!(index.len(), 0);
 }
 
@@ -196,7 +196,7 @@ fn parse_exif_skips_files_deleted_between_visit_and_parse() {
     index.visit_dir(dir.path().to_str().unwrap());
     assert_eq!(index.len(), 1);
     fs::remove_file(&path).unwrap();
-    index.parse_exif(chrono::FixedOffset::east_opt(0).unwrap());
+    index.parse_exif(chrono::FixedOffset::east_opt(0).unwrap(), true);
     assert_eq!(index.len(), 1);
 }
 

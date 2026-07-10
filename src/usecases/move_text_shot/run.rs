@@ -26,7 +26,7 @@ use tracing::{debug, warn};
 
 use super::report::MoveTextShotReport;
 use crate::entities::backend::factory::BackendFactory;
-use crate::entities::backend::{Backend, Entry, EntryKind, stream_copy};
+use crate::entities::backend::{Backend, Entry, EntryKind, partial_move_error, stream_copy};
 use crate::entities::common::{self, canonical_prefix, under_prefix};
 use crate::entities::uri::Location;
 use crate::usecases::config::config;
@@ -680,7 +680,7 @@ fn do_move_file(
         same_instance,
     )?;
     src_backend.remove_file(src_loc).map_err(|re| {
-        io::Error::new(
+        partial_move_error(
             re.kind(),
             format!(
                 "move_text_shot: copied {src} -> {dst} but cannot remove source: {re}",

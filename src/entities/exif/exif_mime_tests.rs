@@ -494,6 +494,45 @@ fn is_office_mime_empty_false() {
     assert!(!super::is_office_mime(""));
 }
 
+// `open_filtered(parse_non_media=false)` 对非媒体 MIME 在 sniff 后短路：返回
+// mime-only Exif（`is_media` 判定仍可用），跳过整文件容器解析——copy/move 在
+// `--include-non-media` 未开时非媒体解析纯属浪费。
+#[test]
+fn open_filtered_skips_parsing_for_non_media_mime() {
+    use super::super::uri::Location;
+    use crate::adapters::backend::fake::FakeBackend;
+    use std::sync::Arc;
+
+    let fake = Arc::new(FakeBackend::new("fake"));
+    let loc = Location::Local(camino::Utf8PathBuf::from("/in-mem/notes.txt"));
+    fake.add_file(loc.clone(), b"plain text content\n".to_vec());
+
+    let backend: Arc<dyn super::super::backend::Backend> = fake;
+    let exif = Exif::open_filtered(&loc, &backend, utc(), false).unwrap();
+    assert_eq!(exif.mime_type(), "text/plain");
+    assert!(!exif.is_media());
+    assert_eq!(exif.doc_created(), 0);
+}
+
+// 反向：媒体 MIME 在 `parse_non_media=false` 下不短路，正常走容器解析
+// （`!is_media_mime` 子条件 false arm）。
+#[test]
+fn open_filtered_still_parses_media_mime() {
+    use super::super::uri::Location;
+    use crate::adapters::backend::fake::FakeBackend;
+    use std::sync::Arc;
+
+    let png = std::fs::read(crate::entities::test_common::DATA_DNS_BENCHMARK).unwrap();
+    let fake = Arc::new(FakeBackend::new("fake"));
+    let loc = Location::Local(camino::Utf8PathBuf::from("/in-mem/photo.png"));
+    fake.add_file(loc.clone(), png);
+
+    let backend: Arc<dyn super::super::backend::Backend> = fake;
+    let exif = Exif::open_filtered(&loc, &backend, utc(), false).unwrap();
+    assert!(exif.is_media());
+    assert!(exif.mime_type().starts_with("image/"));
+}
+
 // End-to-end：FakeBackend 喂内容不被 infer 识别（纯 ASCII txt） + path 带 `.txt`
 // 扩展名 → Exif::open 走 `mime_from_ext` fallback 让 mime=text/plain，再分流到
 // office::populate_office_dates（stub 阶段返 0 不改 exif）。覆盖 Exif::open 的

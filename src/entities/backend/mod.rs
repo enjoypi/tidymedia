@@ -11,6 +11,10 @@ use super::uri::Location;
 
 pub mod factory;
 
+mod partial_move;
+
+pub use self::partial_move::{is_partial_move, partial_move_error};
+
 /// `stream_copy` 的 `BufReader` / `BufWriter` 容量：1 MiB 让远端单文件大视频的
 /// `std::io::copy` 默认 8 KiB stack buffer 减少 128× syscall / RTT 次数；本地
 /// buffered IO 仍受益（每 1 MiB 一次 write syscall）。CLAUDE.md 例外「算法/IO
