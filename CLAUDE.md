@@ -22,7 +22,6 @@
 - 无外部进程依赖；EXIF/视频走 `nom-exif` + `infer`
 - **ONNX 模型走 git-lfs**（`models/` 4 face + 1 OCR ≈ 35 MB）：`scripts/download_models.sh` + `simplify_onnx.py` 装配；路径空时立即返 `InvalidInput`
   - SCRFD-10G / MobileFaceNet **128 维**（非官方 512）/ MediaPipe FaceMesh 192×192 / YOLOv8 EyeState（**非 MobileNetV3 softmax**，640×640 letterbox，decode 取 `[1,6,8400]` anchor max closed conf）
-- **`FaceEmbedder` 签名 `[f32; 128]`**，切 512 维需同步改 `EMBED_DIM` + trait 接口 + 所有 `FakeFaceEmbedder::new([0.0; N])`
 - nom-exif 内部 tracing 大量输出，EnvFilter 默认压 `nom_exif=error`；GPS 子 IFD 用 `Exif::iter()` 按 tag code 匹配（`get()` 只读 IFD0）
 
 ### 容器解析补丁（nom-exif 不支持）
@@ -40,7 +39,7 @@
 - **门槛 region/function/line/branch 四项全 100%**（Linux + `--all-features` + `--branch`）；Windows 平台差异 miss 用 `git stash` 对照判定
 - 严格 100% 命令：`RUSTFLAGS="--cfg=coverage_nightly" cargo +nightly llvm-cov --release nextest --summary-only --branch --ignore-filename-regex='(adapters/backend/[a-z]+_real\.rs|adapters/(ocr|face)/tract_[a-z]+\.rs)$' --all-features`
 - `lib.rs`/`bin/tidymedia.rs` 顶 `#![cfg_attr(coverage_nightly, feature(coverage_attribute))]`；`[lints.rust] unexpected_cfgs` 注册
-- **两类 subprocess phantom miss**：① `adapters/backend/*_real.rs`（大 + 需真环境）走 ignore-regex；② `adapters/(ocr|face)/tract_*_real.rs`（小）走 `#[coverage(off)]`；③ 主体 `tract_dbnet.rs` / `tract_{4face}.rs` 走 ignore-regex
+- **覆盖率排除三组**：① `adapters/backend/*_real.rs`（大 + 需真环境）走 ignore-regex；② `adapters/(ocr|face)/tract_*_real.rs`（小）走 `#[coverage(off)]`；③ 主体 `tract_dbnet.rs` / `tract_{4face}.rs` 走 ignore-regex
 - **子行 region miss 定位**：`llvm-cov report --release --text` 复用 profdata（`report` 不接 `--all-features`），`^0` 即 miss；branch miss 过滤 `BRDA` 第 4 字段 0
 - 改 `Cargo.toml`/`coverage` 属性后必 `cargo +nightly llvm-cov clean --workspace`
 
@@ -51,7 +50,7 @@
 - **fn pointer 依赖注入**：thin wrapper 生产 OK arm 触发 + Err arm 难触发 → 抽 `*_with(fn pointer)` 参数化让测试注 mock
 - **私有 fn 加参数**：`#[cfg(test)]` shim + `use ... as 原名` alias 让 N 处测试零改动
 - **多 callsite 同 `&&` 表达式**：抽 helper 收敛 BR（`if dto==0 && create_date==0` 三调用点共享）
-- **`FakeBackend`**：`inject_reader_error`（首 read 即 Err）文案 = `io::Error::from(kind)` Display（不含"injected"），与 `inject_error` 走 `io::Error::other("injected ...")` 区分；`copy_file` inject 按 **src loc** 匹配；`unique_name_*` 耗尽测试用 `add_file` 填满 N+1 候选替手写 wrapper；`inject_reader_error` 首 read 即 Err，测「sniff OK 后续 read Err」分段路径要抽 `read_to_end` 段到 `coverage(off)` helper
+- **`FakeBackend`**：`inject_reader_error` 首 read 即 Err、文案 = `io::Error::from(kind)` Display（不含"injected"），与 `inject_error` 走 `io::Error::other("injected ...")` 区分，测「sniff OK 后续 read Err」分段路径要抽 `read_to_end` 段到 `coverage(off)` helper；`copy_file` inject 按 **src loc** 匹配；`unique_name_*` 耗尽测试用 `add_file` 填满 N+1 候选替手写 wrapper
 - **平台条件常量优先 `if cfg!(...)`**：跨平台行尾 MUST `#[cfg(target_os="...")] const X = "..."`；`cfg!()` 让 LLVM instrument 两 arm，dead arm 必 miss
 - **私有 fn 微测试**（`#[cfg(test)] #[path] mod tests` + `use super::*;`）：命中 `||` 短路各 sub-branch + NaN/负值 clamp
 - **office 子模块**：`parse(reader, mime)` 入口 fn + 复杂业务 fn 都 `#[cfg_attr(coverage_nightly, coverage(off))]`；正确性靠 lib unit `*_tests.rs` 全分支断言；不可达 `?` Err arm 改 `.expect("internal: ...")` 助手消除
@@ -74,7 +73,6 @@
 
 ## 性能采集（AI 分析用）
 - **一次性汇总**：`uv run --quiet --no-project scripts/perf-collect.py --sub <copy|move|find|cull|move-text-shot> --data <真实源目录> --output-dir <dir>` → 产 `report.json`（含 `duration_ms`）+ `time-v.txt`（`/usr/bin/time -v` 抓 RSS/CPU/IO）+ `perf-report.md`（单一 markdown 直接扔 LLM 分析）
-- **duration_ms 单点**：4 个 Report（`CopyReport`/`FindReport`/`CullReport`/`MoveTextShotReport`）+ `MobileFindReport` 均含；usecase 入口 `Instant::now()` + `usecases::report::elapsed_ms(start)` 单点计算
 - **产物机器可读**：不产 SVG 火焰图/二进制 pprof profile；深度剖析走 samply attach（补充手段，非默认）
 - **详细指南**：`docs/performance.md`（字段字典 + AI 分析 prompt 模板 + 常见瓶颈判定路径）；用户问「性能怎么测」/ 「如何分析瓶颈」直接指到此文档
 
@@ -104,16 +102,16 @@
 - **新增容器 EXIF 自解析** → `entities/<container>.rs`（chunk 遍历）+ 调 `tiff_ifd::parse_tiff`/`parse_ifds` + `entities/exif/image_<container>.rs` 或 fallback 接入 + `types.rs::from_reader` 分流 + `tests/fixtures/gen_<container>.py`；**双 0 XMP fallback 调 `populate_image_xmp_fallback_if_empty`** 单点
 - **新增 office 容器** → `entities/office/<container>.rs`（`parse(reader, mime)` 入口 `coverage(off)` + 业务抽 `extract_dates(buf: &[u8])` 纯 helper lib unit 测全分支）+ `entities/office/mod.rs` MIME + 路由 + `entities/exif/mime.rs::{is_office_mime, mime_from_ext}` + `OFFICE_FIXTURES` 数组 + e2e `tests/lib_tidy/office_archive.rs`
 - **新增子命令** → `Commands` enum + `CommandResult` variant + `tidy()` partial-failure arm + `tidy_with` match + `dispatch_<sub>` fn + `usecases/<name>/` 目录 + `usecases/report.rs::Report` variant + `report_sink.rs::FEATURE_<NAME>` 常量 + match + `lib.rs` re-export
-- **新增 path 拼接调用点** MUST 用 `Location::join_path(segment)` 不直接 `loc.path().join(...)`（Windows host 上 std `PathBuf::push` 走 `\`）；纯 Local 计算保留 OS 分隔符
+- **新增 path 拼接调用点** MUST 用 `Location::join_path(segment)`（Local `Utf8PathBuf::join` / 远端 `/` 字符串拼）不直接 `loc.path().join(...)`：Windows host 上 std `PathBuf::push` 产 `\` 让 SMB pavao/ADB shell/libmtp 找不到路径；`SmbTarget/AdbTarget/MtpTarget.path` 内部拼子路径同理；纯 Local 计算保留 OS 分隔符
 - **新增 Output Port trait** MUST 落到内层：推理类（face/ocr/embedding）→ `usecases/<feature>/mod.rs`；基础设施类（`BackendFactory`）→ `entities/backend/`；具体 impl 留 `adapters/`；**反例**：trait 留 `adapters/` 破坏 CA 内向规则
-- **新增装配 Port**（factory 类，如 `DetectorFactory`/`BackendFactory`）→ trait 在内层（推理类 `usecases/<feature>` / 基础设施类 `entities/backend`）+ `Default<X>Factory` impl 在 `frameworks/<x>.rs`（"决定用哪个具体实现"归最外层；`adapters` 只留 Port 具体 impl）+ `dispatch::tidy_with` 签名增 `&dyn <X>Factory` 参数走 trait 消费 + `lib.rs` re-export `Default<X>Factory` + `<X>Factory` + 所有 `tidy_with` 调用点（含集成测试 ~30 处）扩参（Python `re` 脚本：多行 `tidy_with\(\n(\s+)&EXPR,\n` + 单行 `tidy_with\((&[^,\n\)]+),\s*` 两模式）
+- **新增装配 Port**（factory 类，如 `DetectorFactory`/`BackendFactory`）→ trait 在内层（推理类 `usecases/<feature>` / 基础设施类 `entities/backend`）+ `Default<X>Factory` impl 在 `frameworks/<x>.rs`（"决定用哪个具体实现"归最外层；`adapters` 只留 Port 具体 impl）+ `dispatch::tidy_with` 签名增 `&dyn <X>Factory` 参数走 trait 消费 + `lib.rs` re-export `Default<X>Factory` + `<X>Factory` + 所有 `tidy_with` 调用点（含集成测试 ~30 处）扩参（Python `re` 脚本按多行/单行两模式批量改）
 - **新增 face 算法常量** MUST 入 `FaceConfig` 不留模块顶 const；helper-style 私有 fn 接单字段 `ratio: f32` 保持纯净便于微测试
 - **改 `FaceEmbedder` 维度** → trait + 真实 impl（`EMBED_DIM` + decode 返回类型）+ `fake.rs`（字段/构造/impl）+ 单测 + 集成测试所有 `FakeFaceEmbedder::new([0.0; N])`；sed 批量套路可靠。**MUST 用 `[f32; identity_cluster::EMBED_DIM]` 单点常量**
 - **推理 metadata MUST 与 input 一起按值透传** 不用 `Arc<Mutex<Option<Meta>>>` 共享可变状态（并发 `detect_faces` 时错框）；letterbox preprocess MUST 不带 `.min(1.0)`
 - **face embedding decode `slice.len()` MUST `!=` 严格匹配 `EMBED_DIM`**（`< 128` 让 512 维 InsightFace 错配通过截前 128 维错空间）
 - **新增 `Backend` 能力查询** MUST 走 trait method 不硬编码 scheme：`fn supports_native_rename_to(&self, other: &dyn Backend) -> bool { false }` default
 - **新增 tracing 结构化日志 `feature` 常量** MUST 从 `usecases::report` 单点 `use`（`FEATURE_COPY/MOVE/FIND/CULL/MOVE_TEXT_SHOT` + `feature_of(remove: bool)`）；禁本地 `const` 副本
-- **`do_copy` 类 dry_run 分支** MUST `output_index.add(src.cloned_at(target, out_be))` + 前 `src.secure_hash()?` pre-populate（否则同 basename+同月+不同 hash 静默分派到同 target；`exists(secure=true)` 触发 `open_read(target)` dry-run 下 `NotFound`）
+- **`do_copy` 类 dry_run 分支** MUST `output_index.add(src.cloned_at(target, out_be))` + 前 `src.secure_hash()?` pre-populate：否则同 basename+同月+不同 hash 静默分派到同 target；且 `exists(secure=true)` 触发 `open_read(target)`，dry-run/rename 半态下 `NotFound` → 假失败
 - **无 Index 的 move 类 use case（`move-text-shot`）入口 MUST 三层守卫**：① `sources ⊄ output` ② `sources` 两两 `under_prefix` 检查 ③ 空 file_name 走 `record_failure` 不 panic
 - **移动类 rerun-safe 三态 `TargetDecision`**：base 已存在时 size 快过滤 → SHA-512 双侧比对 → `Duplicate`（删源计 `deduplicated++`） / `Fresh(_N)` / `Exhausted`
 - **bytes-based use case**（OCR/图像）读源 MUST 拆两段：`MIME_SNIFF_BYTES(256)` sniff → 非目标 skip → 命中才 `read_to_end`（远端 `open_read` 整文件入堆）；`Vec::with_capacity(usize::try_from(entry.size).unwrap_or(0))` 精确预分配
@@ -174,7 +172,6 @@
 - feature off `new()` MUST 走 `remote::unsupported_backend(feature)` 单点 helper 不手写文案
 - 测试 `tidy_with(factory, command)` 注入；`FakeBackend`/`FakeOp` `#[doc(hidden)] pub use` 到 crate 根
 - **`Backend::copy_file` 严格 reject 跨 scheme src/dst**：跨 scheme MUST 走 `open_read` + `open_write` + `io::copy` + `writer.finish` 流式 fallback
-- **远端 path 拼接禁 `Utf8PathBuf::join`**：Windows host 上产 `\` 让 SMB pavao/ADB shell/libmtp 找不到路径；统一用 `Location::join_path(segment)`（Local `Utf8PathBuf::join` / 远端 `/` 字符串拼）；`SmbTarget/AdbTarget/MtpTarget.path` 内部拼子路径同理
 
 ### 远端 backend 测试套路
 - **手写 `Fake<Smb|Mtp|Adb>Client`**：state `Arc<Mutex<HashMap>>`；`inject(Op::Read, path, ErrorKind::TimedOut)` 无须 `mockall`
@@ -260,5 +257,4 @@
 - **clippy `neg_cmp_op_on_partial_ord`**：f32 上 `!(a >= b)` 拒绝；NaN-safe 改 `a.is_nan() || a < b`
 - **`OffsetDateTime::from(SystemTime)` 内含 panic**（`.expect("Duration doesn't fit")`）：生产 MUST `duration_since(UNIX_EPOCH)?` + `i64::try_from` + `from_unix_timestamp` 三段守护
 - **跨 backend helper（`stream_copy`）判 same-scheme** MUST `Arc::ptr_eq` 非 `scheme() == scheme()`：`FakeBackend("local")` vs `LocalBackend` 都声明 `"local"` 但存储互不可见
-- **`Info::cloned_at` 后 `secure_hash` 若未算**，`output_index.exists(secure=true)` 触发 `output_backend.open_read` → dry-run/rename 半态下 `NotFound` → 假失败；MUST pre-populate
 - **`/code-review` 假阳性识别**：recall 模式过报；「dead variant」先 `rg` 查引用；「fake silent Ok」核对真实后端 POSIX 行为；「stub map_error」按未来接入价值评估
