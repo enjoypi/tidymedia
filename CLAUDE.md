@@ -36,7 +36,7 @@
 - **`infer` 把 zip 容器（OOXML/ODF/EPUB/iWork）识别为 `application/zip`**：`Exif::open` MUST 在 `sniffed=="application/zip"` 走 `mime_from_ext` 重映射
 
 ## 测试与覆盖率
-- **门槛 region/function/line/branch 四项全 100%**（Linux + `--all-features` + `--branch`）；Windows 平台差异 miss 用 `git stash` 对照判定
+- **门槛 region/function/line/branch 四项全 100%**（Linux + `--all-features` + `--branch`）；**任何存量 miss 归属判定**（平台差异 / 疑似非本次引入）：同 filter `git stash` 对照 main HEAD 跑一遍
 - 严格 100% 命令：`RUSTFLAGS="--cfg=coverage_nightly" cargo +nightly llvm-cov --release nextest --summary-only --branch --ignore-filename-regex='(adapters/backend/[a-z]+_real\.rs|adapters/(ocr|face)/tract_[a-z]+\.rs)$' --all-features`
 - `lib.rs`/`bin/tidymedia.rs` 顶 `#![cfg_attr(coverage_nightly, feature(coverage_attribute))]`；`[lints.rust] unexpected_cfgs` 注册
 - **覆盖率排除三组**：① `adapters/backend/*_real.rs`（大 + 需真环境）走 ignore-regex；② `adapters/(ocr|face)/tract_*_real.rs`（小）走 `#[coverage(off)]`；③ 主体 `tract_dbnet.rs` / `tract_{4face}.rs` 走 ignore-regex
@@ -56,6 +56,7 @@
 - **office 子模块**：`parse(reader, mime)` 入口 fn + 复杂业务 fn 都 `#[cfg_attr(coverage_nightly, coverage(off))]`；正确性靠 lib unit `*_tests.rs` 全分支断言；不可达 `?` Err arm 改 `.expect("internal: ...")` 助手消除
 - **subprocess office fixture 集中**：`tests/lib_tidy/run_cli_flags.rs::OFFICE_FIXTURES: &[&str]` 数组 + 单 test 自动遍历跑 `copy --include-non-media --dry-run` 让 bin instance 命中
 - **超大常量守卫抽 pure helper**（`MAX_REMOTE_WRITE_BUFFER=2GiB`）让 test 传假 `u64` 直触各 arm
+- **测试自身的平台差异 skip 分支**（如 `let Some(t) = pre else { return; }` Linux 恒不可达）：测试 fn 标 `coverage(off)` 从分母剔除
 
 ### 项目特有测试套路
 - **fast-path 命中反向证据**：`fs::rename`/`fs::copy` 保留 src mtime，`std::io::copy` 不保留；`filetime::set_file_mtime` 钉 src 后 move 断言 dst mtime 不变
@@ -70,6 +71,7 @@
 - **`supports_native_rename_to` True 分支**：MUST 用真实 `LocalBackend` + tempfile 真跑 `fs::rename`
 - **`epoch_to_candidate(0) → None`**（视 EXIF 未填）vs `fs_time::from_modified(UNIX_EPOCH) → Some`（合法 fs 值）语义不同：抽独立 `convert_secs_to_candidate` helper
 - **验证「我的改动是否破坏现有测试」**：`git stash && nextest -E 'test(...)' ; git stash pop` 同 filter 对比 main HEAD
+- **`FakeBackend.walk` 对不存在 root 静默返空**（`LocalBackend` 计 walker_errors=1）：「扫描完整性/权威性」类测试两者语义不同，勿用 Fake 断言 walker 错误路径
 
 ## 性能采集（AI 分析用）
 - **一次性汇总**：`uv run --quiet --no-project scripts/perf-collect.py --sub <copy|move|find|cull|move-text-shot> --data <真实源目录> --output-dir <dir>` → 产 `report.json`（含 `duration_ms`）+ `time-v.txt`（`/usr/bin/time -v` 抓 RSS/CPU/IO）+ `perf-report.md`（单一 markdown 直接扔 LLM 分析）
@@ -121,6 +123,9 @@
 - **新增 `Report.scanned` 字段** MUST 与 `CopyReport` 同口径 = walker 触达数（含 failed/skipped/非媒体）；walk 循环内增量而非末尾 `= success_vec.len()`
 - **新增 Report 时序/资源字段**（如 `duration_ms`）MUST 4 Report + `MobileFindReport` + 相应 fixture 五处同步；耗时统一走 `usecases::report::elapsed_ms(Instant)` 单点（`coverage(off)` 免宿主时钟波动断言）
 - **「best + 多 culled」型 `culled[i].score`** MUST 与 `best.score_breakdown.total` 同口径（综合 total），禁单分量替代
+- **新增 move 类「copy 成功但删源失败」半态路径** MUST 用 `entities/backend/partial_move.rs::partial_move_error` 构造（检测走 `is_partial_move` downcast），禁 `io::Error::new`+文案 `contains` 匹配；Display 文案仍 MUST 含 `copied ... but cannot remove source`
+- **`generate_unique_name` 探测三层**：output_index `contains_target` → `index_authoritative`（output 扫描 stats 全 0 或 root 不存在，跳过 `backend.exists` 省远端每文件 1 RTT）→ `backend.exists` 兜底；改 walk/`VisitStats` 语义 MUST 复核 `run_copy_loop` 权威判定
+- **非媒体 EXIF 短路**：`Exif::open_filtered(..., parse_non_media)` + `Index::parse_exif(offset, parse_non_media)`，copy 传 `include_non_media`；`Exif::open` 已是 `#[cfg(test)]` shim，生产新调用走 `open_filtered`
 
 ## 项目分层（Clean Architecture）
 - 四层（外向内）：`frameworks/` → `adapters/` → `usecases/` → `entities/`
@@ -251,6 +256,7 @@
 - **新增整模块先做 lib.rs re-export + dispatch 装配再写主体**（避免整模块 dead_code 数十条噪声）
 - **office 子模块 stub 签名用 `&mut dyn MediaReader`** 而非 `Box<dyn>`（后续 zip/cfb/read_to_end 兼容零改动）
 - **sed 批量加反引号陷阱**：`sed 's/PID_FOO/\`PID_FOO\`/g'` 会改 `const PID_FOO:` 定义本身；sed 后 MUST grep 校验
+- **批量给多行函数调用加参数**：正则 `\([^()]*\)` 只支持一层嵌套必漏改（`&local_loc(out.path())` 两层即失配），MUST 用 Python 括号深度计数定位闭括号；改后 `git diff` 核对改动数
 - **`serde_json::to_vec_pretty` 对 f32 NaN/Inf 输出 `null` 非 Err**：含 `ScoreBreakdown` 的 manifest 直接 `.expect("internal: infallible Serialize")` 无需 match Err arm
 - **`max_by` 选最大 f32 项 MUST 把 NaN 视为 -∞**：抽 `total_cmp_nan_as_neg_inf(a,b)`（`partial_cmp().unwrap_or(Equal)` 让 NaN 被选中 best）
 - **f32→u32 像素坐标 clamp 三态**：NaN→0 / 负→0 / +Inf→limit（`!is_finite → 0` 一锅端让 +Inf 归零 → 占位框）
