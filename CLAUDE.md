@@ -9,9 +9,12 @@
 ## Quick Start
 - **所有 cargo 命令 MUST 带 `--release`**（`profile.release opt-level=0` 编译如 debug，统一 target 目录）
 - **ONNX 推理 e2e 真跑切 opt=3**：`CARGO_PROFILE_RELEASE_OPT_LEVEL=3 cargo run --release -- cull ...`；日常测试用 Fake 注入
-- **tract 加载分流**：4 face 模型（simplify 固化静态 shape）走 `into_optimized().into_runnable()`；PaddleOCR DBNet 动态 H/W 输入 MUST `into_typed().into_runnable()` 跳 optimize
+- **tract 加载分流**：4 face 模型（simplify 固化静态 shape）走 `into_optimized().into_runnable()`；PaddleOCR DBNet 动态 H/W 输入 MUST `into_typed().into_runnable()` 跳 optimize；bge BERT symbolic seq 维 MUST `into_typed()` → `set_symbols({batch_size:1, sequence_length:256})` → `into_optimized().into_runnable()`（`set_input_fact` 固化与图内 Unsqueeze 规则 unify 冲突，run 也不会自动绑 symbol）+ tokenizer encode 后手动 pad/truncate 到 SEQ
+- **tract 0.23 `run` 接收者是 `self: &Arc<Self>`**：runnable MUST Arc 持有才能调 `run`；`into_runnable()` 已返 Arc，勿再 `Arc::new` 双包
 - 典型归档 4 步：① `copy --dry-run --report /tmp/r.json` ② `/tidy-verify /src /out` ③ `copy` 真跑（或 `move` 删源） ④ `find /out` 兜底查重（输出 Python 脚本人工 review）
+- **`copy-doc`/`move-doc`**：仅归档文档族（`is_office_mime` 全集），媒体/未知 skip；默认模板 `{category}/{year}/{month}` 触发 bge zero-shot 内容分类（`backend.classify.categories` 配类目原型文本，cosine < `score_min` 落 uncategorized）；模板不含 `{category}` 则整个分类阶段跳过（不加载模型）
 - 测试 `cargo nextest run --release`；lint `cargo +nightly fmt && cargo clippy --release --all-targets --all-features --locked -- -D warnings`
+- **超 2 min 命令（llvm-cov 全量等）**：macOS 无 `timeout`，用 `uv run --quiet --no-project python -c 'import signal,os,sys; signal.alarm(110); os.execvp(sys.argv[1], sys.argv[1:])' <cmd> <args>` 截断 + 重复执行步进推进（cargo 增量让每轮前进；被杀轮 exit=142/137，正常完成的 nextest 失败是 exit=100）
 - **`--all-features` 仅 Linux 可验**（smb-backend 需 libsmbclient）
 - CLI flag：`--log-level` 全局放最前；`--dry-run` 子命令级放 `copy`/`move` 后
 - debug 走 stderr；`| tail -N` 会截 copy_file 行 → 重定向文件再 grep
@@ -20,7 +23,7 @@
 
 ## 系统依赖
 - 无外部进程依赖；EXIF/视频走 `nom-exif` + `infer`
-- **ONNX 模型走 git-lfs**（`models/` 4 face + 1 OCR ≈ 35 MB）：`scripts/download_models.sh` + `simplify_onnx.py` 装配；路径空时立即返 `InvalidInput`
+- **ONNX 模型走 git-lfs**（`models/` 4 face + 1 OCR + 1 bge ≈ 58 MB）：`scripts/download_models.sh` + `simplify_onnx.py` 装配；路径空时立即返 `InvalidInput`；HuggingFace LFS CDN 不可达（大文件超时、小文件正常）→ `HF_ENDPOINT=https://hf-mirror.com bash scripts/download_models.sh`
   - SCRFD-10G / MobileFaceNet **128 维**（非官方 512）/ MediaPipe FaceMesh 192×192 / YOLOv8 EyeState（**非 MobileNetV3 softmax**，640×640 letterbox，decode 取 `[1,6,8400]` anchor max closed conf）
 - nom-exif 内部 tracing 大量输出，EnvFilter 默认压 `nom_exif=error`；GPS 子 IFD 用 `Exif::iter()` 按 tag code 匹配（`get()` 只读 IFD0）
 
@@ -33,14 +36,15 @@
 - **JPEG/HEIC/TIFF/PNG XMP fallback**：re-tag 后 IFD0 仅剩 ModifyDate，原始时间在 XMP `photoshop:DateCreated`（→ P0）/ `xmp:CreateDate`（→ P1）；扫已 buffer 头 64 KB；seek 失败仍跑（head 已读入不浪费）；未闭合 `<!--` 按 strict 抹至 EOF
 - **`tiff_ifd::scan_ifd` 是 lenient**：越界用 `break` 保部分字段，只有 `count` 本身读不到才返 `None`
 - **TIFF ASCII cnt ≤ 4 inline 在 val 字段**（4 字节），> 4 才走 offset；旧一律走 offset 让 DJI/LG 短 Make/Model 丢失
-- **`infer` 把 zip 容器（OOXML/ODF/EPUB/iWork）识别为 `application/zip`**：`Exif::open` MUST 在 `sniffed=="application/zip"` 走 `mime_from_ext` 重映射
+- **`infer` 把 zip 容器（OOXML/ODF/EPUB/iWork）识别为 `application/zip`、CFB（doc/xls/ppt）识别为 `application/x-ole-storage`**（infer 的 CLSID 细分需完整 CFB header，256 字节 sniff 窗口必失败）：`Exif::open_filtered` MUST 对两者都走 `mime_from_ext` 扩展名重映射
 
 ## 测试与覆盖率
-- **门槛 region/function/line/branch 四项全 100%**（Linux + `--all-features` + `--branch`）；**任何存量 miss 归属判定**（平台差异 / 疑似非本次引入）：同 filter `git stash` 对照 main HEAD 跑一遍
-- 严格 100% 命令：`RUSTFLAGS="--cfg=coverage_nightly" cargo +nightly llvm-cov --release nextest --summary-only --branch --ignore-filename-regex='(adapters/backend/[a-z]+_real\.rs|adapters/(ocr|face)/tract_[a-z]+\.rs)$' --all-features`
+- **门槛 region/function/line/branch 四项全 100%**（Linux + `--all-features` + `--branch`）；**任何存量 miss 归属判定**（平台差异 / 疑似非本次引入）：同 filter `git stash -u`（含 untracked 新文件）对照 main HEAD 跑一遍
+- **macOS 本机覆盖率已知缺口（勿追，Linux CI 口径 100%）**：`local.rs` 非 UTF-8 `?` edge（APFS 强制文件名 UTF-8，`fs::write` 返 EILSEQ 无法造 fixture）+ `remote.rs`/`entities/backend/mod.rs` 泛型 instance 宏 micro-region，main 基线即如此
+- 严格 100% 命令：`RUSTFLAGS="--cfg=coverage_nightly" cargo +nightly llvm-cov --release nextest --summary-only --branch --ignore-filename-regex='(adapters/backend/[a-z]+_real\.rs|adapters/(ocr|face|classify)/tract_[a-z_]+\.rs)$' --all-features`
 - `lib.rs`/`bin/tidymedia.rs` 顶 `#![cfg_attr(coverage_nightly, feature(coverage_attribute))]`；`[lints.rust] unexpected_cfgs` 注册
-- **覆盖率排除三组**：① `adapters/backend/*_real.rs`（大 + 需真环境）走 ignore-regex；② `adapters/(ocr|face)/tract_*_real.rs`（小）走 `#[coverage(off)]`；③ 主体 `tract_dbnet.rs` / `tract_{4face}.rs` 走 ignore-regex
-- **子行 region miss 定位**：`llvm-cov report --release --text` 复用 profdata（`report` 不接 `--all-features`），`^0` 即 miss；branch miss 过滤 `BRDA` 第 4 字段 0
+- **覆盖率排除三组**：① `adapters/backend/*_real.rs`（大 + 需真环境）走 ignore-regex；② `adapters/(ocr|face)/tract_*_real.rs`（小）走 `#[coverage(off)]`；③ 主体 `tract_dbnet.rs` / `tract_{4face}.rs` / `tract_embed*.rs` 走 ignore-regex
+- **子行 region miss 定位**：`llvm-cov report --release --text` 复用 profdata（`report` 不接 `--all-features`），`^0` 即 miss；branch miss 过滤 `BRDA` 第 4 字段 0；**function miss 用 `--lcov` 的 `FNDA:0`**（mangled 名可辨 closure/泛型；per-instance 有噪声，跨 instance 全 0 才是真 miss，summary 合并数为权威）
 - 改 `Cargo.toml`/`coverage` 属性后必 `cargo +nightly llvm-cov clean --workspace`
 
 ### phantom miss 消除套路
@@ -100,9 +104,9 @@
 - **新增配置字段** → `usecases/config.rs` 结构体 + `config.yaml` + `frameworks/config.rs::sanitize_*` 校验 + `config_defaults_match_historical_constants` 测试 + `rg <field>` **验证有真实消费点**（防死配置）；secret 走 `.env.example` + gitignore
 - **新增 CLI flag** → `adapters/dispatch.rs` 透传 + 每子命令路径独立 e2e 触发 Some/None 两边；e2e MUST 含 `run_cli(["tidymedia", ...])` 字符串形式
 - **新增 `media_time` 候选 / 调整 P0–P4** → `entities/media_time/priority.rs` `Source`/`Priority` → 解析模块 → `resolve`/`decision` 裁决 → fixture
-- **新增 archive_template 占位符** → `usecases/archive_template.rs::render` + 同文件 `PLACEHOLDERS` 常量 + `usecases/config.rs::validate_archive_template` 三处同步
+- **新增 archive_template 占位符** → `usecases/archive_template.rs::render` + 同文件 `PLACEHOLDERS` 常量 + `usecases/config.rs::validate_archive_template` 三处同步；用户值入路径段（如 `{category}` 类目名）MUST 过 `sanitize_path_segment`
 - **新增容器 EXIF 自解析** → `entities/<container>.rs`（chunk 遍历）+ 调 `tiff_ifd::parse_tiff`/`parse_ifds` + `entities/exif/image_<container>.rs` 或 fallback 接入 + `types.rs::from_reader` 分流 + `tests/fixtures/gen_<container>.py`；**双 0 XMP fallback 调 `populate_image_xmp_fallback_if_empty`** 单点
-- **新增 office 容器** → `entities/office/<container>.rs`（`parse(reader, mime)` 入口 `coverage(off)` + 业务抽 `extract_dates(buf: &[u8])` 纯 helper lib unit 测全分支）+ `entities/office/mod.rs` MIME + 路由 + `entities/exif/mime.rs::{is_office_mime, mime_from_ext}` + `OFFICE_FIXTURES` 数组 + e2e `tests/lib_tidy/office_archive.rs`
+- **新增 office 容器** → `entities/office/<container>.rs`（`parse(reader, mime)` 入口 + `extract_text(reader, mime, max_bytes)` 文本提取 + 业务纯 helper lib unit 测全分支）+ `entities/office/mod.rs` MIME + 双路由（`populate_office_dates`/`extract_office_text`）+ `entities/exif/mime.rs::{is_office_mime, mime_from_ext}` + `OFFICE_FIXTURES` 数组 + e2e `tests/lib_tidy/office_archive.rs`；**fixture 进 `OFFICE_FIXTURES` 后该容器全部业务 fn MUST `coverage(off)`**（subprocess bin instance 只跑 happy path，multi-instance branch 记录让 lib unit 全分支覆盖被拆散成 phantom miss）；剥标签/截断共用 `entities/office/scan.rs`
 - **新增子命令** → `Commands` enum + `CommandResult` variant + `tidy()` partial-failure arm + `tidy_with` match + `dispatch_<sub>` fn + `usecases/<name>/` 目录 + `usecases/report.rs::Report` variant + `report_sink.rs::FEATURE_<NAME>` 常量 + match + `lib.rs` re-export
 - **新增 path 拼接调用点** MUST 用 `Location::join_path(segment)`（Local `Utf8PathBuf::join` / 远端 `/` 字符串拼）不直接 `loc.path().join(...)`：Windows host 上 std `PathBuf::push` 产 `\` 让 SMB pavao/ADB shell/libmtp 找不到路径；`SmbTarget/AdbTarget/MtpTarget.path` 内部拼子路径同理；纯 Local 计算保留 OS 分隔符
 - **新增 Output Port trait** MUST 落到内层：推理类（face/ocr/embedding）→ `usecases/<feature>/mod.rs`；基础设施类（`BackendFactory`）→ `entities/backend/`；具体 impl 留 `adapters/`；**反例**：trait 留 `adapters/` 破坏 CA 内向规则
@@ -125,7 +129,8 @@
 - **「best + 多 culled」型 `culled[i].score`** MUST 与 `best.score_breakdown.total` 同口径（综合 total），禁单分量替代
 - **新增 move 类「copy 成功但删源失败」半态路径** MUST 用 `entities/backend/partial_move.rs::partial_move_error` 构造（检测走 `is_partial_move` downcast），禁 `io::Error::new`+文案 `contains` 匹配；Display 文案仍 MUST 含 `copied ... but cannot remove source`
 - **`generate_unique_name` 探测三层**：output_index `contains_target` → `index_authoritative`（output 扫描 stats 全 0 或 root 不存在，跳过 `backend.exists` 省远端每文件 1 RTT）→ `backend.exists` 兜底；改 walk/`VisitStats` 语义 MUST 复核 `run_copy_loop` 权威判定
-- **非媒体 EXIF 短路**：`Exif::open_filtered(..., parse_non_media)` + `Index::parse_exif(offset, parse_non_media)`，copy 传 `include_non_media`；`Exif::open` 已是 `#[cfg(test)]` shim，生产新调用走 `open_filtered`
+- **copy-doc 分类管线单向数据流**：dispatch（`doc_only && template_needs_category` 才 `build_document_classifier`）→ `make_classify_provider`（阈值裁决）→ `Index::classify_documents`（gate `is_office` + 复用 parse_exif 已 sniff MIME，MUST 在 parse_exif 之后）→ `Info.category`（`cloned_at` MUST 搬运）→ `TemplateContext.category`（`unwrap_or("uncategorized")`）；`TextClassifyProvider` 是 `Box<dyn Fn>`（分类器有状态，裸 fn 指针装不下；Entity 签名只现 `std::ops::Fn` 保 CA 内向）
+- **非媒体 EXIF 短路三态**：`Exif::open_filtered(..., parse_non_media, doc_only)` + `Index::parse_exif(offset, parse_non_media, doc_only)`——`doc_only=true` 反向短路（仅文档族整文件解析，copy-doc/move-doc 路径）；`Exif::open` 已是 `#[cfg(test)]` shim，生产新调用走 `open_filtered`；落盘过滤 `ops.rs::passes_type_filter` 与解析短路同口径
 
 ## 项目分层（Clean Architecture）
 - 四层（外向内）：`frameworks/` → `adapters/` → `usecases/` → `entities/`
@@ -158,6 +163,7 @@
 ### copy/move 重叠保护
 - source ⊆ output → `InvalidInput` 拒绝；output ⊂ source（就地归档）→ `Index::remove_under_prefix` 剔除
 - 前缀比较用 `entities::common::under_prefix`（分隔符边界）+ `canonical_prefix`（Local canonicalize / 远端 display）；**`canonical_prefix` 是 copy/move/cull/move_text_shot 4 单点**，新增 use case MUST 用此 helper 替 `Location::display()`
+- **entry 级 output 子树判定 MUST 用 `common::entry_under_prefix`（字面 fast-path + canonical 补判）**：canonical output prefix 与 walker 字面路径在 macOS `/var→/private/var`、`/tmp→/private/tmp` symlink 下不可比，纯字面 `under_prefix` 恒 false 让就地归档保护静默失效；copy 的 `Index::remove_under_prefix`（key 是字面 `&str`）走 canonical + 字面双前缀各剔一遍（幂等免相等判分支）
 - **`canonical_prefix` vs `file_info::full_path` 语义正交**：前者解析 symlink 真实物理位置；后者路径索引 key 希望字面稳定（对 `is_absolute()` 跳过 canonicalize 避 Windows 跨盘）
 
 ## URI 与 Backend
@@ -196,7 +202,7 @@
 - **`expand_env` 递归上限 `EXPAND_ENV_MAX_DEPTH=32`** 防栈爆
 - **env value 拼回 yaml 前 MUST `sanitize_env_value`** 剥换行/控制字符防结构注入
 - 结构化日志字段：`feature` / `operation` / `result`
-- **R1 外置**：`copy.{timezone_offset_hours, unique_name_max_attempts, archive_template}` / `exif.valid_date_time_secs` / `backend.smb.{default_user,workgroup}` / `backend.adb.{server_host,server_port}` / `log.level`（`RUST_LOG` > flag > 配置）；**无消费点勿加占位**
+- **R1 外置**：`copy.{timezone_offset_hours, unique_name_max_attempts, archive_template, doc_archive_template}` / `exif.valid_date_time_secs` / `backend.smb.{default_user,workgroup}` / `backend.adb.{server_host,server_port}` / `backend.classify.{embed_model_path,tokenizer_path,categories,score_min,max_text_bytes}` / `log.level`（`RUST_LOG` > flag > 配置）；**无消费点勿加占位**
 - **不外置例外**：算法常量（EPOCH_1904 等）/ 协议字面量 / 日志维度名 / 流式哈希（`FAST_READ_SIZE`, `STREAM_CHUNK=1MiB`, `MIME_SNIFF_BYTES=256`）
 - `usecases/copy/ops.rs::println!` 是 CLI 脚本可读输出**不是** R3 日志路径
 
@@ -207,6 +213,8 @@
 | `RUST_LOG` | 日志级别（优先级最高） |
 | `CARGO_PROFILE_RELEASE_OPT_LEVEL` | e2e 真跑切 opt=3 |
 | `TIDYMEDIA_OCR_DET_MODEL` / `TIDYMEDIA_FACE_*` | 模型路径 + 阈值 |
+| `TIDYMEDIA_CLASSIFY_{MODEL,TOKENIZER,SCORE_MIN,MAX_TEXT_BYTES}` | copy-doc 内容分类模型 + 阈值 |
+| `TIDYMEDIA_DOC_ARCHIVE_TEMPLATE` | copy-doc/move-doc 默认归档模板 |
 | `SMB_USER` / `SMB_PASSWORD` / `KRB5CCNAME` | SMB 凭据 |
 | `ANDROID_HOME` / `ANDROID_NDK_HOME` | 交叉编译 |
 
@@ -225,6 +233,7 @@
 - **跨平台 path 段断言用 `std::path::Path::ends_with`** 优于 `s.ends_with("a/b") || s.ends_with(r"a\b")`
 - **`cargo nextest run` 默认 fail-fast** 让分散平台失败被截断 → 调试跨平台 MUST `--no-fail-fast`
 - **`Cargo.toml` 业务关键 dep MUST caret 锁主版本**（`sha2 = "0.11"` 非 `"*"`）
+- **`tokenizers` crate `default-features = false` MUST 加 `features = ["fancy-regex"]`**（正则后端二选一缺省即编译错；fancy-regex 纯 Rust 免 C 依赖）
 - **本地 `[patch.crates-io]` 验证**：`cp -r ~/.cargo/registry/src/<idx>/<crate>-<ver>/ <vendor>` + patch + path；Cargo.lock 中 patched crate 无 `source =`/`checksum =` 即生效
 - **远端 `RemoteClient::read` 整文件入堆**（已知限制）：pavao/adb_client API 限制，大视频在 Android 有 OOM 风险
 - **远端 `mkdir_p` 是真递归**（`remote.rs::mkdir_recursive`）自底向上 stat；`FakeRemoteClient::mkdir` 不校验父目录（单层 vs 递归差异 fake 测不出）
