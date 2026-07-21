@@ -234,8 +234,7 @@ pub(super) fn walk_entry_to_io_with(
 ) -> io::Result<Entry> {
     let entry = e.map_err(|e| ignore_to_io(&e))?;
     let path = entry.path().to_path_buf();
-    let utf8 = camino::Utf8PathBuf::from_path_buf(path)
-        .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "non-UTF8 path"))?;
+    let utf8 = camino::Utf8PathBuf::from_path_buf(path).map_err(non_utf8_path_err)?;
     let size = get_meta(&entry)
         .map_err(|e| io::Error::other(format!("metadata failed for {utf8}: {e}")))?
         .len();
@@ -244,6 +243,13 @@ pub(super) fn walk_entry_to_io_with(
         size,
         kind: kind_from_file_type(entry.file_type()),
     })
+}
+
+/// 非 UTF-8 路径 → `InvalidData`。具名 fn 替代 `map_err` 内联 closure：macOS APFS
+/// 强制文件名 UTF-8 无法造真实 fixture（EILSEQ），closure 在 macOS 物理不可达成
+/// function miss；具名 fn 可用内存构造的 `PathBuf`（无需写盘）直测，全平台可覆盖。
+pub(super) fn non_utf8_path_err(_: std::path::PathBuf) -> io::Error {
+    io::Error::new(io::ErrorKind::InvalidData, "non-UTF8 path")
 }
 
 /// `std::fs::FileType` → [`EntryKind`]。socket/fifo/symlink 等归为 Other。

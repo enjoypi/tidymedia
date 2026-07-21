@@ -288,16 +288,22 @@ fn visit_location_accepts_multiple_backends_in_one_index() {
     assert!(mtp_entry.value().calc_full_hash().is_ok());
 }
 
-// 文件名含非 UTF-8 字节时，Utf8PathBuf::from_path_buf 失败 → 计 walker_errors
+// 文件名含非 UTF-8 字节时，Utf8PathBuf::from_path_buf 失败 → 计 walker_errors。
+// macOS APFS 强制文件名 UTF-8（create 返 EILSEQ）无法构造 fixture → 运行期 skip；
+// 测试 fn 标 coverage(off) 让 skip 分支从分母剔除（CLAUDE.md「测试自身的平台差异
+// skip 分支」套路），Linux 上完整断言照跑。
 #[test]
 #[cfg(unix)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 fn visit_dir_counts_non_utf8_path() {
     use std::ffi::OsStr;
     use std::os::unix::ffi::OsStrExt;
     let dir = tempdir().unwrap();
     let bad = OsStr::from_bytes(&[b'a', 0xFF, 0xFE, b'.', b'b', b'i', b'n']);
     let p = dir.path().join(bad);
-    fs::write(&p, b"abc").unwrap();
+    if fs::write(&p, b"abc").is_err() {
+        return;
+    }
 
     let mut index = Index::new();
     index.visit_dir(dir.path().to_str().unwrap());

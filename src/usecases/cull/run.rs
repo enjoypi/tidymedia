@@ -40,7 +40,7 @@ use super::util::{
 };
 use crate::entities::backend::factory::BackendFactory;
 use crate::entities::backend::{Backend, Entry, EntryKind};
-use crate::entities::common::{self, canonical_prefix, under_prefix};
+use crate::entities::common::{self, canonical_prefix};
 use crate::entities::uri::Location;
 use crate::usecases::config::{FaceConfig, config};
 use crate::usecases::face::{
@@ -341,8 +341,10 @@ fn scan_source(
         if entry.kind != EntryKind::File {
             continue;
         }
-        // under_prefix 命中 = 该文件位于 output 子树（同根归档场景），不算 source 触达。
-        if under_prefix(&entry.location.display(), output_prefix) {
+        // 命中 = 该文件位于 output 子树（同根归档场景），不算 source 触达。
+        // entry_under_prefix 做字面 + canonical 双判：macOS `/var → /private/var`
+        // 等 symlink 下 walker 字面路径与 canonical output prefix 不可比。
+        if common::entry_under_prefix(&entry.location, output_prefix) {
             continue;
         }
         // 触达 source 文件即计入 scanned（含后续被识别为非图/超大/解码失败/IO 失败的）；

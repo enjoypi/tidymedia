@@ -286,3 +286,13 @@ fn read_to_string_accepts_size_below_cap() {
     let s = LocalBackend::new().read_to_string(&local(&path)).unwrap();
     assert!(s.starts_with("<?xml"));
 }
+
+// 具名 fn 直测：非 UTF-8 路径错误构造。macOS 无法造真实非 UTF-8 文件（APFS
+// EILSEQ），内存构造 PathBuf 让该 fn 全平台可覆盖（walk 的 map_err 引用点见
+// walk_entry_to_io_with）。
+#[test]
+fn non_utf8_path_err_is_invalid_data() {
+    let err = super::non_utf8_path_err(std::path::PathBuf::from("whatever"));
+    assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
+    assert!(err.to_string().contains("non-UTF8"), "got: {err}");
+}

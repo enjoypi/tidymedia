@@ -334,17 +334,9 @@ fn process_entry(
     delta
 }
 
-/// symlink 场景下 `output_prefix` 已 canonical，`entry.location.display()` 是 walker
-/// yield 的原始路径（含 symlink 段）→ 字面 `under_prefix` 会误判。对 Local entry 做
-/// 一次 canonicalize 补判：远端 backend `canonical_prefix` fallback 到 display 即等价。
-///
-/// 字面 fast-path + canonical fallback 收敛在同一 helper，让上层调用点只剩单 branch，
-/// 避免 fake 测试环境下「字面 false 但 canonical true」sub-branch 不可测的 phantom miss。
+/// 见 [`common::entry_under_prefix`]（已上提 entities 单点，cull 共用）。
 fn is_entry_under_output(entry_loc: &Location, output_prefix: &str) -> bool {
-    if under_prefix(&entry_loc.display(), output_prefix) {
-        return true;
-    }
-    under_prefix(&canonical_prefix(entry_loc), output_prefix)
+    common::entry_under_prefix(entry_loc, output_prefix)
 }
 
 /// 先读前 [`MIME_SNIFF_BYTES`] 字节做 `is_image` 判定：非 image 返 `Ok(None)`；

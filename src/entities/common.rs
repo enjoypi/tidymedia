@@ -53,6 +53,25 @@ pub fn canonical_prefix(loc: &Location) -> String {
     }
 }
 
+/// entry 级「是否位于 output 子树」判定：`output_prefix` 已 canonical，而 walker
+/// yield 的 entry 路径是字面形式（含 symlink 段，如 macOS `/var → /private/var`、
+/// `/tmp → /private/tmp`）→ 纯字面 `under_prefix` 会误返 false，让 output 子树
+/// 文件被当 source 处理（cull/copy 就地归档保护失效）。字面 fast-path +
+/// entry canonicalize 补判；远端 backend `canonical_prefix` fallback 到 display
+/// 即等价。cull / move-text-shot 共用；copy 的 `Index::remove_under_prefix`
+/// 场景（key 是字面 `&str` 非 `Location`）走双前缀方案（canonical + 字面各剔一遍）。
+///
+/// 字面 fast-path + canonical fallback 收敛在同一 helper，让上层调用点只剩单
+/// branch，避免 fake 测试环境下「字面 false 但 canonical true」sub-branch 不可测
+/// 的 phantom miss。
+#[must_use]
+pub fn entry_under_prefix(entry_loc: &Location, output_prefix: &str) -> bool {
+    if under_prefix(&entry_loc.display(), output_prefix) {
+        return true;
+    }
+    under_prefix(&canonical_prefix(entry_loc), output_prefix)
+}
+
 #[cfg(test)]
 mod tests {
     use super::Error;
