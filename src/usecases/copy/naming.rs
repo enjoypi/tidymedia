@@ -58,6 +58,7 @@ pub(super) fn generate_unique_name(
         month,
         day: &day,
         valuable_name: &valuable_name,
+        category: src_file.category_ref().unwrap_or("uncategorized"),
         exif: src_file.exif_ref(),
     };
     let sub_dir_rel = render(template, &template_ctx);

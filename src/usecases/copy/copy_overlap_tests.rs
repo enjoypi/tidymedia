@@ -136,9 +136,11 @@ fn copy_with_provider_runs_enrich_candidates() {
         /* dry_run = */ false,
         /* remove = */ false,
         /* include_non_media = */ false,
+        /* doc_only = */ false,
         None,
         None,
         Some(no_candidates),
+        None,
     )
     .unwrap();
     assert_eq!(report.copied, 1);

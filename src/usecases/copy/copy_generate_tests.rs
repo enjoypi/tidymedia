@@ -55,6 +55,7 @@ fn default_opts(template: &str) -> CopyOpts<'_> {
         dry_run: false,
         remove: false,
         include_non_media: false,
+        doc_only: false,
         template,
     }
 }
@@ -404,6 +405,7 @@ fn do_copy_dry_run_reports_target_but_writes_nothing() {
         dry_run: true,
         remove: false,
         include_non_media: false,
+        doc_only: false,
         template: DEFAULT_TMPL,
     };
     let did_copy = do_copy(&info, &local_loc(out.path()), &local_arc(), &idx, &opts).unwrap();

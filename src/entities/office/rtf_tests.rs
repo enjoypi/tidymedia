@@ -182,3 +182,133 @@ fn find_group_end_trailing_backslash_no_next_byte() {
     let buf = b"a\\";
     assert_eq!(find_group_end(buf, 0), buf.len());
 }
+
+// ============= strip_rtf_into（extract_text 业务） =============
+
+#[test]
+fn strip_rtf_extracts_plain_text() {
+    let mut out = String::new();
+    strip_rtf_into(b"{\\rtf1\\ansi Hello World}", &mut out, 64);
+    assert_eq!(out, "Hello World");
+}
+
+#[test]
+fn strip_rtf_decodes_unicode_escape_chinese() {
+    // 发=U+53D1=21457 票=U+7968=31080；`\uN?` 的 fallback `?` 必须被吞。
+    let mut out = String::new();
+    strip_rtf_into(b"{\\rtf1 \\u21457?\\u31080?}", &mut out, 64);
+    assert_eq!(out, "发票");
+}
+
+#[test]
+fn strip_rtf_unicode_negative_wraps_to_bmp() {
+    // \u-10179 → -10179 + 65536 = 55357 落 surrogate 区 → from_u32 None → 丢弃。
+    let mut out = String::new();
+    strip_rtf_into(b"{\\u-10179?}x", &mut out, 64);
+    assert_eq!(out, "x");
+}
+
+#[test]
+fn strip_rtf_skips_fonttbl_group() {
+    let mut out = String::new();
+    strip_rtf_into(b"{\\rtf1{\\fonttbl{\\f0 Arial;}}body}", &mut out, 64);
+    assert_eq!(out, "body");
+}
+
+#[test]
+fn strip_rtf_skips_star_extension_group() {
+    let mut out = String::new();
+    strip_rtf_into(b"{\\rtf1{\\*\\generator Foo 1.0;}text}", &mut out, 64);
+    assert_eq!(out, "text");
+}
+
+#[test]
+fn strip_rtf_par_becomes_space() {
+    let mut out = String::new();
+    strip_rtf_into(b"{a\\par b}", &mut out, 64);
+    assert_eq!(out, "a b");
+}
+
+#[test]
+fn strip_rtf_hex_escape_ascii() {
+    let mut out = String::new();
+    strip_rtf_into(b"{\\'41\\'42}", &mut out, 64);
+    assert_eq!(out, "AB");
+}
+
+#[test]
+fn strip_rtf_hex_escape_invalid_digits_skipped() {
+    let mut out = String::new();
+    strip_rtf_into(b"{\\'zz ok}", &mut out, 64);
+    assert_eq!(out, "zz ok");
+}
+
+#[test]
+fn strip_rtf_escaped_braces_literal() {
+    let mut out = String::new();
+    strip_rtf_into(b"{\\{x\\}}", &mut out, 64);
+    assert_eq!(out, "{x}");
+}
+
+#[test]
+fn strip_rtf_symbol_control_becomes_space() {
+    let mut out = String::new();
+    strip_rtf_into(b"{a\\~b}", &mut out, 64);
+    assert_eq!(out, "a b");
+}
+
+#[test]
+fn strip_rtf_budget_truncates() {
+    let mut out = String::new();
+    strip_rtf_into(b"{abcdefgh}", &mut out, 4);
+    assert_eq!(out, "abcd");
+}
+
+#[test]
+fn strip_rtf_trailing_backslash_is_safe() {
+    let mut out = String::new();
+    strip_rtf_into(b"{ab}\\", &mut out, 64);
+    assert_eq!(out, "ab");
+}
+
+#[test]
+fn strip_rtf_escaped_brace_inside_skip_group_not_terminating() {
+    // skip group 内 `\}` 转义不得当组闭合；组后正文保留。
+    let mut out = String::new();
+    strip_rtf_into(b"{\\info \\} still}after", &mut out, 64);
+    assert_eq!(out, "after");
+}
+
+#[test]
+fn strip_rtf_u_without_digits_ignored() {
+    let mut out = String::new();
+    strip_rtf_into(b"{\\u x}", &mut out, 64);
+    assert_eq!(out, "x");
+}
+
+#[test]
+fn strip_rtf_control_word_with_numeric_param_dropped() {
+    let mut out = String::new();
+    strip_rtf_into(b"{\\fs24 sized}", &mut out, 64);
+    assert_eq!(out, "sized");
+}
+
+#[test]
+fn match_skip_group_none_for_body_word() {
+    assert!(match_skip_group(b"\\b bold").is_none());
+}
+
+#[test]
+fn hex_val_covers_ranges() {
+    assert_eq!(hex_val(b'0'), Some(0));
+    assert_eq!(hex_val(b'a'), Some(10));
+    assert_eq!(hex_val(b'F'), Some(15));
+    assert_eq!(hex_val(b'g'), None);
+}
+
+#[test]
+fn consume_control_empty_rest_returns_zero() {
+    let mut text = Vec::new();
+    assert_eq!(consume_control(b"", &mut text), 0);
+    assert!(text.is_empty());
+}

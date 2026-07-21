@@ -15,8 +15,45 @@ mod test_render {
             month,
             day,
             valuable_name,
+            category: "uncategorized",
             exif,
         }
+    }
+
+    #[test]
+    fn render_category_placeholder() {
+        let c = TemplateContext {
+            year: "2017",
+            month: "02",
+            day: "14",
+            valuable_name: "",
+            category: "invoice",
+            exif: None,
+        };
+        let result = render("{category}/{year}/{month}", &c);
+        assert_eq!(result, "invoice/2017/02");
+    }
+
+    #[test]
+    fn render_category_sanitizes_path_separators() {
+        // 类目名来自用户 config，`/` 会拼出额外目录层级，必须清洗为 `_`。
+        let c = TemplateContext {
+            year: "2017",
+            month: "02",
+            day: "14",
+            valuable_name: "",
+            category: "a/b\\c",
+            exif: None,
+        };
+        let result = render("{category}", &c);
+        assert_eq!(result, "a_b_c");
+    }
+
+    #[test]
+    fn render_category_default_uncategorized() {
+        let c = ctx("2017", "02", "14", "x", None);
+        let result = render("{category}/{year}", &c);
+        assert_eq!(result, "uncategorized/2017");
     }
 
     #[test]

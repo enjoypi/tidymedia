@@ -80,7 +80,7 @@ impl Exif {
         Self::open(&Location::Local(path.to_path_buf()), &backend, local_offset)
     }
 
-    /// 测试 shim：等价 `open_filtered(..., true)`。生产唯一调用方
+    /// 测试 shim：等价 `open_filtered(..., true, false)`。生产唯一调用方
     /// `Index::parse_exif` 已直接走 [`Self::open_filtered`]。
     #[cfg(test)]
     pub fn open(
@@ -88,37 +88,52 @@ impl Exif {
         backend: &Arc<dyn Backend>,
         local_offset: FixedOffset,
     ) -> common::Result<Self> {
-        Self::open_filtered(loc, backend, local_offset, true)
+        Self::open_filtered(loc, backend, local_offset, true, false)
     }
 
     /// Backend Gateway 入口：从 [`Location`] 用 backend 打开 reader，
     /// `sniff_mime` 在原 reader 上 seek(0) 之后把句柄交给 [`Self::from_reader`] 解析。
     /// 单次 `open_read` 减少远端 backend 的往返次数。
     ///
-    /// `sniff_mime` 返空 OR 返 `application/zip` 时调 [`super::mime::mime_from_ext`]
-    /// 按 location 扩展名兜底 —— infer 把 OOXML/ODF/iWork/EPUB/思维导图 zip 容器
-    /// 一律识别为 `application/zip`，需扩展名重映射到具体 office mime 才能命中 office 路由。
+    /// `sniff_mime` 返空 OR 返 `application/zip` OR 返 `application/x-ole-storage`
+    /// 时调 [`super::mime::mime_from_ext`] 按 location 扩展名兜底 —— infer 把
+    /// OOXML/ODF/iWork/EPUB/思维导图 zip 容器一律识别为 `application/zip`；CFB
+    /// （doc/xls/ppt）在 256 字节 sniff 窗口下 infer 的 CLSID 细分必失败（需完整
+    /// CFB header），落到泛化 `x-ole-storage`。两者都需扩展名重映射才能命中 office 路由。
     ///
-    /// `parse_non_media=false` 时非媒体 MIME 在 sniff 后短路返回只含 `mime_type`
-    /// 的 `Exif`，跳过整文件容器解析。`copy`/`move` 在 `--include-non-media` 未
-    /// 开启时非媒体文件最终被 `do_copy` 过滤，office/zip 等整文件解析纯属浪费
-    /// ——远端 backend 下 `open_read` 是整文件下载。短路结果仍足以支撑
-    /// `Exif::is_media` 判定（仅依赖 `mime_type`）。
+    /// 解析范围三态短路（与 `do_copy` 的落盘过滤同口径，见其注释交叉引用）：
+    /// - `doc_only=true`：仅文档族（[`is_office_mime`]）做整文件解析，媒体与未知
+    ///   格式在 sniff 后短路——`copy-doc`/`move-doc` 会 skip 非文档，解析纯属浪费；
+    /// - 否则 `parse_non_media=false` 时非媒体 MIME 短路返回只含 `mime_type`
+    ///   的 `Exif`。`copy`/`move` 在 `--include-non-media` 未开启时非媒体文件
+    ///   最终被 `do_copy` 过滤，office/zip 等整文件解析纯属浪费
+    ///   ——远端 backend 下 `open_read` 是整文件下载。
+    ///
+    /// 短路结果仍足以支撑 `Exif::is_media` / `Exif::is_office` 判定（仅依赖 `mime_type`）。
     pub fn open_filtered(
         loc: &Location,
         backend: &Arc<dyn Backend>,
         local_offset: FixedOffset,
         parse_non_media: bool,
+        doc_only: bool,
     ) -> common::Result<Self> {
         let mut reader = backend.open_read(loc)?;
         let sniffed = sniff_mime(reader.as_mut())?;
-        let mime_type = if sniffed.is_empty() || sniffed == "application/zip" {
+        let needs_ext_remap = sniffed.is_empty()
+            || sniffed == "application/zip"
+            || sniffed == crate::entities::office::MIME_OLE_STORAGE;
+        let mime_type = if needs_ext_remap {
             super::mime::mime_from_ext(loc.path().extension())
                 .map_or_else(|| sniffed.clone(), str::to_string)
         } else {
             sniffed
         };
-        if !parse_non_media && !Self::is_media_mime(&mime_type) {
+        let parse_full = if doc_only {
+            is_office_mime(&mime_type)
+        } else {
+            parse_non_media || Self::is_media_mime(&mime_type)
+        };
+        if !parse_full {
             return Ok(Self {
                 mime_type,
                 ..Self::default()
@@ -225,6 +240,13 @@ impl Exif {
 
     pub fn is_media(&self) -> bool {
         Self::is_media_mime(self.mime_type())
+    }
+
+    /// MIME 是否属于文档族（PDF / OOXML / CFB / iWork / ODF / RTF / EPUB /
+    /// 思维导图 / 纯文本）。`copy-doc`/`move-doc` 的落盘过滤与
+    /// [`Self::open_filtered`] 的 `doc_only` 短路共享 [`is_office_mime`] 单一判定。
+    pub fn is_office(&self) -> bool {
+        is_office_mime(self.mime_type())
     }
 
     /// MIME 是否为图片/视频（fpx 排除）。[`Self::open_filtered`] 在整文件解析

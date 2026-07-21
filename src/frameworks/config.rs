@@ -9,7 +9,7 @@ use tracing::debug;
 use tracing::warn;
 
 use crate::usecases::config::{
-    Config, CopyConfig, FaceConfig, LogConfig, OcrConfig, validate_archive_template,
+    ClassifyConfig, Config, CopyConfig, FaceConfig, LogConfig, OcrConfig, validate_archive_template,
 };
 
 /// 把 yaml/env loader 注入 `usecases::config` 全局；CLI / FFI 启动早期调用。
@@ -98,22 +98,19 @@ fn sanitize(mut cfg: Config) -> Config {
         );
         cfg.copy.unique_name_max_attempts = fallback;
     }
-    if let Err(e) = validate_archive_template(&cfg.copy.archive_template) {
-        let fallback = CopyConfig::default().archive_template;
-        warn!(
-            feature = "config",
-            operation = "sanitize",
-            result = "invalid_value",
-            field = "copy.archive_template",
-            error = %e,
-            fallback = %fallback,
-            "archive_template invalid; falling back to default"
-        );
-        eprintln_sanitize_fallback("copy.archive_template", &format!("invalid: {e}"), &fallback);
-        cfg.copy.archive_template = fallback;
-    }
+    sanitize_template_field(
+        &mut cfg.copy.archive_template,
+        CopyConfig::default().archive_template,
+        "copy.archive_template",
+    );
+    sanitize_template_field(
+        &mut cfg.copy.doc_archive_template,
+        CopyConfig::default().doc_archive_template,
+        "copy.doc_archive_template",
+    );
     sanitize_ocr(&mut cfg.backend.ocr);
     sanitize_face(&mut cfg.backend.face);
+    sanitize_classify(&mut cfg.backend.classify);
     // 非法 level 会让 CLI 端 parse 失败静默退 info；此处统一回退 + 告警。
     // sanitize 在 install_logging 之前由 OnceLock lazy init 触发 → tracing subscriber
     // 尚未安装，`warn!` 投到默认 no-op dispatcher 被丢弃；user 看不到 fallback。
@@ -141,6 +138,24 @@ fn sanitize(mut cfg: Config) -> Config {
 /// 仍走 tracing！。
 fn eprintln_sanitize_fallback(field: &str, value: &str, fallback: &dyn std::fmt::Display) {
     eprintln!("tidymedia: config {field}={value} invalid; falling back to {fallback}");
+}
+
+// archive_template / doc_archive_template 共用的模板校验回退：非法模板会渲染出
+// 字面 `{xxx}` 目录，warn + stderr 兜底 + 回退默认（关键 fallback 双通道可见）。
+fn sanitize_template_field(value: &mut String, fallback: String, field: &'static str) {
+    if let Err(e) = validate_archive_template(value) {
+        warn!(
+            feature = "config",
+            operation = "sanitize",
+            result = "invalid_value",
+            field,
+            error = %e,
+            fallback = %fallback,
+            "archive template invalid; falling back to default"
+        );
+        eprintln_sanitize_fallback(field, &format!("invalid: {e}"), &fallback);
+        *value = fallback;
+    }
 }
 
 // OCR 三阈值非法即 warn + 回退默认；与 `archive_template` 同哲学（feature off
@@ -295,6 +310,29 @@ fn sanitize_max_image_bytes_field(value: &mut u64, fallback: u64, field: &str) {
             "max_image_bytes must be >= 1 MiB; falling back to default"
         );
         *value = fallback;
+    }
+}
+
+// classify 两参数非法即 warn + 回退默认，与 sanitize_ocr 同哲学：
+// - `score_min ∈ (0, 1)`：cosine 相似度域，越界让阈值恒真/恒假
+// - `max_text_bytes >= 1`：0 让所有文档提不出文本全落 uncategorized
+fn sanitize_classify(classify: &mut ClassifyConfig) {
+    let defaults = ClassifyConfig::default();
+    sanitize_face_unit_open(
+        &mut classify.score_min,
+        defaults.score_min,
+        "backend.classify.score_min",
+    );
+    if classify.max_text_bytes == 0 {
+        warn!(
+            feature = "config",
+            operation = "sanitize",
+            result = "invalid_value",
+            field = "backend.classify.max_text_bytes",
+            fallback = defaults.max_text_bytes,
+            "max_text_bytes must be >= 1; falling back to default"
+        );
+        classify.max_text_bytes = defaults.max_text_bytes;
     }
 }
 

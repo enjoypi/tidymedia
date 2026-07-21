@@ -260,7 +260,20 @@ fn binary_emits_debug_log_to_stderr_when_log_level_debug() {
 /// instance 走 `office::*` 业务路径，消除 LLVM multi-instance phantom miss
 /// （CLAUDE.md「--branch multi-binary instance 陷阱」套路）。新增 office 解析模块
 /// 时把对应 fixture 加入 `OFFICE_FIXTURES` 即可，无需新增 subprocess fn。
-const OFFICE_FIXTURES: &[&str] = &["sample-pdf-dated.pdf", "sample-docx-dated.docx"];
+const OFFICE_FIXTURES: &[&str] = &[
+    "sample-pdf-dated.pdf",
+    "sample-docx-dated.docx",
+    "sample-pptx-dated.pptx",
+    "sample-xlsx-dated.xlsx",
+    "sample-doc-dated.doc",
+    "sample-xls-dated.xls",
+    "sample-ppt-dated.ppt",
+    "sample-odt-dated.odt",
+    "sample-ods-dated.ods",
+    "sample-odp-dated.odp",
+    "sample-rtf-dated.rtf",
+    "sample-epub-dated.epub",
+];
 
 #[test]
 fn binary_copy_with_office_fixtures_walks_office_paths() {
@@ -285,6 +298,37 @@ fn binary_copy_with_office_fixtures_walks_office_paths() {
     assert!(
         outp.status.success(),
         "binary copy with office fixtures must succeed; stderr: {}",
+        String::from_utf8_lossy(&outp.stderr)
+    );
+}
+
+/// spawn `tidymedia copy-doc --dry-run` 遍历同一 fixture 矩阵：bin instance 走
+/// `doc_only` 过滤 + office 解析路径（消 multi-instance phantom miss，同上）。
+/// 显式模板避开 `{category}`——subprocess 不依赖分类模型文件。
+#[test]
+fn binary_copy_doc_with_office_fixtures_walks_doc_paths() {
+    let src = tempdir().unwrap();
+    for name in OFFICE_FIXTURES {
+        std::fs::copy(format!("{DATA_DIR}/{name}"), src.path().join(name))
+            .unwrap_or_else(|e| panic!("seed {name}: {e}"));
+    }
+    let out = tempdir().unwrap();
+    let outp = std::process::Command::new(env!("CARGO_BIN_EXE_tidymedia"))
+        .args([
+            "copy-doc",
+            "--dry-run",
+            "--archive-template",
+            "{year}/{month}",
+            "--output",
+            out.path().to_str().unwrap(),
+            src.path().to_str().unwrap(),
+        ])
+        .env_remove("RUST_LOG")
+        .output()
+        .expect("spawn tidymedia binary");
+    assert!(
+        outp.status.success(),
+        "binary copy-doc with office fixtures must succeed; stderr: {}",
         String::from_utf8_lossy(&outp.stderr)
     );
 }

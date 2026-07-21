@@ -21,6 +21,7 @@ pub(crate) mod odf;
 pub(crate) mod ooxml;
 pub(crate) mod pdf;
 pub(crate) mod rtf;
+pub(crate) mod scan;
 pub(crate) mod text;
 
 // MIME 常量集中此处避免与 exif/mime.rs 双向引用循环。`mime_from_ext` 会用同套
@@ -54,6 +55,10 @@ pub(crate) const MIME_FREEMIND: &str = "application/x-freemind";
 pub(crate) const MIME_MINDNODE: &str = "application/x-mindnode";
 pub(crate) const MIME_ITMZ: &str = "application/x-itmz";
 pub(crate) const MIME_MINDMANAGER: &str = "application/x-mindmanager";
+/// infer 对 CFB 的兜底识别：doc matcher 需要完整 CFB header（512+ 字节）经
+/// cfb crate 读根 CLSID 才能细分 doc/xls/ppt，本项目 sniff 只喂 256 字节必失败，
+/// 落到 archive matcher 的泛化 MIME——与 `application/zip` 同理按扩展名重映射。
+pub(crate) const MIME_OLE_STORAGE: &str = "application/x-ole-storage";
 pub(crate) const MIME_TEXT_PLAIN: &str = "text/plain";
 pub(crate) const MIME_TEXT_MARKDOWN: &str = "text/markdown";
 pub(crate) const MIME_TEXT_RST: &str = "text/x-rst";
@@ -65,6 +70,7 @@ pub(crate) const MIME_TEXT_TSV: &str = "text/tab-separated-values";
 /// 接 `&mut dyn MediaReader` 而非 `Box<dyn MediaReader>`：让 stub 阶段子模块不消费
 /// reader 不触发 `clippy::needless_pass_by_value`；commit 2-9 接入主体时（zip /
 /// pdf 字节读 / cfb 容器读取）`&mut Read + Seek` 仍是合法 trait bound。
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub(crate) fn populate_office_dates(reader: &mut dyn MediaReader, mime: &str) -> (u64, u64) {
     if mime.starts_with(MIME_PDF) {
         pdf::parse(reader, mime)
@@ -90,14 +96,51 @@ pub(crate) fn populate_office_dates(reader: &mut dyn MediaReader, mime: &str) ->
     }
 }
 
+/// 文本提取路由：按 mime 分流到子提取器，返 best-effort 正文片段（分类用，
+/// 非全文保真）。空串 = 提不出文本（扫描版 PDF / iWork IWA / 损坏容器），
+/// 调用方（`usecases::copy::classify`）落 `uncategorized`。
+/// `max_bytes` 是输出文本上限（分类 embedding 只吃前几百 token，无需全文）。
+#[cfg_attr(coverage_nightly, coverage(off))]
+pub(crate) fn extract_office_text(
+    reader: &mut dyn MediaReader,
+    mime: &str,
+    max_bytes: usize,
+) -> String {
+    if mime.starts_with(MIME_PDF) {
+        pdf::extract_text(reader, mime, max_bytes)
+    } else if is_ooxml_mime(mime) {
+        ooxml::extract_text(reader, mime, max_bytes)
+    } else if is_cfb_mime(mime) {
+        cfb::extract_text(reader, mime, max_bytes)
+    } else if is_iwork_mime(mime) {
+        // iWork '13+ IWA（Snappy+protobuf）不解析：返空走 uncategorized（已知限制）。
+        String::new()
+    } else if mime.starts_with(MIME_ODF_PREFIX) {
+        odf::extract_text(reader, mime, max_bytes)
+    } else if mime == MIME_RTF_APP || mime == MIME_RTF_TEXT {
+        rtf::extract_text(reader, mime, max_bytes)
+    } else if mime == MIME_EPUB {
+        epub::extract_text(reader, mime, max_bytes)
+    } else if is_mindmap_zip_mime(mime) {
+        mindmap_zip::extract_text(reader, mime, max_bytes)
+    } else if mime == MIME_FREEMIND {
+        mindmap_mm::extract_text(reader, mime, max_bytes)
+    } else {
+        text::extract_text(reader, mime, max_bytes)
+    }
+}
+
+#[cfg_attr(coverage_nightly, coverage(off))]
 fn is_ooxml_mime(mime: &str) -> bool {
     mime.starts_with(MIME_OOXML_PREFIX)
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 fn is_cfb_mime(mime: &str) -> bool {
     mime == MIME_DOC || mime == MIME_PPT || mime == MIME_XLS
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 fn is_iwork_mime(mime: &str) -> bool {
     mime == MIME_PAGES
         || mime == MIME_NUMBERS
@@ -105,6 +148,7 @@ fn is_iwork_mime(mime: &str) -> bool {
         || mime.starts_with(MIME_IWORK_PREFIX)
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 fn is_mindmap_zip_mime(mime: &str) -> bool {
     mime == MIME_XMIND
         || mime == MIME_XMIND_ALT

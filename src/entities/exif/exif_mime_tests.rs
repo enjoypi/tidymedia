@@ -508,7 +508,7 @@ fn open_filtered_skips_parsing_for_non_media_mime() {
     fake.add_file(loc.clone(), b"plain text content\n".to_vec());
 
     let backend: Arc<dyn super::super::backend::Backend> = fake;
-    let exif = Exif::open_filtered(&loc, &backend, utc(), false).unwrap();
+    let exif = Exif::open_filtered(&loc, &backend, utc(), false, false).unwrap();
     assert_eq!(exif.mime_type(), "text/plain");
     assert!(!exif.is_media());
     assert_eq!(exif.doc_created(), 0);
@@ -528,9 +528,82 @@ fn open_filtered_still_parses_media_mime() {
     fake.add_file(loc.clone(), png);
 
     let backend: Arc<dyn super::super::backend::Backend> = fake;
-    let exif = Exif::open_filtered(&loc, &backend, utc(), false).unwrap();
+    let exif = Exif::open_filtered(&loc, &backend, utc(), false, false).unwrap();
     assert!(exif.is_media());
     assert!(exif.mime_type().starts_with("image/"));
+}
+
+// `open_filtered(doc_only=true)` 对文档族 MIME 整文件解析：PDF 的 /CreationDate
+// 被提取（doc_created 非 0），证明未走 mime-only 短路。
+#[test]
+fn open_filtered_doc_only_parses_office_mime() {
+    use super::super::uri::Location;
+    use crate::adapters::backend::fake::FakeBackend;
+    use std::sync::Arc;
+
+    let pdf = std::fs::read(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/data/sample-pdf-dated.pdf"
+    ))
+    .unwrap();
+    let fake = Arc::new(FakeBackend::new("fake"));
+    let loc = Location::Local(camino::Utf8PathBuf::from("/in-mem/doc.pdf"));
+    fake.add_file(loc.clone(), pdf);
+
+    let backend: Arc<dyn super::super::backend::Backend> = fake;
+    let exif = Exif::open_filtered(&loc, &backend, utc(), false, true).unwrap();
+    assert!(exif.is_office());
+    assert_ne!(exif.doc_created(), 0);
+}
+
+// `open_filtered(doc_only=true)` 对媒体 MIME 反向短路：mime-only Exif
+// （is_media 判定可用），跳过 EXIF 容器解析——copy-doc 会 skip 媒体，解析纯属浪费。
+// fixture 带 DateTimeOriginal：若未短路 date_time_original 必非 0，断言有区分度。
+#[test]
+fn open_filtered_doc_only_skips_media_mime() {
+    use super::super::uri::Location;
+    use crate::adapters::backend::fake::FakeBackend;
+    use std::sync::Arc;
+
+    let jpg = std::fs::read(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/data/sample-with-exif.jpg"
+    ))
+    .unwrap();
+    let fake = Arc::new(FakeBackend::new("fake"));
+    let loc = Location::Local(camino::Utf8PathBuf::from("/in-mem/photo.jpg"));
+    fake.add_file(loc.clone(), jpg);
+
+    let backend: Arc<dyn super::super::backend::Backend> = fake;
+    let exif = Exif::open_filtered(&loc, &backend, utc(), true, true).unwrap();
+    assert!(exif.is_media());
+    assert!(!exif.is_office());
+    assert_eq!(exif.date_time_original(), 0);
+}
+
+// CFB fixture（真实 sample-doc-dated.doc）在 256 字节 sniff 窗口下被 infer 识别为
+// 泛化 `application/x-ole-storage`（CLSID 细分需完整 header 必失败）→ 扩展名重映射
+// 到 application/msword → CFB 路由命中 SummaryInformation 时间。回归钉死本次
+// e2e 矩阵抓到的重映射缺口。
+#[test]
+fn open_filtered_remaps_ole_storage_by_extension() {
+    use super::super::uri::Location;
+    use crate::adapters::backend::fake::FakeBackend;
+    use std::sync::Arc;
+
+    let doc = std::fs::read(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/data/sample-doc-dated.doc"
+    ))
+    .unwrap();
+    let fake = Arc::new(FakeBackend::new("fake"));
+    let loc = Location::Local(camino::Utf8PathBuf::from("/in-mem/contract.doc"));
+    fake.add_file(loc.clone(), doc);
+
+    let backend: Arc<dyn super::super::backend::Backend> = fake;
+    let exif = Exif::open_filtered(&loc, &backend, utc(), false, true).unwrap();
+    assert_eq!(exif.mime_type(), "application/msword");
+    assert_ne!(exif.doc_created(), 0);
 }
 
 // End-to-end：FakeBackend 喂内容不被 infer 识别（纯 ASCII txt） + path 带 `.txt`

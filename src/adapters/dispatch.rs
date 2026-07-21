@@ -34,8 +34,13 @@ pub fn tidy(command: Commands) -> Result<()> {
     let result = tidy_with(&DefaultBackendFactory, &DefaultDetectorFactory, command)?;
     match result {
         CommandResult::Copy(report) if report.failed > 0 => {
-            // report.remove 区分 copy 与 move：错文案会让 CI 脚本按 "copy" 误判子命令。
-            let op = if report.remove { "move" } else { "copy" };
+            // (remove, doc_only) 区分四个子命令：错文案会让 CI 脚本误判子命令。
+            let op = match (report.remove, report.doc_only) {
+                (false, false) => "copy",
+                (false, true) => "copy-doc",
+                (true, false) => "move",
+                (true, true) => "move-doc",
+            };
             let past = if report.remove { "moved" } else { "copied" };
             Err(Error::Io(std::io::Error::other(format!(
                 "{op} partial failure: {failed} failed, {ok} {past}, {ignored} ignored",
@@ -71,6 +76,10 @@ pub fn tidy(command: Commands) -> Result<()> {
 /// # Errors
 ///
 /// 当 backend / detector 构造失败、IO 操作出错或业务逻辑出错时返回 `Err`。
+#[expect(
+    clippy::too_many_lines,
+    reason = "六子命令 match 每 arm 是纯解构透传；拆分只会把 enum 解构搬到别处"
+)]
 pub fn tidy_with(
     factory: &dyn BackendFactory,
     detectors: &dyn DetectorFactory,
@@ -86,11 +95,13 @@ pub fn tidy_with(
             report,
         } => dispatch_copy_or_move(
             factory,
+            detectors,
             sources,
             output,
             dry_run,
             /* remove = */ false,
             include_non_media,
+            /* doc_only = */ false,
             archive_template.as_deref(),
             report.as_deref(),
         ),
@@ -103,11 +114,49 @@ pub fn tidy_with(
             report,
         } => dispatch_copy_or_move(
             factory,
+            detectors,
             sources,
             output,
             dry_run,
             /* remove = */ true,
             include_non_media,
+            /* doc_only = */ false,
+            archive_template.as_deref(),
+            report.as_deref(),
+        ),
+        Commands::CopyDoc {
+            dry_run,
+            sources,
+            output,
+            archive_template,
+            report,
+        } => dispatch_copy_or_move(
+            factory,
+            detectors,
+            sources,
+            output,
+            dry_run,
+            /* remove = */ false,
+            /* include_non_media = */ false,
+            /* doc_only = */ true,
+            archive_template.as_deref(),
+            report.as_deref(),
+        ),
+        Commands::MoveDoc {
+            dry_run,
+            sources,
+            output,
+            archive_template,
+            report,
+        } => dispatch_copy_or_move(
+            factory,
+            detectors,
+            sources,
+            output,
+            dry_run,
+            /* remove = */ true,
+            /* include_non_media = */ false,
+            /* doc_only = */ true,
             archive_template.as_deref(),
             report.as_deref(),
         ),
@@ -148,22 +197,42 @@ pub fn tidy_with(
     }
 }
 
-// Copy / Move 唯一区别是 `remove` 布尔；提到此处避免两个 arm 18 行同体重复。
+// Copy / Move / CopyDoc / MoveDoc 区别仅 `remove` + `doc_only` 布尔组合；
+// 提到此处避免四个 arm 同体重复。
 #[expect(
     clippy::too_many_arguments,
-    reason = "dispatch 单点接 6 个 CLI flag + factory + sources/output；折成结构体会让两个调用点也要先 Build 结构体"
+    reason = "dispatch 单点接 CLI flag + factory + sources/output；折成结构体会让四个调用点也要先 Build 结构体"
+)]
+#[expect(
+    clippy::fn_params_excessive_bools,
+    reason = "dry_run/remove/include_non_media/doc_only 与 CLI flag 一一对应，收敛 enum 反让四个调用点更绕"
 )]
 fn dispatch_copy_or_move(
     factory: &dyn BackendFactory,
+    detectors: &dyn DetectorFactory,
     sources: Vec<Location>,
     output: Location,
     dry_run: bool,
     remove: bool,
     include_non_media: bool,
+    doc_only: bool,
     archive_template: Option<&str>,
     report: Option<&str>,
 ) -> Result<CommandResult> {
     validate_template_arg(archive_template)?;
+    // 分类器仅在 doc 命令且最终模板消费 {category} 时构造（快速失败：模板要
+    // category 但模型未配 → InvalidInput）；构造是懒的，模型在首次分类才加载。
+    let template = crate::usecases::resolved_template(archive_template, doc_only);
+    let classifier = if doc_only && crate::usecases::template_needs_category(template) {
+        let cfg = &crate::usecases::config::config().backend.classify;
+        Some(crate::usecases::make_classify_provider(
+            std::sync::Arc::from(detectors.build_document_classifier()?),
+            cfg.max_text_bytes,
+            cfg.score_min,
+        ))
+    } else {
+        None
+    };
     let src_pairs = build_sources(factory, sources)?;
     let out_pair = build_source(factory, output)?;
     let sink = report.map(JsonFileReportSink::new);
@@ -173,10 +242,12 @@ fn dispatch_copy_or_move(
         dry_run,
         remove,
         include_non_media,
+        doc_only,
         archive_template,
         sink.as_ref().map(|s| s as &dyn ReportSink),
         // P3 sidecar 发现的依赖倒置注入点：adapters 协议解析进 usecases 流程。
         Some(crate::adapters::sidecar::discover_with_backend),
+        classifier,
     )?;
     Ok(CommandResult::Copy(copy_report))
 }

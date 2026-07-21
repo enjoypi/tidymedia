@@ -14,12 +14,13 @@ use tracing::debug;
 use tracing::error;
 use tracing::trace;
 
+use super::classify::template_needs_category;
 use super::ops::do_copy;
 use super::reporting::{ReportFlags, finalize, log_operation_summary, log_scan_summary};
 use crate::entities::backend::Backend;
 use crate::entities::common;
 use crate::entities::common::{canonical_prefix, under_prefix};
-use crate::entities::file_index::{CandidateProvider, Index, VisitStats};
+use crate::entities::file_index::{CandidateProvider, Index, TextClassifyProvider, VisitStats};
 use crate::entities::threadpool::install_io;
 use crate::entities::uri::Location;
 use crate::usecases::config::config;
@@ -43,10 +44,15 @@ pub(super) const MONTH: [&str; 13] = [
 ];
 
 /// [`do_copy`] 的选项包；把 bool + template 打包，规避 `clippy::too_many_arguments`。
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "dry_run/remove/include_non_media/doc_only 四态互相独立（CLI flag 一比一），收敛 enum 反让调用点更绕"
+)]
 pub struct CopyOpts<'a> {
     pub dry_run: bool,
     pub remove: bool,
     pub include_non_media: bool,
+    pub doc_only: bool,
     pub template: &'a str,
 }
 
@@ -70,7 +76,7 @@ pub(super) fn chrono_offset_from_hours(hours: i8) -> FixedOffset {
     FixedOffset::east_opt(i32::from(hours) * 3600).unwrap_or_else(|| chrono::Utc.fix())
 }
 
-/// 测试 shim：等价于 `copy_with_sidecar(..., None)`。
+/// 测试 shim：等价于 `copy_with_sidecar(..., doc_only=false, None)`。
 /// 生产路径（dispatch）走 [`copy_with_sidecar`] 注入 P3 发现；仅测试用本简短入口。
 #[cfg(test)]
 pub fn copy(
@@ -88,16 +94,33 @@ pub fn copy(
         dry_run,
         remove,
         include_non_media,
+        false,
         archive_template,
         report_sink,
+        None,
         None,
     )
 }
 
-// 8 个参数源于 CLI 选项的一比一透传；与 make_report 同理。
+/// 解析最终归档模板：显式传入优先，否则按命令族取配置默认
+/// （doc 命令用 `doc_archive_template`，含 `{category}`）。
+/// `pub(crate)`：dispatch 构造分类器前需用同一口径判断模板是否消费 `{category}`。
+pub(crate) fn resolved_template(archive_template: Option<&str>, doc_only: bool) -> &str {
+    archive_template.unwrap_or(if doc_only {
+        &config().copy.doc_archive_template
+    } else {
+        &config().copy.archive_template
+    })
+}
+
+// 9 个参数源于 CLI 选项的一比一透传；与 make_report 同理。
 #[expect(
     clippy::too_many_arguments,
     reason = "CLI 选项 + sidecar provider 一比一透传，折结构体会让 dispatch 调用点同样冗长"
+)]
+#[expect(
+    clippy::fn_params_excessive_bools,
+    reason = "dry_run/remove/include_non_media/doc_only 与 CLI flag 一比一透传，收敛 enum 反让 dispatch 调用点更绕"
 )]
 pub fn copy_with_sidecar(
     sources: &[Source],
@@ -105,18 +128,30 @@ pub fn copy_with_sidecar(
     dry_run: bool,
     remove: bool,
     include_non_media: bool,
+    doc_only: bool,
     archive_template: Option<&str>,
     report_sink: Option<&dyn ReportSink>,
     sidecar: Option<CandidateProvider>,
+    classifier: Option<TextClassifyProvider>,
 ) -> common::Result<CopyReport> {
     let start = Instant::now();
     let (output_loc, output_backend) = output;
-    let template = archive_template.unwrap_or(&config().copy.archive_template);
+    let template = resolved_template(archive_template, doc_only);
 
     let output_prefix = canonical_prefix(&output_loc);
     ensure_sources_outside_output(sources, &output_prefix)?;
     let feature = feature_of(remove);
-    let source = build_source_index(sources, &output_prefix, sidecar, feature, include_non_media);
+    let source = build_source_index(
+        sources,
+        (&output_prefix, &output_loc.display()),
+        sidecar,
+        // dispatch 仅在 doc_only 时构造 Some(classifier)，此处只补「模板是否
+        // 消费 {category}」的单一守卫（无消费点不做工）。
+        classifier.filter(|_| template_needs_category(template)),
+        feature,
+        include_non_media,
+        doc_only,
+    );
 
     let total_files = source.len();
     let scan_stats = source.stats();
@@ -126,6 +161,7 @@ pub fn copy_with_sidecar(
         dry_run,
         remove,
         include_non_media,
+        doc_only,
     };
     if total_files == 0 {
         return Ok(finalize(
@@ -179,6 +215,7 @@ fn execute_copy(
         dry_run: flags.dry_run,
         remove: flags.remove,
         include_non_media: flags.include_non_media,
+        doc_only: flags.doc_only,
         template,
     };
     let (copied, ignored, failed, errors, errors_truncated) =
@@ -225,23 +262,32 @@ fn ensure_sources_outside_output(sources: &[Source], output_prefix: &str) -> com
     Ok(())
 }
 
-// 扫源建索引 + 重叠剔除 + EXIF/P3 富集；拆出让 copy_with_sidecar 保持在 100 行内。
-// include_non_media=false 时 parse_exif 对非媒体 MIME 短路（sniff 后跳过整文件
-// 容器解析）——这些文件后续在 do_copy 被 is_media 过滤，解析成本纯属浪费。
+// 扫源建索引 + 重叠剔除 + EXIF/P3 富集 + 内容分类；拆出让 copy_with_sidecar 保持
+// 在 100 行内。include_non_media=false 时 parse_exif 对非媒体 MIME 短路（sniff 后
+// 跳过整文件容器解析）——这些文件后续在 do_copy 被 is_media 过滤，解析成本纯属浪费。
+// doc_only=true 反向短路：仅文档族整文件解析（copy-doc/move-doc 路径）。
+// classifier 已由调用方按「doc_only && 模板含 {category}」过滤——无消费点不做工。
 fn build_source_index(
     sources: &[Source],
-    output_prefix: &str,
+    output_prefixes: (&str, &str),
     sidecar: Option<CandidateProvider>,
+    classifier: Option<TextClassifyProvider>,
     feature: &'static str,
     include_non_media: bool,
+    doc_only: bool,
 ) -> Index {
+    let (output_prefix, output_literal) = output_prefixes;
     let mut source = Index::new();
     for (loc, backend) in sources {
         source.visit_location(loc, backend);
     }
     // output ⊂ source（就地归档，如 copy /photos -o /photos/archive）：把已归档
     // 文件从 source 索引剔除，否则它们会被再次复制 / 在 move 模式下被误删。
-    let excluded = source.remove_under_prefix(output_prefix);
+    // canonical + 字面双前缀各剔一遍：index key 是 walker 字面路径，macOS
+    // `/var → /private/var` 等 symlink 下 canonical 前缀匹配不到字面 key；
+    // 两者相同时第二遍空剔除，幂等零副作用（免去相等判分支）。
+    let excluded =
+        source.remove_under_prefix(output_prefix) + source.remove_under_prefix(output_literal);
     if excluded > 0 {
         debug!(
             feature,
@@ -252,11 +298,15 @@ fn build_source_index(
             "excluded already-archived files under output from source index"
         );
     }
-    source.parse_exif(configured_chrono_offset(), include_non_media);
+    source.parse_exif(configured_chrono_offset(), include_non_media, doc_only);
     // P3 富集：adapters 层注入的 sidecar 发现（XMP / Takeout），entities 只消费
     // 转换好的 Candidate（依赖倒置，协议细节不进 usecases）。
     if let Some(provider) = sidecar {
         source.enrich_candidates(provider);
+    }
+    // 内容分类（copy-doc/move-doc）：MUST 在 parse_exif 之后（复用已 sniff MIME）。
+    if let Some(provider) = classifier {
+        source.classify_documents(&provider);
     }
     source
 }

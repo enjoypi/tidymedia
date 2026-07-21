@@ -65,6 +65,8 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 wyhash = "0.6"
 xxhash-rust = { version = "0.8", features = ["xxh3"] }
 zip = "8"
+tokenizers = { version = "0.23.1", default-features = false, features = ["fancy-regex"] }
+flate2 = "1.1.9"
 
 [dev-dependencies]
 assert_cmd = "2"
@@ -73,6 +75,7 @@ filetime = "0.2"
 predicates = "3"
 pretty_assertions = "1"
 rstest = "0.26"
+uuid = "1.24.0"
 
 [lints.rust]
 future-incompatible = { level = "warn", priority = -2 }

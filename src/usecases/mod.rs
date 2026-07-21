@@ -1,10 +1,12 @@
 // Use Cases 层：编排 Entity 业务规则 + 应用级流程。
 pub(super) use copy::Source;
 pub(super) use copy::copy_with_sidecar;
+pub(super) use copy::{make_classify_provider, resolved_template, template_needs_category};
 pub(super) use cull::cull;
 pub(super) use find::find_duplicates;
 pub(super) use move_text_shot::move_text_shot;
 
+pub(crate) mod classify;
 pub(crate) mod config;
 pub(crate) mod detector;
 pub(crate) mod face;

@@ -9,6 +9,8 @@ copy:
   # {valuable_name} = 路径中第一个含非 ASCII 的目录段（无则省略此段）
   # 注意：值展开后以 `{` 开头，必须加引号否则 YAML 按 flow mapping 解析
   archive_template: "${TIDYMEDIA_ARCHIVE_TEMPLATE:-{year}/{month}/{valuable_name}}"
+  # copy-doc / move-doc 未传 --archive-template 时的默认模板（{category} 按内容类目分桶）
+  doc_archive_template: "${TIDYMEDIA_DOC_ARCHIVE_TEMPLATE:-{category}/{year}/{month}}"
 exif:
   # EXIF 时间戳小于此 UNIX 秒数视为不可信（默认 2000-01-01T00:00:00Z）
   valid_date_time_secs: ${TIDYMEDIA_VALID_DATE_TIME_SECS:-946684800}
@@ -86,3 +88,24 @@ backend:
     # 单文件字节上限（防 OOM）；超此值的图扫描阶段直接 skip 计入 failed
     # 默认 50 MiB = 52428800 字节；大 RAW 文件可调高
     max_image_bytes: ${TIDYMEDIA_FACE_MAX_BYTES:-52428800}
+  # copy-doc / move-doc 子命令的文档内容分类后端（zero-shot embedding）
+  # bge-small-zh-v1.5 int8 ONNX + tokenizer.json 走 git-lfs 存放在 models/；
+  # 路径为空 = 调用时报 InvalidInput（仅在归档模板含 {category} 时才会加载）
+  classify:
+    # bge-small-zh embedding ONNX 本地路径
+    embed_model_path: ${TIDYMEDIA_CLASSIFY_MODEL:-models/bge_small_zh_v15_int8.onnx}
+    # 模型配套 tokenizer.json 本地路径
+    tokenizer_path: ${TIDYMEDIA_CLASSIFY_TOKENIZER:-models/bge_small_zh_v15_tokenizer.json}
+    # cosine 相似度下限；低于此值落 uncategorized
+    # spike 实测：命中类目 0.60~0.81、无关文本最高 0.36，默认 0.5 两侧留余量
+    score_min: ${TIDYMEDIA_CLASSIFY_SCORE_MIN:-0.5}
+    # 提取给分类器的正文文本字节上限（embedding 只吃前几百 token）
+    max_text_bytes: ${TIDYMEDIA_CLASSIFY_MAX_TEXT_BYTES:-4096}
+    # 用户类目集：name 进 {category} 归档路径段，description 是 zero-shot 原型文本
+    # 空列表 = 全部落 uncategorized（不加载模型）；按需增删改
+    categories:
+      - {name: invoice, description: "发票、收据、报销单据、增值税发票"}
+      - {name: contract, description: "合同、协议、甲方乙方条款"}
+      - {name: report, description: "工作报告、总结汇报、项目进展"}
+      - {name: resume, description: "个人简历、求职、教育经历、工作经历"}
+      - {name: manual, description: "使用手册、说明书、操作指南、教程"}

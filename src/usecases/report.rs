@@ -64,7 +64,7 @@ pub fn extend_errors_capped(
 /// 跳过、空文件、读不到的）；`copied` / `ignored` / `failed` 反映 `do_copy` 决策计数。
 #[expect(
     clippy::struct_excessive_bools,
-    reason = "dry_run / remove / include_non_media / errors_truncated 四态互相独立，无法收敛为单一 enum：dry_run 是 CLI flag、remove 区分 copy/move、include_non_media 是媒体过滤、errors_truncated 是软 cap 命中指示"
+    reason = "dry_run / remove / include_non_media / doc_only / errors_truncated 五态互相独立，无法收敛为单一 enum：dry_run 是 CLI flag、remove 区分 copy/move、include_non_media 是媒体过滤、doc_only 区分 copy-doc/move-doc、errors_truncated 是软 cap 命中指示"
 )]
 #[derive(Debug, Serialize)]
 pub struct CopyReport {
@@ -82,6 +82,8 @@ pub struct CopyReport {
     pub dry_run: bool,
     pub remove: bool,
     pub include_non_media: bool,
+    /// `copy-doc`/`move-doc` 路径：仅文档族入档，媒体与未知格式 skip。
+    pub doc_only: bool,
     pub errors: Vec<ReportError>,
     /// `errors` Vec 是否因 [`ERRORS_SOFT_CAP`] 截断；`true` = 存在未记入 `errors`
     /// 的失败项，用户应看 `failed` 总数与结构化日志。

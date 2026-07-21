@@ -381,3 +381,34 @@ fn info_debug_format_includes_fast_hash() {
     assert!(dbg.contains("fast_hash"));
     assert!(dbg.contains("size"));
 }
+
+// ============= category（copy-doc/move-doc 内容类目） =============
+
+#[test]
+fn category_defaults_to_none() {
+    let info = Info::from(common::DATA_SMALL).unwrap();
+    assert!(info.category_ref().is_none());
+}
+
+#[test]
+fn set_category_then_read_back() {
+    let mut info = Info::from(common::DATA_SMALL).unwrap();
+    info.set_category("invoice".to_string());
+    assert_eq!(info.category_ref(), Some("invoice"));
+}
+
+// cloned_at 必须搬 category：fast-path rename 后 dst 入 output_index，丢 category
+// 会让后续重跑对同文件重复分类甚至桶漂移。
+#[test]
+fn cloned_at_carries_category() {
+    use crate::adapters::backend::local::LocalBackend;
+    use crate::entities::uri::Location;
+
+    let mut info = Info::from(common::DATA_SMALL).unwrap();
+    info.set_category("contract".to_string());
+    let cloned = info.cloned_at(
+        Location::Local(camino::Utf8PathBuf::from("/x/y.png")),
+        LocalBackend::arc(),
+    );
+    assert_eq!(cloned.category_ref(), Some("contract"));
+}

@@ -150,6 +150,52 @@ pub enum Commands {
         #[arg(long)]
         report: Option<String>,
     },
+
+    /// Copy non-duplicate document files from sources to the output directory, archived by document creation time and content category. Documents cover pdf, doc/xls/ppt, docx/xlsx/pptx, odt/ods/odp, rtf, epub, pages/numbers/key, mind maps and plain text (txt/md/rst/csv/tsv). Media and unknown formats are skipped (use `copy` for those). Duplicate detection uses SHA-512; no source files are modified.
+    CopyDoc {
+        /// Dry run, do not copy files
+        #[arg(short, long)]
+        dry_run: bool,
+
+        /// The source directories or files (URI or local path)
+        #[arg(required = true)]
+        sources: Vec<Location>,
+
+        /// The output directory (URI or local path)
+        #[arg(short, long)]
+        output: Location,
+
+        /// Archive directory template; placeholders: `{category}` `{year}` `{month}` `{day}` `{make}` `{model}` `{valuable_name}`
+        #[arg(long)]
+        archive_template: Option<String>,
+
+        /// Write a JSON operation report to this path
+        #[arg(long)]
+        report: Option<String>,
+    },
+
+    /// Move non-duplicate document files from sources into the output directory, archived by document creation time and content category (same document formats as `copy-doc`). Sources that duplicate something already in output are physically deleted; duplicate detection uses SHA-512. Media and unknown formats are left untouched.
+    MoveDoc {
+        /// Dry run, do not move or delete files
+        #[arg(short, long)]
+        dry_run: bool,
+
+        /// The source directories or files (URI or local path)
+        #[arg(required = true)]
+        sources: Vec<Location>,
+
+        /// The output directory (URI or local path)
+        #[arg(short, long)]
+        output: Location,
+
+        /// Archive directory template; placeholders: `{category}` `{year}` `{month}` `{day}` `{make}` `{model}` `{valuable_name}`
+        #[arg(long)]
+        archive_template: Option<String>,
+
+        /// Write a JSON operation report to this path
+        #[arg(long)]
+        report: Option<String>,
+    },
 }
 
 /// 解析命令行参数并执行对应子命令。

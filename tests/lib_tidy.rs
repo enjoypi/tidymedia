@@ -110,3 +110,6 @@ mod cull;
 
 #[path = "lib_tidy/office_archive.rs"]
 mod office_archive;
+
+#[path = "lib_tidy/copy_move_doc.rs"]
+mod copy_move_doc;

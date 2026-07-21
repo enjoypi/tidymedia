@@ -84,6 +84,45 @@ fn copy_archives_txt_falls_back_to_mtime_or_filename() {
     );
 }
 
+// 全矩阵 fixture（pptx/xlsx/doc/xls/ppt/odt/ods/odp/rtf/epub）共享同一断言：
+// created=2017-02-14 → 桶 2017/02。逐个独立 tempdir 隔离，任一失败可定位格式。
+#[test]
+fn copy_archives_full_office_matrix_by_creation_date() {
+    const MATRIX: &[&str] = &[
+        "sample-pptx-dated.pptx",
+        "sample-xlsx-dated.xlsx",
+        "sample-doc-dated.doc",
+        "sample-xls-dated.xls",
+        "sample-ppt-dated.ppt",
+        "sample-odt-dated.odt",
+        "sample-ods-dated.ods",
+        "sample-odp-dated.odp",
+        "sample-rtf-dated.rtf",
+        "sample-epub-dated.epub",
+    ];
+    for name in MATRIX {
+        let src = tempdir().unwrap();
+        let out = tempdir().unwrap();
+        std::fs::copy(format!("{DATA_DIR}/{name}"), src.path().join(name))
+            .unwrap_or_else(|e| panic!("seed {name}: {e}"));
+        tidy(Commands::Copy {
+            dry_run: false,
+            include_non_media: true,
+            sources: vec![local(src.path().to_str().unwrap())],
+            output: local(out.path().to_str().unwrap()),
+            archive_template: None,
+            report: None,
+        })
+        .unwrap_or_else(|e| panic!("copy {name}: {e}"));
+        let bucket = out.path().join("2017").join("02");
+        assert!(
+            bucket.exists(),
+            "{name} must land in 2017/02 bucket; out tree: {:?}",
+            walk(out.path())
+        );
+    }
+}
+
 fn walk(p: &std::path::Path) -> Vec<std::path::PathBuf> {
     let mut out = Vec::new();
     if let Ok(rd) = std::fs::read_dir(p) {

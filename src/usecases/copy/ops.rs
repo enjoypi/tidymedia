@@ -58,14 +58,7 @@ pub(super) fn do_copy(
         return Ok(false);
     }
 
-    if !opts.include_non_media && !src.is_media() {
-        warn!(
-            feature,
-            operation = "filter_media",
-            result = "skipped_non_media",
-            source = %src_display,
-            "file is not an image or video (pass --include-non-media to copy anyway)"
-        );
+    if !passes_type_filter(src, opts, feature, src_display) {
         return Ok(false);
     }
 
@@ -161,6 +154,39 @@ pub(super) fn do_copy(
             "无法为\"{src_display}\"生成目标目录的文件名"
         ))))
     }
+}
+
+// 落盘类型过滤，与 Exif::open_filtered 的解析短路同口径（三态）：doc_only 只留
+// 文档族；否则 include_non_media 放行一切、默认只留媒体。从 do_copy 抽出
+// （clippy too_many_lines）；`coverage(off)` 理由与 do_copy 相同（multi-binary
+// instance 下 `warn!` micro-region 虚假 miss），业务由 `copy_doc_only_tests` /
+// `copy_advanced_tests::include_non_media` 系列真测。
+#[cfg_attr(coverage_nightly, coverage(off))]
+fn passes_type_filter(src: &Info, opts: &CopyOpts<'_>, feature: &'static str, disp: &str) -> bool {
+    if opts.doc_only {
+        if !src.is_office() {
+            warn!(
+                feature,
+                operation = "filter_media",
+                result = "skipped_non_document",
+                source = %disp,
+                "file is not a document (copy-doc/move-doc only archive document formats)"
+            );
+            return false;
+        }
+        return true;
+    }
+    if !opts.include_non_media && !src.is_media() {
+        warn!(
+            feature,
+            operation = "filter_media",
+            result = "skipped_non_media",
+            source = %disp,
+            "file is not an image or video (pass --include-non-media to copy anyway)"
+        );
+        return false;
+    }
+    true
 }
 
 // dry-run 分支：不落盘，但 add cloned_at 让本次 run 的后续决策拿到与真跑一致的

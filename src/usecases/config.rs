@@ -27,6 +27,7 @@ pub fn install_loader(loader: fn() -> Config) {
 /// 默认归档模板：`{year}/{month}/{valuable_name}`。
 /// `{valuable_name}` 为路径中首个含非 ASCII 的目录段；若不存在则该段为空串。
 pub const DEFAULT_ARCHIVE_TEMPLATE: &str = "{year}/{month}/{valuable_name}";
+pub const DEFAULT_DOC_ARCHIVE_TEMPLATE: &str = "{category}/{year}/{month}";
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(default)]
@@ -34,6 +35,9 @@ pub struct CopyConfig {
     pub timezone_offset_hours: i8,
     pub unique_name_max_attempts: u32,
     pub archive_template: String,
+    /// `copy-doc`/`move-doc` 未传 `--archive-template` 时的默认模板
+    /// （文档按内容类目分桶，时间在内层）。
+    pub doc_archive_template: String,
 }
 
 impl Default for CopyConfig {
@@ -42,6 +46,7 @@ impl Default for CopyConfig {
             timezone_offset_hours: 8,
             unique_name_max_attempts: 10,
             archive_template: DEFAULT_ARCHIVE_TEMPLATE.to_string(),
+            doc_archive_template: DEFAULT_DOC_ARCHIVE_TEMPLATE.to_string(),
         }
     }
 }
@@ -58,7 +63,8 @@ pub fn validate_archive_template(template: &str) -> Result<(), String> {
     // 保证渲染后至少有一段非空目录的占位符——剩下的 {valuable_name} 可能渲染为
     // 空串致全部文件落 output 根；要求模板含至少一个 always-non-empty 占位符。
     // const 须放 fn 顶（clippy::items_after_statements，pedantic）。
-    const ALWAYS_NON_EMPTY: [&str; 5] = ["year", "month", "day", "make", "model"];
+    // category 恒非空：调用方以 "uncategorized" 兜底（archive_template.rs）。
+    const ALWAYS_NON_EMPTY: [&str; 6] = ["year", "month", "day", "make", "model", "category"];
     if template.is_empty() {
         return Err("archive_template must not be empty".into());
     }
@@ -196,6 +202,45 @@ impl Default for OcrConfig {
     }
 }
 
+/// `copy-doc`/`move-doc` 内容分类的单个用户类目：`name` 进 `{category}` 归档
+/// 路径段，`description` 是 zero-shot 原型文本（embedding 后与文档正文比相似度）。
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(default)]
+pub struct CategoryDef {
+    pub name: String,
+    pub description: String,
+}
+
+/// `copy-doc`/`move-doc` 内容分类后端参数。模型/tokenizer 路径外置；
+/// `categories` 用户可自定义类目集（空 = 全部落 uncategorized，不加载模型）。
+#[derive(Clone, Debug, Deserialize)]
+#[serde(default)]
+pub struct ClassifyConfig {
+    /// bge-small-zh embedding ONNX 本地路径。空串 = 调用时报 `InvalidInput`。
+    pub embed_model_path: String,
+    /// 模型配套 `tokenizer.json` 本地路径。空串同上。
+    pub tokenizer_path: String,
+    /// 用户类目集；顺序无关（取 cosine argmax）。
+    pub categories: Vec<CategoryDef>,
+    /// cosine 相似度下限；低于此值落 uncategorized。spike 实测命中类目
+    /// 0.60–0.81、无关文本最高 0.36，默认 0.5 两侧留余量。
+    pub score_min: f32,
+    /// 提取给分类器的正文文本字节上限（embedding 只吃前几百 token）。
+    pub max_text_bytes: usize,
+}
+
+impl Default for ClassifyConfig {
+    fn default() -> Self {
+        Self {
+            embed_model_path: String::new(),
+            tokenizer_path: String::new(),
+            categories: Vec::new(),
+            score_min: 0.5,
+            max_text_bytes: 4096,
+        }
+    }
+}
+
 /// `cull` 子命令的人脸质量评分参数：4 个 ONNX 模型路径 + pHash/清晰度/EAR
 /// 阈值 + 综合评分权重。模型不入 git，路径外置；阈值与权重暴露让用户按场景调优。
 #[derive(Clone, Debug, Deserialize)]
@@ -274,6 +319,7 @@ pub struct BackendConfig {
     pub adb: AdbBackendConfig,
     pub ocr: OcrConfig,
     pub face: FaceConfig,
+    pub classify: ClassifyConfig,
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
@@ -295,6 +341,7 @@ mod tests {
         assert_eq!(c.copy.timezone_offset_hours, 8);
         assert_eq!(c.copy.unique_name_max_attempts, 10);
         assert_eq!(c.copy.archive_template, "{year}/{month}/{valuable_name}");
+        assert_eq!(c.copy.doc_archive_template, "{category}/{year}/{month}");
         assert_eq!(c.exif.valid_date_time_secs, 946_684_800);
         assert_eq!(c.backend.smb.default_user, "");
         assert_eq!(c.backend.smb.workgroup, "WORKGROUP");
@@ -321,6 +368,11 @@ mod tests {
         assert!((c.backend.face.w_blink - 2.0).abs() < f32::EPSILON);
         assert!((c.backend.face.w_smile - 0.5).abs() < f32::EPSILON);
         assert_eq!(c.backend.face.max_image_bytes, 50 * 1024 * 1024);
+        assert_eq!(c.backend.classify.embed_model_path, "");
+        assert_eq!(c.backend.classify.tokenizer_path, "");
+        assert!(c.backend.classify.categories.is_empty());
+        assert!((c.backend.classify.score_min - 0.5).abs() < f32::EPSILON);
+        assert_eq!(c.backend.classify.max_text_bytes, 4096);
         assert_eq!(c.log.level, "info");
     }
 

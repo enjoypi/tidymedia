@@ -6,12 +6,17 @@ use tracing::debug;
 use crate::entities::file_index::VisitStats;
 use crate::usecases::report::{CopyReport, Report, ReportError, ReportSink};
 
-/// 报告口径三开关；打包让 `finalize` / `make_report` 参数列表不再逐项透传。
+/// 报告口径四开关；打包让 `finalize` / `make_report` 参数列表不再逐项透传。
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "dry_run/remove/include_non_media/doc_only 四态互相独立（CLI flag 一比一），收敛 enum 反让调用点更绕"
+)]
 #[derive(Clone, Copy)]
 pub(super) struct ReportFlags {
     pub dry_run: bool,
     pub remove: bool,
     pub include_non_media: bool,
+    pub doc_only: bool,
 }
 
 pub(super) fn log_scan_summary(feature: &'static str, total_files: usize, stats: VisitStats) {
@@ -47,6 +52,7 @@ pub(super) fn log_operation_summary(
         dry_run = flags.dry_run,
         remove = flags.remove,
         include_non_media = flags.include_non_media,
+        doc_only = flags.doc_only,
         skipped_empty = stats.skipped_empty,
         skipped_unreadable = stats.skipped_unreadable,
         walker_errors = stats.walker_errors,
@@ -70,9 +76,7 @@ pub(super) fn finalize(
     duration_ms: u64,
 ) -> CopyReport {
     let report = make_report(
-        flags.dry_run,
-        flags.remove,
-        flags.include_non_media,
+        flags,
         stats,
         copied,
         ignored,
@@ -91,14 +95,8 @@ pub(super) fn finalize(
     clippy::too_many_arguments,
     reason = "report 字段与 run_copy_loop 返回值一一对应；合并结构体反而在唯一调用点更绕"
 )]
-#[expect(
-    clippy::fn_params_excessive_bools,
-    reason = "dry_run/remove/include_non_media/errors_truncated 与 CopyReport 字段一一对应，收敛 enum 反让调用点更绕"
-)]
 fn make_report(
-    dry_run: bool,
-    remove: bool,
-    include_non_media: bool,
+    flags: ReportFlags,
     scan_stats: VisitStats,
     copied: usize,
     ignored: usize,
@@ -120,9 +118,10 @@ fn make_report(
         skipped_empty: scan_stats.skipped_empty,
         skipped_unreadable: scan_stats.skipped_unreadable,
         walker_errors: scan_stats.walker_errors,
-        dry_run,
-        remove,
-        include_non_media,
+        dry_run: flags.dry_run,
+        remove: flags.remove,
+        include_non_media: flags.include_non_media,
+        doc_only: flags.doc_only,
         errors,
         errors_truncated,
         duration_ms,

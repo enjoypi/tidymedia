@@ -1,7 +1,9 @@
 //! CFB 字节扫描单测：合成 `PropertySet` 字节缓冲覆盖 `extract_dates` /
 //! `find_property_filetime` / `filetime_to_epoch` / `read_u32_le` 各分支。
 //! 整 fn `parse(reader, mime)` `coverage(off)`，e2e 由 fixture 集成测试覆盖
-//! （但 CFB 写 lib 罕见 → 不入 subprocess fixture，业务由本节单测真测）。
+//! （静态 fixture `tests/data/sample-{doc,xls,ppt}-dated.*` 由
+//! `tests/gen_cfb_fixtures.rs` 用 cfb crate writer 生成——Python
+//! `compoundfiles`/`olefile` 只读写不了 CFB）。
 
 use super::*;
 
@@ -179,4 +181,73 @@ fn filetime_to_epoch_below_unix_epoch_returns_none() {
 #[test]
 fn u32_le_at_happy() {
     assert_eq!(u32_le_at(&[1, 0, 0, 0], 0), 1);
+}
+
+// ============= extract_printable_runs（extract_text 业务） =============
+
+fn utf16le(s: &str) -> Vec<u8> {
+    s.encode_utf16().flat_map(u16::to_le_bytes).collect()
+}
+
+#[test]
+fn printable_runs_extracts_utf16_chinese() {
+    // 前导噪声保持偶数长度：UTF-16 扫描按偶字节对齐（Word piece 常从
+    // 512/1024 边界开始）；奇偏移 piece 错位解码是 best-effort 已知限制。
+    let mut bytes = vec![0xFF_u8, 0x00, 0x01, 0x00];
+    bytes.extend(utf16le("增值税发票内容片段"));
+    bytes.extend([0x00, 0x00, 0xFF, 0xFE]);
+    let mut out = String::new();
+    extract_printable_runs(&bytes, &mut out, 256);
+    assert!(out.contains("增值税发票内容片段"), "got: {out}");
+}
+
+#[test]
+fn printable_runs_extracts_long_ascii() {
+    let mut out = String::new();
+    extract_printable_runs(
+        b"\x01\x02this is a plain ascii sentence\x00\x03",
+        &mut out,
+        256,
+    );
+    assert!(out.contains("this is a plain ascii sentence"), "got: {out}");
+}
+
+#[test]
+fn printable_runs_drops_short_fragments() {
+    let mut out = String::new();
+    extract_printable_runs(b"\x00ab\x00cd\x01ef\x02", &mut out, 256);
+    assert_eq!(out, "");
+}
+
+#[test]
+fn printable_runs_respects_budget() {
+    let mut out = String::new();
+    extract_printable_runs(b"abcdefghijklmnopqrstuvwxyz", &mut out, 10);
+    assert!(out.len() <= 10, "got len {}: {out}", out.len());
+}
+
+#[test]
+fn printable_runs_empty_input_yields_empty() {
+    let mut out = String::new();
+    extract_printable_runs(&[], &mut out, 64);
+    assert_eq!(out, "");
+}
+
+#[test]
+fn flush_run_separates_runs_with_space() {
+    let mut out = String::new();
+    let mut run = String::from("first run body");
+    flush_run(&mut run, &mut out, 256);
+    let mut run2 = String::from("second run body");
+    flush_run(&mut run2, &mut out, 256);
+    assert_eq!(out, "first run body second run body");
+}
+
+#[test]
+fn is_text_char_rejects_control() {
+    assert!(is_text_char('汉'));
+    assert!(is_text_char('a'));
+    assert!(is_text_char(' '));
+    assert!(is_text_char('!'));
+    assert!(!is_text_char('\u{0007}'));
 }

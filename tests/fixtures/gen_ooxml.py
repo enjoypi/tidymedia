@@ -48,20 +48,50 @@ CONTENT_TYPES_XLSX = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 """
 
 
-def write_ooxml(path: Path, content_types: str, with_core: bool = True) -> None:
+DOCX_DOCUMENT_XML = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body><w:p><w:r><w:t>增值税发票 报销单据 开票日期</w:t></w:r></w:p></w:body>
+</w:document>
+"""
+
+PPTX_SLIDE1_XML = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<p:sld xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">
+  <p:cSld><p:spTree><p:sp><p:txBody><a:p><a:r><a:t>项目进展工作报告 汇报总结</a:t></a:r></a:p></p:txBody></p:sp></p:spTree></p:cSld>
+</p:sld>
+"""
+
+XLSX_SHARED_STRINGS_XML = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" count="2" uniqueCount="2">
+  <si><t>合同条款</t></si><si><t>甲方乙方</t></si>
+</sst>
+"""
+
+# 各格式正文 entry：供 copy-doc 内容分类的 extract_text 提取（时间解析不读它们）。
+BODY_ENTRIES = {
+    "docx": [("word/document.xml", DOCX_DOCUMENT_XML)],
+    "pptx": [("ppt/slides/slide1.xml", PPTX_SLIDE1_XML)],
+    "xlsx": [("xl/sharedStrings.xml", XLSX_SHARED_STRINGS_XML)],
+}
+
+
+def write_ooxml(
+    path: Path, content_types: str, with_core: bool = True, body: str | None = None
+) -> None:
     with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as z:
         z.writestr("[Content_Types].xml", content_types)
         if with_core:
             z.writestr("docProps/core.xml", CORE_XML_DATED)
+        for name, content in BODY_ENTRIES.get(body or "", []):
+            z.writestr(name, content)
 
 
 def main() -> None:
     sys.stdout.reconfigure(newline="\n")
     DATA_DIR.mkdir(parents=True, exist_ok=True)
 
-    write_ooxml(DATA_DIR / "sample-docx-dated.docx", CONTENT_TYPES_DOCX)
-    write_ooxml(DATA_DIR / "sample-pptx-dated.pptx", CONTENT_TYPES_PPTX)
-    write_ooxml(DATA_DIR / "sample-xlsx-dated.xlsx", CONTENT_TYPES_XLSX)
+    write_ooxml(DATA_DIR / "sample-docx-dated.docx", CONTENT_TYPES_DOCX, body="docx")
+    write_ooxml(DATA_DIR / "sample-pptx-dated.pptx", CONTENT_TYPES_PPTX, body="pptx")
+    write_ooxml(DATA_DIR / "sample-xlsx-dated.xlsx", CONTENT_TYPES_XLSX, body="xlsx")
     write_ooxml(DATA_DIR / "sample-docx-no-core.docx", CONTENT_TYPES_DOCX, with_core=False)
 
     for name in [

@@ -12,6 +12,7 @@
 
 use std::io;
 
+use crate::usecases::classify::DocumentClassifier;
 use crate::usecases::face::{EyeStateClassifier, FaceDetector, FaceEmbedder, FaceMeshDetector};
 use crate::usecases::ocr::TextDetector;
 
@@ -52,4 +53,11 @@ pub trait DetectorFactory: Send + Sync {
     ///
     /// 同 [`Self::build_face_detector`]。
     fn build_text_detector(&self) -> io::Result<Box<dyn TextDetector>>;
+
+    /// bge embedding 文档内容分类（`copy-doc`/`move-doc` 的 `{category}` 归档）。
+    ///
+    /// # Errors
+    ///
+    /// 同 [`Self::build_face_detector`]。
+    fn build_document_classifier(&self) -> io::Result<Box<dyn DocumentClassifier>>;
 }

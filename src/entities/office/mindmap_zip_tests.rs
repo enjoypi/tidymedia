@@ -52,3 +52,51 @@ fn millis_to_secs_modern() {
 fn millis_to_secs_pre_first_day_returns_none() {
     assert!(millis_to_secs(60_000).is_none());
 }
+
+// ============= collect_json_titles（extract_text 业务） =============
+
+#[test]
+fn json_titles_collects_nested_topics() {
+    let mut out = String::new();
+    collect_json_titles(
+        r#"[{"title":"发票主题","children":{"attached":[{"title":"子题"}]}}]"#.as_bytes(),
+        &mut out,
+        64,
+    );
+    assert_eq!(out, "发票主题 子题");
+}
+
+#[test]
+fn json_titles_skips_non_string_value() {
+    let mut out = String::new();
+    collect_json_titles(br#"{"title": 123, "title":"real"}"#, &mut out, 64);
+    assert_eq!(out, "real");
+}
+
+#[test]
+fn json_titles_keeps_escaped_quote_inside() {
+    let mut out = String::new();
+    collect_json_titles(br#"{"title":"a\"b"}"#, &mut out, 64);
+    assert_eq!(out, "a\\\"b");
+}
+
+#[test]
+fn json_titles_budget_truncates() {
+    let mut out = String::new();
+    collect_json_titles(br#"{"title":"abcdefgh"}"#, &mut out, 4);
+    assert_eq!(out, "abcd");
+}
+
+#[test]
+fn json_titles_whitespace_after_colon() {
+    let mut out = String::new();
+    collect_json_titles(b"{\"title\":   \"spaced\"}", &mut out, 64);
+    assert_eq!(out, "spaced");
+}
+
+#[test]
+fn json_titles_empty_value_skipped() {
+    let mut out = String::new();
+    collect_json_titles(br#"{"title":"","title":"x"}"#, &mut out, 64);
+    assert_eq!(out, "x");
+}

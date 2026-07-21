@@ -96,3 +96,44 @@ fn find_subslice_found_and_not_found() {
     assert_eq!(find_subslice(b"hello world", b"world"), Some(6));
     assert!(find_subslice(b"hello", b"world").is_none());
 }
+
+// ============= collect_text_attrs（extract_text 业务） =============
+
+#[test]
+fn collect_text_attrs_multiple_nodes() {
+    let mut out = String::new();
+    collect_text_attrs(
+        r#"<node TEXT="根主题"><node TEXT="子主题"/></node>"#.as_bytes(),
+        &mut out,
+        64,
+    );
+    assert_eq!(out, "根主题 子主题");
+}
+
+#[test]
+fn collect_text_attrs_empty_value_skipped() {
+    let mut out = String::new();
+    collect_text_attrs(br#"<node TEXT=""/><node TEXT="x"/>"#, &mut out, 64);
+    assert_eq!(out, "x");
+}
+
+#[test]
+fn collect_text_attrs_unterminated_quote_stops() {
+    let mut out = String::new();
+    collect_text_attrs(br#"<node TEXT="never closed"#, &mut out, 64);
+    assert_eq!(out, "");
+}
+
+#[test]
+fn collect_text_attrs_budget_truncates() {
+    let mut out = String::new();
+    collect_text_attrs(br#"<node TEXT="abcdefgh"/>"#, &mut out, 4);
+    assert_eq!(out, "abcd");
+}
+
+#[test]
+fn collect_text_attrs_no_attr_yields_empty() {
+    let mut out = String::new();
+    collect_text_attrs(b"<map version=\"1.0\"/>", &mut out, 64);
+    assert_eq!(out, "");
+}

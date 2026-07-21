@@ -48,6 +48,7 @@ mod test_advanced {
             dry_run: false,
             remove: false,
             include_non_media: false,
+            doc_only: false,
             template,
         }
     }
@@ -109,6 +110,7 @@ mod test_advanced {
             dry_run: false,
             remove: true,
             include_non_media: false,
+            doc_only: false,
             template: DEFAULT_TMPL,
         };
         let res = do_copy(&info, &out_dir, &local_arc(), &idx, &opts);
@@ -193,6 +195,7 @@ mod test_advanced {
             dry_run: false,
             remove: true,
             include_non_media: false,
+            doc_only: false,
             template: DEFAULT_TMPL,
         };
         let res = do_copy(&info, &local_loc(&out), &local_arc(), &idx, &opts);
@@ -257,6 +260,7 @@ mod test_advanced {
             dry_run: false,
             remove: false,
             include_non_media: true,
+            doc_only: false,
             template: DEFAULT_TMPL,
         };
         let did = do_copy(&info, &local_loc(out.path()), &local_arc(), &idx, &opts).unwrap();
@@ -487,6 +491,7 @@ mod test_advanced {
             dry_run: false,
             remove: true,
             include_non_media: false,
+            doc_only: false,
             template: DEFAULT_TMPL,
         };
         let ok = do_copy(&info, &out_loc, &backend_arc, &idx, &opts).unwrap();

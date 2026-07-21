@@ -47,6 +47,13 @@ pub use adapters::backend::fake::{FakeBackend, Op as FakeOp};
 pub use adapters::ocr::fake::FakeTextDetector;
 pub use usecases::ocr::TextDetector;
 
+// DocumentClassifier Port（copy-doc/move-doc 内容分类）：Port 在 usecases/classify，
+// tract embedding 实现 + Fake 在 adapters/classify。
+pub use adapters::classify::build_classifier;
+#[doc(hidden)]
+pub use adapters::classify::fake::FakeDocumentClassifier;
+pub use usecases::classify::{Classification, DocumentClassifier};
+
 // Face Ports（cull 子命令用）：4 个 trait + `FaceDetection` DTO 在 usecases/face；
 // 真实实现 + 4 个 build_* 装配函数 + Fake 在 adapters/face。
 #[doc(hidden)]

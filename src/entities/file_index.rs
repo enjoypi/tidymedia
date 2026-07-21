@@ -5,19 +5,16 @@ use std::io;
 use std::sync::Arc;
 
 use camino::{Utf8Path, Utf8PathBuf};
-use chrono::FixedOffset;
 use dashmap::DashMap;
 use dashmap::mapref::entry::Entry;
 use dashmap::mapref::one::Ref;
 use parking_lot::Mutex;
-use rayon::iter::{IntoParallelRefIterator, ParallelBridge, ParallelIterator};
+use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use tracing::warn;
 
 use super::backend::{Backend, EntryKind};
 use super::common;
-use super::exif;
 use super::file_info::Info;
-use super::media_time;
 use super::threadpool::install_io;
 use super::uri::Location;
 // 测试 helper `Index::visit_dir` 需要构造 LocalBackend instance。仅 #[cfg(test)]
@@ -26,11 +23,6 @@ use super::uri::Location;
 use crate::adapters::backend::local::LocalBackend;
 
 const FEATURE_INDEX: &str = "index";
-
-/// P3 sidecar 等外部时间候选的发现函数（依赖倒置：协议解析在 adapters 层，
-/// entities 只接收转换好的 [`media_time::Candidate`]）。
-/// 普通 fn 指针即可——provider 无状态、`Send + Sync`、可直接进 rayon 并行。
-pub type CandidateProvider = fn(&Location, &Arc<dyn Backend>) -> Vec<media_time::Candidate>;
 
 /// 一组重复文件：相同 size + 相同 content hash。size 仅 metadata，组身份由 paths 决定。
 /// 避免旧 `BTreeMap<u64, Vec<Utf8PathBuf>>` 用 size 作唯一键导致同 size 不同内容互相覆盖。
@@ -449,49 +441,12 @@ impl Index {
             }
         }
     }
-
-    /// 并行对每个 indexed 文件用 nom-exif + infer 读取元数据；解析失败的文件被
-    /// 静默跳过（"尽力而为"语义）。从不返回错误。
-    /// `local_offset` 用于解释 EXIF 内无时区的 NaiveDateTime（相机本地时区）。
-    /// `parse_non_media=false` 时非媒体 MIME 在 sniff 后短路为 mime-only `Exif`
-    /// （跳过 office/zip 整文件解析）；调用方在过滤非媒体文件时传 false 省 IO。
-    ///
-    /// F1：`&mut self` 保留供顶层调用感知阶段边界；内部走 `DashMap` 的 `iter_mut`
-    /// 拿各 shard 写锁（rayon `par_bridge` 上转并行 iter，跨 shard 天然无竞争）。
-    pub fn parse_exif(&mut self, local_offset: FixedOffset, parse_non_media: bool) {
-        // 同 visit_location：Exif::open_filtered 内调 backend.open_read（远端是
-        // 整文件同步下载）是 I/O-bound，包 I/O 池避免阻塞 CPU 池线程。
-        install_io(|| {
-            self.files.iter_mut().par_bridge().for_each(|mut kv| {
-                let info = kv.value_mut();
-                if let Ok(e) = exif::Exif::open_filtered(
-                    info.location(),
-                    &info.backend(),
-                    local_offset,
-                    parse_non_media,
-                ) {
-                    info.set_exif(e);
-                }
-            });
-        });
-    }
-
-    /// 并行对每个 indexed 文件调用 provider 注入额外时间候选（P3 sidecar 等），
-    /// 与 `parse_exif` 同为"尽力而为"富集步骤：无 sidecar 时 provider 返空即可。
-    pub fn enrich_candidates(&mut self, provider: CandidateProvider) {
-        // provider 通常调 backend.read_to_string 读 sidecar（远端 stat + read），
-        // 同 visit_location 是 I/O-bound，包 I/O 池。
-        install_io(|| {
-            self.files.iter_mut().par_bridge().for_each(|mut kv| {
-                let info = kv.value_mut();
-                let candidates = provider(info.location(), &info.backend());
-                if !candidates.is_empty() {
-                    info.add_candidates(candidates);
-                }
-            });
-        });
-    }
 }
+
+#[path = "file_index_enrich.rs"]
+mod enrich;
+
+pub use self::enrich::{CandidateProvider, TextClassifyProvider};
 
 #[cfg(test)]
 #[path = "file_index_tests.rs"]

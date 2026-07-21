@@ -425,3 +425,45 @@ fn load_keeps_valid_face_fields_unchanged() {
     assert!((cfg.backend.face.w_smile - 0.8).abs() < f32::EPSILON);
     remove_env_var("TIDYMEDIA_CONFIG");
 }
+
+// classify `score_min` 越界（≤0 或 ≥1 或 NaN）回退默认 0.5，避免阈值恒真/恒假。
+#[test]
+fn load_sanitizes_invalid_classify_score_min_to_default() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("badscore.yaml");
+    std::fs::write(&path, "backend:\n  classify:\n    score_min: 1.5\n").unwrap();
+    set_env_var("TIDYMEDIA_CONFIG", path.to_str().unwrap());
+    let cfg = load();
+    assert!((cfg.backend.classify.score_min - 0.5).abs() < f32::EPSILON);
+    remove_env_var("TIDYMEDIA_CONFIG");
+}
+
+// classify `max_text_bytes` 为 0 回退默认 4096——0 让所有文档提不出文本全落 uncategorized。
+#[test]
+fn load_sanitizes_zero_classify_max_text_bytes_to_default() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("zerotext.yaml");
+    std::fs::write(&path, "backend:\n  classify:\n    max_text_bytes: 0\n").unwrap();
+    set_env_var("TIDYMEDIA_CONFIG", path.to_str().unwrap());
+    let cfg = load();
+    assert_eq!(cfg.backend.classify.max_text_bytes, 4096);
+    remove_env_var("TIDYMEDIA_CONFIG");
+}
+
+// classify categories 从 yaml 正确反序列化（name + description 两字段）。
+#[test]
+fn load_parses_classify_categories() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("cats.yaml");
+    std::fs::write(
+        &path,
+        "backend:\n  classify:\n    categories:\n      - {name: invoice, description: \"发票\"}\n",
+    )
+    .unwrap();
+    set_env_var("TIDYMEDIA_CONFIG", path.to_str().unwrap());
+    let cfg = load();
+    assert_eq!(cfg.backend.classify.categories.len(), 1);
+    assert_eq!(cfg.backend.classify.categories[0].name, "invoice");
+    assert_eq!(cfg.backend.classify.categories[0].description, "发票");
+    remove_env_var("TIDYMEDIA_CONFIG");
+}

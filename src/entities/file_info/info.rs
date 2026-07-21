@@ -59,6 +59,9 @@ pub struct Info {
     /// P3 候选（XMP / Takeout sidecar）：协议解析在 adapters 层，经
     /// [`Self::add_candidates`] 注入；entities 只消费转换好的 [`media_time::Candidate`]。
     extra_candidates: Vec<media_time::Candidate>,
+    /// 文档内容类目（copy-doc/move-doc 分类结果），经 [`Self::set_category`] 注入；
+    /// None = 未分类（媒体文件 / 非 doc 命令 / 分类失败），render 时兜底 uncategorized。
+    category: Option<String>,
     lazy: Mutex<Lazy>,
     meta: BackendMetadata,
 }
@@ -102,6 +105,7 @@ impl Info {
             backend,
             exif: None,
             extra_candidates: Vec::new(),
+            category: None,
             lazy: Mutex::new(Lazy::new(bytes_read as u64, second_hash)),
             meta,
         })
@@ -194,6 +198,7 @@ impl Info {
             backend: new_backend,
             exif: self.exif.clone(),
             extra_candidates: self.extra_candidates.clone(),
+            category: self.category.clone(),
             lazy: Mutex::new(lazy_snapshot),
             meta: self.meta.clone(),
         }
@@ -270,6 +275,22 @@ impl Info {
 
     pub fn is_media(&self) -> bool {
         self.exif.as_ref().is_some_and(exif::Exif::is_media)
+    }
+
+    /// 是否文档族（PDF / OOXML / CFB / iWork / ODF / RTF / EPUB / 思维导图 /
+    /// 纯文本）；`copy-doc`/`move-doc` 的 `do_copy` 落盘过滤用。
+    pub fn is_office(&self) -> bool {
+        self.exif.as_ref().is_some_and(exif::Exif::is_office)
+    }
+
+    /// 注入文档内容类目（`Index::classify_documents` 并行写回）。
+    pub fn set_category(&mut self, category: String) {
+        self.category = Some(category);
+    }
+
+    /// 文档内容类目；None = 未分类，`{category}` 渲染时兜底 uncategorized。
+    pub fn category_ref(&self) -> Option<&str> {
+        self.category.as_deref()
     }
 }
 

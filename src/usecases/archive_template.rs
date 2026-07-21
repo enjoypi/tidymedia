@@ -14,14 +14,24 @@ use crate::usecases::report::FEATURE_COPY;
 /// `render` 支持的全部占位符名。`validate_archive_template` 据此拒绝未知占位符
 ///（未知名渲染时不被替换，会产生形如 `{foo}` 的字面目录段）。
 /// 单源：render 走单次扫描按 name 派发，新增占位符仅需扩这里 + render 内的 match。
-pub(crate) const PLACEHOLDERS: [&str; 6] =
-    ["year", "month", "day", "valuable_name", "make", "model"];
+pub(crate) const PLACEHOLDERS: [&str; 7] = [
+    "year",
+    "month",
+    "day",
+    "valuable_name",
+    "make",
+    "model",
+    "category",
+];
 
 pub struct TemplateContext<'a> {
     pub year: &'a str,
     pub month: &'a str,
     pub day: &'a str,
     pub valuable_name: &'a str,
+    /// 文档内容类目（`copy-doc`/`move-doc` 分类结果）；未分类文件（含 copy/move
+    /// 命令下用户模板写了 `{category}`）由调用方传 `"uncategorized"` 兜底。
+    pub category: &'a str,
     /// EXIF 句柄；仅在模板含 `{make}` 或 `{model}` 时被访问。
     pub exif: Option<&'a Exif>,
 }
@@ -35,6 +45,9 @@ pub struct TemplateContext<'a> {
 pub fn render(template: &str, ctx: &TemplateContext<'_>) -> String {
     let mut make: Option<String> = None;
     let mut model: Option<String> = None;
+    // 类目名来自用户 config（可能含 `/` 等路径字符），与 make/model 同口径清洗；
+    // 懒求值：仅模板含 {category} 时才做一次。
+    let mut category: Option<String> = None;
     let mut out = String::with_capacity(template.len());
     let mut rest = template;
     while let Some(open) = rest.find('{') {
@@ -59,6 +72,11 @@ pub fn render(template: &str, ctx: &TemplateContext<'_>) -> String {
             "model" => Some(
                 model
                     .get_or_insert_with(|| read_exif_field(ctx.exif, Exif::model, "model"))
+                    .as_str(),
+            ),
+            "category" => Some(
+                category
+                    .get_or_insert_with(|| sanitize_path_segment(ctx.category))
                     .as_str(),
             ),
             _ => None,

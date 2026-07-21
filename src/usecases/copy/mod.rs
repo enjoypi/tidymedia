@@ -2,12 +2,14 @@
 //! 日志与报告（reporting）子模块。对外路径（`usecases::copy::{copy, Source}`）
 //! 经 re-export 保持不变。
 
+pub(super) mod classify;
 pub(super) mod naming;
 pub(super) mod ops;
 pub(super) mod reporting;
 pub(super) mod run;
 
-pub(crate) use self::run::{Source, copy_with_sidecar};
+pub(crate) use self::classify::{make_classify_provider, template_needs_category};
+pub(crate) use self::run::{Source, copy_with_sidecar, resolved_template};
 
 // 测试经 `super::super::*` glob 访问的内部项（私有 use 对子模块可见，生产侧不暴露）。
 #[cfg(test)]
@@ -38,6 +40,10 @@ mod tests;
 #[cfg(test)]
 #[path = "copy_advanced_tests.rs"]
 mod advanced_tests;
+
+#[cfg(test)]
+#[path = "copy_doc_only_tests.rs"]
+mod doc_only_tests;
 
 #[cfg(test)]
 #[path = "copy_generate_tests.rs"]

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 拉 cull 子命令所需 4 个 ONNX 模型到 models/ 目录。
+# 拉 cull（4 face）+ copy-doc/move-doc（1 embedding）子命令所需 ONNX 模型到 models/ 目录。
 # 模型由 git-lfs 跟踪：clone 后只需 `git lfs pull` 即获全部；本脚本仅在初次
 # 装配（或刷新模型版本）时跑。所有 ONNX 跑 onnxsim 静态化算子，提升 tract
 # 推理速度并降低解析出错概率。
@@ -9,8 +9,10 @@
 #   EyeState    → src/adapters/face/tract_eyestate*.rs     (YOLOv8 检测头)
 #   FaceMesh    → src/adapters/face/tract_facemesh*.rs     (468 点 landmark)
 #   MobileFaceNet → src/adapters/face/tract_mobilefacenet*.rs (512 维 embedding)
+#   bge-small-zh-v1.5 int8 → src/adapters/classify/tract_embed*.rs (文档分类)
 #
 # 用法：bash scripts/download_models.sh
+# HuggingFace 不可达时可设 HF_ENDPOINT=https://hf-mirror.com 走国内镜像。
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -20,17 +22,19 @@ trap 'rm -rf "$TMP_DIR"' EXIT
 
 mkdir -p "$MODELS_DIR"
 
-echo "==> [1/4] SCRFD-10G (antelopev2)"
+HF="${HF_ENDPOINT:-https://huggingface.co}"
+
+echo "==> [1/5] SCRFD-10G (antelopev2)"
 curl --silent --show-error --fail --location \
     -o "$MODELS_DIR/scrfd_10g_bnkps.onnx" \
-    "https://huggingface.co/DIAMONIK7777/antelopev2/resolve/main/scrfd_10g_bnkps.onnx"
+    "$HF/DIAMONIK7777/antelopev2/resolve/main/scrfd_10g_bnkps.onnx"
 
-echo "==> [2/4] EyeState YOLOv8 (MichalMlodawski/open-closed-eye-detection)"
+echo "==> [2/5] EyeState YOLOv8 (MichalMlodawski/open-closed-eye-detection)"
 curl --silent --show-error --fail --location \
     -o "$MODELS_DIR/eyestate_yolov8.onnx" \
-    "https://huggingface.co/MichalMlodawski/open-closed-eye-detection/resolve/main/model.onnx"
+    "$HF/MichalMlodawski/open-closed-eye-detection/resolve/main/model.onnx"
 
-echo "==> [3/4] FaceMesh (PINTO_model_zoo 032_FaceMesh)"
+echo "==> [3/5] FaceMesh (PINTO_model_zoo 032_FaceMesh)"
 # PINTO 的 tarball 是嵌套两层：外层按 framework 分目录，每目录内 resources.tar.gz
 # 才是真正模型；选 20_new_onnx_postprocess_N-batch 子集（含 1-batch 静态 onnx）。
 curl --silent --show-error --fail --location \
@@ -53,12 +57,21 @@ fi
 cp "$FACEMESH_SRC" "$MODELS_DIR/face_mesh_192x192.onnx"
 echo "    抽取自 $FACEMESH_SRC"
 
-echo "==> [4/4] MobileFaceNet (foamliu/MobileFaceNet pt → onnx)"
+echo "==> [4/5] MobileFaceNet (foamliu/MobileFaceNet pt → onnx)"
 uv run --no-project --quiet --with torch --with numpy --with onnxscript \
     "$REPO_ROOT/scripts/export_mobilefacenet.py"
 
+echo "==> [5/5] bge-small-zh-v1.5 int8 + tokenizer (Xenova 社区 ONNX 转换)"
+# tract 侧加载用 set_symbols 固定 shape（tract_embed_real.rs），无需 onnxsim 预处理。
+curl --silent --show-error --fail --location \
+    -o "$MODELS_DIR/bge_small_zh_v15_int8.onnx" \
+    "$HF/Xenova/bge-small-zh-v1.5/resolve/main/onnx/model_quantized.onnx"
+curl --silent --show-error --fail --location \
+    -o "$MODELS_DIR/bge_small_zh_v15_tokenizer.json" \
+    "$HF/Xenova/bge-small-zh-v1.5/resolve/main/tokenizer.json"
+
 echo
-echo "==> onnxsim 静态化算子简化"
+echo "==> onnxsim 静态化算子简化（face 模型；bge 不在此列）"
 uv run --no-project --quiet --with onnx --with onnxsim --with onnxruntime \
     "$REPO_ROOT/scripts/simplify_onnx.py"
 

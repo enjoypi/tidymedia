@@ -1,5 +1,7 @@
-# ONNX 模型走 git-lfs：cull + move-text-shot 子命令依赖
-# models/*.onnx 合计约 35MB；clone 后 `git lfs pull` 自动拉取
+# ONNX 模型走 git-lfs：cull + move-text-shot + copy-doc/move-doc 子命令依赖
+# models/*.onnx 合计约 58MB；clone 后 `git lfs pull` 自动拉取
 *.onnx filter=lfs diff=lfs merge=lfs -text
 # 转换中间产物（foamliu MobileFaceNet 原始 pt）
 *.pt filter=lfs diff=lfs merge=lfs -text
+# bge tokenizer.json（429KB）：精确路径避免泛化 *.json 误捕获配置文件
+models/*_tokenizer.json filter=lfs diff=lfs merge=lfs -text

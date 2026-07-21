@@ -296,15 +296,91 @@ fn parse_with_creation_only_returns_zero_for_modified() {
 }
 
 #[test]
-fn parse_truncates_at_scan_limit() {
-    // 把 /CreationDate 放在 PDF_SCAN_BYTES 之外 → 找不到 → (0, 0)
-    let mut data = vec![0u8; PDF_SCAN_BYTES + 100];
+fn parse_drops_middle_region_of_large_pdf() {
+    // >2×64 KB 文件的中段（头尾窗口之外）仍是盲区：/CreationDate 放正中 →
+    // 找不到 → (0, 0)。记录双窗口方案的残留可接受限制。
+    let head_tail = usize::try_from(PDF_SCAN_BYTES).unwrap();
+    let mut data = vec![0u8; head_tail + 512];
     data.extend_from_slice(b"/CreationDate (D:20170214103000Z)");
+    data.extend(vec![0u8; head_tail + 512]);
     let mut r = Cursor::new(data);
     assert_eq!(parse(&mut r, "application/pdf"), (0, 0));
 }
 
+#[test]
+fn parse_finds_creation_date_in_tail_window() {
+    // 旧单窗口漏检的场景：未线性化大 PDF 的 /Info 在文件尾。双窗口后命中。
+    let filler = usize::try_from(3 * PDF_SCAN_BYTES).unwrap();
+    let mut data = vec![b' '; filler];
+    data.extend_from_slice(b"trailer << /Info 1 0 R >> /CreationDate (D:20170214103000Z)");
+    let mut r = Cursor::new(data);
+    let (c, _) = parse(&mut r, "application/pdf");
+    assert_eq!(c, 1_487_068_200);
+}
+
+#[test]
+fn parse_head_window_wins_over_tail() {
+    // 头尾各有 /CreationDate：头窗口字节在 buffer 前部，首个匹配胜出。
+    let filler = usize::try_from(3 * PDF_SCAN_BYTES).unwrap();
+    let mut data = b"%PDF-1.4 /CreationDate (D:20170214103000Z) ".to_vec();
+    data.extend(vec![b' '; filler]);
+    data.extend_from_slice(b"/CreationDate (D:20200101000000Z)");
+    let mut r = Cursor::new(data);
+    let (c, _) = parse(&mut r, "application/pdf");
+    assert_eq!(c, 1_487_068_200);
+}
+
+#[test]
+fn parse_whole_file_read_when_at_most_two_windows() {
+    // 总大小 ≤ 2×64 KB 走整读：旧实现会截断漏检的「64 KB+100 处日期」现在命中。
+    let head = usize::try_from(PDF_SCAN_BYTES).unwrap();
+    let mut data = vec![0u8; head + 100];
+    data.extend_from_slice(b"/CreationDate (D:20170214103000Z)");
+    let mut r = Cursor::new(data);
+    let (c, _) = parse(&mut r, "application/pdf");
+    assert_eq!(c, 1_487_068_200);
+}
+
+// ============= scan_windows 纯窗口划分 =============
+
+#[test]
+fn scan_windows_zero_size_single_empty_range() {
+    assert_eq!(scan_windows(0), (0..0, None));
+}
+
+#[test]
+fn scan_windows_small_file_single_window() {
+    assert_eq!(scan_windows(100), (0..100, None));
+}
+
+#[test]
+fn scan_windows_exactly_two_windows_still_whole_read() {
+    let two = 2 * PDF_SCAN_BYTES;
+    assert_eq!(scan_windows(two), (0..two, None));
+}
+
+#[test]
+fn scan_windows_above_threshold_splits_disjoint_head_tail() {
+    let size = 2 * PDF_SCAN_BYTES + 1;
+    let (head, tail) = scan_windows(size);
+    let tail = tail.unwrap();
+    assert_eq!(head, 0..PDF_SCAN_BYTES);
+    assert_eq!(tail, size - PDF_SCAN_BYTES..size);
+    assert!(head.end <= tail.start, "windows must not overlap");
+}
+
+#[test]
+fn scan_windows_large_file_windows_sized_exactly() {
+    let size = 100 * PDF_SCAN_BYTES;
+    let (head, tail) = scan_windows(size);
+    let tail = tail.unwrap();
+    assert_eq!(head.end - head.start, PDF_SCAN_BYTES);
+    assert_eq!(tail.end - tail.start, PDF_SCAN_BYTES);
+}
+
 /// Reader read Err 时直接返 (0, 0)。用包装 reader 注入读错。
+/// seek 必须返非 0 apparent size：返 0 会让 `scan_windows(0)` 产生空窗口，
+/// read 永不被调用，测试假通过。
 #[test]
 fn parse_returns_zeros_on_read_error() {
     use std::io;
@@ -318,10 +394,129 @@ fn parse_returns_zeros_on_read_error() {
     }
     impl io::Seek for FailRead {
         fn seek(&mut self, _pos: io::SeekFrom) -> io::Result<u64> {
-            Ok(0)
+            Ok(1024)
         }
     }
 
     let mut r = FailRead;
     assert_eq!(parse(&mut r, "application/pdf"), (0, 0));
+}
+
+// ============= extract_text_from_buf（文本层提取业务） =============
+
+#[test]
+fn text_from_uncompressed_stream_collects_tj_literals() {
+    let pdf = b"%PDF-1.4\n<< /Length 40 >>\nstream\nBT (Hello) Tj (World) Tj ET\nendstream\n";
+    let out = extract_text_from_buf(pdf, 256);
+    assert_eq!(out, "Hello World");
+}
+
+#[test]
+fn text_from_flate_stream_inflates_then_collects() {
+    use std::io::Write;
+    let content = b"BT (compressed body text) Tj ET";
+    let mut enc = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::default());
+    enc.write_all(content).unwrap();
+    let deflated = enc.finish().unwrap();
+    let mut pdf = b"<< /Filter /FlateDecode >>\nstream\n".to_vec();
+    pdf.extend_from_slice(&deflated);
+    pdf.extend_from_slice(b"\nendstream\n");
+    let out = extract_text_from_buf(&pdf, 256);
+    assert!(out.contains("compressed body text"), "got: {out}");
+}
+
+#[test]
+fn text_from_flate_stream_garbage_data_skipped() {
+    let pdf = b"<< /Filter /FlateDecode >>\nstream\nnot zlib at all\nendstream\n";
+    assert_eq!(extract_text_from_buf(pdf, 256), "");
+}
+
+#[test]
+fn text_from_buf_without_stream_keyword_empty() {
+    assert_eq!(extract_text_from_buf(b"%PDF-1.4 no content", 256), "");
+}
+
+#[test]
+fn text_from_buf_stream_without_endstream_empty() {
+    assert_eq!(extract_text_from_buf(b"<< >>\nstream\nBT (x) Tj", 256), "");
+}
+
+#[test]
+fn text_from_buf_respects_budget() {
+    let pdf = b"<< >>\nstream\nBT (abcdefghijklmnop) Tj ET\nendstream\n";
+    let out = extract_text_from_buf(pdf, 4);
+    assert_eq!(out, "abcd");
+}
+
+// ============= collect_string_literals 边界 =============
+
+#[test]
+fn literals_skipped_when_no_bt_operator() {
+    let mut out = String::new();
+    collect_string_literals(b"(graphics only) re f", &mut out, 64);
+    assert_eq!(out, "");
+}
+
+#[test]
+fn literals_unescape_parens_and_backslash() {
+    let mut out = String::new();
+    collect_string_literals(br"BT (a\(b\)c\\d) Tj ET", &mut out, 64);
+    assert_eq!(out, r"a(b)c\d");
+}
+
+#[test]
+fn literals_nested_parens_kept() {
+    let mut out = String::new();
+    collect_string_literals(b"BT (outer (inner) tail) Tj ET", &mut out, 64);
+    assert_eq!(out, "outer (inner) tail");
+}
+
+#[test]
+fn literals_empty_string_no_trailing_space() {
+    let mut out = String::new();
+    collect_string_literals(b"BT () Tj ET", &mut out, 64);
+    assert_eq!(out, "");
+}
+
+#[test]
+fn literals_unterminated_paren_lenient() {
+    let mut out = String::new();
+    collect_string_literals(b"BT (never closed", &mut out, 64);
+    assert_eq!(out, "never closed");
+}
+
+#[test]
+fn literals_other_escape_sequences_dropped() {
+    // `\n` `\061` 等转义不还原（分类噪声可容忍），仅 `\(` `\)` `\\` 有语义。
+    let mut out = String::new();
+    collect_string_literals(br"BT (a\nb) Tj ET", &mut out, 64);
+    assert_eq!(out, "ab");
+}
+
+#[test]
+fn inflate_capped_valid_zlib_roundtrip() {
+    use std::io::Write;
+    let mut enc = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::default());
+    enc.write_all(b"payload").unwrap();
+    let z = enc.finish().unwrap();
+    assert_eq!(inflate_capped(&z).unwrap(), b"payload");
+}
+
+#[test]
+fn inflate_capped_garbage_returns_none() {
+    assert!(inflate_capped(b"definitely not zlib").is_none());
+}
+
+#[test]
+fn inflate_capped_empty_output_returns_none() {
+    let enc = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::default());
+    let z = enc.finish().unwrap();
+    assert!(inflate_capped(&z).is_none());
+}
+
+#[test]
+fn skip_stream_eol_variants() {
+    assert_eq!(skip_stream_eol(b"s\r\nX", 1), 3);
+    assert_eq!(skip_stream_eol(b"s\nX", 1), 2);
+    assert_eq!(skip_stream_eol(b"sX", 1), 1);
 }

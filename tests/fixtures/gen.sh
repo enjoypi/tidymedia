@@ -118,4 +118,20 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 uv run --quiet --no-project "$SCRIPT_DIR/gen_png_exif.py"
 uv run --quiet --no-project "$SCRIPT_DIR/gen_jpeg_makernotes_broken.py"
 
+#######################################
+# Office 文档 fixture（copy-doc/move-doc 归档 + 内容分类）
+#######################################
+# 全矩阵统一时间口径：created=2017-02-14T10:30:00Z（桶 2017/02）+
+# modified=2018-01-01T12:00:00Z；正文含可分类中文关键词。
+uv run --quiet --no-project "$SCRIPT_DIR/gen_ooxml.py"
+uv run --quiet --no-project "$SCRIPT_DIR/gen_pdf.py"
+uv run --quiet --no-project "$SCRIPT_DIR/gen_odf.py"
+uv run --quiet --no-project "$SCRIPT_DIR/gen_rtf.py"
+uv run --quiet --no-project "$SCRIPT_DIR/gen_epub.py"
+
+# CFB（doc/xls/ppt）不是 gen_*.py：Python olefile/compoundfiles 只读无法写 CFB，
+# 走生产依赖 cfb crate 的 writer（tests/gen_cfb_fixtures.rs，#[ignore] 生成器）：
+#   cargo test --release --test gen_cfb_fixtures -- --ignored
+echo "NOTE: regenerate doc/xls/ppt via: cargo test --release --test gen_cfb_fixtures -- --ignored"
+
 echo "Generated $(ls -1 "$DATA_DIR" | wc -l) files in $DATA_DIR"

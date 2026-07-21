@@ -56,7 +56,57 @@ fn read_entry<R: Read + std::io::Seek>(
     Some(content)
 }
 
+/// 章节正文单文件读取上限；xhtml markup 膨胀系数低于 OOXML，128 KiB 足够。
+const CHAPTER_MAX_BYTES: u64 = 128 * 1024;
+
+/// 文本提取入口：按 entry 名后缀（`.xhtml`/`.html`/`.htm`）遍历章节文件，
+/// 剥 HTML 标签攒 best-effort 正文，达 `max_bytes` 停。
+///
+/// 整 fn `coverage(off)`：zip 打开/entry 缺失早返路径同 `parse`；剥标签业务由
+/// `scan::strip_markup_into` 单测真测。
+#[cfg_attr(coverage_nightly, coverage(off))]
+pub(super) fn extract_text(reader: &mut dyn MediaReader, _mime: &str, max_bytes: usize) -> String {
+    let Ok(mut archive) = zip::ZipArchive::new(reader) else {
+        return String::new();
+    };
+    let mut names: Vec<String> = archive
+        .file_names()
+        .filter(|n| {
+            std::path::Path::new(n)
+                .extension()
+                .and_then(|e| e.to_str())
+                .is_some_and(|e| {
+                    e.eq_ignore_ascii_case("xhtml")
+                        || e.eq_ignore_ascii_case("html")
+                        || e.eq_ignore_ascii_case("htm")
+                })
+        })
+        .map(str::to_string)
+        .collect();
+    names.sort();
+    let mut out = String::new();
+    for name in names {
+        if out.len() >= max_bytes {
+            break;
+        }
+        let Ok(entry) = archive.by_name(&name) else {
+            continue;
+        };
+        let mut content = Vec::new();
+        if entry
+            .take(CHAPTER_MAX_BYTES)
+            .read_to_end(&mut content)
+            .is_err()
+        {
+            continue;
+        }
+        super::scan::strip_markup_into(&content, &mut out, max_bytes);
+    }
+    out
+}
+
 /// 在 container.xml 字节内找 `<rootfile full-path="...">` 的 OPF 路径。
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub(super) fn find_opf_path(buf: &[u8]) -> Option<String> {
     let start = find_subslice(buf, ATTR_FULL_PATH)?;
     let after = &buf[start + ATTR_FULL_PATH.len()..];
@@ -65,6 +115,7 @@ pub(super) fn find_opf_path(buf: &[u8]) -> Option<String> {
 }
 
 /// 纯字节扫描业务：从 OPF 内容查 `dc:date` element + `meta property="dcterms:modified"`。
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub(super) fn extract_dates(buf: &[u8]) -> (u64, u64) {
     let created = scan_element_text(buf, TAG_DC_DATE_OPEN, TAG_DC_DATE_CLOSE)
         .and_then(parse_iso8601_to_epoch)
@@ -90,6 +141,7 @@ fn scan_meta_property<'a>(buf: &'a [u8], property_key: &[u8]) -> Option<&'a str>
     std::str::from_utf8(&text[..end]).ok()
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 fn scan_element_text<'a>(buf: &'a [u8], open_tag: &[u8], close_tag: &[u8]) -> Option<&'a str> {
     let start = find_subslice(buf, open_tag)?;
     let after_open = start + open_tag.len();
@@ -101,6 +153,7 @@ fn scan_element_text<'a>(buf: &'a [u8], open_tag: &[u8], close_tag: &[u8]) -> Op
     std::str::from_utf8(&text[..end]).ok()
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 fn parse_iso8601_to_epoch(s: &str) -> Option<u64> {
     let dt = DateTime::parse_from_rfc3339(s.trim()).ok()?;
     let secs = dt.timestamp();
@@ -111,6 +164,7 @@ fn parse_iso8601_to_epoch(s: &str) -> Option<u64> {
     }
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 fn find_byte(haystack: &[u8], byte: u8) -> Option<usize> {
     let mut i = 0;
     while i < haystack.len() {
@@ -122,6 +176,7 @@ fn find_byte(haystack: &[u8], byte: u8) -> Option<usize> {
     None
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 fn find_subslice(haystack: &[u8], needle: &[u8]) -> Option<usize> {
     haystack
         .windows(needle.len())

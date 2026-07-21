@@ -1,5 +1,6 @@
 // Interface Adapters 层：CLI 解析、命令调度、Gateway 实现。
 pub mod backend;
+pub mod classify;
 pub mod cli;
 pub mod dispatch;
 pub mod face;

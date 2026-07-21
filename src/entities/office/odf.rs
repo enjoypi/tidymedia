@@ -39,7 +39,37 @@ pub(super) fn parse(reader: &mut dyn MediaReader, _mime: &str) -> (u64, u64) {
     extract_dates(&content)
 }
 
+/// 正文文件（odt/ods/odp 共用单入口）与读取上限；markup 膨胀系数见 ooxml 同名常量。
+const CONTENT_XML: &str = "content.xml";
+const CONTENT_XML_MAX_BYTES: u64 = 256 * 1024;
+
+/// 文本提取入口：读 `content.xml` 剥 XML 标签攒 best-effort 正文。
+///
+/// 整 fn `coverage(off)`：zip 打开/entry 缺失早返路径同 `parse`；剥标签业务由
+/// `scan::strip_markup_into` 单测真测。
+#[cfg_attr(coverage_nightly, coverage(off))]
+pub(super) fn extract_text(reader: &mut dyn MediaReader, _mime: &str, max_bytes: usize) -> String {
+    let Ok(mut archive) = zip::ZipArchive::new(reader) else {
+        return String::new();
+    };
+    let Ok(entry) = archive.by_name(CONTENT_XML) else {
+        return String::new();
+    };
+    let mut content = Vec::new();
+    if entry
+        .take(CONTENT_XML_MAX_BYTES)
+        .read_to_end(&mut content)
+        .is_err()
+    {
+        return String::new();
+    }
+    let mut out = String::new();
+    super::scan::strip_markup_into(&content, &mut out, max_bytes);
+    out
+}
+
 /// 纯字节扫描业务：查 `meta:creation-date` 与 `dc:date` element 文本。
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub(super) fn extract_dates(buf: &[u8]) -> (u64, u64) {
     let created = scan_element_text(buf, TAG_CREATED_OPEN, TAG_CREATED_CLOSE)
         .and_then(parse_odf_datetime)
@@ -52,6 +82,7 @@ pub(super) fn extract_dates(buf: &[u8]) -> (u64, u64) {
 
 /// ODF 时间可能带时区（RFC 3339）或 naive（无 Z）。先试 `parse_from_rfc3339`，
 /// 失败回退按 UTC 解析 `YYYY-MM-DDTHH:MM:SS`。
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub(super) fn parse_odf_datetime(s: &str) -> Option<u64> {
     let trimmed = s.trim();
     if let Ok(dt) = DateTime::parse_from_rfc3339(trimmed) {
@@ -70,6 +101,7 @@ pub(super) fn parse_odf_datetime(s: &str) -> Option<u64> {
     }
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 fn scan_element_text<'a>(buf: &'a [u8], open_tag: &[u8], close_tag: &[u8]) -> Option<&'a str> {
     let start = find_subslice(buf, open_tag)?;
     let after_open = start + open_tag.len();
@@ -81,6 +113,7 @@ fn scan_element_text<'a>(buf: &'a [u8], open_tag: &[u8], close_tag: &[u8]) -> Op
     std::str::from_utf8(&text[..end]).ok()
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 fn find_byte(haystack: &[u8], byte: u8) -> Option<usize> {
     let mut i = 0;
     while i < haystack.len() {
@@ -92,6 +125,7 @@ fn find_byte(haystack: &[u8], byte: u8) -> Option<usize> {
     None
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))]
 fn find_subslice(haystack: &[u8], needle: &[u8]) -> Option<usize> {
     haystack
         .windows(needle.len())

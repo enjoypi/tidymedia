@@ -56,6 +56,7 @@ fn sample_copy_report() -> CopyReport {
         dry_run: false,
         remove: false,
         include_non_media: false,
+        doc_only: false,
         errors: vec![],
         errors_truncated: false,
         duration_ms: 0,
