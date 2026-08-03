@@ -81,7 +81,7 @@ fn classify_empty_categories_short_circuits_without_model() {
     let c = build_classifier(&cfg_with_categories(Vec::new())).unwrap();
     let r = c.classify(Utf8Path::new("/a.pdf"), "any").unwrap();
     assert!(r.category.is_empty());
-    assert!(r.score == f32::NEG_INFINITY);
+    assert!(r.score.is_infinite() && r.score.is_sign_negative());
 }
 
 #[test]
@@ -152,7 +152,7 @@ fn normalize_nan_norm_unchanged() {
 fn best_match_empty_prototypes_returns_neg_inf() {
     let r = best_match(&[1.0], &[]);
     assert!(r.category.is_empty());
-    assert!(r.score == f32::NEG_INFINITY);
+    assert!(r.score.is_infinite() && r.score.is_sign_negative());
 }
 
 #[test]
