@@ -196,6 +196,88 @@ fn modify_date_at_exactly_one_day_still_vetoes() {
     );
 }
 
+// 下载时戳类文件名（13 位 unix 毫秒 / mmexport）与 mtime 天然同源——下载器落盘
+// 即把 mtime 写成下载时刻，"互证"恒真是假象，不构成推翻 P0 的证据
+//（real-2019 fixture `1547957801421.mp4`：QT 六字段一致 2016:05 被微信下载
+// 时戳+mtime 假多数派推翻）。
+#[test]
+fn unix_millis_vote_does_not_overrule_p0() {
+    let p0 = Utc
+        .with_ymd_and_hms(2016, 5, 23, 5, 58, 15)
+        .unwrap()
+        .timestamp();
+    let download = Utc
+        .with_ymd_and_hms(2019, 1, 20, 4, 16, 41)
+        .unwrap()
+        .timestamp();
+    let d = resolve(
+        vec![
+            cand(Source::QuickTimeCreationDate, p0),
+            cand(Source::FilenameUnixMillis, download),
+            cand(Source::FsMtime, download + 1),
+        ],
+        None,
+        None,
+        now(),
+    )
+    .unwrap();
+    assert_eq!(d.priority, Priority::P0);
+    assert_eq!(d.utc.timestamp(), p0);
+    assert_eq!(d.source, Source::QuickTimeCreationDate);
+    assert_eq!(d.conflicts.len(), 1);
+    assert_eq!(d.conflicts[0].kind, ConflictKind::FilenameOver1Day);
+}
+
+#[test]
+fn wechat_export_vote_does_not_overrule_p0() {
+    let p0 = Utc
+        .with_ymd_and_hms(2016, 5, 23, 5, 58, 15)
+        .unwrap()
+        .timestamp();
+    let download = Utc
+        .with_ymd_and_hms(2019, 1, 20, 4, 16, 41)
+        .unwrap()
+        .timestamp();
+    let d = resolve(
+        vec![
+            cand(Source::QuickTimeCreationDate, p0),
+            cand(Source::FilenameWeChatExport, download),
+            cand(Source::FsMtime, download + 1),
+        ],
+        None,
+        None,
+        now(),
+    )
+    .unwrap();
+    assert_eq!(d.priority, Priority::P0);
+    assert_eq!(d.utc.timestamp(), p0);
+    assert_eq!(d.conflicts.len(), 1);
+    assert_eq!(d.conflicts[0].kind, ConflictKind::FilenameOver1Day);
+}
+
+// 合法场景回归：拍摄命名类文件名（IMG_YYYYMMDD_HHMMSS）+ mtime 互证仍推翻
+// 相机时钟错误的 P0。
+#[test]
+fn camera_named_vote_still_overrules_p0() {
+    let p0 = 1_000_000_000;
+    let real = p0 + 600 * 86_400;
+    let d = resolve(
+        vec![
+            cand(Source::ExifDateTimeOriginal, p0),
+            cand(Source::FilenamePhone, real),
+            cand(Source::FsMtime, real + 3600),
+        ],
+        None,
+        None,
+        now(),
+    )
+    .unwrap();
+    assert_eq!(d.priority, Priority::P2);
+    assert_eq!(d.utc.timestamp(), real);
+    assert_eq!(d.source, Source::FilenamePhone);
+    assert_eq!(d.conflicts[0].kind, ConflictKind::P0OverruledByMajority);
+}
+
 // 触发 majority_verdict line 130 `matches!(v, Validity::Valid)` 的 false arm：
 // filename 候选 utc 在 pre-1995（LowConfidencePre1995 validity）时，多数派仲裁
 // 必须拒绝它推翻 P0（CLAUDE.md「多数派仲裁仅认 Validity::Valid」）。

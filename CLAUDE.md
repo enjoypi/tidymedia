@@ -107,7 +107,7 @@
 - **新增 `Backend` impl** → `walk` MUST 递归 yield 所有 file；远端 `walk_recursive` MUST 有 `visited: HashSet<String>` 防 symlink 环 OOM（ADB /sdcard loop / SMB DFS junction / mtp 挂载回环）
 - **新增配置字段** → `usecases/config.rs` 结构体 + `config.yaml` + `frameworks/config.rs::sanitize_*` 校验 + `config_defaults_match_historical_constants` 测试 + `rg <field>` **验证有真实消费点**（防死配置）；secret 走 `.env.example` + gitignore
 - **新增 CLI flag** → `adapters/dispatch.rs` 透传 + 每子命令路径独立 e2e 触发 Some/None 两边；e2e MUST 含 `run_cli(["tidymedia", ...])` 字符串形式
-- **新增 `media_time` 候选 / 调整 P0–P4** → `entities/media_time/priority.rs` `Source`/`Priority` → 解析模块 → `resolve`/`decision` 裁决 → fixture
+- **新增 `media_time` 候选 / 调整 P0–P4** → `entities/media_time/priority.rs` `Source`/`Priority` → 解析模块 → `resolve`/`decision` 裁决 → fixture；**新增下载时戳类 P2 variant MUST 加入 `Source::is_majority_filename_vote` 黑名单**
 - **新增 archive_template 占位符** → `usecases/archive_template.rs::render` + 同文件 `PLACEHOLDERS` 常量 + `usecases/config.rs::validate_archive_template` 三处同步；用户值入路径段（如 `{category}` 类目名）MUST 过 `sanitize_path_segment`
 - **新增容器 EXIF 自解析** → `entities/<container>.rs`（chunk 遍历）+ 调 `tiff_ifd::parse_tiff`/`parse_ifds` + `entities/exif/image_<container>.rs` 或 fallback 接入 + `types.rs::from_reader` 分流 + `tests/fixtures/gen_<container>.py`；**双 0 XMP fallback 调 `populate_image_xmp_fallback_if_empty`** 单点
 - **新增 office 容器** → `entities/office/<container>.rs`（`parse(reader, mime)` 入口 + `extract_text(reader, mime, max_bytes)` 文本提取 + 业务纯 helper lib unit 测全分支）+ `entities/office/mod.rs` MIME + 双路由（`populate_office_dates`/`extract_office_text`）+ `entities/exif/mime.rs::{is_office_mime, mime_from_ext}` + `OFFICE_FIXTURES` 数组 + e2e `tests/lib_tidy/office_archive.rs`；**fixture 进 `OFFICE_FIXTURES` 后该容器全部业务 fn MUST `coverage(off)`**（subprocess bin instance 只跑 happy path，multi-instance branch 记录让 lib unit 全分支覆盖被拆散成 phantom miss）；剥标签/截断共用 `entities/office/scan.rs`
@@ -148,7 +148,7 @@
 ## 核心算法：media_time
 - **P0** = `ExifDateTimeOriginal` / `QuickTimeCreationDate` / `MkvDateUtc`；**P1** = `ExifCreateDate` / `QuickTimeCreateDate`；**P2** = 文件名启发式；**P3** = `XmpSidecar` / `GoogleTakeoutJson`；**P4** = `FsMtime`
 - mtime 比 P0 早 > 30 天发提示性冲突告警
-- **多数派仲裁**：filename 与 mtime 互证（差≤1天）且与 P0 差>30天 → 推翻 P0（相机时钟错，`P0OverruledByMajority` 不静默）；**仅认 `Validity::Valid` 候选**（`majority_override` 显式过滤 `LowConfidencePre1995`）
+- **多数派仲裁**：filename 与 mtime 互证（差≤1天）且与 P0 差>30天 → 推翻 P0（相机时钟错，`P0OverruledByMajority` 不静默）；**仅认 `Validity::Valid` 候选**（`majority_override` 显式过滤 `LowConfidencePre1995`）；**filename 票仅限拍摄命名类**（`Source::is_majority_filename_vote` 黑名单 `FilenameUnixMillis`/`FilenameWeChatExport`——下载时戳与 mtime 天然同源，互证恒真是假象，不得推翻 QT P0）
 - **ModifyDate 三方互证否决**：filename 票与 EXIF `ModifyDate` 差≤1天 → 保 P0 记 `MajorityVetoedByModifyDate`（`ModifyDate` 仅作旁证不进候选）
 - `entities/media_time/` 子模块：`priority` / `candidate`（`epoch_to_candidate` secs==0 视未填）/ `filename`（IMG/DSC/Screenshot 前缀 + 13 位 ms 戳 + WeChat/WhatsApp/Pixel/裸 `YYYYMMDD_HHMMSS` + 通用 19 字节窗口 + 宽松 YYYYMMDD）/ `filter`（EPOCH_1904/SOFT_THRESHOLD_1995/FUTURE_TOLERANCE_SECS）/ `resolve`+`decision` / `fs_time`
 - **P3 sidecar 在 `adapters/sidecar.rs`**（非 entities，Interface Adapter）；backend-aware，sibling 路径当前仅 Local；经依赖倒置注入：`dispatch` → `copy_with_sidecar`；`copy()` 无 provider 是 `#[cfg(test)]` shim

@@ -116,6 +116,11 @@ enum MajorityVerdict {
 /// 该 filename 候选成为新 best。LowConfidencePre1995 的两票互证不足以撼动 P0
 /// （pre-1995 的 filename + mtime 常见于扫描件被批量 touch，置信度低不应推翻可信 P0）。
 ///
+/// filename 票仅限拍摄命名类（[`Source::is_majority_filename_vote`]）：13 位 unix
+/// 毫秒戳 / mmexport 等下载时戳与 mtime 天然同源（下载器落盘即写 mtime=下载时刻），
+/// "互证"恒真是假象——微信下载视频的 QT 容器时间才是真实拍摄时间，不应被下载
+/// 时刻推翻。
+///
 /// `ModifyDate` 否决：互证成立但 filename 票与 EXIF `ModifyDate` 差 ≤ 1 天时，
 /// filename+mtime+`ModifyDate` 三方吻合说明三者都是 re-save 时戳（第三方批量
 /// re-save 保留 DTO、刷新 `ModifyDate`+mtime 并按 re-save 时间命名的典型痕迹），
@@ -130,7 +135,7 @@ fn majority_verdict(
         return MajorityVerdict::NoQuorum;
     }
     let quorum = others.iter().find(|(f, v)| {
-        is_filename_source(f.source)
+        f.source.is_majority_filename_vote()
             && matches!(v, Validity::Valid)
             && (best.utc - f.utc).num_seconds().abs() > MTIME_VS_P0_HINT_SECS
             && others.iter().any(|(m, mv)| {

@@ -65,4 +65,17 @@ impl Source {
             Source::FsMtime => Priority::P4,
         }
     }
+
+    /// 多数派仲裁的 filename 票资格。下载时戳类（13 位 unix 毫秒 / mmexport）与
+    /// mtime 天然同源——下载器落盘即把 mtime 写成下载时刻，"互证"恒真是假象，
+    /// 不构成推翻 P0 的证据。黑名单制：新增 P2 来源默认有票，与
+    /// `is_filename_source` 由 priority 推导的"免双写"约定同向；新增下载时戳类
+    /// variant 时必须加入黑名单。
+    pub(crate) fn is_majority_filename_vote(self) -> bool {
+        self.priority() == Priority::P2
+            && !matches!(
+                self,
+                Source::FilenameUnixMillis | Source::FilenameWeChatExport
+            )
+    }
 }

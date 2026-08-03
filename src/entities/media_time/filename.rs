@@ -137,15 +137,17 @@ fn stem_without_ext(name: &str) -> &str {
 }
 
 fn try_camera_or_phone(stem: &str, default_offset: FixedOffset) -> Option<Candidate> {
-    let (rest, source) = if let Some(r) = stem.strip_prefix(PHONE_PREFIX) {
-        (r, Source::FilenamePhone)
-    } else if let Some(r) = stem.strip_prefix(CAMERA_PREFIX) {
-        (r, Source::FilenameCamera)
-    } else if let Some(r) = stem.strip_prefix(VIDEO_PHONE_PREFIX) {
-        (r, Source::FilenameVideoPhone)
-    } else {
-        return None;
-    };
+    let (rest, source) = stem
+        .strip_prefix(PHONE_PREFIX)
+        .map(|r| (r, Source::FilenamePhone))
+        .or_else(|| {
+            stem.strip_prefix(CAMERA_PREFIX)
+                .map(|r| (r, Source::FilenameCamera))
+        })
+        .or_else(|| {
+            stem.strip_prefix(VIDEO_PHONE_PREFIX)
+                .map(|r| (r, Source::FilenameVideoPhone))
+        })?;
     // 期望格式：yyyymmdd_HHMMSS（8 + 1 + 6 = 15 chars）
     if rest.len() != 15 {
         return None;
@@ -195,6 +197,8 @@ fn try_screenshot(stem: &str, default_offset: FixedOffset) -> Option<Candidate> 
 }
 
 /// 微信导出：`mmexport<13-digit-ms>`；直接当 UTC（无时区语义）。
+/// 下载/导出时刻与 mtime 同源，不参与多数派仲裁
+/// （[`Source::is_majority_filename_vote`]）。
 fn try_mmexport(stem: &str) -> Option<Candidate> {
     let rest = stem.strip_prefix(MMEXPORT_PREFIX)?;
     millis_str_to_candidate(rest, Source::FilenameWeChatExport)
@@ -263,7 +267,8 @@ fn try_bare_yyyymmdd(stem: &str, default_offset: FixedOffset) -> Option<Candidat
 
 /// 纯 13 位毫秒 Unix 时间戳（`IM_/网盘/通用命名`）。无时区语义，直接当 UTC。
 /// 长度/纯数字校验由 `millis_str_to_candidate` 单点负责（重复 guard 会产生
-/// 等价变异且违反 DRY）。
+/// 等价变异且违反 DRY）。下载时戳与 mtime 同源，不参与多数派仲裁
+/// （[`Source::is_majority_filename_vote`]）。
 fn try_unix_millis(stem: &str) -> Option<Candidate> {
     millis_str_to_candidate(stem, Source::FilenameUnixMillis)
 }
