@@ -65,7 +65,7 @@ def parse_path(s):
 
 
 def extract_target_bucket(target):
-    parts = target.split(SEP)
+    parts = target.replace("/", SEP).split(SEP)
     for k in range(len(parts) - 2):
         y, mo = parts[k], parts[k + 1]
         if len(y) == 4 and len(mo) == 2 and y.isdigit() and mo.isdigit():
