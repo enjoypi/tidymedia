@@ -27,6 +27,8 @@ use self::image_png::populate_png_dates;
 #[cfg(test)]
 use self::mime::bmff_3gpp_mime;
 #[cfg(test)]
+use self::mime::bmff_xavc_mime;
+#[cfg(test)]
 use self::mime::is_office_mime;
 #[cfg(test)]
 use self::mime::m2ts_legacy_mime;

@@ -125,6 +125,46 @@ fn open_uses_3gpp_fallback_for_3gp_brand() {
     assert!(exif.is_media());
 }
 
+#[test]
+fn bmff_xavc_mime_detects_xavc_brand() {
+    let mut buf = vec![0u8, 0, 0, 0x1c];
+    buf.extend_from_slice(b"ftypXAVC");
+    assert_eq!(super::bmff_xavc_mime(&buf), Some("video/mp4"));
+}
+
+#[test]
+fn bmff_xavc_mime_other_brand_returns_none() {
+    let mut buf = vec![0u8, 0, 0, 0x1c];
+    buf.extend_from_slice(b"ftypisom");
+    assert!(super::bmff_xavc_mime(&buf).is_none());
+}
+
+#[test]
+fn bmff_xavc_mime_too_short_returns_none() {
+    let buf = [0u8; 11];
+    assert!(super::bmff_xavc_mime(&buf).is_none());
+}
+
+#[test]
+fn open_uses_xavc_fallback_for_xavc_brand() {
+    use super::super::uri::Location;
+    use crate::adapters::backend::fake::FakeBackend;
+    use std::sync::Arc;
+
+    let mut bytes = vec![0u8, 0, 0, 0x1c];
+    bytes.extend_from_slice(b"ftypXAVC");
+    bytes.resize(256, 0);
+
+    let fake = Arc::new(FakeBackend::new("fake"));
+    let loc = Location::Local(camino::Utf8PathBuf::from("/in-mem/clip.mp4"));
+    fake.add_file(loc.clone(), bytes);
+
+    let backend: Arc<dyn super::super::backend::Backend> = fake;
+    let exif = Exif::open(&loc, &backend, utc()).unwrap();
+    assert_eq!(exif.mime_type(), "video/mp4");
+    assert!(exif.is_media());
+}
+
 // `mime_from_ext` 覆盖每个扩展名映射 arm（28 个 case + None + 大小写不敏感）。
 
 #[test]

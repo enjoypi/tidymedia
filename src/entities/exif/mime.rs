@@ -18,6 +18,7 @@ pub(super) const MIME_M2TS: &str = "video/m2ts";
 /// `infer` 0.19 的 MP4 matcher 不认 `3gp*` brand；容器本身是 BMFF，
 /// 泛 video 路径交 nom-exif 解析 `mvhd.creation_time` 即可。
 const MIME_3GPP: &str = "video/3gpp";
+const MIME_XAVC: &str = "video/mp4";
 
 /// MIME sniff 时读取的字节数。`infer` 实际只看前 16-32 字节，256 留点余量
 /// 让边界 case（容器嵌套）的判定更稳。
@@ -35,6 +36,7 @@ pub(super) fn sniff_mime(reader: &mut dyn MediaReader) -> io::Result<String> {
         .or_else(|| quicktime_legacy_mime(head).map(str::to_string))
         .or_else(|| m2ts_legacy_mime(head).map(str::to_string))
         .or_else(|| bmff_3gpp_mime(head).map(str::to_string))
+        .or_else(|| bmff_xavc_mime(head).map(str::to_string))
         .unwrap_or_default())
 }
 
@@ -61,6 +63,10 @@ pub(super) fn m2ts_legacy_mime(buf: &[u8]) -> Option<&'static str> {
 // 不认 `3gp*` brand，不识别会让 is_media=false 致整段 3GP 手机视频被 ignore。
 pub(super) fn bmff_3gpp_mime(buf: &[u8]) -> Option<&'static str> {
     (buf.get(4..8) == Some(b"ftyp") && buf.get(8..11) == Some(b"3gp")).then_some(MIME_3GPP)
+}
+
+pub(super) fn bmff_xavc_mime(buf: &[u8]) -> Option<&'static str> {
+    (buf.get(4..8) == Some(b"ftyp") && buf.get(8..12) == Some(b"XAVC")).then_some(MIME_XAVC)
 }
 
 /// 判定 mime 是否属办公文档族（PDF / OOXML / CFB / iWork / ODF / RTF / EPUB /
