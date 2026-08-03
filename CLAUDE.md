@@ -1,12 +1,16 @@
-@~/.claude/rust-p0.md
+@~/.claude/CLAUDE.md
 
-@~/.claude/rust-p1.md
+@~/.claude/rust.md
 
 # tidymedia 开发上下文
 
 按「拍摄时间」去重整理照片/视频的多后端 CLI：sources（local/smb/adb/mtp 混合）→ SHA-512 去重 → 归档到 `output/年/月`。Clean Architecture 四层 + Android app（feature `android-app`）。
 
 ## Quick Start
+
+- 优先使用 justfile
+- 禁止直接使用 cargo
+
 - **所有 cargo 命令 MUST 带 `--release`**（`profile.release opt-level=0` 编译如 debug，统一 target 目录）
 - **ONNX 推理 e2e 真跑切 opt=3**：`CARGO_PROFILE_RELEASE_OPT_LEVEL=3 cargo run --release -- cull ...`；日常测试用 Fake 注入
 - **tract 加载分流**：4 face 模型（simplify 固化静态 shape）走 `into_optimized().into_runnable()`；PaddleOCR DBNet 动态 H/W 输入 MUST `into_typed().into_runnable()` 跳 optimize；bge BERT symbolic seq 维 MUST `into_typed()` → `set_symbols({batch_size:1, sequence_length:256})` → `into_optimized().into_runnable()`（`set_input_fact` 固化与图内 Unsqueeze 规则 unify 冲突，run 也不会自动绑 symbol）+ tokenizer encode 后手动 pad/truncate 到 SEQ
