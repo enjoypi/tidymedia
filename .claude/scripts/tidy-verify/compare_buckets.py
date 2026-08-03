@@ -22,7 +22,8 @@ import re
 import sys
 
 # Windows 上 Python stdout 默认 CRLF；强制 LF 与既有下游脚本（grep/awk/diff）口径一致。
-sys.stdout.reconfigure(newline="\n")
+# 强制 UTF-8：tidymedia target 路径含中文文件名，GBK 控制台默认编码会让 MISMATCH 行乱码。
+sys.stdout.reconfigure(encoding="utf-8", newline="\n")
 
 SEP = chr(92)  # Windows path separator; avoid Write tool eating \
 
@@ -99,8 +100,12 @@ def parse_exif_tsv(path, tz_hours=8):
 
 
 def extract_target_bucket(target):
-    r"""从 target 路径里抽第一个 \YYYY\MM\ 段作为桶（返回 'YYYY:MM' 或 'NO_BUCKET'）。"""
-    parts = target.split(SEP)
+    r"""从 target 路径里抽第一个 \YYYY\MM\ 段作为桶（返回 'YYYY:MM' 或 'NO_BUCKET'）。
+
+    Windows 上 tidymedia target 是混合分隔符：output 根用 `\`，archive_template
+    `{year}/{month}` 渲染字面 `/`（如 `D:\Pictures\2018/01\x.mp4`），故按 `[/\\]` 双分隔。
+    """
+    parts = re.split(r"[/\\]", target)
     for k in range(len(parts) - 2):
         y, m = parts[k], parts[k + 1]
         if len(y) == 4 and len(m) == 2 and y.isdigit() and m.isdigit():
