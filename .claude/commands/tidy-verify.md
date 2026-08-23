@@ -65,7 +65,7 @@ dry-run 的 `copied=N` 只表示「目标库无 SHA-512 完全相同副本」，
 1. **候选收集**：目标库全量 basename 索引；候选 = 同名 ∪ 同 stem `_N` 变体 ∪ 同大小文件。**同名可能多处存在**（不同桶各一），MUST 全部逐一比对，勿只取第一个（实证 `IMG_0540.JPG` 库内 2009/08 与 2017/08 各一，前者不同后者相同）
 2. **SHA-512** 命中 → EXACT_DUP，删源
 3. **像素流 hash**（JPEG 取首个 SOS marker 之后全部熵数据 / PNG 取 IDAT 拼接 / mp4/mov 取 mdat box payload）命中 → PIXEL_SAME = 目标已有「仅元数据已修」版（往轮 tidy-verify 修复成果），删源不归档
-4. **NAME_ONLY**（以上均不同）MUST 再做**旋转校正 pHash**：`imagehash.phash` 对 ROTATE_0/90/180/270 四向取 min hamming，≤10 判同一媒体（旋转/重编码版）。Orientation 标签差异（源 Horizontal vs 目标 Rotate 180）让查看器显示方向不同但像素矩阵相同——MUST 问用户哪边方向正确，错的一侧 `bin/exiftool/exiftool.exe -P -overwrite_original -n -Orientation=1 <file>` 修标签（1=Horizontal）
+4. **NAME_ONLY**（以上均不同）MUST 再做**旋转校正 pHash**：`imagehash.phash` 对 ROTATE_0/90/180/270 四向取 min hamming，≤10 判同一媒体（旋转/重编码版）。Orientation 标签差异（源 Horizontal vs 目标 Rotate 180）让查看器显示方向不同但像素矩阵相同——MUST 问用户哪边方向正确，错的一侧 `bin/exiftool/exiftool.exe -P -overwrite_original -n -Orientation=1 <file>` 修标签（1=Horizontal）。**pHash 命中 MUST 复核防假阳性**：双机同秒同构图 / 同场景连拍会让 hamming 低到 6 但内容不同（实证 `IMG_20260727_142209.jpg`：荣耀 vs 华为双机同秒拍，h=6 但尺寸 4032×3024 ≠ 5824×4368、逐像素 mean=59.8）——命中后逐对跑尺寸比较 + `ImageChops.difference`（尺寸归一），mean<5 才判同一；EXIF 光圈/快门/ISO/焦距/Make/Model 全部不同是「不同机体」铁证
 5. 存疑时 `ImageChops.difference` 逐像素量化：bbox=None 逐字节同；mean<5 是重压缩噪声（视觉等价）
 
 处置：EXACT_DUP / PIXEL_SAME / 旋转同一 → 删源（删除脚本 MUST 逐对复核 hash 再 `os.remove`）；真不同 → 留归档清单。大批量 ignored（目标完全相同副本）可直接信 move 的 dedup 删源；要「只删源不归档」走 `find` 跨库查重：
