@@ -122,3 +122,20 @@
 2. F3 + F10 一起做（共享 cache 基础设施）
 3. F5 / F6 / F9 / F15 / F16 一并改 RemoteClient trait（避免多次破坏；F15+F16 复用同一批 backend override 骨架）
 4. 落地后跑 Linux + `--all-features` `cargo +nightly llvm-cov --branch` 严格 4 项 100% 验证
+
+## 媒体识别缺口（tidy-verify 实证）
+
+- [ ] **Panasonic RW2（RAW）未识别为媒体**（2026-08-09 tidy-verify `D:\Users\Public\Pictures\2023` 实证 218 个，`12/高一元旦晚会` Panasonic DMC-GF6）：magic `II U \0`（TIFF 变体），`infer` 不识 → `filter_media` 跳过；应纳入媒体全集（TIFF 结构可直接复用 `entities/tiff_ifd.rs::parse_tiff` 读 DTO 走 P0）。落地前可用 `exiftool -FileModifyDate<DateTimeOriginal` + `--include-non-media` 兜底（本轮已如此归档）
+
+## media_time 文件名解析缺口（tidy-verify 实证）
+
+- [ ] **三种未解析命名纳入 `entities/media_time/filename.rs`**（2026-08-09 tidy-verify `D:\Users\Public\Pictures\2021` 实证，16 mp4 + 6 jpg 已用 exiftool 按文件名写回容器/EXIF 时间侧修复数据）：
+  - `2010-01-10 11-01-12.mp4`（`YYYY-MM-DD HH-MM-SS` 空格分隔日期时间 + 横线时分秒，老相机/转码导出命名）
+  - `VID_20180205_110003.mp4`（标准 Android 相机 `VID_YYYYMMDD_HHMMSS`，与 IMG_ 对称）
+  - `IMG_6489(20210611-174530)(1).jpg` / `QQ图片20210428220203.jpg`（括号内/尾随 `yyyyMMdd-HHmmss` / `yyyyMMddHHmmss` 导出时戳；QQ/微信导出类注意 `Source::is_majority_filename_vote` 黑名单口径——下载时戳不进多数派票）
+- 落地时按「新增 `media_time` 候选」同步检查点走 `priority.rs` + `filename.rs` + fixture
+
+## media_time 容器解析缺口（tidy-verify 实证）
+
+- [ ] **MP4 QuickTime Keys/UserData `DateTimeOriginal` 解析**：iPhone 编辑导出副本场景下，`mvhd` CreateDate 是导出时戳而非拍摄时间，真实拍摄时间存于 Keys/UserData 的 `DateTimeOriginal`（带时区字符串，如 `2020:07:25 20:40:10+08:00`）；nom-exif 只读 `mvhd`，tidymedia 误归导出月。实证：`D:\Users\Public\Pictures\2020\08\IMG_1511~1525.mp4` ×8（2026-08-04 tidy-verify 发现，已用 exiftool 改写 mvhd 侧修复数据）。方案参照老 QuickTime `pnot` 分支（`[patch.crates-io]` + `BoxHeader::parse` 仅解析 header）；落地时按「新增 `media_time` 候选」同步检查点走 `priority.rs`（候选优先级应高于 `QuickTimeCreationDate`，注意该时间带时区、与 EXIF naive 口径不同需先转 UTC 再走统一 offset 流程）
+- [ ] **XMP 老 `xap:` 前缀 + element 形式漏读**：Photoshop CS2 时代 XMP 用 `xap:` 命名空间前缀（`xap:CreateDate`/`xap:ModifyDate`）且可写作 element 形式 `<xap:CreateDate>2008-10-31T09:15:01+08:00</xap:CreateDate>`；`entities/xmp.rs` 只认 `xmp:` 前缀 attribute 形式 → `populate_image_xmp_fallback_if_empty` 静默 miss 落 mtime。实证：`C:\Pictures\2008\10\m2b4dmzt.jpg`（2026-08-23 tidy-verify 发现，exiftool 归一显示为 `[XMP] CreateDate` 掩盖了前缀差异，已用 exiftool 写 AllDates 侧修复数据）。落地：`find_xmp_packet` 后日期抽取增 `xap:` 前缀 + element 两形态，复用 `exif_xmp_tests.rs` fixture 模式

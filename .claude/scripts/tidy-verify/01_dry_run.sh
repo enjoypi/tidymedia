@@ -17,7 +17,8 @@ rm -rf "${WORK:?}"/*
 target/release/tidymedia.exe --log-level=debug move --dry-run \
     --output "$OUTPUT" "$SOURCE" \
     > "$WORK/run.log" 2>&1
-grep -E 'operation="copy_file"' "$WORK/run.log" > "$WORK/copy_lines.log"
+# copied=0 时 grep 无匹配返 1，set -e 会让脚本静默退出；|| true 放行空结果
+grep -E 'operation="copy_file"' "$WORK/run.log" > "$WORK/copy_lines.log" || true
 
 echo "summary:"
 tail -1 "$WORK/run.log"

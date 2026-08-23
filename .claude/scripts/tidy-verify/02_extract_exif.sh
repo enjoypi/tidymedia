@@ -21,6 +21,18 @@ bin/exiftool/exiftool.exe -r -q -T \
     "$SOURCE" \
     > "$WORK/exif.tsv" 2> "$WORK/exif.err"
 
+# Windows perl 对含中文的入口路径按 ANSI(GBK) 输出文件名字节，下游
+# compare_buckets.py 显式 encoding="utf-8" 会炸；统一规范化为 UTF-8。
+uv run --quiet --no-project python - "$WORK/exif.tsv" <<'PYEOF'
+import sys
+p = sys.argv[1]
+raw = open(p, "rb").read()
+try:
+    raw.decode("utf-8")
+except UnicodeDecodeError:
+    open(p, "w", encoding="utf-8", newline="\n").write(raw.decode("gbk"))
+PYEOF
+
 echo "exif_rows=$(wc -l < "$WORK/exif.tsv")"
 echo "exif_err_lines=$(wc -l < "$WORK/exif.err")"
 echo "work_dir=$WORK"

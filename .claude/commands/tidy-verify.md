@@ -1,5 +1,5 @@
 ---
-description: tidymedia 归档「dry-run → EXIF 对账 → 文件名时间冲突排查 → EXIF 修补 → 真跑 move」全流程
+description: tidymedia 归档「dry-run → EXIF 对账 → 文件名时间冲突排查 → copied 与目标库内容比对 → EXIF 修补 → 真跑 move」全流程
 argument-hint: <source_dir> <output_dir>
 ---
 
@@ -57,6 +57,24 @@ source_root 由解析出的 `<SRC>` 末尾加分隔符得到（Windows 加 `\`�
 DIFFER 行先收集到候选集，**不**逐条直接拍板；进 Step 5。
 
 特殊场景：若 `with_name_time=0` 但 Step 3 仍报 MISMATCH（路径/文件名给不出日期），Step 5 仍 MUST 跑——只是证据卡片里「文件名暗示」会缺，Pattern 主要靠 EXIF/mtime/路径目录 / 相机机型仲裁。
+
+## Step 4.5：copied ≠ 新文件——与目标库内容比对
+
+dry-run 的 `copied=N` 只表示「目标库无 SHA-512 完全相同副本」，**不**表示是新文件。两轮实证：copied 里混有「EXIF 已修版 / 旋转或重编码版 / 撞名版」，直接 move 会把重复副本灌进库。真跑前 MUST 对每个 copied 文件与目标库做三层比对（写确定性脚本，勿逐个人工）：
+
+1. **候选收集**：目标库全量 basename 索引；候选 = 同名 ∪ 同 stem `_N` 变体 ∪ 同大小文件。**同名可能多处存在**（不同桶各一），MUST 全部逐一比对，勿只取第一个（实证 `IMG_0540.JPG` 库内 2009/08 与 2017/08 各一，前者不同后者相同）
+2. **SHA-512** 命中 → EXACT_DUP，删源
+3. **像素流 hash**（JPEG 取首个 SOS marker 之后全部熵数据 / PNG 取 IDAT 拼接 / mp4/mov 取 mdat box payload）命中 → PIXEL_SAME = 目标已有「仅元数据已修」版（往轮 tidy-verify 修复成果），删源不归档
+4. **NAME_ONLY**（以上均不同）MUST 再做**旋转校正 pHash**：`imagehash.phash` 对 ROTATE_0/90/180/270 四向取 min hamming，≤10 判同一媒体（旋转/重编码版）。Orientation 标签差异（源 Horizontal vs 目标 Rotate 180）让查看器显示方向不同但像素矩阵相同——MUST 问用户哪边方向正确，错的一侧 `bin/exiftool/exiftool.exe -P -overwrite_original -n -Orientation=1 <file>` 修标签（1=Horizontal）
+5. 存疑时 `ImageChops.difference` 逐像素量化：bbox=None 逐字节同；mean<5 是重压缩噪声（视觉等价）
+
+处置：EXACT_DUP / PIXEL_SAME / 旋转同一 → 删源（删除脚本 MUST 逐对复核 hash 再 `os.remove`）；真不同 → 留归档清单。大批量 ignored（目标完全相同副本）可直接信 move 的 dedup 删源；要「只删源不归档」走 `find` 跨库查重：
+
+```bash
+./target/release/tidymedia.exe find "<SRC>" "<OUT>" -o "<OUT>" --secure > /tmp/tm/dedup.py
+```
+
+`-o` 让 output 侧删除行注释保护（SURVIVOR），源侧行可直接执行；删除场景 MUST `--secure`（SHA-512）或执行前逐对复核。**假重复识别**：DVD `VIDEO_TS.BUP/.IFO`、`VTS_01_0.BUP/.IFO` 是规范冗余（内容本就相同）MUST NOT 删；电子书相邻页同 hash（如 DelgaBook `data/*.png`）可能是连续同图页，人工看再定。
 
 ## Step 5：证据收集 → 决策 → 写 EXIF
 
@@ -156,3 +174,8 @@ DIFFER 行先收集到候选集，**不**逐条直接拍板；进 Step 5。
 - Python `re` 的 alternation 是 leftmost-first（非 POSIX leftmost-longest）：日期 regex `(0?[1-9]|1[012])` 在 `2008-10` 上会抢吃 `2008-1` → 必须长 token 优先 `(1[012]|0?[1-9])`
 - EXIF naive 时间在 tidymedia 里按 `timezone_offset_hours`（默认 +8）转 epoch，归档桶再 `.to_offset(+8)` 取年月——首尾抵消，等于直接看 EXIF 字符串 `YYYY:MM`
 - exiftool 写默认产生 `<file>_original` 备份，未清会被 tidymedia 当 JPEG 归档；脚本 5 默认 `-overwrite_original`
+- **exiftool 对 mp4 写 `-AllDates` 落到 XMP 而非 QuickTime mvhd，tidymedia 读不到** → 视频 MUST 显式 `-QuickTime:CreateDate=`（+ `ModifyDate`）；QT 时间是 UTC 语义：写入值 = 期望本地时间 − 8h（日精度建议本地 12:00 → UTC 04:00 防跨界）
+- **微信伪 png**（内容 JPEG、扩展名 `.png`）exiftool 报 `Not a valid PNG` 拒写（`-m` 无效）→ 临时改名 `.jpg` 写入后改回原名；tidymedia 按 magic bytes 嗅探不受影响
+- **exiftool 对含中文的入口路径按 ANSI(GBK) 输出文件名字节**（下游 `encoding="utf-8"` 读取即炸）；02 脚本已内置 GBK→UTF-8 规范化，勿移除
+- **iPhone 视频原片 vs 转码副本鉴别**：QT `CreateDate == CreationDate`（拍摄时刻）且无 `ApplePhotosOriginatingSignature` = 原片（HEVC `hvc1` 常见）；CreateDate 晚于拍摄 + 带签名 = 「照片」App 导出的 H.264 转码版（码率拉高体积反而更大，原片已入库时可删）
+- 中文/空格路径拼进 shell 一律双引号；Git Bash 无 `explorer`/`cmd` 在 PATH 时用 `"/c/Windows/explorer.exe" "<file>"` 打开文件人工核图
