@@ -1,38 +1,13 @@
 # TODO
 
-## cull 子命令（4 模型印证流水线 + 性能优化 + 严格覆盖率 100% 已落地）
+## cull 子命令（4 模型印证流水线 + 覆盖率 100% 已落地）
 
 ### P0 e2e 真跑验证
-- [x] 4 个 ONNX 模型已落地 `models/`（git-lfs 跟踪）：
-  - `scrfd_10g_bnkps.onnx`（antelopev2 默认变体；500M 无开源 onnx）
-  - `mobilefacenet.onnx`（foamliu/MobileFaceNet pt→onnx，128 维而非 512 维）
-  - `face_mesh_192x192.onnx`（PINTO_model_zoo 静态 192×192）
-  - `eyestate_yolov8.onnx`（YOLOv8 检测头，非 MobileNetV3 softmax；decode 已重写）
-- [x] tract_eyestate.rs decode 重写（YOLOv8 `[1, 6, 8400]` anchor max closed conf）
-- [x] tract_mobilefacenet.rs EMBED_DIM 改 128（trait `FaceEmbedder` 接口同步 `[f32; 128]`）
 - [ ] 真跑 dry-run + Netron 校对：`cargo run --release -- cull /tmp/test-photos -o /tmp/culled --dry-run --report /tmp/culled/cull-report.json`（profile.release opt-level=0 让 ONNX 推理慢，e2e 真跑前应临时切 opt=3 或部署后再验）
 - [ ] 按真跑反馈微调（如 YOLOv8 EyeState closed_index 是 0 或 1、SCRFD-10G 三 stride 输出顺序）
 
-### P1 完整 4 模型印证流水线
-- [x] 新增 `src/usecases/cull/face_align.rs`：ArcFace 5 点 4-DOF 相似变换 → 112×112 RGB（法方程 + Gauss-Jordan）
-- [x] 新增 `src/usecases/cull/identity_cluster.rs`：跨图 embedding 余弦相似度 Union-Find 聚类
-- [x] 新增 `src/usecases/cull/face_scoring.rs`：EAR 几何 + EyeState 双印证闭眼惩罚 + 嘴角上扬微笑加分综合评分
-- [x] `run.rs::pick_best` 重写：4 模型印证流水线全部接通
-  - SCRFD bbox + 5 keypoints → face_align → 112×112 → MobileFaceNet 128 维 embedding
-  - identity_cluster 跨图余弦聚类（debug! 输出簇数，留 per-identity 策略接入点）
-  - bbox 裁原图 → FaceMesh 468 点 → EAR 几何（左右眼平均）
-  - SCRFD 5 点眼坐标 crop → EyeState 闭眼概率（EAR 或 EyeState 任一命中即判闭眼）
-  - face_scoring::score_image 出完整 ScoreBreakdown；选 `breakdown.total` 最高者为 best
-  - 单脸 face_align/facenet Err 整脸丢弃；facemesh/eyestate Err 退化为空 mesh / 0 概率
-
 ### P2 性能 / 鲁棒性优化
-- [x] pHash 升级 Average Hash → DCT pHash（32×32 → 8×8 低频中位数 64-bit；JPEG 重压缩 Hamming ≤ 12）
-- [x] `pick_best` 重读字节优化：ScannedFile 增 `raw_bytes: Arc<Vec<u8>>` + `decoded: Arc<RgbImage>`，scan 一次读字节 + 一次 decode 后 SCRFD/face_align/facemesh/eyestate 共享（消除二次 IO 与二次 decode）
-- [x] 大图 OOM 防护：scan 阶段 entry.size 超 `backend.face.max_image_bytes`（默认 50 MiB）→ record_failure 计入 failed 不读字节
 - [ ] 远端 backend 真机验证（**「首版 Local-only」标注已过期**：生产路径已全抽象，`factory.for_location` + `Backend::walk`/`read_all`，零 LocalBackend 硬连）：剩余缺口 = 远端整文件入堆 OOM 画像（靠 F9）+ SMB/MTP/ADB 实机验证
-
-### P3 测试与覆盖率
-- [x] 严格覆盖率 4 项 100%（region/function/line/branch）：`RUSTFLAGS="--cfg=coverage_nightly" cargo +nightly llvm-cov --release nextest --summary-only --branch --ignore-filename-regex='(adapters/backend/[a-z]+_real\.rs|adapters/(ocr|face)/tract_[a-z]+\.rs)$' --all-features`（`usecases/cull/run.rs` + 5 个 `tract_*_real.rs` 已回收：前者 `filter_blurry`/`analyze_image` 私有微测试补齐，后者 5 个 `load_runnable` 加 `#[coverage(off)]`；ignore-regex 只留 backend `_real.rs`（大文件+真环境）与 tract 主体（subprocess phantom）；口径 = 聚合 lcov DA/BRDA 真值 100%，summary 剩 monomorphize instance phantom 属已知）
 
 ### P4 Android FFI 集成（首版未包）
 - [ ] `src/frameworks/mobile.rs` 新增 `tidy_cull(sources, output, dry_run) -> MobileCullReport`（uniffi Record）（`CommandResult::Cull`/`dispatch_cull`/`CullReport` 已就绪，照 `MobileFindReport` 平移）
@@ -40,28 +15,7 @@
 - [ ] mobile/android 应用层 UI（缩略图视图浏览 group 目录人工对比）
 - 验收：FFI 走 `tidy_with` + `expect_cull`（禁 `*_report()` 包装）；每 export 顶部 `install_config_loader()`；`mobile_tests.rs` 仿 `find_duplicates_*` 系列；`groups` 透传体积（`ScoreBreakdown` 4×f32）评估上限
 
-## copy / move 性能优化（review 提出 14 项；已落 3，封板 5，待 6）
-
-### 已完成
-- [x] **F4 mkdir_p 缓存**：`ops.rs::do_copy` 加 `mkdir_cache: &mut HashSet<Location>`，同 `{year}/{month}` 桶下 N-1 次 mkdir_recursive RTT 收敛到 1 次；`FakeBackend` 加原子 `mkdir_p_calls` 计数辅证。测试 `mkdir_cache_skips_repeated_mkdir_for_same_target_dir` PASS。
-- [x] **F8 独立 rayon I/O 池**：新 `entities/threadpool.rs::install_io`（CPU×4 clamp [8,64]），`file_index.rs::visit_location` / `parse_exif` / `enrich_candidates` 三处 `par_iter` 包入；远端 IO 阻塞不再吃 CPU 池让 pHash / EXIF 解析饿死。4 个 threadpool 单测 PASS。
-- [x] **F14 stream_copy 1 MiB buffer**：`BufReader`/`BufWriter::with_capacity(1<<20)` + 显式 `flush → into_inner → finish` 三阶段闭合（disk-full 在 finish 阶段显式抛而非 Drop swallow）。`std::io::copy` 8 KiB → 1 MiB，本地 syscall 数 ÷128。
-
-### 已封板（无独立改进空间）
-- **F2 SMB/ADB 拆锁**：pavao libsmbclient C 句柄 + adb sync TCP socket 协议级串行，Mutex 是协议要求；真改进需连接池。
-- **F7 secure_hash 复用**：`Index::exists` bucket 命中才算 secure，预算所有反而反优化；与 F3 绑定才有价值。
-- **F11 sidecar 单 stat**：`read_to_string` 现 `stat + read`，NotFound 短路到 1 RTT 即最优。
-- **F12 dry_run 跳过 mkdir_p**：`do_copy` 既有 `if opts.dry_run { return Ok(true); }` 已实施。
-- **F13 dry_run 跳过 hash**：空 `output_index` 下 `secure_hash` 不触发；`fast_hash` 必算（visit 阶段每文件 4 KiB 唯一 ID）。
-
-### 待新会话（按 ROI 排序）
-
-#### ~~F1 `run_copy_loop` 并行化~~（已完成 2026-07-04）
-- [x] `Index` 内 `HashMap` 改 `DashMap<Utf8PathBuf, Info>` + `DashMap<u64, Mutex<HashSet<Utf8PathBuf>>>`（内嵌 `DashSet` 有同 shard 递归死锁风险，issue #79）；`Index::exists` / `add` / `remove_under_prefix` 全 `&self`
-- [x] `do_copy` 改接 `&Index` + `&DashSet<Location> mkdir_cache`；`run_copy_loop` 用 `install_io(|| groups.par_iter().reduce(CopyDelta::merge))`
-- [x] Phase A 按 `fast_hash` 分桶 + 桶内 `full_path` 字典序 → 同 hash 组 winner 确定性；桶间并行、桶内串行
-- [x] 测试 `run_copy_loop_parallel_correctness_deterministic`（10 轮独立跑断言 (10 copied, 5 ignored, 0 failed) 稳定）+ `run_copy_loop_dedup_produces_single_winner_deterministically` + `add_concurrent_lands_all_entries_and_groups_by_fast_hash` + `add_concurrent_same_fast_hash_bucket_holds_all_paths` + `remove_under_prefix_concurrent_with_readers_does_not_deadlock`
-- [x] 严格覆盖率 4 项与 main HEAD 基线完全对齐（21 region miss 全在 main 已有 miss 文件：naming.rs / crop.rs / group_writer.rs / uri.rs / config.rs，未引入新 miss）
+## copy / move 性能优化（待 8 项）
 
 #### F3 合并 Info::open + Exif::open + sniff_mime（~3h）
 - 新 `Info::open_full(loc, backend, with_exif: bool)`：单次 `open_read` → `fast_hash_stream` + 头 64 KiB head buffer + `sniff_mime`（前 256 B）+ `secure_hash_stream`（同流 sha-512）
@@ -121,13 +75,11 @@
 #### F17 边界硬限与配置外置（~1h，YAGNI 补边界）
 - `remote::walk_recursive` 加 MAX_DEPTH=256 硬限：远端深备份树（Time Machine / rsync `--link-dest`）超限中断该子树 + record walker_error，防堆内存耗尽。⚠ 已是迭代式 stack + visited（无递归栈崩，`remote.rs:229-279`）；stack 当前不携带 depth，加限需改栈元素结构，工作量较原估重；`MAX_DEPTH` 更近算法常量（CLAUDE.md「不外置例外」）
 - `MAX_REMOTE_WRITE_BUFFER = 2 << 30` 外置到 `backend.remote.write_buffer_limit_bytes`，Android FFI 场景可调小到 512 MiB fail-fast，桌面可关（`u64::MAX`）；P0 §13 数值常量 MUST 从配置读取。有真实消费点（`remote.rs:100,:470`），走「新增配置字段」同步检查点全链（config.rs + config.yaml + sanitize + defaults 测试 + rg 验证消费点）
-- （已完成）`system_time_to_offsetdatetime` 三段守护单元测试：`naming.rs:132-145` 实现 + `naming.rs:179-194` 测试已覆盖；原拟 `UNIX_EPOCH + Duration::from_secs(u64::MAX)` fixture 构造不出（`checked_add` 超范围返 None）
 
 ### 落地建议
-1. ~~先做 F1~~（已完成 2026-07-04）
-2. F3 + F10 一起做（共享 cache 基础设施）
-3. F5 / F6 / F9 / F15 / F16 一并改 RemoteClient trait（避免多次破坏；F15+F16 复用同一批 backend override 骨架）
-4. 落地后跑 Linux + `--all-features` `cargo +nightly llvm-cov --branch` 严格 4 项 100% 验证
+1. F3 + F10 一起做（共享 cache 基础设施）
+2. F5 / F6 / F9 / F15 / F16 一并改 RemoteClient trait（避免多次破坏；F15+F16 复用同一批 backend override 骨架）
+3. 落地后跑 Linux + `--all-features` `cargo +nightly llvm-cov --branch` 严格 4 项 100% 验证
 
 ## 媒体识别缺口（tidy-verify 实证）
 
@@ -135,8 +87,6 @@
 
 ## media_time 文件名解析缺口（tidy-verify 实证）
 
-- [x] `2010-01-10 11-01-12.mp4`（`YYYY-MM-DD HH-MM-SS` 空格分隔日期时间）→ `try_generic_dashed` + `FilenameDashedDateTime` 已覆盖（`filename_tests.rs:289-323`）
-- [x] `VID_20180205_110003.mp4`（标准 Android 相机 `VID_YYYYMMDD_HHMMSS`）→ `try_camera_or_phone` VID_ 前缀已覆盖（`filename_tests.rs:41-50`）
 - [ ] **括号 / QQ 导出时戳两形态纳入 `entities/media_time/filename.rs`**（2026-08-09 tidy-verify `D:\Users\Public\Pictures\2021` 实证，16 mp4 + 6 jpg 已用 exiftool 按文件名写回容器/EXIF 时间侧修复数据）：
   - `IMG_6489(20210611-174530)(1).jpg`：括号内 `yyyyMMdd-HHmmss`
   - `QQ图片20210428220203.jpg`：`QQ图片` 前缀 + 14 位 `yyyyMMddHHmmss`（连续无分隔）
