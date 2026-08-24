@@ -216,10 +216,25 @@ impl Info {
         valid_threshold_secs: u64,
         default_offset: FixedOffset,
     ) -> SystemTime {
-        let modified = self.meta.modified;
-        let created = self.meta.created;
-        let fs_fallback = pick_fs_fallback(modified, created);
+        let fs_fallback = pick_fs_fallback(self.meta.modified, self.meta.created);
+        let decision = self.media_time_decision(default_offset);
+        // resolve 返回 None（候选全部被过滤）与"低于阈值"走同一条 fallback 路径，
+        // 避免在 create_time 里多一条不可稳定触发的分支。
+        let secs = decision.map_or(0, |d| d.utc.timestamp());
+        if secs > 0 && secs.cast_unsigned() >= valid_threshold_secs {
+            SystemTime::UNIX_EPOCH + Duration::from_secs(secs.cast_unsigned())
+        } else {
+            fs_fallback
+        }
+    }
 
+    /// 完整拍摄时间决策（P0→P4 优先级 + 冲突列表），供归档决策与 `verify` 对账
+    /// 共用。返回 resolve 原样 decision，不做软阈值过滤（调用方按需解释）。
+    pub fn media_time_decision(
+        &self,
+        default_offset: FixedOffset,
+    ) -> Option<media_time::MediaTimeDecision> {
+        let modified = self.meta.modified;
         // P2 文件名中的 naive 时间按 default_offset（配置时区）解释，与 EXIF naive
         // 同口径——按 UTC 解释会让月末晚间拍摄的文件 +offset 后跨月归错桶；
         // P0/P1 的 epoch 已在 EXIF 解析层（from_path_with_offset）按配置时区转换完毕，
@@ -250,8 +265,6 @@ impl Info {
         // P4。Option<Candidate> 实现 IntoIterator → extend 不引入 if-let 分支。
         candidates.extend(media_time::fs_time::from_modified(modified));
 
-        // resolve 返回 None（候选全部被过滤）与"低于阈值"走同一条 fallback 路径，
-        // 避免在 create_time 里多一条不可稳定触发的分支。
         let decision = media_time::resolve(candidates, gps_utc, modify_date_utc, Utc::now());
         // 冲突优先告警，不静默修正。
         if let Some(ref d) = decision
@@ -265,12 +278,7 @@ impl Info {
                 "media time candidates conflict"
             );
         }
-        let secs = decision.map_or(0, |d| d.utc.timestamp());
-        if secs > 0 && secs.cast_unsigned() >= valid_threshold_secs {
-            SystemTime::UNIX_EPOCH + Duration::from_secs(secs.cast_unsigned())
-        } else {
-            fs_fallback
-        }
+        decision
     }
 
     pub fn is_media(&self) -> bool {

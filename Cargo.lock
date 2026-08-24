@@ -3263,6 +3263,7 @@ dependencies = [
  "predicates",
  "pretty_assertions",
  "rayon",
+ "regex",
  "rstest",
  "serde",
  "serde_derive",

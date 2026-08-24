@@ -16,6 +16,12 @@ argument-hint: <source_dir> <output_dir>
 
 cwd **MUST** 是 tidymedia repo 根（脚本里 `target/release/tidymedia.exe`、`bin/exiftool/exiftool.exe` 都是相对路径）。中间产物默认落 `/tmp/tm/`。
 
+## 自动对账入口（tidymedia verify）
+
+Step 1/3/4 的确定性逻辑已内化为 `tidymedia verify <SRC> <OUT> [--exif-tsv <02 产出的 exif.tsv>] [--report <json>]`：决策上浮、预测桶、注入 tsv 交叉比对（`mismatch`/`exif_from`/`exif_make/model`）、文件名/路径日期桶（`filename_bucket`）、copied 内容比对（`duplicate_verdict`）、pattern 诊断与修补建议。`--exif-tsv` 的 8 列契约与 `02_extract_exif.sh` 的 `-p` 顺序互指（`src/usecases/verify/exif_tsv.rs` 为单点）。MISMATCH>0 时 `$?` 非 0。
+
+skill 流程保留 exiftool 交叉验证的 **02 抽 tsv** 与 **05 写回**（`verify` 只诊断不写盘）；03/04 的判定以 `verify` 输出为准，脚本侧不再另立。
+
 ## Step 1：dry-run
 
 ```bash

@@ -6,7 +6,9 @@
 
 use std::sync::OnceLock;
 
+use chrono::{FixedOffset, Offset, Utc};
 use serde_derive::Deserialize;
+use time::UtcOffset;
 
 static CONFIG: OnceLock<Config> = OnceLock::new();
 static LOADER: OnceLock<fn() -> Config> = OnceLock::new();
@@ -22,6 +24,20 @@ pub fn config() -> &'static Config {
 /// 多次调用静默忽略后续（OnceLock 语义）。
 pub fn install_loader(loader: fn() -> Config) {
     let _ = LOADER.set(loader);
+}
+
+// 时区 offset 单点：copy / move / verify 共用同一份 `timezone_offset_hours` 配置。
+// 越界回退 UTC 防 panic（time::UtcOffset 合法 ±25:59:59）。
+#[must_use]
+pub fn offset_from_hours(hours: i8) -> UtcOffset {
+    UtcOffset::from_whole_seconds(i32::from(hours) * 3600).unwrap_or(UtcOffset::UTC)
+}
+
+// chrono::FixedOffset 版：把 EXIF / 文件名内无时区的 NaiveDateTime 当相机本地时间
+// 解释；与 time::UtcOffset 共用同一份 timezone_offset_hours 配置。
+#[must_use]
+pub fn chrono_offset_from_hours(hours: i8) -> FixedOffset {
+    FixedOffset::east_opt(i32::from(hours) * 3600).unwrap_or_else(|| Utc.fix())
 }
 
 /// 默认归档模板：`{year}/{month}/{valuable_name}`。
@@ -333,7 +349,8 @@ pub struct Config {
 
 #[cfg(test)]
 mod tests {
-    use super::{Config, validate_archive_template};
+    use super::{Config, chrono_offset_from_hours, offset_from_hours, validate_archive_template};
+    use time::UtcOffset;
 
     #[test]
     fn config_defaults_match_historical_constants() {
@@ -447,5 +464,26 @@ mod tests {
     fn validate_archive_template_rejects_pure_static_text() {
         let err = validate_archive_template("archive").unwrap_err();
         assert!(err.contains("at least one of"), "got: {err}");
+    }
+
+    #[test]
+    fn offset_from_hours_valid_value_produces_expected_offset() {
+        assert_eq!(offset_from_hours(8).whole_seconds(), 8 * 3600);
+    }
+
+    #[test]
+    fn offset_from_hours_out_of_range_falls_back_to_utc() {
+        assert_eq!(offset_from_hours(127), UtcOffset::UTC);
+    }
+
+    #[test]
+    fn chrono_offset_from_hours_valid() {
+        let off = chrono_offset_from_hours(8);
+        assert_eq!(off.local_minus_utc(), 8 * 3600);
+    }
+
+    #[test]
+    fn chrono_offset_from_hours_out_of_range_falls_back_to_utc() {
+        assert_eq!(chrono_offset_from_hours(25).local_minus_utc(), 0);
     }
 }

@@ -6,7 +6,6 @@ use std::time::Instant;
 
 use camino::Utf8PathBuf;
 use chrono::FixedOffset;
-use chrono::Offset;
 use dashmap::DashSet;
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use time::UtcOffset;
@@ -24,6 +23,7 @@ use crate::entities::file_index::{CandidateProvider, Index, TextClassifyProvider
 use crate::entities::threadpool::install_io;
 use crate::entities::uri::Location;
 use crate::usecases::config::config;
+use crate::usecases::config::{chrono_offset_from_hours, offset_from_hours};
 use crate::usecases::report::{
     CopyReport, FEATURE_COPY, FEATURE_MOVE, ReportError, ReportSink, extend_errors_capped,
     feature_of, push_error_capped,
@@ -60,20 +60,10 @@ pub(super) fn configured_offset() -> UtcOffset {
     offset_from_hours(config().copy.timezone_offset_hours)
 }
 
-// 越界回退到 UTC，避免 panic；time crate 合法范围 ±25:59:59。
-pub(super) fn offset_from_hours(hours: i8) -> UtcOffset {
-    UtcOffset::from_whole_seconds(i32::from(hours) * 3600).unwrap_or(UtcOffset::UTC)
-}
-
 // chrono::FixedOffset 用于把 EXIF / 文件名内无时区的 NaiveDateTime 当相机本地时间
 // 解释；与 time::UtcOffset 共用同一份 timezone_offset_hours 配置。
 pub(super) fn configured_chrono_offset() -> FixedOffset {
     chrono_offset_from_hours(config().copy.timezone_offset_hours)
-}
-
-// 越界（chrono::FixedOffset 合法 ±86_400 秒，即 ±24h）回退到 UTC。
-pub(super) fn chrono_offset_from_hours(hours: i8) -> FixedOffset {
-    FixedOffset::east_opt(i32::from(hours) * 3600).unwrap_or_else(|| chrono::Utc.fix())
 }
 
 /// 测试 shim：等价于 `copy_with_sidecar(..., doc_only=false, None)`。

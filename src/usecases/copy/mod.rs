@@ -21,9 +21,9 @@ use self::ops::do_copy_with_default_cache as do_copy;
 #[cfg(test)]
 use self::reporting::summary_result;
 #[cfg(test)]
-use self::run::copy;
+use self::run::CopyOpts;
 #[cfg(test)]
-use self::run::{CopyOpts, chrono_offset_from_hours, offset_from_hours};
+use self::run::copy;
 #[cfg(test)]
 use crate::entities::common::canonical_prefix;
 #[cfg(test)]

@@ -5,6 +5,7 @@ pub(super) use copy::{make_classify_provider, resolved_template, template_needs_
 pub(super) use cull::cull;
 pub(super) use find::find_duplicates;
 pub(super) use move_text_shot::move_text_shot;
+pub(super) use verify::verify;
 
 pub(crate) mod classify;
 pub(crate) mod config;
@@ -18,3 +19,4 @@ pub(crate) mod cull;
 pub(crate) mod find;
 pub(crate) mod move_text_shot;
 pub(crate) mod report;
+pub(crate) mod verify;

@@ -10,9 +10,11 @@ use crate::usecases::cull::CullReport;
 use crate::usecases::detector::DetectorFactory;
 use crate::usecases::move_text_shot::MoveTextShotReport;
 use crate::usecases::report::{CopyReport, FindReport, Report, ReportSink};
+use crate::usecases::verify::VerifyReport;
 
 /// 子命令执行结果：Copy/Move 返回 [`CopyReport`]，Find 返回 [`FindReport`]，
-/// `MoveTextShot` 返回 [`MoveTextShotReport`]，`Cull` 返回 [`CullReport`]。
+/// `MoveTextShot` 返回 [`MoveTextShotReport`]，`Cull` 返回 [`CullReport`]，
+/// `Verify` 返回 [`VerifyReport`]。
 /// `tidy_with` 单一入口同时服务 CLI（丢弃返回）与 Android/mobile（消费 report）。
 #[derive(Debug)]
 pub enum CommandResult {
@@ -20,6 +22,7 @@ pub enum CommandResult {
     Find(FindReport),
     MoveTextShot(MoveTextShotReport),
     Cull(CullReport),
+    Verify(VerifyReport),
 }
 
 /// 用默认 backend / detector factory 跑命令；旧入口，等价于
@@ -62,10 +65,21 @@ pub fn tidy(command: Commands) -> Result<()> {
                 report.failed, report.moved, report.culled_count, report.grouped
             ))))
         }
+        CommandResult::Verify(report) if report.mismatched > 0 || report.decision_failed > 0 => {
+            Err(Error::Io(std::io::Error::other(format!(
+                "verify found {mismatched}/{compared} mismatched buckets, {unresolved} unresolved \
+                 decisions, {scanned} scanned",
+                mismatched = report.mismatched,
+                compared = report.compared,
+                unresolved = report.decision_failed,
+                scanned = report.scanned,
+            ))))
+        }
         CommandResult::Copy(_)
         | CommandResult::Find(_)
         | CommandResult::MoveTextShot(_)
-        | CommandResult::Cull(_) => Ok(()),
+        | CommandResult::Cull(_)
+        | CommandResult::Verify(_) => Ok(()),
     }
 }
 
@@ -191,6 +205,22 @@ pub fn tidy_with(
             sources,
             output,
             dry_run,
+            phash_max,
+            report.as_deref(),
+        ),
+        Commands::Verify {
+            sources,
+            output,
+            include_non_media,
+            exif_tsv,
+            phash_max,
+            report,
+        } => dispatch_verify(
+            factory,
+            sources,
+            output,
+            include_non_media,
+            exif_tsv.as_deref(),
             phash_max,
             report.as_deref(),
         ),
@@ -329,6 +359,37 @@ fn dispatch_cull(
         sink.write(&Report::Cull(&cull_report));
     }
     Ok(CommandResult::Cull(cull_report))
+}
+
+fn dispatch_verify(
+    factory: &dyn BackendFactory,
+    sources: Vec<Location>,
+    output: Location,
+    include_non_media: bool,
+    exif_tsv: Option<&str>,
+    phash_max: Option<u8>,
+    report_path: Option<&str>,
+) -> Result<CommandResult> {
+    let src_pairs = build_sources(factory, sources)?;
+    let out_pair = build_source(factory, output)?;
+    let phash_max = phash_max.unwrap_or_else(|| {
+        crate::usecases::config::config()
+            .backend
+            .face
+            .phash_hamming_max
+    });
+    let verify_report = crate::usecases::verify(
+        &src_pairs,
+        &out_pair,
+        phash_max,
+        include_non_media,
+        exif_tsv.map(std::path::Path::new),
+    );
+    if let Some(path) = report_path {
+        let sink = JsonFileReportSink::new(path);
+        sink.write(&Report::Verify(&verify_report));
+    }
+    Ok(CommandResult::Verify(verify_report))
 }
 
 // None 表示未传，跳过校验；Some(s) 时校验模板合法性。

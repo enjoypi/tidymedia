@@ -113,3 +113,6 @@ mod office_archive;
 
 #[path = "lib_tidy/copy_move_doc.rs"]
 mod copy_move_doc;
+
+#[path = "lib_tidy/verify.rs"]
+mod verify;

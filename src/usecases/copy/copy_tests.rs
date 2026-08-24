@@ -1,6 +1,7 @@
 #[cfg(test)]
 mod test {
     use super::super::*;
+    use crate::usecases::config::{chrono_offset_from_hours, offset_from_hours};
 
     /// 结构化日志 summary 的 result 维度：0 失败 → "ok"，>0 → "partial"。
     /// 直测 helper —— 该值只进 tracing 字段，集成测试不捕日志杀不掉 `==` 变异。

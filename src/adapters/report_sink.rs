@@ -5,8 +5,8 @@ use tracing::warn;
 
 use crate::entities::common;
 use crate::usecases::report::{
-    FEATURE_COPY, FEATURE_CULL, FEATURE_FIND, FEATURE_MOVE, FEATURE_MOVE_TEXT_SHOT, Report,
-    ReportSink,
+    FEATURE_COPY, FEATURE_CULL, FEATURE_FIND, FEATURE_MOVE, FEATURE_MOVE_TEXT_SHOT, FEATURE_VERIFY,
+    Report, ReportSink,
 };
 
 /// 把报告原子写到 `path`（先写临时文件再 persist）。
@@ -36,6 +36,7 @@ impl ReportSink for JsonFileReportSink {
             Report::Find(r) => write_report_json(&self.path, *r, FEATURE_FIND),
             Report::MoveTextShot(r) => write_report_json(&self.path, *r, FEATURE_MOVE_TEXT_SHOT),
             Report::Cull(r) => write_report_json(&self.path, *r, FEATURE_CULL),
+            Report::Verify(r) => write_report_json(&self.path, *r, FEATURE_VERIFY),
         }
     }
 }

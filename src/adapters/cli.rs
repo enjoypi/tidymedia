@@ -196,6 +196,33 @@ pub enum Commands {
         #[arg(long)]
         report: Option<String>,
     },
+
+    /// Verify pending archive decisions without moving anything: report each source file's predicted archive bucket, `media_time` decision and its conflicts, and (with `--exif-tsv`) cross-check against a second implementation's expected bucket to catch container times that tidymedia's own reader missed. Diagnostic only; writes no files.
+    Verify {
+        /// The source directories or files (URI or local path)
+        #[arg(required = true)]
+        sources: Vec<Location>,
+
+        /// The output directory (URI or local path) where files are/will be archived
+        #[arg(short, long)]
+        output: Location,
+
+        /// Also verify files that magic-bytes MIME does not classify as image/video
+        #[arg(long)]
+        include_non_media: bool,
+
+        /// TAB-separated EXIF table (the 8-column exiftool `-p` contract of `.claude/scripts/tidy-verify/02_extract_exif.sh`) injected for cross-checking expected buckets
+        #[arg(long)]
+        exif_tsv: Option<String>,
+
+        /// Maximum pHash Hamming distance for pixel-level duplicate comparison (defaults to `backend.face.phash_hamming_max`)
+        #[arg(long)]
+        phash_max: Option<u8>,
+
+        /// Write a JSON operation report to this path
+        #[arg(long)]
+        report: Option<String>,
+    },
 }
 
 /// 解析命令行参数并执行对应子命令。

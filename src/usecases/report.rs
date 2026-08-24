@@ -22,6 +22,7 @@ pub const FEATURE_MOVE: &str = "move";
 pub const FEATURE_FIND: &str = "find";
 pub const FEATURE_CULL: &str = "cull";
 pub const FEATURE_MOVE_TEXT_SHOT: &str = "move_text_shot";
+pub const FEATURE_VERIFY: &str = "verify";
 
 /// Move 复用 copy 流程（remove=true 即 move）；日志 feature 按用户实际子命令
 /// 呈现，避免 `move` 命令输出 feature="copy" 误导排障。
@@ -128,6 +129,7 @@ pub enum Report<'a> {
     Find(&'a FindReport),
     MoveTextShot(&'a crate::usecases::move_text_shot::MoveTextShotReport),
     Cull(&'a crate::usecases::cull::CullReport),
+    Verify(&'a crate::usecases::verify::VerifyReport),
 }
 
 /// 报告输出端：序列化格式 + 持久化机制由实现者决定（JSON 写盘 / stdout / 推送…）。

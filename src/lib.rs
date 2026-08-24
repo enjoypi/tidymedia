@@ -17,6 +17,7 @@ pub use adapters::cli::{Cli, Commands, run_cli};
 pub use adapters::dispatch::{CommandResult, tidy, tidy_with};
 pub use usecases::cull::{CullReport, CulledEntry, GroupReport, ScoreBreakdown};
 pub use usecases::move_text_shot::MoveTextShotReport;
+pub use usecases::verify::{VerifyEntry, VerifyReport};
 
 // ── Entity re-exports ──
 // `BackendFactory` Port 与 `Backend` 同层（entities/backend）；`DefaultBackendFactory`

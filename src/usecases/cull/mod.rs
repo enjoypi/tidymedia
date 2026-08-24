@@ -12,7 +12,7 @@ mod face_align;
 mod face_scoring;
 mod group_writer;
 mod identity_cluster;
-mod phash;
+pub(crate) mod phash;
 mod report;
 mod run;
 mod sharpness;
