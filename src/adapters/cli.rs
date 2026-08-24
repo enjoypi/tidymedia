@@ -211,7 +211,7 @@ pub enum Commands {
         #[arg(long)]
         include_non_media: bool,
 
-        /// TAB-separated EXIF table (the 8-column exiftool `-p` contract of `.claude/scripts/tidy-verify/02_extract_exif.sh`) injected for cross-checking expected buckets
+        /// TAB-separated EXIF table (the 8-column exiftool `-p` contract of `.claude/skills/tidy-verify/config.yaml`) injected for cross-checking expected buckets
         #[arg(long)]
         exif_tsv: Option<String>,
 

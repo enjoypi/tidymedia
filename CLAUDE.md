@@ -160,8 +160,8 @@
 
 ### EXIF vs 归档桶对账
 - EXIF naive 按 `timezone_offset_hours`（默认 +8）转 epoch、归档再 `.to_offset(+8)` → 首尾抵消，**归档桶 = EXIF 字符串前 7 字符 `YYYY:MM`**
-- **QuickTime/视频是 UTC，对账须 +tz——「前 7 字符」规则仅对 EXIF naive 成立**：`compare_buckets.py` 对 QT 列（`QT_COL_INDICES=(2,3)`）走 `_qt_bucket()` 按 UTC→配置时区转换
-- `/tidy-verify <source> <output>` slash command（`.claude/commands/tidy-verify.md` + `.claude/scripts/tidy-verify/`）：dry-run → exiftool 抽 → 桶 MISMATCH → 文件名时间 DIFFER → exiftool 修 → 真跑 move
+- **QuickTime/视频是 UTC，对账须 +tz——「前 7 字符」规则仅对 EXIF naive 成立**：verify 已内化（`verify::bucket::qt_bucket` 对 QT 列 0-based idx 1/2 按 UTC→配置时区转换）
+- `/tidy-verify <source> <output>` slash command（`.claude/commands/tidy-verify.md` 薄壳 → `.claude/skills/tidy-verify/SKILL.md`，脚本 Bun+TS）：dry-run → exiftool 抽 → `verify` 对账 → `analyze_verify.ts` 汇总 → exiftool 修 → 真跑 move
 - **dry-run 年月分析**：MUST 剥源/目标根前缀到相对路径再比年月段
 
 ### copy/move 重叠保护

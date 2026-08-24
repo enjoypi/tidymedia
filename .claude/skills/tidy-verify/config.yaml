@@ -1,0 +1,19 @@
+# tidy-verify skill 常量。脚本 MUST 从本文件读，不留裸数值。
+# 路径相对 tidymedia repo 根（cwd）。
+
+work_dir: /tmp/tm
+
+# tidymedia / exiftool 可执行文件基名；脚本按平台探测 .exe 后缀。
+tidymedia_bin: target/release/tidymedia
+exiftool_bin: bin/exiftool/exiftool
+
+# 工作目录内中间产物文件名（相对 work_dir）。
+exif_tsv: exif.tsv
+verify_report: verify.json
+
+# exiftool -p 8 列契约（与 src/usecases/verify/exif_tsv.rs、src/adapters/cli.rs
+# 互指单点）：path / DTO / QT:CreationDate / QT:CreateDate / CreateDate /
+# FileModifyDate / Make / Model。顺序对齐 tidymedia P0..P4，改 MUST 三处同步。
+# \t 由脚本替换为真实 tab；MUST NOT 加 -fast2（会跳 QuickTime moov 读不到 QT 时间）。
+exiftool_tsv_p: >-
+  $Directory/$FileName\t$DateTimeOriginal\t$QuickTime:CreationDate\t$QuickTime:CreateDate\t$CreateDate\t$FileModifyDate\t$Make\t$Model

@@ -1,5 +1,5 @@
 //! 归档桶对账纯函数：把决策时间 → 预测桶 `YYYY:MM`；把 exiftool `QuickTime` 时间串
-//! 按 UTC→配置时区转换取桶（移植 `.claude/scripts/tidy-verify/compare_buckets.py`）。
+//! 按 UTC→配置时区转换取桶（口径与 tidy-verify skill 的桶对账一致）。
 
 use chrono::{DateTime, Datelike, FixedOffset, NaiveDateTime, TimeZone, Utc};
 

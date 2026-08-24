@@ -1,7 +1,7 @@
-//! 文件名 / 路径日期桶解析：移植 `.claude/scripts/tidy-verify/filename_conflict.py` 的
-//! 三正则（仅诊断提示，不进 `MediaTimeDecision`）。踩坑口径与 skill 逐条对齐：
-//! 单数字月兼容（`西宁 2008-6-19`）、`YYYY` 前非数字边界（防 `P1120296.JPG` 假阳）、
-//! alternation 长 token 优先（`2008-10` 不被吃成 `2008-1`）。
+//! 文件名 / 路径日期桶解析（三正则，仅诊断提示，不进 `MediaTimeDecision`）。
+//! 踩坑口径与 tidy-verify skill 逐条对齐：单数字月兼容（`西宁 2008-6-19`）、`YYYY`
+//! 前非数字边界（防 `P1120296.JPG` 假阳）、alternation 长 token 优先
+//! （`2008-10` 不被吃成 `2008-1`）。
 
 use std::sync::OnceLock;
 

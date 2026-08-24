@@ -1,6 +1,7 @@
-//! copied 内容比对纯函数 + verdict 判定（移植 `45_check_copied.py`）：`SHA-512` 全文件
-//! （`EXACT_DUP`）+ 熵流 hash（`JPEG` SOS→EOF / `PNG` IDAT / `ISO-BMFF` mdat，剥元数据只比
-//! 像素流 → `PIXEL_SAME`）+ 旋转校正 pHash（四向 min hamming → `ROTATED_SAME`）。
+//! copied 内容比对纯函数 + verdict 判定（口径与 tidy-verify skill 一致）：`SHA-512`
+//! 全文件（`EXACT_DUP`）+ 熵流 hash（`JPEG` SOS→EOF / `PNG` IDAT / `ISO-BMFF` mdat，
+//! 剥元数据只比像素流 → `PIXEL_SAME`）+ 旋转校正 pHash（四向 min hamming →
+//! `ROTATED_SAME`）。
 
 use camino::Utf8PathBuf;
 use sha2::{Digest, Sha512};

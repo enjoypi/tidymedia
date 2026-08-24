@@ -29,7 +29,7 @@ pub struct VerifyReport {
 #[derive(Debug, Default, Serialize)]
 pub struct VerifyEntry {
     pub source_path: String,
-    /// 归档预测桶 `YYYY/MM`（由决策时间 + 配置时区推导）。
+    /// 归档预测桶 `YYYY:MM`（由决策时间 + 配置时区推导）。
     pub actual_bucket: String,
     /// 决策优先级（P0..P4 / `(none)`）。
     pub chosen_priority: String,
@@ -37,7 +37,7 @@ pub struct VerifyEntry {
     pub chosen_source: String,
     /// 冲突列表（`ConflictKind` Debug 名）。
     pub conflicts: Vec<String>,
-    /// 注入 exiftool tsv 时第二实现给出的期望桶 `YYYY/MM`。
+    /// 注入 exiftool tsv 时第二实现给出的期望桶 `YYYY:MM`。
     pub exif_exp_bucket: Option<String>,
     /// 期望桶来源标签（`DTO`/`QTCreationDate`/`QTCreateDate`/`CreateDate`/`FsMtime`）。
     pub exif_from: Option<String>,
