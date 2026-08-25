@@ -512,6 +512,8 @@ fn cull_records_failure_when_oversize_image_skipped() {
         "backend:\n  face:\n    max_image_bytes: 1048576\n",
     )
     .unwrap();
+    // 重建全局 config：cargo test 共享进程下必须先 reset（nextest 每测试独立进程无需）。
+    crate::reset_config_loader();
     // SAFETY: nextest per-test 进程隔离，无并发 env 修改竞争
     unsafe {
         std::env::set_var("TIDYMEDIA_CONFIG", cfg_path.to_str().unwrap());

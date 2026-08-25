@@ -45,25 +45,16 @@ impl RawEmbedder for TractRawEmbedder {
         let first = outputs
             .into_iter()
             .next()
-            .ok_or_else(|| io::Error::other("tract embed returned no output tensor"))?;
+            .expect("模型 run 成功必有输出 tensor");
         // CLS pooling：[1, seq, hidden] 取 [0, 0, :]（bge 官方口径，非 mean-pooling）。
-        let hidden = *first
-            .shape()
-            .last()
-            .ok_or_else(|| io::Error::other("tract embed output has no shape"))?;
-        let cast = first
-            .cast_to::<f32>()
-            .map_err(|e| io::Error::other(format!("embed output cast: {e}")))?;
+        let hidden = *first.shape().last().expect("tensor shape 恒非空");
+        let cast = first.cast_to::<f32>().expect("numeric→f32 cast 恒成功");
         let view = cast.view();
         let slice = view
             .as_slice::<f32>()
-            .map_err(|e| io::Error::other(format!("embed output slice: {e}")))?;
-        if slice.len() < hidden {
-            return Err(io::Error::other(format!(
-                "embed output shorter than hidden dim: {} < {hidden}",
-                slice.len()
-            )));
-        }
+            .expect("cast 成功后 view 恒 contiguous");
+        // CLS 向量长度 = hidden 维；`into_runnable` 已固化输出 shape
+        // `[1, seq, hidden]`，`slice.len() = seq*hidden ≥ hidden` 恒成立。
         Ok(slice[..hidden].to_vec())
     }
 }

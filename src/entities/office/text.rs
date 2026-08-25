@@ -6,7 +6,8 @@ use std::io::Read;
 
 use crate::entities::backend::MediaReader;
 
-pub(super) fn parse(reader: &mut dyn MediaReader, mime: &str) -> (u64, u64) {
+#[doc(hidden)]
+pub fn parse(reader: &mut dyn MediaReader, mime: &str) -> (u64, u64) {
     let _ = reader;
     let _ = mime;
     (0, 0)
@@ -17,7 +18,8 @@ pub(super) fn parse(reader: &mut dyn MediaReader, mime: &str) -> (u64, u64) {
 ///
 /// 整 fn `coverage(off)`：read 入口 Err arm 需注入 reader 错误，multi-instance
 /// 下 phantom miss 难闭合；截断语义由 `truncate_to_char_boundary` 类单测保证。
-pub(super) fn extract_text(reader: &mut dyn MediaReader, _mime: &str, max_bytes: usize) -> String {
+#[doc(hidden)]
+pub fn extract_text(reader: &mut dyn MediaReader, _mime: &str, max_bytes: usize) -> String {
     let mut buf = Vec::with_capacity(max_bytes);
     let mut limited = reader.take(max_bytes as u64);
     if limited.read_to_end(&mut buf).is_err() {

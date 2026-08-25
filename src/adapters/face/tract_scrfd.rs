@@ -8,14 +8,13 @@
 //! - 单元测试用 `Vec<FaceDetection>` 直返的 stub `RawScrfd` 验装配 + preprocess
 
 use std::io;
-use std::path::Path;
 use std::sync::{Arc, OnceLock};
 
 use camino::Utf8Path;
 use parking_lot::Mutex;
 use tract_onnx::prelude::*;
 
-use super::tract_scrfd_real::{ScaleMeta, TractRawScrfd, load_runnable};
+use crate::ScaleMeta;
 use crate::usecases::config::FaceConfig;
 use crate::usecases::face::{FaceDetection, FaceDetector};
 
@@ -38,15 +37,15 @@ pub(crate) trait RawScrfd: Send + Sync {
 }
 
 pub struct TractScrfdDetector {
-    cfg: FaceConfig,
+    pub(crate) cfg: FaceConfig,
     // OnceLock 让 lazy init 后 inference 无锁并发：旧 Mutex<Option<...>> 让每次
     // detect_faces 都加锁，rayon 并行评分时所有 worker 串行化在同一把锁上。
-    raw: OnceLock<Box<dyn RawScrfd>>,
+    pub(crate) raw: OnceLock<Box<dyn RawScrfd>>,
     // 仅 load 阶段互斥：35 worker 同时进 ensure_raw 时若都各自调 load_runnable，
     // 250 MB SCRFD model parse + tract optimize 会被并行执行 N 次（OnceLock::set
     // race 只有 1 个生效，其它 N-1 个 worker 已浪费了 load 时间）。double-checked
     // locking 让 load 只跑 1 次；inference 仍走 OnceLock::get 无锁。
-    load_lock: Mutex<()>,
+    pub(crate) load_lock: Mutex<()>,
 }
 
 impl std::fmt::Debug for TractScrfdDetector {
@@ -69,30 +68,6 @@ impl TractScrfdDetector {
             raw: cell,
             load_lock: Mutex::new(()),
         }
-    }
-
-    fn ensure_raw(&self) -> io::Result<&dyn RawScrfd> {
-        // 快路径：已 load 直接 OnceLock::get 无锁返。
-        if let Some(r) = self.raw.get() {
-            return Ok(r.as_ref());
-        }
-        // 慢路径：拿 load_lock 串行 load；双查避免 N worker 都 load 一次。
-        let _guard = self.load_lock.lock();
-        if let Some(r) = self.raw.get() {
-            return Ok(r.as_ref());
-        }
-        let model = load_runnable(Path::new(&self.cfg.scrfd_model_path))?;
-        let boxed: Box<dyn RawScrfd> = Box::new(TractRawScrfd {
-            model,
-            score_threshold: self.cfg.scrfd_score_threshold,
-            nms_iou: self.cfg.scrfd_nms_iou,
-        });
-        let _ = self.raw.set(boxed);
-        Ok(self
-            .raw
-            .get()
-            .expect("OnceLock set by self under load_lock")
-            .as_ref())
     }
 }
 
@@ -125,7 +100,8 @@ pub fn build_scrfd_detector(cfg: &FaceConfig) -> io::Result<Box<dyn FaceDetector
 
 /// Letterbox 把图像 resize 到 640×640（保持长宽比，灰色 128 padding），同时记录
 /// scale + padding 给 postprocess 逆映射用。返 `(NCHW tensor, ScaleMeta)`。
-pub(crate) fn preprocess(bytes: &[u8]) -> io::Result<(Tensor, ScaleMeta)> {
+#[doc(hidden)]
+pub fn preprocess(bytes: &[u8]) -> io::Result<(Tensor, ScaleMeta)> {
     let img = image::load_from_memory(bytes)
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, format!("decode image: {e}")))?;
     let rgb = img.to_rgb8();
@@ -172,9 +148,9 @@ pub(crate) fn preprocess(bytes: &[u8]) -> io::Result<(Tensor, ScaleMeta)> {
             chw[ch * plane + y * side + x] = (f32::from(px.0[ch]) - 127.5) / 128.0;
         }
     }
-    // 同 mobilefacenet.preprocess：const 形状下 Err arm 不可达，map_err 让 caller 经 ? 传播。
+    // chw 定长 3*side*side（canvas.pixels() 固定 side²），shape 恒匹配。
     let tensor = tract_ndarray::Array4::from_shape_vec((1, 3, side, side), chw)
-        .map_err(|e| io::Error::other(format!("SCRFD preprocess shape: {e}")))?
+        .expect("internal: chw sized exactly 1*3*side*side")
         .into_tensor();
     #[expect(clippy::cast_precision_loss, reason = "pad ≤ 640，f32 精确")]
     let meta = ScaleMeta {

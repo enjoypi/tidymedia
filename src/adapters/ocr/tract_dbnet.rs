@@ -10,7 +10,6 @@
 //!   排除（CI 无模型不可触发）；本文件只装配 + 前/后处理 + fake 注入测试
 
 use std::io;
-use std::path::Path;
 use std::sync::Arc;
 
 use camino::Utf8Path;
@@ -18,7 +17,6 @@ use image::GenericImageView;
 use parking_lot::Mutex;
 use tract_onnx::prelude::*;
 
-use super::tract_dbnet_real::load_runnable;
 use crate::usecases::config::OcrConfig;
 use crate::usecases::ocr::TextDetector;
 
@@ -37,35 +35,11 @@ pub(crate) trait RawDetector: Send + Sync {
     fn run(&self, input: Tensor) -> io::Result<Tensor>;
 }
 
-/// 真实 tract `RunnableModel` 适配为 `RawDetector`：仅薄包一层，让前/后处理在
-/// 本文件保持单元测试可达，真实模型路径走 `_real.rs`（CI 不触发）。
-///
-/// 本 struct 与 `run` impl 仅在真实 ONNX 模型存在时才被构造（`ensure_raw` 中），
-/// CI 环境无模型文件不可触发；`run` 加 `coverage(off)`，struct 自身字段
-/// 由 `ensure_raw` 的 `coverage(off)` 间接排除（attribute 不能加在 struct 上）。
-struct TractRawDetector {
-    model: DetModel,
-}
-
-impl RawDetector for TractRawDetector {
-    fn run(&self, input: Tensor) -> io::Result<Tensor> {
-        let outputs = self
-            .model
-            .run(tvec!(input.into_tvalue()))
-            .map_err(|e| io::Error::other(format!("tract DBNet run failed: {e}")))?;
-        let first = outputs
-            .into_iter()
-            .next()
-            .ok_or_else(|| io::Error::other("tract DBNet returned no output tensor"))?;
-        Ok(first.into_tensor())
-    }
-}
-
 /// Detector 主体：持有 OCR 配置 + 懒加载模型。`Mutex<Option<...>>` 替代 nightly 的
 /// `OnceLock::get_or_try_init`；模型加载是 idempotent，竞态首次加载多次无副作用。
 pub struct TractDbnetDetector {
-    cfg: OcrConfig,
-    raw: Mutex<Option<Box<dyn RawDetector>>>,
+    pub(crate) cfg: OcrConfig,
+    pub(crate) raw: Mutex<Option<Box<dyn RawDetector>>>,
 }
 
 impl std::fmt::Debug for TractDbnetDetector {
@@ -94,15 +68,6 @@ impl TractDbnetDetector {
     // 始终因为 `with_raw` 提前注入 `Some(...)` 而 early return。逻辑由
     // `dispatch_returns_invalid_input_when_model_path_empty` + 真模型手动验证
     // （plan「验证」第 5 步）覆盖。
-    fn ensure_raw(&self) -> io::Result<()> {
-        let mut guard = self.raw.lock();
-        if guard.is_some() {
-            return Ok(());
-        }
-        let model = load_runnable(Path::new(&self.cfg.det_model_path))?;
-        *guard = Some(Box::new(TractRawDetector { model }));
-        Ok(())
-    }
 }
 
 impl TextDetector for TractDbnetDetector {
@@ -145,7 +110,8 @@ pub fn build_detector(cfg: &OcrConfig) -> io::Result<Box<dyn TextDetector>> {
 
 /// 把图像字节解码、resize 到 32 倍数短边、ImageNet normalize、HWC→CHW、add batch
 /// dim，返回 NCHW `[1, 3, H, W]` f32 Tensor。
-pub(crate) fn preprocess(bytes: &[u8], max_side: u32) -> io::Result<Tensor> {
+#[doc(hidden)]
+pub fn preprocess(bytes: &[u8], max_side: u32) -> io::Result<Tensor> {
     // ImageNet 归一化：DBNet 训练默认 mean=[0.485,0.456,0.406] std=[0.229,0.224,0.225]
     const MEAN: [f32; 3] = [0.485, 0.456, 0.406];
     const STD: [f32; 3] = [0.229, 0.224, 0.225];
@@ -216,18 +182,17 @@ fn align32(v: u32) -> u32 {
 ///
 /// `cast_to` / `as_slice` 失败时返 `io::Error::other`（Datum 类型不可转或非
 /// contiguous Array4；DBNet 实际输出 f32 sigmoid + contiguous，正常路径不会触发）。
-pub(crate) fn decide(
+#[doc(hidden)]
+pub fn decide(
     output: &Tensor,
     binarize_threshold: f32,
     min_text_pixel_ratio: f32,
 ) -> io::Result<bool> {
-    let cast = output
-        .cast_to::<f32>()
-        .map_err(|e| io::Error::other(format!("dbnet output cast: {e}")))?;
+    let cast = output.cast_to::<f32>().expect("numeric→f32 cast 恒成功");
     let view = cast.view();
     let slice = view
         .as_slice::<f32>()
-        .map_err(|e| io::Error::other(format!("dbnet output slice: {e}")))?;
+        .expect("cast 成功后 view 恒 contiguous");
     if slice.is_empty() {
         return Ok(false);
     }

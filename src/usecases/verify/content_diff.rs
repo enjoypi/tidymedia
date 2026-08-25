@@ -145,7 +145,9 @@ pub(crate) fn sha512_bytes(bytes: &[u8]) -> SecureHash {
 
 /// 按扩展名算「像素流熵」哈希：仅 JPEG SOS 之后 / PNG IDAT 拼接 / BMFF mdat payload，
 /// 忽略元数据差异。不支持或解析失败返 `None`。
-pub(crate) fn entropy_hash(bytes: &[u8], ext: &str) -> Option<SecureHash> {
+#[doc(hidden)]
+#[must_use]
+pub fn entropy_hash(bytes: &[u8], ext: &str) -> Option<SecureHash> {
     match ext {
         "jpg" | "jpeg" => jpeg_entropy_hash(bytes).or_else(|| png_idat_hash(bytes)),
         "png" => png_idat_hash(bytes).or_else(|| jpeg_entropy_hash(bytes)),
@@ -156,7 +158,9 @@ pub(crate) fn entropy_hash(bytes: &[u8], ext: &str) -> Option<SecureHash> {
 
 /// 旋转校正 pHash 相似：源图 4 向（0/90/180/270）与目标图比较，任一方向 Hamming
 /// ≤ `max_hamming` 且尺寸（允许旋转交换宽高）一致 → 相似。解码失败返 `false`。
-pub(crate) fn rotated_phash_similar(a: &[u8], b: &[u8], max_hamming: u8) -> bool {
+#[doc(hidden)]
+#[must_use]
+pub fn rotated_phash_similar(a: &[u8], b: &[u8], max_hamming: u8) -> bool {
     let (Ok(img_a), Ok(img_b)) = (image::load_from_memory(a), image::load_from_memory(b)) else {
         return false;
     };
@@ -176,7 +180,9 @@ pub(crate) fn rotated_phash_similar(a: &[u8], b: &[u8], max_hamming: u8) -> bool
         .any(|img| hamming(phash(img), h_b) <= u32::from(max_hamming))
 }
 
-fn jpeg_entropy_hash(bytes: &[u8]) -> Option<SecureHash> {
+#[doc(hidden)]
+#[must_use]
+pub fn jpeg_entropy_hash(bytes: &[u8]) -> Option<SecureHash> {
     if bytes.len() < 4 || bytes[0] != 0xFF || bytes[1] != 0xD8 {
         return None;
     }
@@ -213,7 +219,9 @@ fn jpeg_entropy_hash(bytes: &[u8]) -> Option<SecureHash> {
     None
 }
 
-fn png_idat_hash(bytes: &[u8]) -> Option<SecureHash> {
+#[doc(hidden)]
+#[must_use]
+pub fn png_idat_hash(bytes: &[u8]) -> Option<SecureHash> {
     const SIG: &[u8] = b"\x89PNG\r\n\x1a\n";
     if !bytes.starts_with(SIG) {
         return None;
@@ -236,7 +244,9 @@ fn png_idat_hash(bytes: &[u8]) -> Option<SecureHash> {
     found.then(|| h.finalize())
 }
 
-fn bmff_mdat_hash(bytes: &[u8]) -> Option<SecureHash> {
+#[doc(hidden)]
+#[must_use]
+pub fn bmff_mdat_hash(bytes: &[u8]) -> Option<SecureHash> {
     let mut h = Sha512::new();
     let mut found = false;
     let mut pos = 0;
@@ -267,7 +277,9 @@ fn bmff_mdat_hash(bytes: &[u8]) -> Option<SecureHash> {
     found.then(|| h.finalize())
 }
 
-fn hash_rest(bytes: &[u8], from: usize) -> SecureHash {
+#[doc(hidden)]
+#[must_use]
+pub fn hash_rest(bytes: &[u8], from: usize) -> SecureHash {
     let mut h = Sha512::new();
     h.update(bytes.get(from..).unwrap_or(&[]));
     h.finalize()

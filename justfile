@@ -22,7 +22,7 @@ export CARGO_PROFILE_RELEASE_OPT_LEVEL := OPT
 CMD := 'C:\Windows\System32\cmd.exe'
 
 # 覆盖率 ignore-regex：与 CLAUDE.md「严格 100% 命令」单点同步
-COV_IGNORE := '(adapters/backend/[a-z]+_real\.rs|adapters/(ocr|face|classify)/tract_[a-z_]+\.rs)$'
+COV_IGNORE := '(adapters/backend/[a-z]+_real\.rs|adapters/(ocr|face|classify)/tract_[a-z_]+\.rs|_phantom\.rs)$'
 
 default:
     @just --list

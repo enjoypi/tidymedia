@@ -6,7 +6,25 @@ use std::path::Path;
 
 use tract_onnx::prelude::*;
 
-use super::tract_mobilefacenet::FacenetModel;
+use super::tract_mobilefacenet::{FacenetModel, RawFacenet, TractFacenetEmbedder};
+
+pub(crate) struct TractRawFacenet {
+    pub(crate) model: FacenetModel,
+}
+
+impl RawFacenet for TractRawFacenet {
+    fn run(&self, input: Tensor) -> io::Result<Tensor> {
+        let outputs = self
+            .model
+            .run(tvec!(input.into_tvalue()))
+            .map_err(|e| io::Error::other(format!("tract MobileFaceNet run failed: {e}")))?;
+        let first = outputs
+            .into_iter()
+            .next()
+            .expect("模型 run 成功必有输出 tensor");
+        Ok(first.into_tensor())
+    }
+}
 
 /// 读 ONNX → optimized → runnable，失败统一映射 `io::Error::Other`。
 ///
@@ -22,4 +40,24 @@ pub(crate) fn load_runnable(path: &Path) -> io::Result<FacenetModel> {
         .into_runnable()
         .map_err(|e| io::Error::other(format!("make MobileFaceNet runnable: {e}")))?;
     Ok(model)
+}
+
+impl TractFacenetEmbedder {
+    pub(crate) fn ensure_raw(&self) -> io::Result<&dyn RawFacenet> {
+        if let Some(r) = self.raw.get() {
+            return Ok(r.as_ref());
+        }
+        let _guard = self.load_lock.lock();
+        if let Some(r) = self.raw.get() {
+            return Ok(r.as_ref());
+        }
+        let model = load_runnable(Path::new(&self.cfg.facenet_model_path))?;
+        let boxed: Box<dyn RawFacenet> = Box::new(TractRawFacenet { model });
+        let _ = self.raw.set(boxed);
+        Ok(self
+            .raw
+            .get()
+            .expect("OnceLock set by self under load_lock")
+            .as_ref())
+    }
 }

@@ -8,7 +8,7 @@ use std::path::Path;
 
 use tract_onnx::prelude::*;
 
-use super::tract_scrfd::{INPUT_SIDE, RawScrfd, ScrfdModel};
+use super::tract_scrfd::{INPUT_SIDE, RawScrfd, ScrfdModel, TractScrfdDetector};
 use crate::usecases::face::FaceDetection;
 
 /// 读 ONNX → optimized → runnable。
@@ -38,10 +38,14 @@ pub(crate) struct TractRawScrfd {
 /// preprocess 阶段记录 letterbox scale + padding，让 postprocess 把 bbox 坐标
 /// 逆映射回原图。Copy + 按值传递避免共享可变状态。
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct ScaleMeta {
-    pub(crate) scale: f32,
-    pub(crate) pad_x: f32,
-    pub(crate) pad_y: f32,
+#[doc(hidden)]
+pub struct ScaleMeta {
+    #[doc(hidden)]
+    pub scale: f32,
+    #[doc(hidden)]
+    pub pad_x: f32,
+    #[doc(hidden)]
+    pub pad_y: f32,
 }
 
 impl RawScrfd for TractRawScrfd {
@@ -57,7 +61,10 @@ impl RawScrfd for TractRawScrfd {
 /// SCRFD-500M-bn-kps 三 stride（8/16/32）输出解 anchor + NMS。
 /// 输出 layout 假设：`[score_8, bbox_8, kps_8, score_16, bbox_16, kps_16, score_32, bbox_32, kps_32]`，
 /// 每个 score `[1, A, 1]`、bbox `[1, A, 4]`、kps `[1, A, 10]`，`A=grid_h*grid_w*num_anchors`。
-fn decode_outputs(
+/// `#[doc(hidden)]`：暴露给集成 e2e 直调畸形输入（`outputs.len()<9` / NaN / 越界），
+/// 这些分支真模型输出恒不触发。
+#[doc(hidden)]
+pub fn decode_outputs(
     outputs: &[TValue],
     score_threshold: f32,
     nms_iou: f32,
@@ -74,25 +81,27 @@ fn decode_outputs(
     }
     let mut detections = Vec::new();
     for (i, &stride) in STRIDES.iter().enumerate() {
-        let score_cow = outputs[i * 3].cast_to::<f32>().map_err(io::Error::other)?;
+        let score_cow = outputs[i * 3]
+            .cast_to::<f32>()
+            .expect("numeric→f32 cast 恒成功");
         let bbox_cow = outputs[i * 3 + 1]
             .cast_to::<f32>()
-            .map_err(io::Error::other)?;
+            .expect("numeric→f32 cast 恒成功");
         let kps_cow = outputs[i * 3 + 2]
             .cast_to::<f32>()
-            .map_err(io::Error::other)?;
+            .expect("numeric→f32 cast 恒成功");
         let score_view = score_cow.view();
         let bbox_view = bbox_cow.view();
         let kps_view = kps_cow.view();
         let score = score_view
             .as_slice::<f32>()
-            .map_err(|e| io::Error::other(format!("SCRFD score slice: {e}")))?;
+            .expect("cast 成功后 view 恒 contiguous");
         let bbox = bbox_view
             .as_slice::<f32>()
-            .map_err(|e| io::Error::other(format!("SCRFD bbox slice: {e}")))?;
+            .expect("cast 成功后 view 恒 contiguous");
         let kps = kps_view
             .as_slice::<f32>()
-            .map_err(|e| io::Error::other(format!("SCRFD kps slice: {e}")))?;
+            .expect("cast 成功后 view 恒 contiguous");
         let grid_side = INPUT_SIDE / stride;
         for gy in 0..grid_side {
             for gx in 0..grid_side {
@@ -153,7 +162,9 @@ fn decode_outputs(
     Ok(nms(detections, nms_iou))
 }
 
-fn nms(mut dets: Vec<FaceDetection>, iou_threshold: f32) -> Vec<FaceDetection> {
+#[doc(hidden)]
+#[must_use]
+pub fn nms(mut dets: Vec<FaceDetection>, iou_threshold: f32) -> Vec<FaceDetection> {
     dets.sort_by(|a, b| {
         b.score
             .partial_cmp(&a.score)
@@ -169,7 +180,9 @@ fn nms(mut dets: Vec<FaceDetection>, iou_threshold: f32) -> Vec<FaceDetection> {
     kept
 }
 
-fn iou(a: &[f32; 4], b: &[f32; 4]) -> f32 {
+#[doc(hidden)]
+#[must_use]
+pub fn iou(a: &[f32; 4], b: &[f32; 4]) -> f32 {
     let x1 = a[0].max(b[0]);
     let y1 = a[1].max(b[1]);
     let x2 = a[2].min(b[2]);
@@ -184,5 +197,31 @@ fn iou(a: &[f32; 4], b: &[f32; 4]) -> f32 {
         0.0
     } else {
         inter / union
+    }
+}
+
+impl TractScrfdDetector {
+    pub(crate) fn ensure_raw(&self) -> io::Result<&dyn RawScrfd> {
+        // 快路径：已 load 直接 OnceLock::get 无锁返。
+        if let Some(r) = self.raw.get() {
+            return Ok(r.as_ref());
+        }
+        // 慢路径：拿 load_lock 串行 load；双查避免 N worker 都 load 一次。
+        let _guard = self.load_lock.lock();
+        if let Some(r) = self.raw.get() {
+            return Ok(r.as_ref());
+        }
+        let model = load_runnable(Path::new(&self.cfg.scrfd_model_path))?;
+        let boxed: Box<dyn RawScrfd> = Box::new(TractRawScrfd {
+            model,
+            score_threshold: self.cfg.scrfd_score_threshold,
+            nms_iou: self.cfg.scrfd_nms_iou,
+        });
+        let _ = self.raw.set(boxed);
+        Ok(self
+            .raw
+            .get()
+            .expect("OnceLock set by self under load_lock")
+            .as_ref())
     }
 }

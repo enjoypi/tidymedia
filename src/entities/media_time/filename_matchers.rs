@@ -7,7 +7,7 @@ use chrono::NaiveDateTime;
 
 use super::{
     AT_DOTTED_LEN, CAMERA_PREFIX, MACOS_SCREENSHOT_PREFIX, MMEXPORT_PREFIX, PHONE_PREFIX,
-    PIXEL_PREFIX, QQ_EXPORT_PREFIX, SCREENSHOT_PREFIX, VIDEO_PHONE_PREFIX, WHATSAPP_IMAGE_PREFIX,
+    PIXEL_PREFIX, SCREENSHOT_PREFIX, VIDEO_PHONE_PREFIX, WHATSAPP_IMAGE_PREFIX,
     WHATSAPP_VIDEO_PREFIX, millis_str_to_candidate, naive_to_candidate,
 };
 use crate::entities::media_time::candidate::Candidate;
@@ -80,56 +80,10 @@ fn dashed_window_shape_ok(w: &[u8]) -> bool {
     })
 }
 
-/// 括号内紧凑时戳：`IMG_6489(20210611-174530)(1).jpg` 的 `(yyyyMMdd-HHmmss)`。
-/// `(N)` 序号后缀仅 3 字节，不匹配 15 字节窗口形状（8 数字 + `-` + 6 数字 + `)`）
-/// 天然跳过，无需单独剥。扫描所有 `(`，命中合法日期即返。
-pub(super) fn try_parenthesized_compact(
-    stem: &str,
-    default_offset: FixedOffset,
-) -> Option<Candidate> {
-    const INNER_LEN: usize = 15; // yyyyMMdd-HHmmss
-    let bytes = stem.as_bytes();
-    for (i, &b) in bytes.iter().enumerate() {
-        if b != b'(' {
-            continue;
-        }
-        let inner = i + 1;
-        let end = inner + INNER_LEN;
-        let Some(window) = bytes.get(inner..end) else {
-            continue;
-        };
-        let shape_ok = window[..8].iter().all(u8::is_ascii_digit)
-            && window[8] == b'-'
-            && window[9..].iter().all(u8::is_ascii_digit);
-        if !shape_ok || bytes.get(end) != Some(&b')') {
-            continue;
-        }
-        // 形状匹配的窗口全 ASCII，str 切片落在 char 边界
-        if let Ok(naive) = NaiveDateTime::parse_from_str(&stem[inner..end], "%Y%m%d-%H%M%S") {
-            return Some(naive_to_candidate(
-                naive,
-                default_offset,
-                Source::FilenameBracketedCompact,
-            ));
-        }
-    }
-    None
-}
-
-/// QQ 导出：`QQ图片<14-digit YYYYMMDDHHMMSS>`。14 位秒粒度连续无分隔；
-/// `millis_str_to_candidate` 硬校验 13 位（`try_unix_millis` 不误吞）。
-pub(super) fn try_qq_export(stem: &str, default_offset: FixedOffset) -> Option<Candidate> {
-    let rest = stem.strip_prefix(QQ_EXPORT_PREFIX)?;
-    if rest.len() != 14 || !rest.bytes().all(|b| b.is_ascii_digit()) {
-        return None;
-    }
-    let naive = NaiveDateTime::parse_from_str(rest, "%Y%m%d%H%M%S").ok()?;
-    Some(naive_to_candidate(
-        naive,
-        default_offset,
-        Source::FilenameQqExport,
-    ))
-}
+#[path = "filename_matchers_phantom.rs"]
+mod phantom;
+#[doc(hidden)]
+pub(crate) use self::phantom::{try_parenthesized_compact, try_qq_export};
 
 pub(super) fn try_camera_or_phone(stem: &str, default_offset: FixedOffset) -> Option<Candidate> {
     let (rest, source) = stem

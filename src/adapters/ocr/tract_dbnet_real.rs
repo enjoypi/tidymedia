@@ -11,7 +11,25 @@ use std::path::Path;
 
 use tract_onnx::prelude::*;
 
-use super::tract_dbnet::DetModel;
+use super::tract_dbnet::{DetModel, RawDetector, TractDbnetDetector};
+
+pub(crate) struct TractRawDetector {
+    pub(crate) model: DetModel,
+}
+
+impl RawDetector for TractRawDetector {
+    fn run(&self, input: Tensor) -> io::Result<Tensor> {
+        let outputs = self
+            .model
+            .run(tvec!(input.into_tvalue()))
+            .map_err(|e| io::Error::other(format!("tract DBNet run failed: {e}")))?;
+        let first = outputs
+            .into_iter()
+            .next()
+            .expect("模型 run 成功必有输出 tensor");
+        Ok(first.into_tensor())
+    }
+}
 
 /// 读 ONNX 文件 → `TypedModel`（不调 `into_optimized`）→ `Arc<RunnableModel>`。
 ///
@@ -33,4 +51,16 @@ pub(crate) fn load_runnable(path: &Path) -> io::Result<DetModel> {
         .into_runnable()
         .map_err(|e| io::Error::other(format!("make DBNet runnable: {e}")))?;
     Ok(model)
+}
+
+impl TractDbnetDetector {
+    pub(crate) fn ensure_raw(&self) -> io::Result<()> {
+        let mut guard = self.raw.lock();
+        if guard.is_some() {
+            return Ok(());
+        }
+        let model = load_runnable(Path::new(&self.cfg.det_model_path))?;
+        *guard = Some(Box::new(TractRawDetector { model }));
+        Ok(())
+    }
 }

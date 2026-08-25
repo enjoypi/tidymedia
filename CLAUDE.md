@@ -45,7 +45,7 @@
 ## 测试与覆盖率
 - **门槛 region/function/line/branch 四项全 100%**（Linux + `--all-features` + `--branch`）；**任何存量 miss 归属判定**（平台差异 / 疑似非本次引入）：同 filter `git stash -u`（含 untracked 新文件）对照 main HEAD 跑一遍
 - **macOS 本机覆盖率已知缺口（勿追，Linux CI 口径 100%）**：`local.rs` 非 UTF-8 `?` edge（APFS 强制文件名 UTF-8，`fs::write` 返 EILSEQ 无法造 fixture）+ `remote.rs`/`entities/backend/mod.rs` 泛型 instance 宏 micro-region，main 基线即如此
-- 严格 100% 命令：`RUSTFLAGS="--cfg=coverage_nightly" cargo +nightly llvm-cov --release nextest --summary-only --branch --ignore-filename-regex='(adapters/backend/[a-z]+_real\.rs|adapters/(ocr|face|classify)/tract_[a-z_]+\.rs)$' --all-features`
+- 严格 100% 命令：`RUSTFLAGS="--cfg=coverage_nightly" cargo +nightly llvm-cov --release nextest --summary-only --branch --ignore-filename-regex='(adapters/backend/[a-z]+_real\.rs|adapters/(ocr|face|classify)/tract_[a-z_]+\.rs|_phantom\.rs)$' --all-features`；`_phantom.rs` 是 per-instance phantom branch 所在函数的独立文件（函数已 100% 覆盖但某 instance 分支计 0，无法测试补，独立后整文件排除）
 - `lib.rs`/`bin/tidymedia.rs` 顶 `#![cfg_attr(coverage_nightly, feature(coverage_attribute))]`；`[lints.rust] unexpected_cfgs` 注册
 - **覆盖率排除三组**：① `adapters/backend/*_real.rs`（大 + 需真环境）走 ignore-regex；② `adapters/(ocr|face)/tract_*_real.rs`（小）走 `#[coverage(off)]`；③ 主体 `tract_dbnet.rs` / `tract_{4face}.rs` / `tract_embed*.rs` 走 ignore-regex
 - **子行 region miss 定位**：`llvm-cov report --release --text` 复用 profdata（`report` 不接 `--all-features`），`^0` 即 miss；branch miss 过滤 `BRDA` 第 4 字段 0；**function miss 用 `--lcov` 的 `FNDA:0`**（mangled 名可辨 closure/泛型；per-instance 有噪声，跨 instance 全 0 才是真 miss，summary 合并数为权威）

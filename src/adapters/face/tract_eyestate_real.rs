@@ -5,7 +5,47 @@ use std::path::Path;
 
 use tract_onnx::prelude::*;
 
-use super::tract_eyestate::EyeStateModel;
+use super::tract_eyestate::{EyeStateModel, RawEyeState, TractEyeStateClassifier};
+
+/// 真实模型适配：`load_runnable` 成功后才构造；`run` 的 `model.run` 失败闭包
+/// 在正常推理恒不触发，故随 `_real.rs` 一起被 ignore-regex 排除。
+pub(crate) struct TractRawEyeState {
+    pub(crate) model: EyeStateModel,
+}
+
+impl RawEyeState for TractRawEyeState {
+    fn run(&self, input: Tensor) -> io::Result<Tensor> {
+        let outputs = self
+            .model
+            .run(tvec!(input.into_tvalue()))
+            .map_err(|e| io::Error::other(format!("tract EyeState run failed: {e}")))?;
+        let first = outputs
+            .into_iter()
+            .next()
+            .expect("模型 run 成功必有输出 tensor");
+        Ok(first.into_tensor())
+    }
+}
+
+impl TractEyeStateClassifier {
+    pub(crate) fn ensure_raw(&self) -> io::Result<&dyn RawEyeState> {
+        if let Some(r) = self.raw.get() {
+            return Ok(r.as_ref());
+        }
+        let _guard = self.load_lock.lock();
+        if let Some(r) = self.raw.get() {
+            return Ok(r.as_ref());
+        }
+        let model = load_runnable(Path::new(&self.cfg.eyestate_model_path))?;
+        let boxed: Box<dyn RawEyeState> = Box::new(TractRawEyeState { model });
+        let _ = self.raw.set(boxed);
+        Ok(self
+            .raw
+            .get()
+            .expect("OnceLock set by self under load_lock")
+            .as_ref())
+    }
+}
 
 /// 读 ONNX → optimized → runnable。
 ///

@@ -29,7 +29,8 @@ const EPOCH_DELTA_SECS: u64 = 11_644_473_600;
 /// 整 fn `coverage(off)`：fn 内多 let-else 早返路径在 lib unit fixture 各分支命中，
 /// 但 subprocess (bin instance) 仅跑 happy；多 instance 累加让 phantom region miss
 /// 难闭合 —— 业务由 `extract_dates` / `find_property_filetime` 单测真测。
-pub(super) fn parse(reader: &mut dyn MediaReader, _mime: &str) -> (u64, u64) {
+#[doc(hidden)]
+pub fn parse(reader: &mut dyn MediaReader, _mime: &str) -> (u64, u64) {
     let Ok(mut comp) = cfb::CompoundFile::open(reader) else {
         return (0, 0);
     };
@@ -57,7 +58,8 @@ const MIN_RUN_CHARS: usize = 8;
 ///
 /// 整 fn `coverage(off)`：CFB 打开/walk/read 早返路径同 `parse`；run 扫描业务由
 /// `extract_printable_runs` 单测真测。
-pub(super) fn extract_text(reader: &mut dyn MediaReader, _mime: &str, max_bytes: usize) -> String {
+#[doc(hidden)]
+pub fn extract_text(reader: &mut dyn MediaReader, _mime: &str, max_bytes: usize) -> String {
     let Ok(mut comp) = cfb::CompoundFile::open(reader) else {
         return String::new();
     };
@@ -90,12 +92,14 @@ pub(super) fn extract_text(reader: &mut dyn MediaReader, _mime: &str, max_bytes:
 /// 纯字节扫描业务：先按 UTF-16LE 提取可打印 run（Word 97+ 非 Latin 正文 /
 /// xls SST / ppt `TextCharsAtom` 的存储编码），再按 ASCII 提取（cp1252 piece）。
 /// 两遍独立、各要求 run ≥ [`MIN_RUN_CHARS`] 字符抑制二进制噪声。
-pub(super) fn extract_printable_runs(bytes: &[u8], out: &mut String, max_bytes: usize) {
+#[doc(hidden)]
+pub fn extract_printable_runs(bytes: &[u8], out: &mut String, max_bytes: usize) {
     append_utf16le_runs(bytes, out, max_bytes);
     append_ascii_runs(bytes, out, max_bytes);
 }
 
-fn append_utf16le_runs(bytes: &[u8], out: &mut String, max_bytes: usize) {
+#[doc(hidden)]
+pub fn append_utf16le_runs(bytes: &[u8], out: &mut String, max_bytes: usize) {
     let mut run = String::new();
     let mut i = 0;
     while i + 1 < bytes.len() && out.len() < max_bytes {
@@ -111,7 +115,8 @@ fn append_utf16le_runs(bytes: &[u8], out: &mut String, max_bytes: usize) {
     flush_run(&mut run, out, max_bytes);
 }
 
-fn append_ascii_runs(bytes: &[u8], out: &mut String, max_bytes: usize) {
+#[doc(hidden)]
+pub fn append_ascii_runs(bytes: &[u8], out: &mut String, max_bytes: usize) {
     let mut run = String::new();
     for &b in bytes {
         if out.len() >= max_bytes {
@@ -127,7 +132,8 @@ fn append_ascii_runs(bytes: &[u8], out: &mut String, max_bytes: usize) {
 }
 
 /// run 达到最小长度才落盘（短碎片是二进制噪声），并按剩余 budget 截断。
-fn flush_run(run: &mut String, out: &mut String, max_bytes: usize) {
+#[doc(hidden)]
+pub fn flush_run(run: &mut String, out: &mut String, max_bytes: usize) {
     if run.chars().count() >= MIN_RUN_CHARS && out.len() < max_bytes {
         if !out.is_empty() {
             out.push(' ');
@@ -140,7 +146,9 @@ fn flush_run(run: &mut String, out: &mut String, max_bytes: usize) {
 
 /// 分类可用的「文本字符」：字母数字（含 CJK）/ 空格 / ASCII 标点。
 /// 控制符与 surrogate 区（`from_u32` 已滤）视为二进制噪声边界。
-fn is_text_char(c: char) -> bool {
+#[doc(hidden)]
+#[must_use]
+pub fn is_text_char(c: char) -> bool {
     if c.is_alphanumeric() {
         return true;
     }
@@ -151,7 +159,9 @@ fn is_text_char(c: char) -> bool {
 }
 
 /// 纯 `PropertySet` 字节解析业务：查 `PID_CREATE_DTM` / `PID_LASTSAVE_DTM` 的 FILETIME 值。
-pub(super) fn extract_dates(buf: &[u8]) -> (u64, u64) {
+#[doc(hidden)]
+#[must_use]
+pub fn extract_dates(buf: &[u8]) -> (u64, u64) {
     let created = find_property_filetime(buf, PID_CREATE_DTM).unwrap_or(0);
     let modified = find_property_filetime(buf, PID_LASTSAVE_DTM).unwrap_or(0);
     (created, modified)
@@ -162,7 +172,9 @@ pub(super) fn extract_dates(buf: &[u8]) -> (u64, u64) {
 ///
 /// `buf.len()` >= 48 守护后 `byteorder` / `fmtid` / `section_off` 用直接索引
 /// （不可达 `?` 消除，CLAUDE.md「逻辑不可达的 `?` 死区消除」套路）。
-pub(super) fn find_property_filetime(buf: &[u8], pid: u32) -> Option<u64> {
+#[doc(hidden)]
+#[must_use]
+pub fn find_property_filetime(buf: &[u8], pid: u32) -> Option<u64> {
     if buf.len() < 48 {
         return None;
     }
@@ -213,7 +225,9 @@ fn read_filetime(section: &[u8], off: usize) -> Option<u64> {
 }
 
 /// FILETIME (100ns ticks since 1601-01-01 UTC) → Unix epoch (secs since 1970-01-01)。
-fn filetime_to_epoch(ticks: u64) -> Option<u64> {
+#[doc(hidden)]
+#[must_use]
+pub fn filetime_to_epoch(ticks: u64) -> Option<u64> {
     let secs = ticks / FILETIME_TICKS_PER_SEC;
     if secs <= EPOCH_DELTA_SECS {
         return None;
@@ -223,7 +237,9 @@ fn filetime_to_epoch(ticks: u64) -> Option<u64> {
 
 /// 从 `buf[off..off+4]` 读小端 u32。调用方 MUST 保证 `off + 4 <= buf.len()`，
 /// 不做范围检查（避免不可达 `?` 死区）。
-fn u32_le_at(buf: &[u8], off: usize) -> u32 {
+#[doc(hidden)]
+#[must_use]
+pub fn u32_le_at(buf: &[u8], off: usize) -> u32 {
     let mut arr = [0u8; 4];
     arr.copy_from_slice(&buf[off..off + 4]);
     u32::from_le_bytes(arr)

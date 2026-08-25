@@ -21,5 +21,7 @@ mod score;
 mod sharpness;
 mod util;
 
+#[doc(hidden)]
+pub use group_writer::best_effort_remove_partial_dst;
 pub use report::{CullReport, CulledEntry, GroupReport, ScoreBreakdown};
 pub use run::cull;

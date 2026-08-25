@@ -152,3 +152,54 @@ fn millis_to_secs_rejects_sub_day_and_converts() {
     assert_eq!(millis_to_secs(86_400_000), Some(86_400));
     assert_eq!(millis_to_secs(1_700_000_000_000), Some(1_700_000_000));
 }
+
+#[test]
+fn extract_text_uses_xml_and_json_fallback() {
+    use std::io::{Cursor, Write};
+    fn zip_bytes(files: &[(&str, &[u8])]) -> Vec<u8> {
+        let mut w = zip::ZipWriter::new(Cursor::new(Vec::new()));
+        for (name, data) in files {
+            w.start_file(
+                *name,
+                zip::write::SimpleFileOptions::default()
+                    .compression_method(zip::CompressionMethod::Stored),
+            )
+            .expect("start zip entry");
+            w.write_all(data).expect("write zip entry");
+        }
+        w.finish().expect("finish zip").into_inner()
+    }
+
+    let xml_zip = zip_bytes(&[("content.xml", b"<a>from xml</a>")]);
+    let mut reader = Cursor::new(xml_zip);
+    assert_eq!(extract_text(&mut reader, MIME_XMIND, 64), "from xml");
+
+    let json_zip = zip_bytes(&[("content.json", br#"{"title":"from json"}"#)]);
+    let mut reader = Cursor::new(json_zip);
+    assert_eq!(extract_text(&mut reader, MIME_XMIND, 64), "from json");
+}
+
+#[test]
+fn extract_text_invalid_or_entryless_yields_empty() {
+    use std::io::{Cursor, Write};
+    fn zip_bytes(files: &[(&str, &[u8])]) -> Vec<u8> {
+        let mut w = zip::ZipWriter::new(Cursor::new(Vec::new()));
+        for (name, data) in files {
+            w.start_file(
+                *name,
+                zip::write::SimpleFileOptions::default()
+                    .compression_method(zip::CompressionMethod::Stored),
+            )
+            .expect("start zip entry");
+            w.write_all(data).expect("write zip entry");
+        }
+        w.finish().expect("finish zip").into_inner()
+    }
+
+    let mut bad = Cursor::new(b"not a zip".to_vec());
+    assert_eq!(extract_text(&mut bad, MIME_XMIND, 64), "");
+
+    let empty = zip_bytes(&[("other.txt", b"x")]);
+    let mut reader = Cursor::new(empty);
+    assert_eq!(extract_text(&mut reader, MIME_XMIND, 64), "");
+}

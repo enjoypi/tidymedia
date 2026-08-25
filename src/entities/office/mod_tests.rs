@@ -92,6 +92,18 @@ fn xmind_mime_routes_to_mindmap_zip_stub() {
 }
 
 #[test]
+fn xmind_valid_zip_routes_to_mindmap_zip() {
+    let z = make_zip(&[("metadata.json", br#"{"created": 1487068200000}"#.as_slice())]);
+    assert_eq!(route(&z, MIME_XMIND), (1_487_068_200, 0));
+}
+
+#[test]
+fn xmind_zip_without_metadata_returns_zeros() {
+    let z = make_zip(&[("content.xml", b"<topic/>".as_slice())]);
+    assert_eq!(route(&z, MIME_XMIND), (0, 0));
+}
+
+#[test]
 fn xmind_alt_mime_routes_to_mindmap_zip_stub() {
     assert_eq!(route(b"PK", MIME_XMIND_ALT), (0, 0));
 }
@@ -265,6 +277,12 @@ fn iwork_returns_empty_known_limitation() {
 #[test]
 fn rtf_routes_to_strip_rtf() {
     assert_eq!(route_text(b"{\\rtf1 body}", MIME_RTF_APP), "body");
+}
+
+#[test]
+fn rtf_text_mime_routes_to_strip_rtf() {
+    // MIME_RTF_TEXT 触发 `mime == MIME_RTF_TEXT` 第二个短路 arm。
+    assert_eq!(route_text(b"{\\rtf1 body}", MIME_RTF_TEXT), "body");
 }
 
 #[test]

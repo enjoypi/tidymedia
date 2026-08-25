@@ -199,7 +199,9 @@ fn lookup_tsv<'a>(rows: &'a [ExifRow], path: &str) -> Option<&'a ExifRow> {
 
 // 剥 source 根前缀得相对路径（skill 的 SOURCE_ROOT 语义），避免根目录年份段污染
 // 文件名/路径日期解析；剥不掉时回退 basename。
-fn strip_source_root(full: &str, roots: &[String]) -> String {
+#[doc(hidden)]
+#[must_use]
+pub fn strip_source_root(full: &str, roots: &[String]) -> String {
     let norm = normalize_sep(full);
     for r in roots {
         let root = normalize_sep(r).trim_end_matches('/').to_owned();
@@ -210,9 +212,10 @@ fn strip_source_root(full: &str, roots: &[String]) -> String {
             }
         }
     }
-    std::path::Path::new(full)
-        .file_name()
-        .map_or_else(|| full.to_owned(), |f| f.to_string_lossy().into_owned())
+    match std::path::Path::new(full).file_name() {
+        Some(f) => f.to_string_lossy().into_owned(),
+        None => full.to_owned(),
+    }
 }
 
 #[cfg(test)]

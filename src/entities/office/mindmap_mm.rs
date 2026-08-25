@@ -14,7 +14,8 @@ const ATTR_CREATED: &[u8] = b"CREATED=\"";
 const ATTR_MODIFIED: &[u8] = b"MODIFIED=\"";
 
 /// 入口：读 reader 前 64 KB 后扫描首个 `<node>` 内 CREATED/MODIFIED。
-pub(super) fn parse(reader: &mut dyn MediaReader, _mime: &str) -> (u64, u64) {
+#[doc(hidden)]
+pub fn parse(reader: &mut dyn MediaReader, _mime: &str) -> (u64, u64) {
     let mut buf = Vec::with_capacity(MM_SCAN_BYTES);
     let mut limited = reader.take(MM_SCAN_BYTES as u64);
     if limited.read_to_end(&mut buf).is_err() {
@@ -24,7 +25,8 @@ pub(super) fn parse(reader: &mut dyn MediaReader, _mime: &str) -> (u64, u64) {
 }
 
 /// 纯字节扫描业务：找首个 `<node ...>` 后的 CREATED / MODIFIED 属性，millis 转 secs。
-pub(super) fn extract_dates(buf: &[u8]) -> (u64, u64) {
+#[doc(hidden)]
+pub fn extract_dates(buf: &[u8]) -> (u64, u64) {
     let Some(node_start) = find_subslice(buf, TAG_NODE_OPEN) else {
         return (0, 0);
     };
@@ -49,7 +51,8 @@ const ATTR_TEXT: &[u8] = b"TEXT=\"";
 ///
 /// 整 fn `coverage(off)`：read 入口 Err arm 同 `parse`；业务由
 /// `collect_text_attrs` 单测真测。
-pub(super) fn extract_text(reader: &mut dyn MediaReader, _mime: &str, max_bytes: usize) -> String {
+#[doc(hidden)]
+pub fn extract_text(reader: &mut dyn MediaReader, _mime: &str, max_bytes: usize) -> String {
     let mut buf = Vec::with_capacity(MM_TEXT_INPUT_CAP);
     let mut limited = reader.take(MM_TEXT_INPUT_CAP as u64);
     if limited.read_to_end(&mut buf).is_err() {
@@ -61,7 +64,8 @@ pub(super) fn extract_text(reader: &mut dyn MediaReader, _mime: &str, max_bytes:
 }
 
 /// 纯字节扫描业务：收集所有 `TEXT="..."` 属性值（XML 实体原样保留）。
-pub(super) fn collect_text_attrs(buf: &[u8], out: &mut String, max_bytes: usize) {
+#[doc(hidden)]
+pub fn collect_text_attrs(buf: &[u8], out: &mut String, max_bytes: usize) {
     let mut pos = 0;
     while out.len() < max_bytes {
         let Some(rel) = find_subslice(&buf[pos..], ATTR_TEXT) else {

@@ -8,7 +8,8 @@
 // - `config_models`：全部 Config 子结构体 + Default impl
 // - 本文件：`Config` 主结构体 + OnceLock + 全局访问器 + 时区/模板工具
 
-use std::sync::OnceLock;
+use std::sync::Mutex;
+use std::sync::PoisonError;
 
 use chrono::{FixedOffset, Offset, Utc};
 use serde_derive::Deserialize;
@@ -23,20 +24,38 @@ pub use config_models::{
     FaceConfig, LogConfig, OcrConfig, SmbBackendConfig,
 };
 
-static CONFIG: OnceLock<Config> = OnceLock::new();
-static LOADER: OnceLock<fn() -> Config> = OnceLock::new();
+// `Mutex<Option<&'static Config>>` + `Box::leak`：config()` 永远返回可被安全解引用的
+// `&'static Config`（leak 后永活，reset 只换当前指针，旧引用仍指向旧配置、不悬垂）；
+// 比 `OnceLock` 多一个测试可用的重载入口，且无 unsafe。
+static CONFIG: Mutex<Option<&'static Config>> = Mutex::new(None);
+static LOADER: Mutex<Option<fn() -> Config>> = Mutex::new(None);
 
 /// 全局只读配置；首次访问时取 [`LOADER`] 加载，未装则用 [`Config::default`]。
 /// CLI / FFI 启动期 MUST 先调 `crate::install_config_loader()`，否则用户的
 /// yaml 不会生效。
 pub fn config() -> &'static Config {
-    CONFIG.get_or_init(|| LOADER.get().map_or_else(Config::default, |f| f()))
+    let mut guard = CONFIG.lock().unwrap_or_else(PoisonError::into_inner);
+    guard.get_or_insert_with(|| {
+        let ldr = LOADER.lock().unwrap_or_else(PoisonError::into_inner);
+        let loader: Option<fn() -> Config> = *ldr;
+        Box::leak(Box::new(loader.map_or_else(Config::default, |f| f())))
+    })
 }
 
-/// 一次性注入加载器（fn pointer）；frameworks 层调用，依赖倒置入口。
-/// 多次调用静默忽略后续（OnceLock 语义）。
+/// 注入加载器（fn pointer）；frameworks 层调用，依赖倒置入口。
+/// 重复调用覆盖旧 loader（生产只调用一次；测试依赖覆盖语义）。
 pub fn install_loader(loader: fn() -> Config) {
-    let _ = LOADER.set(loader);
+    *LOADER.lock().unwrap_or_else(PoisonError::into_inner) = Some(loader);
+}
+
+/// 测试专用：丢弃当前缓存的 config 与 loader，令下一次 [`config`] 按新的
+/// `TIDYMEDIA_CONFIG` env 重新加载。`write_temp_config` 这类每测试换 yaml 的
+/// 场景在共享进程（cargo test）下必须先调用再 `set_var` + `install_config_loader`。
+/// 旧 `&'static Config` 引用仍有效（Box::leak 永活），无悬垂；仅测试使用。
+#[doc(hidden)]
+pub fn reset_config_loader() {
+    *CONFIG.lock().unwrap_or_else(PoisonError::into_inner) = None;
+    *LOADER.lock().unwrap_or_else(PoisonError::into_inner) = None;
 }
 
 // 时区 offset 单点：copy / move / verify 共用同一份 `timezone_offset_hours` 配置。

@@ -12,6 +12,7 @@ const INFLATE_OUTPUT_CAP: usize = 2 * 1024 * 1024;
 
 /// 纯字节扫描业务：遍历 `stream`/`endstream` 对，按前导字典是否含
 /// `/FlateDecode` 决定解压，再收集 `BT…ET` 文本块内的字符串字面量。
+#[must_use]
 pub fn extract_text_from_buf(buf: &[u8], max_bytes: usize) -> String {
     let mut out = String::new();
     let mut pos = 0;
@@ -124,3 +125,7 @@ pub(super) fn skip_stream_eol(buf: &[u8], mut i: usize) -> usize {
     }
     i
 }
+
+#[cfg(test)]
+#[path = "pdf_text_tests.rs"]
+mod tests;

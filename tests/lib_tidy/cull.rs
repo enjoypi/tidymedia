@@ -19,6 +19,9 @@ fn write_temp_config(
     facemesh: &str,
     eyestate: &str,
 ) -> tempfile::TempDir {
+    // 重建全局 config：cargo test 共享进程下必须先 reset，再 set_var + install，
+    // 否则 OnceLock 沿用首个测试的 yaml（nextest 每测试独立进程无需此步）。
+    tidymedia::reset_config_loader();
     let dir = tempdir().unwrap();
     let cfg_path = dir.path().join("config.yaml");
     let yaml = format!(

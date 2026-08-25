@@ -116,3 +116,5 @@ mod copy_move_doc;
 
 #[path = "lib_tidy/verify.rs"]
 mod verify;
+#[path = "lib_tidy/verify_content.rs"]
+mod verify_content;

@@ -25,17 +25,16 @@ mod text;
 pub(super) use dates::extract_dates;
 #[cfg(test)]
 pub(super) use dates::parse_pdf_d_format;
-#[cfg(test)]
-pub(super) use text::collect_string_literals;
-pub(super) use text::extract_text_from_buf;
+#[doc(hidden)]
+pub use text::collect_string_literals;
+#[doc(hidden)]
+pub use text::extract_text_from_buf;
 
 // 上述四者为 office 公开面（`extract_dates` / `extract_text_from_buf` 生产消费，
 // 另两个仅 pdf_tests.rs 经 `use super::*` 引用）。以下私有 helper 同样仅测试构建
 // 导入，避免生产 unused_imports；子模块内声明为 `pub(super)`，作用域仍限 pdf 内。
 #[cfg(test)]
 use dates::{parse_pair, parse_tz_offset, scan_d_date_after_key};
-#[cfg(test)]
-use text::{inflate_capped, skip_stream_eol};
 
 /// PDF 字节扫描单窗口大小；头尾各一个窗口。
 const PDF_SCAN_BYTES: u64 = 64 * 1024;
@@ -47,7 +46,8 @@ const PDF_SCAN_BYTES: u64 = 64 * 1024;
 /// 整 fn `coverage(off)`：seek/read Err arm 只能用 lib unit `FailRead` 注入触发，
 /// subprocess bin instance 永远走 OK arm，多 instance 累加 phantom miss。
 /// 窗口划分由纯 fn `scan_windows` 单测真测。
-pub(super) fn parse(reader: &mut dyn MediaReader, _mime: &str) -> (u64, u64) {
+#[doc(hidden)]
+pub fn parse(reader: &mut dyn MediaReader, _mime: &str) -> (u64, u64) {
     let Some(buf) = read_windows(reader) else {
         return (0, 0);
     };
@@ -56,7 +56,9 @@ pub(super) fn parse(reader: &mut dyn MediaReader, _mime: &str) -> (u64, u64) {
 
 /// 纯窗口划分：`size ≤ 2×64 KB` 整读单窗口（无重叠重复解析）；更大文件头尾各
 /// 64 KB 两段不相交窗口。
-pub(super) fn scan_windows(size: u64) -> (Range<u64>, Option<Range<u64>>) {
+#[doc(hidden)]
+#[must_use]
+pub fn scan_windows(size: u64) -> (Range<u64>, Option<Range<u64>>) {
     if size <= 2 * PDF_SCAN_BYTES {
         (0..size, None)
     } else {
@@ -95,7 +97,8 @@ const PDF_TEXT_INPUT_CAP: usize = 4 * 1024 * 1024;
 ///
 /// 整 fn `coverage(off)`：read 入口 Err arm 同 `parse`；扫描业务由
 /// `extract_text_from_buf` 单测真测。
-pub(super) fn extract_text(reader: &mut dyn MediaReader, _mime: &str, max_bytes: usize) -> String {
+#[doc(hidden)]
+pub fn extract_text(reader: &mut dyn MediaReader, _mime: &str, max_bytes: usize) -> String {
     let mut buf = Vec::new();
     let mut limited = reader.take(PDF_TEXT_INPUT_CAP as u64);
     if limited.read_to_end(&mut buf).is_err() {

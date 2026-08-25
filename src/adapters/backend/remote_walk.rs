@@ -5,14 +5,11 @@
 //! `walk` / `mkdir_p` / `open_write` / `copy_file` 骨架；`map_and_log` 是全部远端
 //! op 失败的结构化日志单点（非泛型，只编译一份）。
 
-use std::collections::HashSet;
 use std::io;
 use std::sync::Arc;
 
 use camino::Utf8Path;
 use tracing::{debug, warn};
-
-use crate::entities::backend::{Entry, EntryKind};
 
 use super::{RemoteAdapter, RemoteClient, RemoteTarget};
 
@@ -72,83 +69,10 @@ pub(super) fn mkparent<A: RemoteAdapter>(
     }
 }
 
-/// best-effort：父目录创建失败由随后的 write/copy 自身报错；R3 要求所有外部调用
-/// 输出结构化日志，否则运维拿到的「写入 ENOENT」缺父目录创建失败上下文。
-/// 抽独立 fn + `coverage(off)`：debug! 宏 closure-form micro-region 在 release
-/// default subscriber 不订阅 debug 时永 0-hit，与 CLAUDE.md「tracing macro micro-region」
-/// 套路一致；调用方的 `if let Err` 分支由 `open_write_mkparent_failure_swallowed_to_debug_log`
-/// 等测试覆盖。
-pub(super) fn log_mkparent_err<A: RemoteAdapter>(parent: &A::Target, e: &io::Error) {
-    debug!(
-        feature = "backend",
-        scheme = A::scheme(),
-        operation = "mkparent",
-        path = %parent.path(),
-        result = "error",
-        error = %e,
-        "mkparent best-effort failed; subsequent write will surface error"
-    );
-}
-
-/// 递归扫描远端目录树，把所有 entry（含 Dir，与 `LocalBackend::walk` 行为对齐）收集到 `out`。
-/// 单 list 失败即记 Err 不再下钻该子树；其余子树继续以"尽力而为"语义扫描。
-///
-/// **显式栈迭代（非递归）**：远端 Time Machine / rsync `--link-dest` 类深层备份
-/// 目录树可达数千层，递归调用会消耗线程栈（每帧 KB 级 + Vec 分配）致 SIGSEGV，
-/// 尤其在 `io_pool` 工作线程（默认 8 MiB）上更易触发。改用堆上 `Vec<Target>` worklist
-/// 后深度只受堆内存约束，与 `LocalBackend::walk` 用 `ignore::WalkBuilder` (heap-based)
-/// 的稳定性对齐。
-pub(super) fn walk_recursive<A: RemoteAdapter>(
-    adapter: &A,
-    root: &A::Target,
-    out: &mut Vec<io::Result<Entry>>,
-) {
-    // symlink/junction 环防护：远端 FS（ADB Android /sdcard、SMB DFS/junction）
-    // 可能含循环 symlink 或挂载点回环，若 `kind_from_mode` 归类为 Dir → stack 无
-    // 限 push 同一子树致 Vec<Target> 堆爆 OOM。visited 按 path 字符串 dedup 让环
-    // 退化为 DAG。key 用 owned String（&Utf8Path 借用与 stack pop 生命周期冲突）；
-    // deep tree 内存开销 O(unique dirs) 可接受，比 SIGSEGV/OOM 好数量级。
-    // `LocalBackend::walk` 走 `ignore::WalkBuilder` 有 follow_links=false 缺省，此处对齐。
-    let mut stack: Vec<A::Target> = Vec::with_capacity(16);
-    let mut visited: HashSet<String> = HashSet::new();
-    stack.push(root.clone());
-    visited.insert(root.path().as_str().to_owned());
-    while let Some(target) = stack.pop() {
-        let listed = adapter
-            .client()
-            .list(&target)
-            .map_err(|e| map_and_log(A::scheme(), "list", target.path(), A::map_error, e));
-        let entries = match listed {
-            Ok(v) => v,
-            Err(e) => {
-                out.push(Err(e));
-                continue;
-            }
-        };
-        for entry in entries {
-            if entry.kind == EntryKind::Dir {
-                match A::Target::from_location(&entry.location, adapter.ctx()) {
-                    Ok(sub) => {
-                        // 已 visit（环/symlink loop 或 backend 重复返子项）直接跳
-                        // 过下钻；entry 本身仍 push 让 caller 得目录节点事件。
-                        if visited.insert(sub.path().as_str().to_owned()) {
-                            stack.push(sub);
-                        }
-                    }
-                    Err(e) => {
-                        // Dir entry 反向 from_location 失败：子树无法下钻，本目录条目
-                        // 也跳过 Ok push——否则 caller 既收到 Err（已记 walker_errors）
-                        // 又收到 Ok(Dir) 重复事件，且后者随后被 visit_location 静默
-                        // 过滤掉，纯属噪声。
-                        out.push(Err(e));
-                        continue;
-                    }
-                }
-            }
-            out.push(Ok(entry));
-        }
-    }
-}
+#[path = "remote_walk_phantom.rs"]
+mod phantom;
+#[doc(hidden)]
+pub(crate) use self::phantom::{log_mkparent_err, walk_recursive};
 
 /// 远端 mkdir-p：自底向上用 stat 找到第一个已存在的祖先，再自浅入深逐层 mkdir。
 /// 远端协议的 mkdir 多为 POSIX 单层语义（父层缺失返回 ENOENT，如 pavao SMB），

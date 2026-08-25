@@ -193,7 +193,8 @@ fn copy_file_cross_scheme(
 /// early-Err copy 场景下逻辑不可达（`stream_copy` 内部已 remove、native copy 早 Err
 /// 前也不 create dst），恒走 Err → False branch 恒 0-hit；集中此处 `coverage-off`
 /// 让 lcov 分支复合 100% 而不掩盖业务测试。
-fn best_effort_remove_partial_dst(be: &dyn Backend, loc: &Location) {
+#[doc(hidden)]
+pub fn best_effort_remove_partial_dst(be: &dyn Backend, loc: &Location) {
     if let Err(re) = be.remove_file(loc) {
         warn!(
             feature = FEATURE,

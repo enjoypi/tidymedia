@@ -12,11 +12,11 @@
 
 use crate::entities::backend::MediaReader;
 
-pub(crate) mod cfb;
+pub mod cfb;
 pub(crate) mod epub;
 pub(crate) mod iwork;
 pub(crate) mod mindmap_mm;
-pub(crate) mod mindmap_zip;
+pub mod mindmap_zip;
 pub(crate) mod odf;
 pub(crate) mod ooxml;
 pub(crate) mod pdf;
@@ -70,7 +70,8 @@ pub(crate) const MIME_TEXT_TSV: &str = "text/tab-separated-values";
 /// 接 `&mut dyn MediaReader` 而非 `Box<dyn MediaReader>`：让 stub 阶段子模块不消费
 /// reader 不触发 `clippy::needless_pass_by_value`；commit 2-9 接入主体时（zip /
 /// pdf 字节读 / cfb 容器读取）`&mut Read + Seek` 仍是合法 trait bound。
-pub(crate) fn populate_office_dates(reader: &mut dyn MediaReader, mime: &str) -> (u64, u64) {
+#[doc(hidden)]
+pub fn populate_office_dates(reader: &mut dyn MediaReader, mime: &str) -> (u64, u64) {
     if mime.starts_with(MIME_PDF) {
         pdf::parse(reader, mime)
     } else if is_ooxml_mime(mime) {
@@ -99,11 +100,8 @@ pub(crate) fn populate_office_dates(reader: &mut dyn MediaReader, mime: &str) ->
 /// 非全文保真）。空串 = 提不出文本（扫描版 PDF / iWork IWA / 损坏容器），
 /// 调用方（`usecases::copy::classify`）落 `uncategorized`。
 /// `max_bytes` 是输出文本上限（分类 embedding 只吃前几百 token，无需全文）。
-pub(crate) fn extract_office_text(
-    reader: &mut dyn MediaReader,
-    mime: &str,
-    max_bytes: usize,
-) -> String {
+#[doc(hidden)]
+pub fn extract_office_text(reader: &mut dyn MediaReader, mime: &str, max_bytes: usize) -> String {
     if mime.starts_with(MIME_PDF) {
         pdf::extract_text(reader, mime, max_bytes)
     } else if is_ooxml_mime(mime) {

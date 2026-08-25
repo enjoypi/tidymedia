@@ -23,6 +23,8 @@ use super::local;
 /// 注意：全局 `OnceLock<Config>` 一旦初始化就不能改，所以**单个测试进程内
 /// 只能跑一次**。nextest 默认每测试独立进程，自动满足。
 fn write_temp_config(model_path: &str) -> tempfile::TempDir {
+    // 重建全局 config：cargo test 共享进程下必须先 reset（nextest 每测试独立进程无需）。
+    tidymedia::reset_config_loader();
     let dir = tempdir().unwrap();
     let cfg_path = dir.path().join("config.yaml");
     let yaml = format!(

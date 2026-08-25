@@ -20,7 +20,8 @@ const TAG_META_CLOSE: &[u8] = b"</meta>";
 const PROPERTY_DCTERMS_MODIFIED: &[u8] = b"dcterms:modified";
 
 /// 入口：把 reader 当 zip 容器打开，双跳读 container.xml → OPF。
-pub(super) fn parse(reader: &mut dyn MediaReader, _mime: &str) -> (u64, u64) {
+#[doc(hidden)]
+pub fn parse(reader: &mut dyn MediaReader, _mime: &str) -> (u64, u64) {
     let Ok(mut archive) = zip::ZipArchive::new(reader) else {
         return (0, 0);
     };
@@ -62,7 +63,8 @@ const CHAPTER_MAX_BYTES: u64 = 128 * 1024;
 ///
 /// 整 fn `coverage(off)`：zip 打开/entry 缺失早返路径同 `parse`；剥标签业务由
 /// `scan::strip_markup_into` 单测真测。
-pub(super) fn extract_text(reader: &mut dyn MediaReader, _mime: &str, max_bytes: usize) -> String {
+#[doc(hidden)]
+pub fn extract_text(reader: &mut dyn MediaReader, _mime: &str, max_bytes: usize) -> String {
     let Ok(mut archive) = zip::ZipArchive::new(reader) else {
         return String::new();
     };

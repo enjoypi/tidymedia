@@ -33,38 +33,10 @@ fn re_yy_mm_dd() -> &'static Regex {
     })
 }
 
-/// 从相对路径（源根剥离后）中抽显式时间，返回首个 `YYYY:MM` 桶或 `None`。
-/// 三正则按优先级尝试：`YYYY[-_./ ]?M` → `YYYYMMDD` → `YY-MM-DD`（`YY<50→20YY`）。
-pub(crate) fn parse_path_date_bucket(s: &str) -> Option<String> {
-    if let Some(c) = re_year_month().captures(s) {
-        let mo = c.get(2).expect("internal: group 2").as_str();
-        let mo = if mo.len() == 1 {
-            format!("0{mo}")
-        } else {
-            mo.to_owned()
-        };
-        return Some(format!(
-            "{}:{mo}",
-            c.get(1).expect("internal: group 1").as_str()
-        ));
-    }
-    if let Some(c) = re_yyyymmdd().captures(s) {
-        return Some(format!(
-            "{}:{}",
-            c.get(1).expect("internal: group 1").as_str(),
-            c.get(2).expect("internal: group 2").as_str()
-        ));
-    }
-    if let Some(c) = re_yy_mm_dd().captures(s) {
-        let yy: i32 = c.get(1).expect("internal: group 1").as_str().parse().ok()?;
-        let year = if yy < 50 { 2000 + yy } else { 1900 + yy };
-        return Some(format!(
-            "{year:04}:{}",
-            c.get(2).expect("internal: group 2").as_str()
-        ));
-    }
-    None
-}
+#[path = "filename_hint_phantom.rs"]
+mod phantom;
+#[doc(hidden)]
+pub(crate) use self::phantom::parse_path_date_bucket;
 
 #[cfg(test)]
 #[path = "filename_hint_tests.rs"]

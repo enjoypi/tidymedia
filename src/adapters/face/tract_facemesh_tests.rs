@@ -101,14 +101,14 @@ fn decode_rejects_longer_than_expected_output() {
 #[test]
 fn preprocess_resizes_non_192() {
     let big = image::RgbImage::from_pixel(256, 256, image::Rgb([10, 20, 30]));
-    let t = preprocess(&big).unwrap();
+    let t = preprocess(&big);
     assert_eq!(t.shape(), [1, 3, 192, 192]);
 }
 
 #[test]
 fn preprocess_keeps_192_unchanged_shape() {
     let exact = image::RgbImage::from_pixel(192, 192, image::Rgb([10, 20, 30]));
-    let t = preprocess(&exact).unwrap();
+    let t = preprocess(&exact);
     assert_eq!(t.shape(), [1, 3, 192, 192]);
 }
 

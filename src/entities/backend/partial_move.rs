@@ -22,6 +22,7 @@ impl fmt::Display for PartialMove {
 impl Error for PartialMove {}
 
 /// 构造携带半态标记的 `io::Error`；`msg` 即对外 Display 文案。
+#[must_use]
 pub fn partial_move_error(kind: io::ErrorKind, msg: String) -> io::Error {
     io::Error::new(kind, PartialMove(msg))
 }

@@ -58,6 +58,14 @@ fn strip_markup_unclosed_tag_drops_tail() {
 }
 
 #[test]
+fn strip_markup_empty_after_strip_skips_push() {
+    // 全标签 + 空白 → trimmed 为空 → `if !trimmed.is_empty()` false 分支。
+    let mut out = String::new();
+    strip_markup_into(b"<a>   </a>", &mut out, 64);
+    assert_eq!(out, "");
+}
+
+#[test]
 fn truncate_at_boundary_noop_when_short() {
     let mut s = String::from("ok");
     truncate_at_boundary(&mut s, 10);
