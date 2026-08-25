@@ -14,11 +14,13 @@ use super::super::uri::Location;
 use super::document::populate_document_dates;
 use super::image::populate_image_dates;
 use super::image_png::populate_png_dates;
+use super::image_rw2::populate_rw2_dates;
 use super::mime::META_TYPE_IMAGE;
 use super::mime::META_TYPE_VIDEO;
 use super::mime::MIME_AVI;
 use super::mime::MIME_M2TS;
 use super::mime::MIME_PNG;
+use super::mime::MIME_RW2;
 use super::mime::is_office_mime;
 use super::mime::sniff_mime;
 use super::video::populate_avi_dates;
@@ -130,8 +132,10 @@ impl Exif {
         };
         let parse_full = if doc_only {
             is_office_mime(&mime_type)
+        } else if parse_non_media {
+            true
         } else {
-            parse_non_media || Self::is_media_mime(&mime_type)
+            Self::is_media_mime(&mime_type)
         };
         if !parse_full {
             return Ok(Self {
@@ -161,6 +165,10 @@ impl Exif {
             // PNG 先于泛 image 分流：nom-exif 不解析 `eXIf` chunk，
             // 时间在 PNG 1.5+ 自定义 chunk 内的完整 TIFF/EXIF header。
             populate_png_dates(reader, &mut exif, local_offset);
+        } else if mime_type.starts_with(MIME_RW2) {
+            // RW2 先于泛 image 分流：nom-exif 不识 TIFF 变体 magic（0x0055），
+            // 时间在 IFD0/ExifIFD（与 TIFF 同布局），走 `entities::rw2` 自解析。
+            populate_rw2_dates(reader, &mut exif, local_offset);
         } else if mime_type.starts_with(META_TYPE_IMAGE) {
             populate_image_dates(reader, &mut exif, local_offset);
         } else if mime_type.starts_with(MIME_AVI) {
@@ -225,7 +233,10 @@ impl Exif {
     /// 当前 MIME 是否为 Matroska/WebM 容器（MKV/WEBM），用于区分
     /// `Source::MkvDateUtc` vs `Source::QuickTimeCreationDate`。
     pub fn is_mkv_container(&self) -> bool {
-        self.mime_type.starts_with("video/x-matroska") || self.mime_type.starts_with("video/webm")
+        if self.mime_type.starts_with("video/x-matroska") {
+            return true;
+        }
+        self.mime_type.starts_with("video/webm")
     }
 
     /// EXIF `Make` 字段（相机厂商）；仅图片 EXIF 通常含有。

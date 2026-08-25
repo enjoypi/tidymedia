@@ -30,6 +30,10 @@ const TYPE_LONG: u16 = 4;
 
 /// TIFF magic（II/MM 字节序读取后均为 `0x002A`）。
 const TIFF_MAGIC: u16 = 0x002A;
+/// Panasonic RW2 RAW 的 TIFF 变体 magic（`II U\0` = 0x49 0x49 0x55 0x00）。
+/// 与 TIFF 0x002A 同布局（BOM + magic + IFD0 offset），经 [`parse_tiff_with_magic`]
+/// 参数化入口走 [`parse_ifds`]，复用 IFD0 + `ExifIFD` 扫描逻辑。
+pub(crate) const RW2_MAGIC: u16 = 0x0055;
 
 /// 单个 ASCII 字段长度上限；Make/Model/日期实测均 <64 字节。
 const MAX_ASCII_BYTES: usize = 256;
@@ -49,13 +53,20 @@ pub(crate) struct TiffIfd {
 /// 损坏头部一律返 None；IFD 内字段全空也返 `Some(TiffIfd::default())`，
 /// 由调用方决定是否进一步 fallback。
 pub(crate) fn parse_tiff(payload: &[u8]) -> Option<TiffIfd> {
+    parse_tiff_with_magic(payload, TIFF_MAGIC)
+}
+
+/// TIFF 变体入口：同 [`parse_tiff`] 布局但 magic 由调用方指定（RW2 用
+/// [`RW2_MAGIC`]）。PNG eXIf / JPEG APP1 走 `parse_tiff`（0x002A）；
+/// Panasonic RW2 走本入口，内部委托 [`parse_ifds`]。
+pub(crate) fn parse_tiff_with_magic(payload: &[u8], magic: u16) -> Option<TiffIfd> {
     let bom = payload.get(..2)?;
     let order = match bom {
         b"II" => ByteOrder::Le,
         b"MM" => ByteOrder::Be,
         _ => return None,
     };
-    if u16_at(payload, 2, order)? != TIFF_MAGIC {
+    if u16_at(payload, 2, order)? != magic {
         return None;
     }
     let ifd0_off = u32_at(payload, 4, order)? as usize;

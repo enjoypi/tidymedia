@@ -17,6 +17,7 @@ pub mod media_time;
 pub(crate) mod office;
 pub(crate) mod png;
 pub(crate) mod riff;
+pub(crate) mod rw2;
 #[cfg(test)]
 pub(crate) mod test_common;
 pub(crate) mod threadpool;

@@ -255,6 +255,62 @@ fn wechat_export_vote_does_not_overrule_p0() {
     assert_eq!(d.conflicts[0].kind, ConflictKind::FilenameOver1Day);
 }
 
+// 括号内紧凑时戳与 QQ 导出：黑名单归属待真实样本实证，当前默认无票（数据安全
+// 优先，防下载时戳错误推翻相机 P0）——实证为原图拍摄时间后再移除黑名单。
+#[test]
+fn bracketed_compact_vote_does_not_overrule_p0() {
+    let p0 = Utc
+        .with_ymd_and_hms(2016, 5, 23, 5, 58, 15)
+        .unwrap()
+        .timestamp();
+    let download = Utc
+        .with_ymd_and_hms(2019, 1, 20, 4, 16, 41)
+        .unwrap()
+        .timestamp();
+    let d = resolve(
+        vec![
+            cand(Source::QuickTimeCreationDate, p0),
+            cand(Source::FilenameBracketedCompact, download),
+            cand(Source::FsMtime, download + 1),
+        ],
+        None,
+        None,
+        now(),
+    )
+    .unwrap();
+    assert_eq!(d.priority, Priority::P0);
+    assert_eq!(d.utc.timestamp(), p0);
+    assert_eq!(d.conflicts.len(), 1);
+    assert_eq!(d.conflicts[0].kind, ConflictKind::FilenameOver1Day);
+}
+
+#[test]
+fn qq_export_vote_does_not_overrule_p0() {
+    let p0 = Utc
+        .with_ymd_and_hms(2016, 5, 23, 5, 58, 15)
+        .unwrap()
+        .timestamp();
+    let download = Utc
+        .with_ymd_and_hms(2019, 1, 20, 4, 16, 41)
+        .unwrap()
+        .timestamp();
+    let d = resolve(
+        vec![
+            cand(Source::QuickTimeCreationDate, p0),
+            cand(Source::FilenameQqExport, download),
+            cand(Source::FsMtime, download + 1),
+        ],
+        None,
+        None,
+        now(),
+    )
+    .unwrap();
+    assert_eq!(d.priority, Priority::P0);
+    assert_eq!(d.utc.timestamp(), p0);
+    assert_eq!(d.conflicts.len(), 1);
+    assert_eq!(d.conflicts[0].kind, ConflictKind::FilenameOver1Day);
+}
+
 // 合法场景回归：拍摄命名类文件名（IMG_YYYYMMDD_HHMMSS）+ mtime 互证仍推翻
 // 相机时钟错误的 P0。
 #[test]

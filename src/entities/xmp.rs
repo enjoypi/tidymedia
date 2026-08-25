@@ -7,9 +7,10 @@
 //! 兜底嗅探，与 exiftool 行为对齐。
 //!
 //! 范围：纯函数 + 单段 APP1 packet（≤ 64 KB 窗口足够），不引 XML lib。
+//! 支持 `xmp:` 与老 Adobe 系 `xap:` 命名空间前缀的 attribute 形态；element 形态
+//! `<ns:CreateDate>…</ns:CreateDate>` 也读（Photoshop CS2 时代 XMP 用 `xap:`）。
 //! 已知不支持：ExtendedXMP（跨多 APP1 段拼接，标识符
-//! `http://ns.adobe.com/xmp/extension/\0`）；element 形式
-//! `<xmp:CreateDate>...</xmp:CreateDate>`（Adobe 系工具默认写 attribute）。
+//! `http://ns.adobe.com/xmp/extension/\0`）。
 
 use chrono::DateTime;
 use chrono::FixedOffset;
@@ -20,6 +21,11 @@ const PACKET_END: &str = "</x:xmpmeta>";
 // 不同工具下两种都见过（exiftool Shorthand 输出单引号、Adobe 系工具多用双引号）。
 const KEY_PHOTOSHOP_DATE_CREATED: &str = "photoshop:DateCreated=";
 const KEY_XMP_CREATE_DATE: &str = "xmp:CreateDate=";
+/// Photoshop CS2 时代 XMP 用 `xap:` 命名空间前缀（attribute 形态，带 `=`）。
+const KEY_XAP_CREATE_DATE: &str = "xap:CreateDate=";
+/// element 形态的标签名（无 `=`，`<xmp:CreateDate>…</xmp:CreateDate>`）。
+const KEY_XMP_CREATE_DATE_ELEMENT: &str = "xmp:CreateDate";
+const KEY_XAP_CREATE_DATE_ELEMENT: &str = "xap:CreateDate";
 
 /// XMP packet 内的两个候选时间。两键互独立，可能同时为 Some/None。
 #[doc(hidden)]
@@ -47,14 +53,19 @@ pub(crate) fn find_xmp_packet(buf: &[u8]) -> Option<&str> {
 }
 
 /// 解析 XMP packet 子串，返回 photoshop:DateCreated 与 xmp:CreateDate 两键
-/// 的 attribute 值（RFC3339）。仅 attribute 形态；element 形态 YAGNI。
+/// 的值（RFC3339）。`xmp_create_date` 支持 `xmp:` / `xap:` 前缀 + attribute /
+/// element 两形态，attribute 优先。
 #[doc(hidden)]
 #[must_use]
 pub fn parse_xmp_dates(content: &str) -> XmpDates {
     let stripped = strip_xml_comments(content);
+    let xmp_create_date = find_attr_rfc3339(&stripped, KEY_XMP_CREATE_DATE)
+        .or_else(|| find_attr_rfc3339(&stripped, KEY_XAP_CREATE_DATE))
+        .or_else(|| find_element_rfc3339(&stripped, KEY_XMP_CREATE_DATE_ELEMENT))
+        .or_else(|| find_element_rfc3339(&stripped, KEY_XAP_CREATE_DATE_ELEMENT));
     XmpDates {
         photoshop_date_created: find_attr_rfc3339(&stripped, KEY_PHOTOSHOP_DATE_CREATED),
-        xmp_create_date: find_attr_rfc3339(&stripped, KEY_XMP_CREATE_DATE),
+        xmp_create_date,
     }
 }
 
@@ -99,6 +110,41 @@ fn find_attr_rfc3339(haystack: &str, key: &str) -> Option<DateTime<FixedOffset>>
         if let Ok(dt) = DateTime::parse_from_rfc3339(&rest[..end]) {
             return Some(dt);
         }
+    }
+}
+
+/// element 形态 `<ns:Key>…</ns:Key>` 的 body 文本是 RFC3339 值；attribute 形态由
+/// [`find_attr_rfc3339`] 处理（key 后是 `>` 非引号，两者值形态不同不能复用）。
+/// 边界：key 后必须紧跟 `>`（无属性）或空白（带属性），防 `<ns:KeyX>` 误匹配；
+/// open/close tag 缺失或 parse 失败继续找下一个 `<ns:Key`（对齐 continue 语义，
+/// 防首个 malformed element 让后续真实 element 永久跳过）。
+fn find_element_rfc3339(haystack: &str, key: &str) -> Option<DateTime<FixedOffset>> {
+    let open = format!("<{key}");
+    let close = format!("</{key}>");
+    let mut search_from = 0usize;
+    loop {
+        let rel = haystack[search_from..].find(&open)?;
+        let start = search_from + rel;
+        let after_key = start + open.len();
+        let boundary = haystack[after_key..].chars().next()?;
+        if !matches!(boundary, '>' | ' ' | '\t' | '\n' | '\r') {
+            search_from = after_key;
+            continue;
+        }
+        let Some(gt_rel) = haystack[after_key..].find('>') else {
+            search_from = after_key;
+            continue;
+        };
+        let body_start = after_key + gt_rel + 1;
+        let Some(close_rel) = haystack[body_start..].find(&close) else {
+            search_from = body_start;
+            continue;
+        };
+        let body = &haystack[body_start..body_start + close_rel];
+        if let Ok(dt) = DateTime::parse_from_rfc3339(body.trim()) {
+            return Some(dt);
+        }
+        search_from = body_start + close_rel + close.len();
     }
 }
 

@@ -161,6 +161,84 @@ fn parse_xmp_dates_continues_past_non_boundary_prefix() {
     );
 }
 
+// ── parse_xmp_dates: xap: 前缀 + element 形态 ──
+
+/// Photoshop CS2 时代 `xap:` 命名空间前缀 attribute 形态。
+#[test]
+fn parse_xmp_dates_xap_attribute_double_quoted() {
+    let xml = r#"<rdf:Description xap:CreateDate="2008-10-31T09:15:01+08:00"/>"#;
+    let dates = parse_xmp_dates(xml);
+    // 09:15:01 +08:00 = 01:15:01 UTC = 1225415701
+    assert_eq!(dates.xmp_create_date.unwrap().timestamp(), 1_225_415_701);
+    assert!(dates.photoshop_date_created.is_none());
+}
+
+#[test]
+fn parse_xmp_dates_xap_attribute_single_quoted() {
+    let xml = "<rdf:Description xap:CreateDate='2020-01-01T00:00:00Z'/>";
+    let dates = parse_xmp_dates(xml);
+    assert_eq!(dates.xmp_create_date.unwrap().timestamp(), 1_577_836_800);
+}
+
+/// element 形态（无属性）：`<xap:CreateDate>…</xap:CreateDate>`。
+#[test]
+fn parse_xmp_dates_element_xap_no_attr() {
+    let xml = "<x:xmpmeta><xap:CreateDate>2008-10-31T09:15:01+08:00</xap:CreateDate></x:xmpmeta>";
+    let dates = parse_xmp_dates(xml);
+    assert_eq!(dates.xmp_create_date.unwrap().timestamp(), 1_225_415_701);
+    assert!(dates.photoshop_date_created.is_none());
+}
+
+/// element 形态带属性：`<xmp:CreateDate x="1">…</xmp:CreateDate>`。
+#[test]
+fn parse_xmp_dates_element_xmp_with_attr() {
+    let xml =
+        r#"<x:xmpmeta><xmp:CreateDate x="1">2020-01-01T00:00:00Z</xmp:CreateDate></x:xmpmeta>"#;
+    let dates = parse_xmp_dates(xml);
+    assert_eq!(dates.xmp_create_date.unwrap().timestamp(), 1_577_836_800);
+}
+
+/// attribute 优先于 element：同串 xmp attribute + xap element → attribute 胜。
+#[test]
+fn parse_xmp_dates_order_attr_beats_element() {
+    let xml = r#"<x:xmpmeta xmp:CreateDate="2021-01-01T00:00:00Z">
+        <xap:CreateDate>2008-10-31T09:15:01+08:00</xap:CreateDate></x:xmpmeta>"#;
+    let dates = parse_xmp_dates(xml);
+    assert_eq!(dates.xmp_create_date.unwrap().timestamp(), 1_609_459_200);
+}
+
+/// element body parse 失败必须 continue：后续真实 element 仍被命中。
+#[test]
+fn parse_xmp_dates_element_parse_failure_continues() {
+    let xml = "<x:xmpmeta><xap:CreateDate>not-a-date</xap:CreateDate>\
+        <xap:CreateDate>2008-10-31T09:15:01+08:00</xap:CreateDate></x:xmpmeta>";
+    let dates = parse_xmp_dates(xml);
+    assert_eq!(dates.xmp_create_date.unwrap().timestamp(), 1_225_415_701);
+}
+
+/// `<xap:CreateDateFoo>` 前缀匹配但 boundary 非 `>`/空白 → 跳过，后续 element 命中。
+#[test]
+fn parse_xmp_dates_element_non_boundary_prefix_skipped() {
+    let xml = "<x:xmpmeta><xap:CreateDateFoo>2020-01-01T00:00:00Z</xap:CreateDateFoo>\
+        <xap:CreateDate>2008-10-31T09:15:01+08:00</xap:CreateDate></x:xmpmeta>";
+    let dates = parse_xmp_dates(xml);
+    assert_eq!(dates.xmp_create_date.unwrap().timestamp(), 1_225_415_701);
+}
+
+/// open tag 无闭合 `>` → continue；无可续 → None。
+#[test]
+fn parse_xmp_dates_element_unclosed_open_tag_returns_none() {
+    let xml = "<x:xmpmeta><xap:CreateDate not-closed";
+    assert!(parse_xmp_dates(xml).xmp_create_date.is_none());
+}
+
+/// body 无 `</key>` 闭合 → continue；无可续 → None。
+#[test]
+fn parse_xmp_dates_element_missing_close_tag_returns_none() {
+    let xml = "<x:xmpmeta><xap:CreateDate>no-close-tag</x:xmpmeta>";
+    assert!(parse_xmp_dates(xml).xmp_create_date.is_none());
+}
+
 // ── strip_xml_comments ──
 
 /// 注释体替换为同字节数空格，前后正文与偏移原样保留。注释起点远离 0

@@ -332,6 +332,76 @@ fn empty_name_returns_none() {
     assert!(parse_filename("", utc_offset()).is_none());
 }
 
+// 括号内紧凑时戳（原 IMG 拍摄命名被清理/备份工具加括号时戳污染）。
+#[rstest]
+#[case::img_bracketed("IMG_6489(20210611-174530)(1).jpg", epoch("2021-06-11T17:45:30Z"))]
+#[case::img_bracketed_no_ext("IMG_6489(20210611-174530)(1)", epoch("2021-06-11T17:45:30Z"))]
+// 首个括号非日期、第二个是：`photo(1)(20210611-174530).jpg` → 命中后者
+#[case::first_paren_not_date("photo(1)(20210611-174530).jpg", epoch("2021-06-11T17:45:30Z"))]
+fn bracketed_compact_parsed(#[case] name: &str, #[case] expected_ts: i64) {
+    let c = parse_filename(name, utc_offset()).unwrap();
+    assert_eq!(c.source, Source::FilenameBracketedCompact);
+    assert_eq!(c.utc.timestamp(), expected_ts);
+    assert!(c.inferred_offset);
+}
+
+#[test]
+fn bracketed_compact_east8_offset_applied() {
+    // 本地 17:45:30 +08:00 = UTC 09:45:30
+    let c = parse_filename("IMG_6489(20210611-174530)(1).jpg", east8()).unwrap();
+    let expected = Utc.with_ymd_and_hms(2021, 6, 11, 9, 45, 30).unwrap();
+    assert_eq!(c.utc, expected);
+    assert_eq!(c.offset, Some(east8()));
+}
+
+#[rstest]
+// 无括号
+#[case::no_paren("IMG_6489.jpg")]
+// 括号内容不足 15 字节窗口
+#[case::short_paren("a(1)b.jpg")]
+// 括号内容非数字
+#[case::alpha_paren("x(abcd).jpg")]
+// 括号未闭合
+#[case::unclosed_paren("x(20210611-174530")]
+// 括号内分隔符形状错（日期用 `_`）
+#[case::wrong_sep("x(20210611_174530).jpg")]
+fn bracketed_compact_rejects(#[case] name: &str) {
+    assert!(parse_filename(name, utc_offset()).is_none());
+}
+
+// QQ 导出：`QQ图片<14-digit YYYYMMDDHHMMSS>`。
+#[rstest]
+#[case::qq_basic("QQ图片20210428220203.jpg", epoch("2021-04-28T22:02:03Z"))]
+#[case::qq_no_ext("QQ图片20210428220203", epoch("2021-04-28T22:02:03Z"))]
+fn qq_export_parsed(#[case] name: &str, #[case] expected_ts: i64) {
+    let c = parse_filename(name, utc_offset()).unwrap();
+    assert_eq!(c.source, Source::FilenameQqExport);
+    assert_eq!(c.utc.timestamp(), expected_ts);
+    assert!(c.inferred_offset);
+}
+
+#[test]
+fn qq_export_east8_offset_applied() {
+    // 本地 22:02:03 +08:00 = UTC 14:02:03
+    let c = parse_filename("QQ图片20210428220203.jpg", east8()).unwrap();
+    let expected = Utc.with_ymd_and_hms(2021, 4, 28, 14, 2, 3).unwrap();
+    assert_eq!(c.utc, expected);
+    assert_eq!(c.offset, Some(east8()));
+}
+
+#[rstest]
+// 13 位（短）
+#[case::qq_short("QQ图片2021042822020.jpg")]
+// 15 位（长）
+#[case::qq_long("QQ图片202104282202030.jpg")]
+// 含字母
+#[case::qq_alpha("QQ图片2021042822020a.jpg")]
+// 前缀后不足 14 位
+#[case::qq_too_short("QQ图片202104.jpg")]
+fn qq_export_rejects(#[case] name: &str) {
+    assert!(parse_filename(name, utc_offset()).is_none());
+}
+
 #[test]
 fn stem_strips_last_extension_only() {
     // PXL with .MP.jpg — stem_without_ext strips only .jpg, then try_pixel strips .MP via prefix-then-15chars

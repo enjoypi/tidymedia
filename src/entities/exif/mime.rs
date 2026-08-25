@@ -8,6 +8,9 @@ pub(super) const META_TYPE_IMAGE: &str = "image/";
 pub(super) const META_TYPE_VIDEO: &str = "video/";
 /// PNG 容器；nom-exif 3.6 不解析 `eXIf` chunk，走 `entities::png` 自解析。
 pub(super) const MIME_PNG: &str = "image/png";
+/// Panasonic RW2 RAW（TIFF 变体，magic `0x0055`）；infer 不识，走
+/// `entities::rw2` 自解析。以 `image/` 前缀通过 `is_media_mime` 媒体门槛。
+pub(super) const MIME_RW2: &str = "image/x-panasonic-rw2";
 /// RIFF AVI 容器；nom-exif 不支持，走 `entities::riff` 自解析内嵌 EXIF。
 pub(super) const MIME_AVI: &str = "video/x-msvideo";
 const MIME_QUICKTIME: &str = "video/quicktime";
@@ -56,17 +59,29 @@ pub(super) fn quicktime_legacy_mime(buf: &[u8]) -> Option<&'static str> {
 // 单 0x47 sync 太弱（H264 SEI / 任意二进制都可能命中），要求 192 byte 间隔连续两个
 // sync 才认。`infer` 0.19 不支持 m2ts；不识别会让 is_media=false 致整段 AVCHD 被 ignore。
 pub(super) fn m2ts_legacy_mime(buf: &[u8]) -> Option<&'static str> {
-    (buf.get(4) == Some(&0x47) && buf.get(196) == Some(&0x47)).then_some(MIME_M2TS)
+    if buf.get(4) == Some(&0x47) && buf.get(196) == Some(&0x47) {
+        Some(MIME_M2TS)
+    } else {
+        None
+    }
 }
 
 // 标准 BMFF `ftyp` 但 brand 是 `3gp4`/`3gp5` 等：`infer` 0.19 的 MP4 matcher
 // 不认 `3gp*` brand，不识别会让 is_media=false 致整段 3GP 手机视频被 ignore。
 pub(super) fn bmff_3gpp_mime(buf: &[u8]) -> Option<&'static str> {
-    (buf.get(4..8) == Some(b"ftyp") && buf.get(8..11) == Some(b"3gp")).then_some(MIME_3GPP)
+    if buf.get(4..8) == Some(b"ftyp") && buf.get(8..11) == Some(b"3gp") {
+        Some(MIME_3GPP)
+    } else {
+        None
+    }
 }
 
 pub(super) fn bmff_xavc_mime(buf: &[u8]) -> Option<&'static str> {
-    (buf.get(4..8) == Some(b"ftyp") && buf.get(8..12) == Some(b"XAVC")).then_some(MIME_XAVC)
+    if buf.get(4..8) == Some(b"ftyp") && buf.get(8..12) == Some(b"XAVC") {
+        Some(MIME_XAVC)
+    } else {
+        None
+    }
 }
 
 /// 判定 mime 是否属办公文档族（PDF / OOXML / CFB / iWork / ODF / RTF / EPUB /
@@ -106,6 +121,7 @@ pub(super) fn is_office_mime(mime: &str) -> bool {
 pub(crate) fn mime_from_ext(ext: Option<&str>) -> Option<&'static str> {
     let lower = ext?.to_ascii_lowercase();
     let mime = match lower.as_str() {
+        "rw2" => MIME_RW2,
         "pdf" => office::MIME_PDF,
         "docx" => office::MIME_DOCX,
         "pptx" => office::MIME_PPTX,

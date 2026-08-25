@@ -2,6 +2,7 @@ mod document;
 mod image;
 mod image_jpeg;
 mod image_png;
+mod image_rw2;
 mod mime;
 mod types;
 mod video;
@@ -25,6 +26,8 @@ use self::image::rational_to_u32;
 #[cfg(test)]
 use self::image_png::populate_png_dates;
 #[cfg(test)]
+use self::image_rw2::populate_rw2_dates;
+#[cfg(test)]
 use self::mime::bmff_3gpp_mime;
 #[cfg(test)]
 use self::mime::bmff_xavc_mime;
@@ -46,7 +49,7 @@ use self::video::populate_video_dates;
 use super::backend::MediaReader;
 
 #[cfg(test)]
-#[path = "exif_tests_common.rs"]
+#[path = "exif_test_helpers.rs"]
 mod tests_common;
 
 #[cfg(test)]
@@ -76,3 +79,7 @@ mod xmp_tests;
 #[cfg(test)]
 #[path = "exif_png_tests.rs"]
 mod png_tests;
+
+#[cfg(test)]
+#[path = "exif_rw2_tests.rs"]
+mod rw2_tests;

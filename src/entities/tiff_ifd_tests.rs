@@ -1,7 +1,9 @@
 use super::ByteOrder;
+use super::RW2_MAGIC;
 use super::TiffIfd;
 use super::parse_ifds;
 use super::parse_tiff;
+use super::parse_tiff_with_magic;
 
 // ---------- byte-level fixture builder ----------
 
@@ -352,4 +354,39 @@ fn parse_ifds_ascii_cnt_zero_returns_none() {
     buf.extend_from_slice(&u32_bytes(0, ByteOrder::Le));
     let ifd = parse_ifds(&buf, 0, ByteOrder::Le).unwrap();
     assert_eq!(ifd.make, None);
+}
+
+// ---------- parse_tiff_with_magic（RW2 参数化入口） ----------
+
+#[test]
+fn parse_tiff_with_magic_rw2_magic_extracts_fields() {
+    let mut buf = build_tiff_full(ByteOrder::Le);
+    buf[2] = 0x55;
+    buf[3] = 0x00;
+    let ifd = parse_tiff_with_magic(&buf, RW2_MAGIC).unwrap();
+    assert_eq!(
+        ifd.date_time_original.as_deref(),
+        Some("2024:05:17 12:00:00")
+    );
+    assert_eq!(ifd.create_date.as_deref(), Some("2024:05:17 12:00:01"));
+    assert_eq!(ifd.modify_date.as_deref(), Some("2024:05:17 12:00:02"));
+    assert_eq!(ifd.make.as_deref(), Some("Canon"));
+}
+
+#[test]
+fn parse_tiff_with_magic_wrong_magic_returns_none() {
+    let mut buf = build_tiff_full(ByteOrder::Le);
+    buf[2] = 0x55;
+    buf[3] = 0x00;
+    // RW2 字节但传 TIFF 0x002A → magic 不匹配返 None（覆盖 RW2 侧 `!= magic`）。
+    assert_eq!(parse_tiff_with_magic(&buf, 0x002A), None);
+}
+
+#[test]
+fn parse_tiff_wrapper_matches_with_magic_002a() {
+    // 薄包装等价：parse_tiff 恒调 parse_tiff_with_magic(payload, TIFF_MAGIC)。
+    for order in [ByteOrder::Le, ByteOrder::Be] {
+        let buf = build_tiff_full(order);
+        assert_eq!(parse_tiff(&buf), parse_tiff_with_magic(&buf, 0x002A));
+    }
 }

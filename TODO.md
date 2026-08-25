@@ -83,7 +83,7 @@
 
 ## 媒体识别缺口（tidy-verify 实证）
 
-- [ ] **Panasonic RW2（RAW）未识别为媒体**（2026-08-09 tidy-verify `D:\Users\Public\Pictures\2023` 实证 218 个，`12/高一元旦晚会` Panasonic DMC-GF6）：magic `II U \0`（0x49 0x49 0x55 0x00，第三字节非 TIFF 0x2A），`infer` 不识 → `mime_from_ext` 无 .rw2 → 空 mime → `passes_type_filter` 跳过；应纳入媒体全集。⚠ **不能直调 `parse_tiff`**（`tiff_ifd.rs` 硬校验 0x002A 必 None），须参数化 magic 入口内部走 `parse_ifds` 复用（AVI `strd` 同款）；走「新增容器 EXIF 自解析」检查点（`mime_from_ext` 增映射 + `types.rs::from_reader` 新分支 + `image_rw2.rs` + `gen_rw2.py` fixture）。⚠ 远端 `open_read` 整文件入堆（RAW ≥20 MB）OOM 面色，fixture 近端 only。落地前可用 `exiftool -FileModifyDate<DateTimeOriginal` + `--include-non-media` 兜底（本轮已如此归档）
+- [ ] **Panasonic RW2（RAW）未识别为媒体**（2026-08-09 tidy-verify `D:\Users\Public\Pictures\2023` 实证 218 个，`12/高一元旦晚会` Panasonic DMC-GF6）：magic `II U \0`（0x49 0x49 0x55 0x00，第三字节非 TIFF 0x2A），`infer` 不识 → `mime_from_ext` 无 .rw2 → 空 mime → `passes_type_filter` 跳过；应纳入媒体全集。⚠ **不能直调 `parse_tiff`**（`tiff_ifd.rs` 硬校验 0x002A 必 None），须参数化 magic 入口内部走 `parse_ifds` 复用（AVI `strd` 同款）；走「新增容器 EXIF 自解析」检查点（`mime_from_ext` 增映射 + `types.rs::from_reader` 新分支 + `image_rw2.rs` + `gen_rw2.ts` fixture）。⚠ 远端 `open_read` 整文件入堆（RAW ≥20 MB）OOM 面色，fixture 近端 only。落地前可用 `exiftool -FileModifyDate<DateTimeOriginal` + `--include-non-media` 兜底（本轮已如此归档）
 
 ## media_time 文件名解析缺口（tidy-verify 实证）
 

@@ -107,3 +107,23 @@ fn bare_yyyymmdd_pattern() {
     assert_eq!(c.utc.timestamp(), 1_686_796_200);
     assert!(c.inferred_offset);
 }
+
+/// 括号内紧凑时戳（原 IMG 拍摄命名被清理工具污染）：`IMG_6489(20210611-174530)(1).jpg`。
+#[test]
+fn bracketed_compact_pattern() {
+    let c = parse_filename("IMG_6489(20210611-174530)(1).jpg", east8()).unwrap();
+    assert_eq!(c.source, Source::FilenameBracketedCompact);
+    // 本地 17:45:30 +08:00 = UTC 09:45:30；2021-06-11 09:45:30 UTC = 1_623_404_730。
+    assert_eq!(c.utc.timestamp(), 1_623_404_730);
+    assert!(c.inferred_offset);
+}
+
+/// QQ 导出：`QQ图片<14-digit YYYYMMDDHHMMSS>`；本地时间。
+#[test]
+fn qq_export_pattern() {
+    let c = parse_filename("QQ图片20210428220203.jpg", east8()).unwrap();
+    assert_eq!(c.source, Source::FilenameQqExport);
+    // 本地 22:02:03 +08:00 = UTC 14:02:03；2021-04-28 14:02:03 UTC = 1_619_618_523。
+    assert_eq!(c.utc.timestamp(), 1_619_618_523);
+    assert!(c.inferred_offset);
+}

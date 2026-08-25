@@ -168,6 +168,28 @@ fn open_uses_xavc_fallback_for_xavc_brand() {
 // `mime_from_ext` 覆盖每个扩展名映射 arm（28 个 case + None + 大小写不敏感）。
 
 #[test]
+fn mime_from_ext_rw2() {
+    assert_eq!(
+        super::mime_from_ext(Some("rw2")),
+        Some("image/x-panasonic-rw2")
+    );
+}
+
+#[test]
+fn mime_from_ext_uppercase_rw2() {
+    assert_eq!(
+        super::mime_from_ext(Some("RW2")),
+        Some("image/x-panasonic-rw2")
+    );
+}
+
+// RW2 MIME 以 `image/` 前缀通过媒体门槛（infer 不识 RAW，靠 ext 兜底）。
+#[test]
+fn is_media_mime_rw2_true() {
+    assert!(Exif::is_media_mime("image/x-panasonic-rw2"));
+}
+
+#[test]
 fn mime_from_ext_pdf() {
     assert_eq!(super::mime_from_ext(Some("pdf")), Some("application/pdf"));
 }

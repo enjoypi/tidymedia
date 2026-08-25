@@ -35,6 +35,12 @@ pub enum Source {
     FilenameWhatsApp,
     /// 通用 `<任意前缀>YYYY-MM-DD HH-MM-SS`（事后批量重命名工具的常见格式）
     FilenameDashedDateTime,
+    /// 括号内紧凑时戳 `IMG_6489(20210611-174530)(1).jpg` 的 `(yyyyMMdd-HHmmss)`
+    /// （原 IMG_ 拍摄命名被清理/备份工具加括号时戳污染）。黑名单归属待真实样本
+    /// 实证——默认无票防下载时戳错误推翻 P0，实证为原图拍摄时间后再移除。
+    FilenameBracketedCompact,
+    /// QQ 导出：`QQ图片<14-digit YYYYMMDDHHMMSS>`（下载时戳类，与 mmexport 同因无票）。
+    FilenameQqExport,
     // P3 — 旁路 sidecar
     XmpSidecar,
     GoogleTakeoutJson,
@@ -60,22 +66,27 @@ impl Source {
             | Source::FilenameBareYyyymmdd
             | Source::FilenameWeChatExport
             | Source::FilenameWhatsApp
-            | Source::FilenameDashedDateTime => Priority::P2,
+            | Source::FilenameDashedDateTime
+            | Source::FilenameBracketedCompact
+            | Source::FilenameQqExport => Priority::P2,
             Source::XmpSidecar | Source::GoogleTakeoutJson => Priority::P3,
             Source::FsMtime => Priority::P4,
         }
     }
 
-    /// 多数派仲裁的 filename 票资格。下载时戳类（13 位 unix 毫秒 / mmexport）与
-    /// mtime 天然同源——下载器落盘即把 mtime 写成下载时刻，"互证"恒真是假象，
-    /// 不构成推翻 P0 的证据。黑名单制：新增 P2 来源默认有票，与
-    /// `is_filename_source` 由 priority 推导的"免双写"约定同向；新增下载时戳类
+    /// 多数派仲裁的 filename 票资格。下载时戳类（13 位 unix 毫秒 / mmexport / QQ
+    /// 导出 / 括号内时戳）与 mtime 天然同源——下载器落盘即把 mtime 写成下载时刻，
+    /// "互证"恒真是假象，不构成推翻 P0 的证据。黑名单制：新增 P2 来源默认有票，
+    /// 与 `is_filename_source` 由 priority 推导的"免双写"约定同向；新增下载时戳类
     /// variant 时必须加入黑名单。
     pub(crate) fn is_majority_filename_vote(self) -> bool {
         self.priority() == Priority::P2
             && !matches!(
                 self,
-                Source::FilenameUnixMillis | Source::FilenameWeChatExport
+                Source::FilenameUnixMillis
+                    | Source::FilenameWeChatExport
+                    | Source::FilenameBracketedCompact
+                    | Source::FilenameQqExport
             )
     }
 }

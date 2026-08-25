@@ -29,7 +29,7 @@
 - **链路现状**：`passes_type_filter`（`copy/ops.rs:165,179-188`）→ `Info::is_media` → `is_media_mime`（`types.rs:255-260`，仅 `image/`|`video/` 前缀）；MIME 来源 `sniff_mime`（`mime.rs:29-41`，infer 不识 RW2）→ `mime_from_ext` 兜底（`mime.rs:106-138`，**无 .rw2 分支**）→ 空 mime → skip。
 - **可行性**：仿 `image_png` 先例（`png.rs:41` → `tiff_ifd` → `image_png.rs:23` → `types.rs::from_reader` 分流 `types.rs:160`）。MIME 加 `rw2 → image/tiff` 或专属 `image/x-panasonic-rw2` 常量；`image/tiff` 即可过 `is_media_mime`，落盘过滤自动同口径。
 - **⚠️ 实现前 MUST**：magic `II U\0`（0x49 0x49 0x55 0x00）第三字节 0x55，**不能直调 `parse_tiff`**（`tiff_ifd.rs:57-59` 硬校验 0x002A）；需参数化 magic 入口内部走 `parse_ifds`（`tiff_ifd.rs:67`，与 AVI `strd` 同款）。确认 IFD0 偏移与 DTO 是否在 ExifIFD 链内（`tiff_ifd` 只扫 IFD0 + ExifIFD 一层）。
-- **同步检查点**：CLAUDE.md「新增容器 EXIF 自解析」链（entities + `image_rw2.rs` + `from_reader` 新分支 + `gen_rw2.py` fixture）。
+- **同步检查点**：CLAUDE.md「新增容器 EXIF 自解析」链（entities + `image_rw2.rs` + `from_reader` 新分支 + `gen_rw2.ts` fixture）。
 - **⚠️ 关联风险**：RAW 单文件 ≥20 MB，远端（SMB/ADB）`open_read` 整文件入堆 → OOM 面色。fixture 用近端 only。
 
 ### 3.2 XMP 老 `xap:` 前缀 + element 形态（约 1h，实证 `C:\Pictures\2008\10\m2b4dmzt.jpg`）

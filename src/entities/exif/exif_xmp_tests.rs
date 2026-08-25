@@ -99,6 +99,16 @@ fn populate_image_xmp_fallback_packet_without_keys() {
     assert_eq!(exif.exif_create_date(), 0);
 }
 
+/// XMP packet 内 `xap:` element 形态的 `CreateDate` → fallback 填 `create_date`。
+#[test]
+fn populate_image_xmp_fallback_element_form_fills_create_date() {
+    let head = b"<x:xmpmeta><xap:CreateDate>2008-10-31T09:15:01+08:00</xap:CreateDate></x:xmpmeta>";
+    let mut exif = mk_exif("image/jpeg", |_| {});
+    super::populate_image_xmp_fallback(head, &mut exif);
+    assert_eq!(exif.date_time_original(), 0);
+    assert_eq!(exif.exif_create_date(), 1_225_415_701);
+}
+
 /// `populate_image_dates` 入口 reader seek(0) 失败 → 早返回，字段保持 0。
 /// 用自实现 `FailSeek` wrapper：read 透传 Cursor、seek 恒 Err。
 #[test]

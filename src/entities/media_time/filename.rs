@@ -22,6 +22,8 @@ const SCREENSHOT_PREFIX: &str = "Screenshot_";
 const MACOS_SCREENSHOT_PREFIX: &str = "Screen Shot ";
 // 微信导出：mmexport<13-digit-ms>.jpg
 const MMEXPORT_PREFIX: &str = "mmexport";
+// QQ 导出：QQ图片<14-digit YYYYMMDDHHMMSS>.jpg
+const QQ_EXPORT_PREFIX: &str = "QQ图片";
 // WhatsApp: "WhatsApp Image YYYY-MM-DD at HH.MM.SS" / "WhatsApp Video …"
 const WHATSAPP_IMAGE_PREFIX: &str = "WhatsApp Image ";
 const WHATSAPP_VIDEO_PREFIX: &str = "WhatsApp Video ";
@@ -57,6 +59,12 @@ pub fn parse_filename(name: &str, default_offset: FixedOffset) -> Option<Candida
         return Some(c);
     }
     if let Some(c) = try_generic_dashed(stem, default_offset) {
+        return Some(c);
+    }
+    if let Some(c) = try_parenthesized_compact(stem, default_offset) {
+        return Some(c);
+    }
+    if let Some(c) = try_qq_export(stem, default_offset) {
         return Some(c);
     }
     if let Some(c) = try_loose_yyyymmdd(stem, default_offset) {
@@ -130,6 +138,54 @@ fn dashed_window_shape_ok(w: &[u8]) -> bool {
         10 => b == b' ',
         _ => b.is_ascii_digit(),
     })
+}
+
+/// 括号内紧凑时戳：`IMG_6489(20210611-174530)(1).jpg` 的 `(yyyyMMdd-HHmmss)`。
+/// `(N)` 序号后缀仅 3 字节，不匹配 15 字节窗口形状（8 数字 + `-` + 6 数字 + `)`）
+/// 天然跳过，无需单独剥。扫描所有 `(`，命中合法日期即返。
+fn try_parenthesized_compact(stem: &str, default_offset: FixedOffset) -> Option<Candidate> {
+    const INNER_LEN: usize = 15; // yyyyMMdd-HHmmss
+    let bytes = stem.as_bytes();
+    for (i, &b) in bytes.iter().enumerate() {
+        if b != b'(' {
+            continue;
+        }
+        let inner = i + 1;
+        let end = inner + INNER_LEN;
+        let Some(window) = bytes.get(inner..end) else {
+            continue;
+        };
+        let shape_ok = window[..8].iter().all(u8::is_ascii_digit)
+            && window[8] == b'-'
+            && window[9..].iter().all(u8::is_ascii_digit);
+        if !shape_ok || bytes.get(end) != Some(&b')') {
+            continue;
+        }
+        // 形状匹配的窗口全 ASCII，str 切片落在 char 边界
+        if let Ok(naive) = NaiveDateTime::parse_from_str(&stem[inner..end], "%Y%m%d-%H%M%S") {
+            return Some(naive_to_candidate(
+                naive,
+                default_offset,
+                Source::FilenameBracketedCompact,
+            ));
+        }
+    }
+    None
+}
+
+/// QQ 导出：`QQ图片<14-digit YYYYMMDDHHMMSS>`。14 位秒粒度连续无分隔；
+/// `millis_str_to_candidate` 硬校验 13 位（`try_unix_millis` 不误吞）。
+fn try_qq_export(stem: &str, default_offset: FixedOffset) -> Option<Candidate> {
+    let rest = stem.strip_prefix(QQ_EXPORT_PREFIX)?;
+    if rest.len() != 14 || !rest.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    let naive = NaiveDateTime::parse_from_str(rest, "%Y%m%d%H%M%S").ok()?;
+    Some(naive_to_candidate(
+        naive,
+        default_offset,
+        Source::FilenameQqExport,
+    ))
 }
 
 fn stem_without_ext(name: &str) -> &str {
