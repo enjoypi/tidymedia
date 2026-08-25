@@ -4,7 +4,6 @@
 /// 把 `buf` 中标签外文本追加进 `out`（连续空白折叠单空格），
 /// 累计长度达 `max_bytes` 即停。XML 实体（`&amp;` 等）原样保留——
 /// 分类 embedding 对少量实体噪声不敏感（YAGNI 不解码）。
-#[cfg_attr(coverage_nightly, coverage(off))]
 pub(super) fn strip_markup_into(buf: &[u8], out: &mut String, max_bytes: usize) {
     let budget = max_bytes.saturating_sub(out.len());
     if budget == 0 {
@@ -49,7 +48,6 @@ pub(super) fn strip_markup_into(buf: &[u8], out: &mut String, max_bytes: usize) 
 }
 
 /// 截断 `s` 到不超过 `max_bytes` 且落在 char boundary 上（防 panic）。
-#[cfg_attr(coverage_nightly, coverage(off))]
 pub(super) fn truncate_at_boundary(s: &mut String, max_bytes: usize) {
     if s.len() <= max_bytes {
         return;

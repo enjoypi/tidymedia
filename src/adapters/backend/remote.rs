@@ -205,7 +205,6 @@ fn mkparent<A: RemoteAdapter>(target: &A::Target, client: &Arc<dyn RemoteClient<
 /// default subscriber 不订阅 debug 时永 0-hit，与 CLAUDE.md「tracing macro micro-region」
 /// 套路一致；调用方的 `if let Err` 分支由 `open_write_mkparent_failure_swallowed_to_debug_log`
 /// 等测试覆盖。
-#[cfg_attr(coverage_nightly, coverage(off))]
 fn log_mkparent_err<A: RemoteAdapter>(parent: &A::Target, e: &io::Error) {
     debug!(
         feature = "backend",

@@ -23,7 +23,6 @@ const PLIST_MAX_BYTES: usize = 64 * 1024;
 /// 整 fn `coverage(off)`：fn 内多 let-else 早返路径在 lib unit fixture 各分支命中，
 /// 但 subprocess (bin instance) iWork 文件不入 default fixture 集；业务由
 /// `extract_dates_from_plist` 单测真测。
-#[cfg_attr(coverage_nightly, coverage(off))]
 pub(super) fn parse(reader: &mut dyn MediaReader, _mime: &str) -> (u64, u64) {
     let Ok(mut archive) = zip::ZipArchive::new(reader) else {
         return (0, 0);

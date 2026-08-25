@@ -65,7 +65,6 @@ impl TractEmbedClassifier {
     // `coverage(off)`：真实模型加载路径——`load_raw_embedder` 在 `_real.rs` 由
     // ignore-regex 排除；CI 不分发 ONNX/tokenizer 文件，ensure_loaded 在 lib
     // unit 始终因 `with_raw` 提前注入 Some 而 early return。
-    #[cfg_attr(coverage_nightly, coverage(off))]
     fn ensure_loaded(&self) -> io::Result<()> {
         let mut guard = self.state.lock();
         if guard.is_some() {

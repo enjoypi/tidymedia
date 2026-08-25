@@ -23,7 +23,6 @@ struct XmindMetadata {
 }
 
 /// 入口：把 reader 当 zip 容器打开，按 mime 分流到子解析器。
-#[cfg_attr(coverage_nightly, coverage(off))]
 pub(super) fn parse(reader: &mut dyn MediaReader, mime: &str) -> (u64, u64) {
     let Ok(mut archive) = zip::ZipArchive::new(reader) else {
         return (0, 0);
@@ -37,7 +36,6 @@ pub(super) fn parse(reader: &mut dyn MediaReader, mime: &str) -> (u64, u64) {
     }
 }
 
-#[cfg_attr(coverage_nightly, coverage(off))]
 fn parse_xmind<R: Read + std::io::Seek>(archive: &mut zip::ZipArchive<R>) -> (u64, u64) {
     let Ok(entry) = archive.by_name(METADATA_JSON) else {
         return (0, 0);
@@ -63,7 +61,6 @@ const CONTENT_MAX_BYTES: u64 = 256 * 1024;
 ///
 /// 整 fn `coverage(off)`：zip 打开/entry 缺失早返路径同 `parse`；业务由
 /// `scan::strip_markup_into` / `collect_json_titles` 单测真测。
-#[cfg_attr(coverage_nightly, coverage(off))]
 pub(super) fn extract_text(reader: &mut dyn MediaReader, _mime: &str, max_bytes: usize) -> String {
     let Ok(mut archive) = zip::ZipArchive::new(reader) else {
         return String::new();
@@ -77,7 +74,6 @@ pub(super) fn extract_text(reader: &mut dyn MediaReader, _mime: &str, max_bytes:
     out
 }
 
-#[cfg_attr(coverage_nightly, coverage(off))]
 fn read_entry_capped<R: Read + std::io::Seek>(
     archive: &mut zip::ZipArchive<R>,
     name: &str,
@@ -98,7 +94,6 @@ fn read_entry_capped<R: Read + std::io::Seek>(
 
 /// 纯字节扫描业务：收集 JSON 内所有 `"title":"..."` 值（xmind zen topic 文本）。
 /// 不整树反序列化——只需要文本片段喂分类器。
-#[cfg_attr(coverage_nightly, coverage(off))]
 pub(super) fn collect_json_titles(buf: &[u8], out: &mut String, max_bytes: usize) {
     const KEY: &[u8] = b"\"title\":";
     let mut pos = 0;
@@ -135,7 +130,6 @@ pub(super) fn collect_json_titles(buf: &[u8], out: &mut String, max_bytes: usize
     }
 }
 
-#[cfg_attr(coverage_nightly, coverage(off))]
 fn find_subslice(haystack: &[u8], needle: &[u8]) -> Option<usize> {
     haystack
         .windows(needle.len())
@@ -143,7 +137,6 @@ fn find_subslice(haystack: &[u8], needle: &[u8]) -> Option<usize> {
 }
 
 /// 纯 JSON 解析业务：取 `created` / `modified` 字段（milliseconds → secs）。
-#[cfg_attr(coverage_nightly, coverage(off))]
 pub(super) fn extract_dates_from_json(buf: &[u8]) -> (u64, u64) {
     let Ok(meta) = serde_json::from_slice::<XmindMetadata>(buf) else {
         return (0, 0);
@@ -153,7 +146,6 @@ pub(super) fn extract_dates_from_json(buf: &[u8]) -> (u64, u64) {
     (created, modified)
 }
 
-#[cfg_attr(coverage_nightly, coverage(off))]
 fn millis_to_secs(ms: u64) -> Option<u64> {
     let secs = ms / 1000;
     if secs < 86_400 { None } else { Some(secs) }

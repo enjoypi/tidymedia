@@ -30,7 +30,6 @@ pub fn from_modified(modified: Option<SystemTime>) -> Option<Candidate> {
 /// 而 fs mtime = 1970-01-01 是合法值（fixture / 测试 `FakeBackend` 默认 mtime）。
 /// `coverage(off)` 与 CLAUDE.md「难测/不可达分支」一致：调用入口由
 /// `from_modified` 单测覆盖，本 helper 的 Err arm 物理不可达。
-#[cfg_attr(coverage_nightly, coverage(off))]
 fn convert_secs_to_candidate(secs_u64: u64) -> Option<Candidate> {
     let signed = i64::try_from(secs_u64).ok()?;
     let delta = TimeDelta::try_seconds(signed)?;

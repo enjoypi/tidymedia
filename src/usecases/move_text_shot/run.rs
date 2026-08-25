@@ -91,7 +91,6 @@ pub fn move_text_shot(
     Ok(report)
 }
 
-#[cfg_attr(coverage_nightly, coverage(off))]
 fn log_summary(report: &MoveTextShotReport, dry_run: bool) {
     let result = summary_result(report.failed);
     debug!(
@@ -368,7 +367,6 @@ fn sniff_and_read(
 /// `Read::read_to_end` + `Ok(Some(buf))` 一体化包装 + `coverage(off)`：sniff 成功后
 /// `read_to_end` 的 `?` Err arm 需构造「首 N 字节 OK 后续 Err」的分段 reader
 /// （fake 未支持），pre-existing multi-instance phantom miss 走该 helper 收敛。
-#[cfg_attr(coverage_nightly, coverage(off))]
 fn drain_reader_to_option(reader: &mut dyn Read, mut buf: Vec<u8>) -> io::Result<Option<Vec<u8>>> {
     reader.read_to_end(&mut buf)?;
     Ok(Some(buf))
@@ -486,7 +484,6 @@ enum TargetDecision {
 /// 都在 target 已存在 + hash 分支的深层链路，e2e 测试触发点稀疏且 fake 桩组合复杂；
 /// `coverage(off)` 豁免整 fn 计数，业务由既有 `move_text_shot_dry_run_records_deduplicated_*`
 /// 与 `move_text_shot_records_dedup_and_removes_src` 类 e2e 断言守护。
-#[cfg_attr(coverage_nightly, coverage(off))]
 fn dedupe_or_pick_target(
     base_target: &Location,
     file_name: &str,
@@ -524,7 +521,6 @@ fn bytes_hash_equal(
 
 /// `read_to_end` + SHA-512 双侧比对一体化 `coverage(off)`：`?` Err arm 走 helper
 /// 内部让 caller `bytes_hash_equal` 的调用站点无独立 `?` sub-region。
-#[cfg_attr(coverage_nightly, coverage(off))]
 fn drain_and_hash_equal(reader: &mut dyn Read, src_bytes: &[u8]) -> io::Result<bool> {
     let mut target_bytes = Vec::new();
     reader.read_to_end(&mut target_bytes)?;
@@ -555,7 +551,6 @@ fn handle_duplicate(
     log_deduplicated(&src_loc.display(), &target_loc.display());
 }
 
-#[cfg_attr(coverage_nightly, coverage(off))]
 fn log_deduplicated(src: &str, dst: &str) {
     debug!(
         feature = FEATURE,
@@ -609,7 +604,6 @@ fn do_move_or_dry_run(
 /// `debug!` closure micro-region 在 release + 默认无 subscriber 时 0-hit 让整 fn 掉
 /// region 覆盖率；抽 helper 加 `coverage(off)` 集中排除，业务 fn 保持可测（CLAUDE.md
 /// 「tracing macro micro-region release subscriber 不订阅 debug 时 0-hit」套路）。
-#[cfg_attr(coverage_nightly, coverage(off))]
 fn log_move_ok(src: &str, dst: &str) {
     debug!(
         feature = FEATURE,
@@ -621,7 +615,6 @@ fn log_move_ok(src: &str, dst: &str) {
     );
 }
 
-#[cfg_attr(coverage_nightly, coverage(off))]
 fn log_move_dry_run(src: &str, dst: &str) {
     debug!(
         feature = FEATURE,
@@ -730,7 +723,6 @@ fn unique_name_from_index(
     Ok(None)
 }
 
-#[cfg_attr(coverage_nightly, coverage(off))]
 fn check_candidate_free(backend: &Arc<dyn Backend>, loc: &Location) -> io::Result<bool> {
     backend.exists(loc).map(|exists| !exists)
 }
@@ -755,7 +747,6 @@ fn record_failure(delta: &mut SourceDelta, path: String, e: &io::Error) {
     delta.failed += 1;
 }
 
-#[cfg_attr(coverage_nightly, coverage(off))]
 fn log_item_failed(path: &str, msg: &str) {
     warn!(
         feature = FEATURE,

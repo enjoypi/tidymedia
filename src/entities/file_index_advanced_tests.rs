@@ -294,7 +294,6 @@ fn visit_location_accepts_multiple_backends_in_one_index() {
 // skip 分支」套路），Linux 上完整断言照跑。
 #[test]
 #[cfg(unix)]
-#[cfg_attr(coverage_nightly, coverage(off))]
 fn visit_dir_counts_non_utf8_path() {
     use std::ffi::OsStr;
     use std::os::unix::ffi::OsStrExt;

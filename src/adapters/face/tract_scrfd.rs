@@ -71,7 +71,6 @@ impl TractScrfdDetector {
         }
     }
 
-    #[cfg_attr(coverage_nightly, coverage(off))]
     fn ensure_raw(&self) -> io::Result<&dyn RawScrfd> {
         // 快路径：已 load 直接 OnceLock::get 无锁返。
         if let Some(r) = self.raw.get() {

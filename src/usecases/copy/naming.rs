@@ -138,7 +138,6 @@ fn system_time_to_offsetdatetime(t: SystemTime) -> Option<OffsetDateTime> {
 /// Linux/macOS 平台 `Duration::as_secs()` 由 `timespec.tv_sec: i64` 转 u64，最大值不
 /// 超过 `i64::MAX`，`try_from` Err arm 逻辑不可达；`from_unix_timestamp` 越界仅在
 /// 探测超远未来（≈ ±5×10¹⁴ 年）才失败。两条 Err arm 都无法从测试稳定触发。
-#[cfg_attr(coverage_nightly, coverage(off))]
 fn convert_dur_secs_to_offsetdatetime(secs: u64) -> Option<OffsetDateTime> {
     let secs = i64::try_from(secs).ok()?;
     OffsetDateTime::from_unix_timestamp(secs).ok()
@@ -174,7 +173,6 @@ mod tests {
     /// 测试自身的 let-else `return;`（Windows/CI 平台差异 skip 路径）在 Linux
     /// 恒不可达，`coverage(off)` 将其从严格 100% 分母剔除；被测函数本身仍被
     /// `at_epoch` 用例正常计数。
-    #[cfg_attr(coverage_nightly, coverage(off))]
     #[test]
     fn system_time_to_offsetdatetime_pre_epoch_returns_none() {
         let pre = UNIX_EPOCH.checked_sub(Duration::from_secs(1));

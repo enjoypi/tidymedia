@@ -156,7 +156,11 @@ fn parse_mdpm(data: &[u8]) -> Option<String> {
 fn bcd(b: u8) -> Option<u32> {
     let hi = b >> 4;
     let lo = b & 0x0f;
-    (hi <= 9 && lo <= 9).then(|| u32::from(hi) * 10 + u32::from(lo))
+    if hi <= 9 && lo <= 9 {
+        Some(u32::from(hi) * 10 + u32::from(lo))
+    } else {
+        None
+    }
 }
 
 #[cfg(test)]

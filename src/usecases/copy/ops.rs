@@ -28,7 +28,6 @@ use crate::usecases::report::feature_of;
 // 双 binary 联合断言保证，cov(off) 仅消除 LLVM region 计数器在 multi-instance
 // 累加下的虚假 miss。
 #[inline(never)]
-#[cfg_attr(coverage_nightly, coverage(off))]
 pub(super) fn do_copy(
     src: &Info,
     output_dir: &Location,
@@ -161,7 +160,6 @@ pub(super) fn do_copy(
 // （clippy too_many_lines）；`coverage(off)` 理由与 do_copy 相同（multi-binary
 // instance 下 `warn!` micro-region 虚假 miss），业务由 `copy_doc_only_tests` /
 // `copy_advanced_tests::include_non_media` 系列真测。
-#[cfg_attr(coverage_nightly, coverage(off))]
 fn passes_type_filter(src: &Info, opts: &CopyOpts<'_>, feature: &'static str, disp: &str) -> bool {
     if opts.doc_only {
         if !src.is_office() {
@@ -202,7 +200,6 @@ fn passes_type_filter(src: &Info, opts: &CopyOpts<'_>, feature: &'static str, di
 // 否则同 hash 后续 src 走 output_index.exists(secure=true) 会触发
 // f.secure_hash() → output_backend.open_read(target_loc)，dry-run 下 target
 // 未真写返 NotFound 让 do_copy 假失败。
-#[cfg_attr(coverage_nightly, coverage(off))]
 fn record_dry_run(
     src: &Info,
     target_loc: Location,
@@ -231,7 +228,6 @@ fn record_dry_run(
 // instance 盲区。功能上 lib unit 已由 `copy_advanced_tests::do_copy_cross_backend_...`
 // 与 lib_tidy `move_keeps_src_and_dst_when_remove_file_fails` 双重断言覆盖；wrap
 // 错误文案契约由 `local_tests::cross_device_rename_*` 钉死。
-#[cfg_attr(coverage_nightly, coverage(off))]
 fn remove_src_after_stream_copy(
     src: &Info,
     src_loc: &Location,

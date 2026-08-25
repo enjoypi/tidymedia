@@ -22,7 +22,10 @@ pub fn under_prefix(path: &str, prefix: &str) -> bool {
         return false;
     }
     let rest = &path[prefix.len()..];
-    rest.is_empty() || rest.starts_with('/') || rest.starts_with('\\')
+    if rest.is_empty() || rest.starts_with('/') || rest.starts_with('\\') {
+        return true;
+    }
+    false
 }
 
 /// 把 [`Location`] 规范化为 prefix 字符串：Local 路径直接 `std::fs::canonicalize`

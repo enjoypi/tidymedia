@@ -48,7 +48,6 @@ struct TractRawDetector {
 }
 
 impl RawDetector for TractRawDetector {
-    #[cfg_attr(coverage_nightly, coverage(off))]
     fn run(&self, input: Tensor) -> io::Result<Tensor> {
         let outputs = self
             .model
@@ -95,7 +94,6 @@ impl TractDbnetDetector {
     // 始终因为 `with_raw` 提前注入 `Some(...)` 而 early return。逻辑由
     // `dispatch_returns_invalid_input_when_model_path_empty` + 真模型手动验证
     // （plan「验证」第 5 步）覆盖。
-    #[cfg_attr(coverage_nightly, coverage(off))]
     fn ensure_raw(&self) -> io::Result<()> {
         let mut guard = self.raw.lock();
         if guard.is_some() {

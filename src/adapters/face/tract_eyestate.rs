@@ -46,7 +46,6 @@ struct TractRawEyeState {
 }
 
 impl RawEyeState for TractRawEyeState {
-    #[cfg_attr(coverage_nightly, coverage(off))]
     fn run(&self, input: Tensor) -> io::Result<Tensor> {
         let outputs = self
             .model
@@ -90,7 +89,6 @@ impl TractEyeStateClassifier {
         }
     }
 
-    #[cfg_attr(coverage_nightly, coverage(off))]
     fn ensure_raw(&self) -> io::Result<&dyn RawEyeState> {
         if let Some(r) = self.raw.get() {
             return Ok(r.as_ref());

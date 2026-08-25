@@ -35,7 +35,6 @@ struct TractRawFaceMesh {
 }
 
 impl RawFaceMesh for TractRawFaceMesh {
-    #[cfg_attr(coverage_nightly, coverage(off))]
     fn run(&self, input: Tensor) -> io::Result<Tensor> {
         let outputs = self
             .model
@@ -79,7 +78,6 @@ impl TractFaceMeshDetector {
         }
     }
 
-    #[cfg_attr(coverage_nightly, coverage(off))]
     fn ensure_raw(&self) -> io::Result<&dyn RawFaceMesh> {
         if let Some(r) = self.raw.get() {
             return Ok(r.as_ref());

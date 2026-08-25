@@ -25,7 +25,6 @@ const CORE_XML_MAX_BYTES: usize = 64 * 1024;
 /// 整 fn `coverage(off)`：fn 内多 `let Ok(..) else { return (0, 0); }` 早返路径
 /// 由 lib unit fixture 各分支命中，但 subprocess (bin instance) 仅跑 happy；
 /// 多 instance 累加让 phantom region miss 难闭合 —— 业务由 `extract_dates` 单测真测。
-#[cfg_attr(coverage_nightly, coverage(off))]
 pub(super) fn parse(reader: &mut dyn MediaReader, _mime: &str) -> (u64, u64) {
     let Ok(mut archive) = zip::ZipArchive::new(reader) else {
         return (0, 0);
@@ -58,7 +57,6 @@ const BODY_XML_MAX_BYTES: u64 = 256 * 1024;
 ///
 /// 整 fn `coverage(off)`：zip 打开/entry 缺失早返路径同 `parse`；剥标签业务由
 /// `scan::strip_markup_into` 单测真测。
-#[cfg_attr(coverage_nightly, coverage(off))]
 pub(super) fn extract_text(reader: &mut dyn MediaReader, mime: &str, max_bytes: usize) -> String {
     let Ok(mut archive) = zip::ZipArchive::new(reader) else {
         return String::new();
@@ -92,7 +90,6 @@ pub(super) fn extract_text(reader: &mut dyn MediaReader, mime: &str, max_bytes: 
 
 /// 读单个 zip entry 前 [`BODY_XML_MAX_BYTES`] 字节剥标签入 `out`；entry 缺失 /
 /// 读失败静默跳过（best-effort）。`coverage(off)` 理由同 `extract_text`。
-#[cfg_attr(coverage_nightly, coverage(off))]
 fn append_entry_text<R: std::io::Read + std::io::Seek>(
     archive: &mut zip::ZipArchive<R>,
     name: &str,
@@ -115,7 +112,6 @@ fn append_entry_text<R: std::io::Read + std::io::Seek>(
 
 /// 纯字节扫描业务：在 `core.xml` 内容查 dcterms:created/modified 元素文本，
 /// 调 `parse_iso8601_to_epoch` 转 Unix UTC epoch。
-#[cfg_attr(coverage_nightly, coverage(off))]
 pub(super) fn extract_dates(buf: &[u8]) -> (u64, u64) {
     let created = scan_element_text(buf, TAG_CREATED_OPEN, TAG_CREATED_CLOSE)
         .and_then(parse_iso8601_to_epoch)
@@ -128,7 +124,6 @@ pub(super) fn extract_dates(buf: &[u8]) -> (u64, u64) {
 
 /// 在 `buf` 内找 `<open_tag` element：跳到首 `>` 后取至 `</close_tag>` 之间内容。
 /// 支持 `<dcterms:created xsi:type="...">text</dcterms:created>` 的属性形式。
-#[cfg_attr(coverage_nightly, coverage(off))]
 fn scan_element_text<'a>(buf: &'a [u8], open_tag: &[u8], close_tag: &[u8]) -> Option<&'a str> {
     // start 来自 find_subslice 返回值 → start + open_tag.len() ≤ buf.len() 必成立
     // → `&buf[after_open..]` 永不越界（CLAUDE.md「逻辑不可达的 `?` 死区消除」套路）。
@@ -145,7 +140,6 @@ fn scan_element_text<'a>(buf: &'a [u8], open_tag: &[u8], close_tag: &[u8]) -> Op
 
 /// 解析 ISO 8601 时间（RFC 3339 子集，dcterms:W3CDTF）：
 /// `YYYY-MM-DDTHH:MM:SS[+HH:MM|Z]`。chrono `DateTime::parse_from_rfc3339` 接 RFC 3339。
-#[cfg_attr(coverage_nightly, coverage(off))]
 fn parse_iso8601_to_epoch(s: &str) -> Option<u64> {
     let dt = DateTime::parse_from_rfc3339(s.trim()).ok()?;
     let secs = dt.timestamp();
@@ -156,7 +150,6 @@ fn parse_iso8601_to_epoch(s: &str) -> Option<u64> {
     }
 }
 
-#[cfg_attr(coverage_nightly, coverage(off))]
 fn find_byte(haystack: &[u8], byte: u8) -> Option<usize> {
     let mut i = 0;
     while i < haystack.len() {
@@ -168,7 +161,6 @@ fn find_byte(haystack: &[u8], byte: u8) -> Option<usize> {
     None
 }
 
-#[cfg_attr(coverage_nightly, coverage(off))]
 fn find_subslice(haystack: &[u8], needle: &[u8]) -> Option<usize> {
     haystack
         .windows(needle.len())

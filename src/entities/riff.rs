@@ -121,7 +121,7 @@ fn parse_avif_ifd(strd: &[u8]) -> Option<AviExif> {
 }
 
 #[cfg(test)]
-#[path = "riff_tests_common.rs"]
+#[path = "riff_test_helpers.rs"]
 mod tests_common;
 
 #[cfg(test)]

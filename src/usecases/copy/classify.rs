@@ -48,7 +48,6 @@ pub(crate) fn make_classify_provider(
 /// 整 fn `coverage(off)`：IO 编排（`open_read` Err arm）需注入 reader 错误，
 /// multi-instance 下 phantom miss 难闭合；分类语义由 `classify_tests.rs`
 /// 用 `FakeBackend` + `FakeDocumentClassifier` 全分支断言。
-#[cfg_attr(coverage_nightly, coverage(off))]
 fn classify_one(
     loc: &Location,
     backend: &Arc<dyn Backend>,

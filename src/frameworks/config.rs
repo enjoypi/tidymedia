@@ -213,7 +213,13 @@ fn sanitize_ocr(ocr: &mut OcrConfig) {
 
 // 开区间 (0.0, 1.0) 内的有限正数。NaN/Inf 均通过 `is_finite()` 拒绝。
 fn is_unit_open(v: f32) -> bool {
-    v.is_finite() && v > 0.0 && v < 1.0
+    if !v.is_finite() {
+        return false;
+    }
+    if v <= 0.0 {
+        return false;
+    }
+    v < 1.0
 }
 
 // FaceConfig 各阈值/权重越界即 warn + 回退默认，同 `sanitize_ocr` 哲学：
@@ -480,16 +486,27 @@ fn sanitize_env_value(var: &str, value: String) -> String {
 }
 
 fn yaml_unsafe_byte(b: u8) -> bool {
-    // LF / CR / NUL 必剥；其余控制字符 (除 TAB) 同剥避免 yaml 解析歧义
-    matches!(b, b'\n' | b'\r' | 0) || (b < 0x20 && b != b'\t')
+    if matches!(b, b'\n' | b'\r' | 0) {
+        return true;
+    }
+    if b >= 0x20 {
+        return false;
+    }
+    b != b'\t'
 }
 
 fn yaml_unsafe_char(c: char) -> bool {
-    matches!(c, '\n' | '\r' | '\0') || (c.is_control() && c != '\t')
+    if matches!(c, '\n' | '\r' | '\0') {
+        return true;
+    }
+    if !c.is_control() {
+        return false;
+    }
+    c != '\t'
 }
 
 #[cfg(test)]
-#[path = "config_test_common.rs"]
+#[path = "config_test_helpers.rs"]
 mod test_common;
 
 #[cfg(test)]

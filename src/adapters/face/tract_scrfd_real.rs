@@ -16,7 +16,6 @@ use crate::usecases::face::FaceDetection;
 /// # Errors
 ///
 /// 文件不存在、ONNX 解析、优化或形状推导失败时返回 `Err`。
-#[cfg_attr(coverage_nightly, coverage(off))]
 pub(crate) fn load_runnable(path: &Path) -> io::Result<ScrfdModel> {
     let model = tract_onnx::onnx()
         .model_for_path(path)
@@ -46,7 +45,6 @@ pub(crate) struct ScaleMeta {
 }
 
 impl RawScrfd for TractRawScrfd {
-    #[cfg_attr(coverage_nightly, coverage(off))]
     fn run(&self, input: Tensor, meta: ScaleMeta) -> io::Result<Vec<FaceDetection>> {
         let outputs = self
             .model
@@ -59,7 +57,6 @@ impl RawScrfd for TractRawScrfd {
 /// SCRFD-500M-bn-kps 三 stride（8/16/32）输出解 anchor + NMS。
 /// 输出 layout 假设：`[score_8, bbox_8, kps_8, score_16, bbox_16, kps_16, score_32, bbox_32, kps_32]`，
 /// 每个 score `[1, A, 1]`、bbox `[1, A, 4]`、kps `[1, A, 10]`，`A=grid_h*grid_w*num_anchors`。
-#[cfg_attr(coverage_nightly, coverage(off))]
 fn decode_outputs(
     outputs: &[TValue],
     score_threshold: f32,
@@ -156,7 +153,6 @@ fn decode_outputs(
     Ok(nms(detections, nms_iou))
 }
 
-#[cfg_attr(coverage_nightly, coverage(off))]
 fn nms(mut dets: Vec<FaceDetection>, iou_threshold: f32) -> Vec<FaceDetection> {
     dets.sort_by(|a, b| {
         b.score
@@ -173,7 +169,6 @@ fn nms(mut dets: Vec<FaceDetection>, iou_threshold: f32) -> Vec<FaceDetection> {
     kept
 }
 
-#[cfg_attr(coverage_nightly, coverage(off))]
 fn iou(a: &[f32; 4], b: &[f32; 4]) -> f32 {
     let x1 = a[0].max(b[0]);
     let y1 = a[1].max(b[1]);

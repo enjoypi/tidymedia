@@ -99,10 +99,16 @@ fn split_stem_ext(name: &str) -> (String, String) {
 }
 
 fn stem_digit_variant(name_stem: &str, base_stem: &str) -> bool {
-    name_stem
+    let Some(digits) = name_stem
         .strip_prefix(base_stem)
         .and_then(|rest| rest.strip_prefix('_'))
-        .is_some_and(|digits| !digits.is_empty() && digits.chars().all(|c| c.is_ascii_digit()))
+    else {
+        return false;
+    };
+    if digits.is_empty() {
+        return false;
+    }
+    digits.chars().all(|c| c.is_ascii_digit())
 }
 
 fn basename(p: &str) -> &str {

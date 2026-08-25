@@ -12,7 +12,6 @@ use super::tract_facemesh::FaceMeshModel;
 /// # Errors
 ///
 /// 文件不存在、ONNX 解析、优化或形状推导失败时返回 `Err`。
-#[cfg_attr(coverage_nightly, coverage(off))]
 pub(crate) fn load_runnable(path: &Path) -> io::Result<FaceMeshModel> {
     let model = tract_onnx::onnx()
         .model_for_path(path)

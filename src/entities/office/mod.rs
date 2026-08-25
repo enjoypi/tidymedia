@@ -70,7 +70,6 @@ pub(crate) const MIME_TEXT_TSV: &str = "text/tab-separated-values";
 /// 接 `&mut dyn MediaReader` 而非 `Box<dyn MediaReader>`：让 stub 阶段子模块不消费
 /// reader 不触发 `clippy::needless_pass_by_value`；commit 2-9 接入主体时（zip /
 /// pdf 字节读 / cfb 容器读取）`&mut Read + Seek` 仍是合法 trait bound。
-#[cfg_attr(coverage_nightly, coverage(off))]
 pub(crate) fn populate_office_dates(reader: &mut dyn MediaReader, mime: &str) -> (u64, u64) {
     if mime.starts_with(MIME_PDF) {
         pdf::parse(reader, mime)
@@ -100,7 +99,6 @@ pub(crate) fn populate_office_dates(reader: &mut dyn MediaReader, mime: &str) ->
 /// 非全文保真）。空串 = 提不出文本（扫描版 PDF / iWork IWA / 损坏容器），
 /// 调用方（`usecases::copy::classify`）落 `uncategorized`。
 /// `max_bytes` 是输出文本上限（分类 embedding 只吃前几百 token，无需全文）。
-#[cfg_attr(coverage_nightly, coverage(off))]
 pub(crate) fn extract_office_text(
     reader: &mut dyn MediaReader,
     mime: &str,
@@ -130,17 +128,20 @@ pub(crate) fn extract_office_text(
     }
 }
 
-#[cfg_attr(coverage_nightly, coverage(off))]
 fn is_ooxml_mime(mime: &str) -> bool {
     mime.starts_with(MIME_OOXML_PREFIX)
 }
 
-#[cfg_attr(coverage_nightly, coverage(off))]
 fn is_cfb_mime(mime: &str) -> bool {
-    mime == MIME_DOC || mime == MIME_PPT || mime == MIME_XLS
+    if mime == MIME_DOC {
+        return true;
+    }
+    if mime == MIME_PPT {
+        return true;
+    }
+    mime == MIME_XLS
 }
 
-#[cfg_attr(coverage_nightly, coverage(off))]
 fn is_iwork_mime(mime: &str) -> bool {
     mime == MIME_PAGES
         || mime == MIME_NUMBERS
@@ -148,7 +149,6 @@ fn is_iwork_mime(mime: &str) -> bool {
         || mime.starts_with(MIME_IWORK_PREFIX)
 }
 
-#[cfg_attr(coverage_nightly, coverage(off))]
 fn is_mindmap_zip_mime(mime: &str) -> bool {
     mime == MIME_XMIND
         || mime == MIME_XMIND_ALT

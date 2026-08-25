@@ -25,7 +25,13 @@ fn is_direct_child(child: &str, parent: &str) -> bool {
     let Some(inner) = rest.strip_prefix(['/', '\\']) else {
         return false;
     };
-    !inner.is_empty() && !inner.contains('/') && !inner.contains('\\')
+    if inner.is_empty() {
+        return false;
+    }
+    if inner.contains('/') {
+        return false;
+    }
+    !inner.contains('\\')
 }
 
 /// Client 操作的错误注入键。

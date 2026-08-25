@@ -2,7 +2,24 @@ use std::io::Cursor;
 
 use image::RgbImage;
 
-use super::{entropy_hash, rotated_phash_similar, sha512_bytes};
+use super::{entropy_hash, rotated_phash_similar, sha512_bytes, stem_digit_variant};
+
+/// `photo_2021_12.jpg` 类：`basename` 剥掉 `base_stem` + `_` 后是纯数字后缀
+/// （重复导出序号）→ 视为同内容变体。
+#[test]
+fn stem_digit_variant_detects_numeric_suffix() {
+    assert!(stem_digit_variant("photo_2021_12", "photo_2021"));
+    assert!(stem_digit_variant("IMG_20210501_3", "IMG_20210501"));
+}
+
+#[test]
+fn stem_digit_variant_rejects_non_digit_or_missing() {
+    assert!(!stem_digit_variant("photo_2021_abc", "photo_2021"));
+    assert!(!stem_digit_variant("photo_2021", "photo_2021"));
+    assert!(!stem_digit_variant("photo_2021_", "photo_2021"));
+    assert!(!stem_digit_variant("other_2021_12", "photo_2021"));
+    assert!(!stem_digit_variant("photo_2021_1_x", "photo_2021_1"));
+}
 
 fn chunk(typ: [u8; 4], data: &[u8]) -> Vec<u8> {
     let mut out = Vec::new();

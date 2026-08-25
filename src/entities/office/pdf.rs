@@ -27,7 +27,6 @@ const KEY_MOD: &[u8] = b"/ModDate";
 /// 整 fn `coverage(off)`：seek/read Err arm 只能用 lib unit `FailRead` 注入触发，
 /// subprocess bin instance 永远走 OK arm，多 instance 累加 phantom miss。
 /// 窗口划分由纯 fn `scan_windows` 单测真测。
-#[cfg_attr(coverage_nightly, coverage(off))]
 pub(super) fn parse(reader: &mut dyn MediaReader, _mime: &str) -> (u64, u64) {
     let Some(buf) = read_windows(reader) else {
         return (0, 0);
@@ -37,7 +36,6 @@ pub(super) fn parse(reader: &mut dyn MediaReader, _mime: &str) -> (u64, u64) {
 
 /// 纯窗口划分：`size ≤ 2×64 KB` 整读单窗口（无重叠重复解析）；更大文件头尾各
 /// 64 KB 两段不相交窗口。
-#[cfg_attr(coverage_nightly, coverage(off))]
 pub(super) fn scan_windows(size: u64) -> (Range<u64>, Option<Range<u64>>) {
     if size <= 2 * PDF_SCAN_BYTES {
         (0..size, None)
@@ -47,7 +45,6 @@ pub(super) fn scan_windows(size: u64) -> (Range<u64>, Option<Range<u64>>) {
 }
 
 /// IO 胶水：seek End 取 size → 按窗口读拼 buffer。`coverage(off)` 理由同 `parse`。
-#[cfg_attr(coverage_nightly, coverage(off))]
 fn read_windows(reader: &mut dyn MediaReader) -> Option<Vec<u8>> {
     let size = reader.seek(SeekFrom::End(0)).ok()?;
     let (head, tail) = scan_windows(size);
@@ -81,7 +78,6 @@ const INFLATE_OUTPUT_CAP: usize = 2 * 1024 * 1024;
 ///
 /// 整 fn `coverage(off)`：read 入口 Err arm 同 `parse`；扫描业务由
 /// `extract_text_from_buf` 单测真测。
-#[cfg_attr(coverage_nightly, coverage(off))]
 pub(super) fn extract_text(reader: &mut dyn MediaReader, _mime: &str, max_bytes: usize) -> String {
     let mut buf = Vec::new();
     let mut limited = reader.take(PDF_TEXT_INPUT_CAP as u64);
@@ -93,7 +89,6 @@ pub(super) fn extract_text(reader: &mut dyn MediaReader, _mime: &str, max_bytes:
 
 /// 纯字节扫描业务：遍历 `stream`/`endstream` 对，按前导字典是否含
 /// `/FlateDecode` 决定解压，再收集 `BT…ET` 文本块内的字符串字面量。
-#[cfg_attr(coverage_nightly, coverage(off))]
 pub(super) fn extract_text_from_buf(buf: &[u8], max_bytes: usize) -> String {
     let mut out = String::new();
     let mut pos = 0;
@@ -124,7 +119,6 @@ pub(super) fn extract_text_from_buf(buf: &[u8], max_bytes: usize) -> String {
 
 /// zlib 解压 content stream，输出 cap 防炸弹；非 zlib 数据（加密/其它 filter
 /// 链）返 `None` 跳过。
-#[cfg_attr(coverage_nightly, coverage(off))]
 fn inflate_capped(data: &[u8]) -> Option<Vec<u8>> {
     use std::io::Read;
     let decoder = flate2::read::ZlibDecoder::new(data);
@@ -141,7 +135,6 @@ fn inflate_capped(data: &[u8]) -> Option<Vec<u8>> {
 /// 收集 content 内 `(...)` 字符串字面量（PDF 文本 show 运算符 `Tj`/`TJ`/`'`/`"`
 /// 的操作数），处理 `\(` `\)` `\\` 转义与嵌套括号；仅当 content 含 `BT`
 /// （text block 开始运算符）才扫，过滤纯图形 stream。
-#[cfg_attr(coverage_nightly, coverage(off))]
 pub(super) fn collect_string_literals(content: &[u8], out: &mut String, max_bytes: usize) {
     if find_subslice(content, b"BT").is_none() {
         return;
@@ -200,7 +193,6 @@ pub(super) fn collect_string_literals(content: &[u8], out: &mut String, max_byte
 }
 
 /// `stream` 关键字后跳过 EOL（`\r\n` 或 `\n`，PDF spec §7.3.8）。
-#[cfg_attr(coverage_nightly, coverage(off))]
 fn skip_stream_eol(buf: &[u8], mut i: usize) -> usize {
     if buf.get(i) == Some(&b'\r') {
         i += 1;
@@ -212,7 +204,6 @@ fn skip_stream_eol(buf: &[u8], mut i: usize) -> usize {
 }
 
 /// 纯字节扫描业务：在 buffer 内查 `/CreationDate` + `/ModDate` 的 `D:` 字面量。
-#[cfg_attr(coverage_nightly, coverage(off))]
 pub(super) fn extract_dates(buf: &[u8]) -> (u64, u64) {
     let created = scan_d_date_after_key(buf, KEY_CREATION).unwrap_or(0);
     let modified = scan_d_date_after_key(buf, KEY_MOD).unwrap_or(0);
@@ -221,7 +212,6 @@ pub(super) fn extract_dates(buf: &[u8]) -> (u64, u64) {
 
 /// 在 `buf` 中找首个 `key`（如 `/CreationDate`），跳过 key 后白空格直到 `(D:...)`，
 /// 提取括号内字串调 `parse_pdf_d_format` 转 Unix UTC epoch。
-#[cfg_attr(coverage_nightly, coverage(off))]
 fn scan_d_date_after_key(buf: &[u8], key: &[u8]) -> Option<u64> {
     let pos = find_subslice(buf, key)?;
     let rest = &buf[pos + key.len()..];
@@ -235,7 +225,6 @@ fn scan_d_date_after_key(buf: &[u8], key: &[u8]) -> Option<u64> {
 /// `slice::iter().position(closure)` 的非 closure 等价物 —— closure region 在多
 /// codegen instance 下易出 phantom miss（CLAUDE.md「closure 算独立 function」）；
 /// 手写 for 循环让 LLVM 把整 fn 算单 region 累加到两 instance。
-#[cfg_attr(coverage_nightly, coverage(off))]
 fn find_byte(haystack: &[u8], byte: u8) -> Option<usize> {
     let mut i = 0;
     while i < haystack.len() {
@@ -254,7 +243,6 @@ fn find_byte(haystack: &[u8], byte: u8) -> Option<usize> {
 /// instance 各 monomorphize 一份，phantom region miss 难以靠 fixture 一一覆盖
 /// （subprocess fixture 只跑 happy path，lib unit 跑边界，两 instance 区域 region
 /// 切片不重合）。逻辑正确性由 lib unit `pdf_tests.rs` 全分支覆盖断言保证。
-#[cfg_attr(coverage_nightly, coverage(off))]
 pub(super) fn parse_pdf_d_format(s: &str) -> Option<u64> {
     let body = s.strip_prefix("D:")?;
     let bytes = body.as_bytes();
@@ -288,12 +276,10 @@ pub(super) fn parse_pdf_d_format(s: &str) -> Option<u64> {
 }
 
 /// `from_utf8` 对 ASCII 子串永不 Err；用于 PDF 日期前缀（YYYY/MM/DD）切片转 &str。
-#[cfg_attr(coverage_nightly, coverage(off))]
 fn ascii_str(bytes: &[u8]) -> &str {
     std::str::from_utf8(bytes).expect("internal: PDF date prefix bytes are ASCII")
 }
 
-#[cfg_attr(coverage_nightly, coverage(off))]
 fn parse_pair(bytes: &[u8], offset: usize) -> Option<u32> {
     let slice = bytes.get(offset..offset + 2)?;
     std::str::from_utf8(slice).ok()?.parse().ok()
@@ -304,7 +290,6 @@ fn parse_pair(bytes: &[u8], offset: usize) -> Option<u32> {
 /// instance 各 monomorphize 一份，phantom region miss 难靠 fixture 一一覆盖
 /// （subprocess fixture 只跑 happy path）。逻辑正确性由 `pdf_tests.rs`
 /// `parse_tz_offset_*` 系列全分支断言保证。
-#[cfg_attr(coverage_nightly, coverage(off))]
 fn parse_tz_offset(tz: &[u8]) -> Option<FixedOffset> {
     if tz.is_empty() || tz[0] == b'Z' {
         return FixedOffset::east_opt(0);
@@ -331,7 +316,6 @@ fn parse_tz_offset(tz: &[u8]) -> Option<FixedOffset> {
     FixedOffset::east_opt(sign * (hh * 3600 + mm * 60))
 }
 
-#[cfg_attr(coverage_nightly, coverage(off))]
 fn find_subslice(haystack: &[u8], needle: &[u8]) -> Option<usize> {
     haystack
         .windows(needle.len())
