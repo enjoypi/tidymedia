@@ -82,7 +82,7 @@
 - **`FakeBackend.walk` 对不存在 root 静默返空**（`LocalBackend` 计 walker_errors=1）：「扫描完整性/权威性」类测试两者语义不同，勿用 Fake 断言 walker 错误路径
 
 ## 性能采集（AI 分析用）
-- **一次性汇总**：`uv run --quiet --no-project scripts/perf-collect.py --sub <copy|move|find|cull|move-text-shot> --data <真实源目录> --output-dir <dir>` → 产 `report.json`（含 `duration_ms`）+ `time-v.txt`（`/usr/bin/time -v` 抓 RSS/CPU/IO）+ `perf-report.md`（单一 markdown 直接扔 LLM 分析）
+- **一次性汇总**：`bun scripts/perf-collect.ts --sub <copy|move|find|cull|move-text-shot> --data <真实源目录> --output-dir <dir>` → 产 `report.json`（含 `duration_ms`）+ `time-v.txt`（`/usr/bin/time -v` 抓 RSS/CPU/IO）+ `perf-report.md`（单一 markdown 直接扔 LLM 分析）
 - **产物机器可读**：不产 SVG 火焰图/二进制 pprof profile；深度剖析走 samply attach（补充手段，非默认）
 - **详细指南**：`docs/performance.md`（字段字典 + AI 分析 prompt 模板 + 常见瓶颈判定路径）；用户问「性能怎么测」/ 「如何分析瓶颈」直接指到此文档
 
@@ -109,7 +109,7 @@
 - **新增 CLI flag** → `adapters/dispatch.rs` 透传 + 每子命令路径独立 e2e 触发 Some/None 两边；e2e MUST 含 `run_cli(["tidymedia", ...])` 字符串形式
 - **新增 `media_time` 候选 / 调整 P0–P4** → `entities/media_time/priority.rs` `Source`/`Priority` → 解析模块 → `resolve`/`decision` 裁决 → fixture；**新增下载时戳类 P2 variant MUST 加入 `Source::is_majority_filename_vote` 黑名单**
 - **新增 archive_template 占位符** → `usecases/archive_template.rs::render` + 同文件 `PLACEHOLDERS` 常量 + `usecases/config.rs::validate_archive_template` 三处同步；用户值入路径段（如 `{category}` 类目名）MUST 过 `sanitize_path_segment`
-- **新增容器 EXIF 自解析** → `entities/<container>.rs`（chunk 遍历）+ 调 `tiff_ifd::parse_tiff`/`parse_ifds` + `entities/exif/image_<container>.rs` 或 fallback 接入 + `types.rs::from_reader` 分流 + `tests/fixtures/gen_<container>.py`；**双 0 XMP fallback 调 `populate_image_xmp_fallback_if_empty`** 单点
+- **新增容器 EXIF 自解析** → `entities/<container>.rs`（chunk 遍历）+ 调 `tiff_ifd::parse_tiff`/`parse_ifds` + `entities/exif/image_<container>.rs` 或 fallback 接入 + `types.rs::from_reader` 分流 + `tests/fixtures/gen_<container>.ts`；**双 0 XMP fallback 调 `populate_image_xmp_fallback_if_empty`** 单点
 - **新增 office 容器** → `entities/office/<container>.rs`（`parse(reader, mime)` 入口 + `extract_text(reader, mime, max_bytes)` 文本提取 + 业务纯 helper lib unit 测全分支）+ `entities/office/mod.rs` MIME + 双路由（`populate_office_dates`/`extract_office_text`）+ `entities/exif/mime.rs::{is_office_mime, mime_from_ext}` + `OFFICE_FIXTURES` 数组 + e2e `tests/lib_tidy/office_archive.rs`；**fixture 进 `OFFICE_FIXTURES` 后该容器全部业务 fn MUST `coverage(off)`**（subprocess bin instance 只跑 happy path，multi-instance branch 记录让 lib unit 全分支覆盖被拆散成 phantom miss）；剥标签/截断共用 `entities/office/scan.rs`
 - **新增子命令** → `Commands` enum + `CommandResult` variant + `tidy()` partial-failure arm + `tidy_with` match + `dispatch_<sub>` fn + `usecases/<name>/` 目录 + `usecases/report.rs::Report` variant + `report_sink.rs::FEATURE_<NAME>` 常量 + match + `lib.rs` re-export
 - **新增 path 拼接调用点** MUST 用 `Location::join_path(segment)`（Local `Utf8PathBuf::join` / 远端 `/` 字符串拼）不直接 `loc.path().join(...)`：Windows host 上 std `PathBuf::push` 产 `\` 让 SMB pavao/ADB shell/libmtp 找不到路径；`SmbTarget/AdbTarget/MtpTarget.path` 内部拼子路径同理；纯 Local 计算保留 OS 分隔符
@@ -256,7 +256,7 @@
 - **`use rayon::prelude::*` 违反 P0 §5**：最小 import = `use rayon::iter::{IntoParallelRefIterator, IntoParallelRefMutIterator, ParallelIterator}`
 - **同盘 move fast-path**：`opts.remove && src.scheme()=="local" && output.scheme()=="local"` 走 `Backend::rename`（OS 内核唯一权威源判同卷，MUST NOT Rust 层重复判）
 - **大文件 OOM fixture 用 random-noise PNG**（≥ 1500×1500，纯色压缩太小无效）
-- **dry-run log / 路径聚合用 Python**：临时 `cat > x.py <<'PYEOF' ... PYEOF` + `uv run x.py`；独立脚本 MUST `uv run --quiet --no-project <script>`
+- **dry-run log / 路径聚合用 Bun**：临时 `cat > x.ts <<'TSEOF' ... TSEOF` + `bun x.ts`；独立脚本 MUST `bun <script>`
   - **Windows 输出陷阱**：Python stdout 默认 CRLF MUST `sys.stdout.reconfigure(newline='\n')`；GBK 中文乱码 → 写 UTF-8 文件再读；Python `re` alternation leftmost-first（长 token 放前）
 - **`tracing::*!` message 含 `{name}` 被当 named placeholder** → 转义 `{{name}}` 或改措辞避 `{`
 - **`MediaWriter::finish` flush MUST `?` 传播不 `.ok()`**（BufWriter 包装后 disk-full 在 finish 阶段暴露）

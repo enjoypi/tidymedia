@@ -6,7 +6,7 @@
 
 ```bash
 # 一条命令产完整报告（用真实照片库测 find 子命令）
-uv run --quiet --no-project scripts/perf-collect.py \
+bun scripts/perf-collect.ts \
   --sub find \
   --data /path/to/your/photos \
   --output-dir /tmp/perf-run
@@ -32,7 +32,7 @@ uv run --quiet --no-project scripts/perf-collect.py \
 
 ### L4：/usr/bin/time -v（系统资源）
 
-`perf-collect.py` 用 `/usr/bin/time -v` 包裹 tidymedia 进程，抓以下字段：
+`perf-collect.ts` 用 `/usr/bin/time -v` 包裹 tidymedia 进程，抓以下字段：
 
 | 字段 | 含义 |
 |---|---|
@@ -79,7 +79,7 @@ uv run --quiet --no-project scripts/perf-collect.py \
 - **Linux**：`/usr/bin/time`（默认自带）
 - **macOS**：`brew install gnu-time` 后 `gtime` 可用
 - **Windows**：暂未支持（`/usr/bin/time -v` 缺失）
-- **ONNX 真跑**：`export CARGO_PROFILE_RELEASE_OPT_LEVEL=3` 后重 build（`perf-collect.py` 已自动设 env）；否则 `profile.release opt-level=0` 编译如 debug，推理慢 10-100 倍
+- **ONNX 真跑**：`export CARGO_PROFILE_RELEASE_OPT_LEVEL=3` 后重 build（`perf-collect.ts` 已自动设 env）；否则 `profile.release opt-level=0` 编译如 debug，推理慢 10-100 倍
 
 ## 已知限制
 
@@ -89,6 +89,6 @@ uv run --quiet --no-project scripts/perf-collect.py \
 
 ## 参考实现
 
-- 采集脚本：`scripts/perf-collect.py`（Python 标准库，`uv run --quiet --no-project`）
+- 采集脚本：`scripts/perf-collect.ts`（Bun+TypeScript，`bun scripts/perf-collect.ts`）
 - 耗时单点：`src/usecases/report.rs::elapsed_ms`（`coverage(off)` 免宿主时钟波动）
 - 同步检查点：`CLAUDE.md`「新增 Report 时序/资源字段」

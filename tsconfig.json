@@ -1,0 +1,14 @@
+{
+  "compilerOptions": {
+    "types": ["@types/bun"],
+    "lib": ["ESNext"],
+    "target": "ESNext",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
+    "verbatimModuleSyntax": true
+  },
+  "include": ["tests/fixtures/**/*.ts", "scripts/**/*.ts", "tools/**/*.ts"]
+}

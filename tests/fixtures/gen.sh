@@ -11,7 +11,8 @@
 #   - 所有 EXIF/容器日期固定为可预测时间，便于 assert_eq
 set -euo pipefail
 
-DATA_DIR="$(cd "$(dirname "$0")/../data" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+DATA_DIR="$SCRIPT_DIR/../data"
 cd "$DATA_DIR"
 
 #######################################
@@ -108,28 +109,30 @@ rm -f blank-noexif.jpg
 trap - EXIT
 
 #######################################
-# Python 合成 fixture（PNG eXIf chunk / JPEG APP1 fallback）
+# Bun 合成 fixture（PNG eXIf / JPEG APP1 / RW2 / office 容器）
 #######################################
-# 与 ffmpeg/exiftool 不同，这两个 fixture 用 Python stdlib 直接拼字节流：
-#   - PNG: gen_png_exif.py → sample-png-exif.png（带 eXIf chunk）
-#   - JPEG: gen_jpeg_makernotes_broken.py → sample-jpeg-app1-broken.jpg
+# 用 Bun 直接执行 TypeScript 拼字节流（无 Python 依赖）：
+#   - gen_png_exif.ts → sample-png-exif.png（带 eXIf chunk）
+#   - gen_jpeg_makernotes_broken.ts → sample-jpeg-app1-broken.jpg
 #     （IFD0 完整 + ExifIFD 越界 count，让 nom-exif parse_exif 失败但 fallback 可读）
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-uv run --quiet --no-project "$SCRIPT_DIR/gen_png_exif.py"
-uv run --quiet --no-project "$SCRIPT_DIR/gen_jpeg_makernotes_broken.py"
+#   - gen_rw2.ts → sample-rw2.rw2（TIFF 变体 magic 0x0055）
+#   - gen_ooxml/gen_pdf/gen_odf/gen_rtf/gen_epub.ts → office 文档 fixture
+bun "$SCRIPT_DIR/gen_png_exif.ts"
+bun "$SCRIPT_DIR/gen_jpeg_makernotes_broken.ts"
+bun "$SCRIPT_DIR/gen_rw2.ts"
 
 #######################################
 # Office 文档 fixture（copy-doc/move-doc 归档 + 内容分类）
 #######################################
 # 全矩阵统一时间口径：created=2017-02-14T10:30:00Z（桶 2017/02）+
 # modified=2018-01-01T12:00:00Z；正文含可分类中文关键词。
-uv run --quiet --no-project "$SCRIPT_DIR/gen_ooxml.py"
-uv run --quiet --no-project "$SCRIPT_DIR/gen_pdf.py"
-uv run --quiet --no-project "$SCRIPT_DIR/gen_odf.py"
-uv run --quiet --no-project "$SCRIPT_DIR/gen_rtf.py"
-uv run --quiet --no-project "$SCRIPT_DIR/gen_epub.py"
+bun "$SCRIPT_DIR/gen_ooxml.ts"
+bun "$SCRIPT_DIR/gen_pdf.ts"
+bun "$SCRIPT_DIR/gen_odf.ts"
+bun "$SCRIPT_DIR/gen_rtf.ts"
+bun "$SCRIPT_DIR/gen_epub.ts"
 
-# CFB（doc/xls/ppt）不是 gen_*.py：Python olefile/compoundfiles 只读无法写 CFB，
+# CFB（doc/xls/ppt）不是 gen_*.ts：Python olefile/compoundfiles 只读无法写 CFB，
 # 走生产依赖 cfb crate 的 writer（tests/gen_cfb_fixtures.rs，#[ignore] 生成器）：
 #   cargo test --release --test gen_cfb_fixtures -- --ignored
 echo "NOTE: regenerate doc/xls/ppt via: cargo test --release --test gen_cfb_fixtures -- --ignored"
