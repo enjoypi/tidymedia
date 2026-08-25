@@ -5,6 +5,8 @@
 //! `tests/gen_cfb_fixtures.rs` 用 cfb crate writer 生成——Python
 //! `compoundfiles`/`olefile` 只读写不了 CFB）。
 
+use std::io::{Cursor, Write};
+
 use super::*;
 
 /// 构造合法 `SummaryInformation PropertySet` 字节缓冲，含 `PID_CREATE_DTM` +
@@ -250,4 +252,109 @@ fn is_text_char_rejects_control() {
     assert!(is_text_char(' '));
     assert!(is_text_char('!'));
     assert!(!is_text_char('\u{0007}'));
+}
+
+// ---- 文本提取族（extract_printable_runs / append_* / flush_run / is_text_char）----
+
+#[test]
+fn is_text_char_accepts_alnum_space_punct() {
+    assert!(is_text_char('a'));
+    assert!(is_text_char('中'));
+    assert!(is_text_char(' '));
+    assert!(is_text_char('.'));
+    assert!(!is_text_char('\n'));
+    assert!(!is_text_char('\u{0}'));
+}
+
+#[test]
+fn extract_printable_runs_ascii_runs_concatenated() {
+    let mut out = String::new();
+    extract_printable_runs(b"hello world, this is long enough", &mut out, 100);
+    assert!(out.contains("hello world"), "got: {out}");
+}
+
+#[test]
+fn extract_printable_runs_utf16le_extracts_chinese() {
+    let mut bytes = Vec::new();
+    for c in "你好世界这是一个很长的中文段落".chars() {
+        let mut buf = [0u16; 2];
+        for unit in c.encode_utf16(&mut buf) {
+            bytes.extend_from_slice(&unit.to_le_bytes());
+        }
+    }
+    let mut out = String::new();
+    extract_printable_runs(&bytes, &mut out, 100);
+    assert!(!out.is_empty(), "got: {out}");
+}
+
+#[test]
+fn extract_printable_runs_skips_short_fragments() {
+    // 短碎片（<8 字符）视为二进制噪声，不落盘
+    let mut out = String::new();
+    extract_printable_runs(b"abc def", &mut out, 100);
+    assert!(out.is_empty(), "got: {out}");
+}
+
+#[test]
+fn extract_printable_runs_respects_max_bytes() {
+    let mut out = String::new();
+    extract_printable_runs(b"aaaaaaaaaaaaaaaaaaaaaaaaaa", &mut out, 5);
+    assert!(out.chars().count() <= 5, "got: {out}");
+}
+
+#[test]
+fn flush_run_appends_with_space_separator() {
+    let mut run = "aaaaaaaabbbbbbbb".to_owned();
+    let mut out = "existing".to_owned();
+    flush_run(&mut run, &mut out, 100);
+    assert_eq!(out, "existing aaaaaaaabbbbbbbb");
+    assert!(run.is_empty());
+}
+
+#[test]
+fn flush_run_truncates_at_boundary() {
+    let mut run = "aaaaaaaabbbbbbbbcccccccc".to_owned();
+    let mut out = String::new();
+    flush_run(&mut run, &mut out, 6);
+    assert!(out.chars().count() <= 6, "got: {out}");
+}
+
+use super::parse;
+
+/// 合法 CFB 容器但无 `\x05SummaryInformation` stream → `parse` 走 `open_stream` Err
+/// 分支返 `(0, 0)`。cfb crate 是生产依赖（非 dev），可直接构造。
+#[test]
+fn parse_cfb_without_summary_stream_returns_zeros() {
+    let mut comp = cfb::CompoundFile::create(Cursor::new(Vec::new())).expect("create empty cfb");
+    let mut s = comp
+        .create_stream("/SomeOtherStream")
+        .expect("create other stream");
+    s.write_all(b"not summary").expect("write body");
+    drop(s);
+    let cursor = comp.into_inner();
+    let buf = cursor.into_inner();
+    let mut reader = Cursor::new(buf);
+    let (created, modified) = parse(&mut reader, "application/msword");
+    assert_eq!((created, modified), (0, 0));
+}
+
+/// 合法 CFB 含 `SummaryInformation` → `parse` 走 happy path 提取日期。
+#[test]
+fn parse_cfb_with_summary_stream_extracts_dates() {
+    let mut comp = cfb::CompoundFile::create(Cursor::new(Vec::new())).expect("create cfb");
+    let propertyset = build_summary_propertyset(
+        unix_to_filetime(1_700_000_000),
+        unix_to_filetime(1_600_000_000),
+    );
+    let mut s = comp
+        .create_stream("/\u{5}SummaryInformation")
+        .expect("create summary stream");
+    s.write_all(&propertyset).expect("write propertyset");
+    drop(s);
+    let cursor = comp.into_inner();
+    let buf = cursor.into_inner();
+    let mut reader = Cursor::new(buf);
+    let (created, modified) = parse(&mut reader, "application/msword");
+    assert_eq!(created, 1_700_000_000);
+    assert_eq!(modified, 1_600_000_000);
 }

@@ -1,17 +1,16 @@
 //! `Info` 实体：按需哈希（fast/full/secure）缓存 + EXIF 持有 + 拍摄时间裁决入口。
+//!
+//! 时间裁决（`create_time` / `media_time_decision` / `pick_fs_fallback`）在子模块
+//! `time`；本文件保留 struct 定义、访问器、哈希与克隆。
+#[path = "time.rs"]
+pub(super) mod time;
 
 use std::io;
 use std::sync::Arc;
-use std::time::Duration;
-use std::time::SystemTime;
 
-use camino::Utf8Path;
 use camino::Utf8PathBuf;
 use chrono::FixedOffset;
-use chrono::TimeZone;
-use chrono::Utc;
 use parking_lot::Mutex;
-use tracing::warn;
 
 use super::streams::{fast_hash_stream, full_hash_stream, secure_hash_stream};
 use crate::entities::backend::{Backend, EntryKind, Metadata as BackendMetadata};
@@ -215,17 +214,8 @@ impl Info {
         &self,
         valid_threshold_secs: u64,
         default_offset: FixedOffset,
-    ) -> SystemTime {
-        let fs_fallback = pick_fs_fallback(self.meta.modified, self.meta.created);
-        let decision = self.media_time_decision(default_offset);
-        // resolve 返回 None（候选全部被过滤）与"低于阈值"走同一条 fallback 路径，
-        // 避免在 create_time 里多一条不可稳定触发的分支。
-        let secs = decision.map_or(0, |d| d.utc.timestamp());
-        if secs > 0 && secs.cast_unsigned() >= valid_threshold_secs {
-            SystemTime::UNIX_EPOCH + Duration::from_secs(secs.cast_unsigned())
-        } else {
-            fs_fallback
-        }
+    ) -> std::time::SystemTime {
+        time::create_time(self, valid_threshold_secs, default_offset)
     }
 
     /// 完整拍摄时间决策（P0→P4 优先级 + 冲突列表），供归档决策与 `verify` 对账
@@ -234,51 +224,7 @@ impl Info {
         &self,
         default_offset: FixedOffset,
     ) -> Option<media_time::MediaTimeDecision> {
-        let modified = self.meta.modified;
-        // P2 文件名中的 naive 时间按 default_offset（配置时区）解释，与 EXIF naive
-        // 同口径——按 UTC 解释会让月末晚间拍摄的文件 +offset 后跨月归错桶；
-        // P0/P1 的 epoch 已在 EXIF 解析层（from_path_with_offset）按配置时区转换完毕，
-        // 这里的 offset 对其仅作候选元数据。
-        let gps_utc = self.exif.as_ref().and_then(exif::Exif::gps_utc);
-        // ModifyDate 不进候选，仅作多数派仲裁的 re-save 旁证；epoch 已在
-        // EXIF 解析层按配置时区转换，0 = 缺失。
-        // 与 epoch_to_candidate 同口径：i64::try_from 守护 u64>i64::MAX 折回负数
-        // 致 timestamp_opt 返虚假 1969 时间戳被多数派误用为 re-save 旁证。
-        let modify_date_utc = self
-            .exif
-            .as_ref()
-            .map(exif::Exif::exif_modify_date)
-            .filter(|&s| s > 0)
-            .and_then(|s| i64::try_from(s).ok())
-            .and_then(|s| Utc.timestamp_opt(s, 0).single());
-        let mut candidates = match self.exif.as_ref() {
-            Some(exif) => media_time::candidates_from_exif(exif, default_offset),
-            None => Vec::new(),
-        };
-        // P2：文件名启发式（IMG_/DSC_/Screenshot_/毫秒戳等）。
-        candidates.extend(media_time::candidates_from_filename(
-            Utf8Path::new(self.full_path.as_str()),
-            default_offset,
-        ));
-        // P3：adapters 层发现并注入的 sidecar 候选（XMP / Google Takeout）。
-        candidates.extend(self.extra_candidates.iter().copied());
-        // P4。Option<Candidate> 实现 IntoIterator → extend 不引入 if-let 分支。
-        candidates.extend(media_time::fs_time::from_modified(modified));
-
-        let decision = media_time::resolve(candidates, gps_utc, modify_date_utc, Utc::now());
-        // 冲突优先告警，不静默修正。
-        if let Some(ref d) = decision
-            && !d.conflicts.is_empty()
-        {
-            warn!(
-                feature = "file_info",
-                operation = "resolve_time",
-                file = %self.full_path,
-                conflicts = ?d.conflicts,
-                "media time candidates conflict"
-            );
-        }
-        decision
+        time::media_time_decision(self, default_offset)
     }
 
     pub fn is_media(&self) -> bool {
@@ -315,16 +261,6 @@ fn ensure_hashable(meta: &crate::entities::backend::Metadata, loc: &Location) ->
         return Err(io::Error::other(format!("{} is empty", loc.display())));
     }
     Ok(())
-}
-
-/// P4 fs 兜底：按 CLAUDE.md「P4 = FsMtime」定义优先用 mtime；mtime 缺失才退 btime；
-/// 两者都缺失退 `UNIX_EPOCH`。btime 在 copy 后通常 = 复制时刻（晚于源 mtime），
-/// 在某些 fs 上 == ctime（inode 变更时刻），比 mtime 更不稳定，故不取较早值。
-pub(super) fn pick_fs_fallback(
-    modified: Option<SystemTime>,
-    created: Option<SystemTime>,
-) -> SystemTime {
-    modified.or(created).unwrap_or(SystemTime::UNIX_EPOCH)
 }
 
 impl PartialEq for Info {

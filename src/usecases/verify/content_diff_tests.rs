@@ -147,3 +147,177 @@ fn rotated_phash_detects_rotated_copy() {
 fn rotated_phash_decoding_failure_returns_false() {
     assert!(!rotated_phash_similar(b"not-an-image", b"also-not", 10));
 }
+
+use std::sync::Arc;
+
+use camino::Utf8PathBuf;
+
+use super::{
+    basename, build_output_index, find_candidates, read_guarded, read_guarded_by_path, read_to_end,
+    split_stem_ext, verdict_for,
+};
+use crate::adapters::backend::fake::FakeBackend;
+use crate::entities::file_index::Index;
+use crate::entities::file_info::Info;
+use crate::entities::uri::Location;
+
+fn local(path: &str) -> Location {
+    Location::Local(Utf8PathBuf::from(path))
+}
+
+fn fake_info(backend: &Arc<FakeBackend>, path: &str, data: Vec<u8>) -> Info {
+    backend.add_file(local(path), data);
+    Info::open(&local(path), backend.clone()).expect("internal: fake info open")
+}
+
+#[test]
+fn split_stem_ext_splits_on_last_dot() {
+    assert_eq!(split_stem_ext("a.b.c"), ("a.b".to_owned(), ".c".to_owned()));
+    assert_eq!(split_stem_ext("noext"), ("noext".to_owned(), String::new()));
+}
+
+#[test]
+fn basename_takes_last_segment() {
+    assert_eq!(basename("/a/b/c.jpg"), "c.jpg");
+    assert_eq!(basename("flat.jpg"), "flat.jpg");
+}
+
+#[test]
+fn read_to_end_reads_backend_file() {
+    let be = Arc::new(FakeBackend::new("local"));
+    let info = fake_info(&be, "/src/a.txt", b"hello world".to_vec());
+    let bytes = read_to_end(info.backend().as_ref(), info.location(), info.size);
+    assert_eq!(bytes.as_deref(), Some(b"hello world".as_slice()));
+}
+
+#[test]
+fn read_to_end_returns_none_when_open_fails() {
+    let be = Arc::new(FakeBackend::new("local"));
+    let info = fake_info(&be, "/src/a.txt", b"x".to_vec());
+    let missing = Location::Local(Utf8PathBuf::from("/missing.txt"));
+    let bytes = read_to_end(info.backend().as_ref(), &missing, 1);
+    assert!(bytes.is_none());
+}
+
+#[test]
+fn read_guarded_rejects_oversize() {
+    let be = Arc::new(FakeBackend::new("local"));
+    let info = fake_info(&be, "/src/a.txt", b"abc".to_vec());
+    assert!(read_guarded(&info, 2).is_none());
+    assert_eq!(read_guarded(&info, 5).as_deref(), Some(b"abc".as_slice()));
+}
+
+#[test]
+fn read_guarded_by_path_returns_none_when_missing() {
+    let be = Arc::new(FakeBackend::new("local"));
+    let info = fake_info(&be, "/src/a.txt", b"abc".to_vec());
+    let idx = Index::new();
+    idx.add(info);
+    let missing = Utf8PathBuf::from("/missing.txt");
+    assert!(read_guarded_by_path(&idx, &missing, 10).is_none());
+}
+
+#[test]
+fn find_candidates_matches_exact_and_digit_variant() {
+    let be = Arc::new(FakeBackend::new("local"));
+    let a = fake_info(&be, "/out/photo_2021.jpg", b"a".to_vec());
+    let b = fake_info(&be, "/out/photo_2021_2.jpg", b"b".to_vec());
+    let c = fake_info(&be, "/out/unrelated.jpg", b"c".to_vec());
+    let idx = Index::new();
+    idx.add(a);
+    idx.add(b);
+    idx.add(c);
+    let cands = find_candidates(&idx, "photo_2021.jpg");
+    assert!(cands.iter().any(|p| p.as_str().ends_with("photo_2021.jpg")));
+    assert!(
+        cands
+            .iter()
+            .any(|p| p.as_str().ends_with("photo_2021_2.jpg"))
+    );
+    assert!(!cands.iter().any(|p| p.as_str().ends_with("unrelated.jpg")));
+}
+
+#[test]
+fn verdict_for_exact_dup_when_hash_equal() {
+    let be = Arc::new(FakeBackend::new("local"));
+    let src = fake_info(&be, "/src/a.jpg", b"same".to_vec());
+    let out = fake_info(&be, "/out/a.jpg", b"same".to_vec());
+    let idx = Index::new();
+    idx.add(out);
+    let verdict = verdict_for(&src, &idx, 10, 1000);
+    assert_eq!(verdict, "exact_dup");
+}
+
+#[test]
+fn verdict_for_absent_when_no_candidate() {
+    let be = Arc::new(FakeBackend::new("local"));
+    let src = fake_info(&be, "/src/a.jpg", b"same".to_vec());
+    let idx = Index::new();
+    assert_eq!(verdict_for(&src, &idx, 10, 1000), "absent");
+}
+
+#[test]
+fn verdict_for_name_only_when_oversize() {
+    let be = Arc::new(FakeBackend::new("local"));
+    let src = fake_info(&be, "/src/a.jpg", b"12345".to_vec());
+    let out = fake_info(&be, "/out/a.jpg", b"x".to_vec());
+    let idx = Index::new();
+    idx.add(out);
+    // max_bytes=1 让 src 读超限 → 无字节可比 → name_only
+    assert_eq!(verdict_for(&src, &idx, 10, 1), "name_only");
+}
+
+#[test]
+fn build_output_index_skips_non_dir_output() {
+    let be = Arc::new(FakeBackend::new("local"));
+    be.add_file(local("/out.txt"), b"x".to_vec());
+    let src: crate::usecases::Source = (local("/out.txt"), be);
+    let idx = build_output_index(&src);
+    assert_eq!(idx.len(), 0);
+}
+
+#[test]
+fn build_output_index_indexes_dir() {
+    let be = Arc::new(FakeBackend::new("local"));
+    be.add_dir(local("/out"));
+    be.add_file(local("/out/a.jpg"), b"x".to_vec());
+    let src: crate::usecases::Source = (local("/out"), be);
+    let idx = build_output_index(&src);
+    assert_eq!(idx.len(), 1);
+}
+
+/// 最小 JPEG：SOI + 一段 APPn（可变元数据）+ SOS + 相同像素字节。
+/// 两变体 SOS 之后像素流相同 → `jpeg_entropy_hash` 相等 → `pixel_same`。
+fn minimal_jpeg(meta: &[u8]) -> Vec<u8> {
+    let mut b = vec![0xFF, 0xD8];
+    b.extend_from_slice(&[0xFF, 0xE0]);
+    b.extend_from_slice(&(u16::try_from(meta.len()).expect("internal: seg len") + 2).to_be_bytes());
+    b.extend_from_slice(meta);
+    b.extend_from_slice(&[0xFF, 0xDA, 0x00, 0x02, 0x01, 0x02]);
+    b.extend_from_slice(b"PIXELSTREAM");
+    b
+}
+
+#[test]
+fn verdict_for_pixel_same_when_entropy_equal() {
+    let be = Arc::new(FakeBackend::new("local"));
+    // src 与候选 JPEG 元数据不同但像素流相同 → entropy 相等
+    let src = fake_info(&be, "/src/photo.jpg", minimal_jpeg(b"metadata-a"));
+    let out = fake_info(&be, "/out/photo.jpg", minimal_jpeg(b"metadata-b"));
+    let idx = Index::new();
+    idx.add(out);
+    assert_eq!(verdict_for(&src, &idx, 10, 1000), "pixel_same");
+}
+
+#[test]
+fn verdict_for_rotated_same_when_phash_rotated() {
+    let be = Arc::new(FakeBackend::new("local"));
+    // src 图与候选图是旋转 90° 关系 → rotated_phash_similar 命中
+    let img = noise_image(128, 41);
+    let rotated = image::imageops::rotate90(&img);
+    let src = fake_info(&be, "/src/r.jpg", encode_png(&img));
+    let out = fake_info(&be, "/out/r.jpg", encode_png(&rotated));
+    let idx = Index::new();
+    idx.add(out);
+    assert_eq!(verdict_for(&src, &idx, 10, 1_000_000), "rotated_same");
+}

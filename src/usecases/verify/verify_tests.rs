@@ -83,3 +83,46 @@ fn build_entry_with_decision_fills_priority_source_conflicts() {
     assert_eq!(e.fix_suggestion.as_deref(), Some("exiftool hint"));
     assert!(e.mismatch);
 }
+
+use std::path::Path;
+
+use super::super::verify::exif_tsv::ExifRow;
+use super::{load_tsv, lookup_tsv, strip_source_root};
+
+#[test]
+fn load_tsv_none_returns_empty() {
+    assert!(load_tsv(None).is_empty());
+}
+
+#[test]
+fn load_tsv_missing_file_returns_empty() {
+    let p = Path::new("/definitely/missing/tsv.txt");
+    assert!(load_tsv(Some(p)).is_empty());
+}
+
+#[test]
+fn lookup_tsv_matches_normalized_path() {
+    let row = ExifRow {
+        path: "/out/IMG_1.jpg".to_owned(),
+        fields: Default::default(),
+        make: String::new(),
+        model: String::new(),
+    };
+    let rows = vec![row];
+    // 反斜杠路径归一化后匹配
+    assert!(lookup_tsv(&rows, r"\out\IMG_1.jpg").is_some());
+    assert!(lookup_tsv(&rows, "/other.jpg").is_none());
+}
+
+#[test]
+fn strip_source_root_strips_root_prefix() {
+    let roots = vec!["/photos".to_owned(), "/media".to_owned()];
+    assert_eq!(
+        strip_source_root("/photos/2024/01/a.jpg", &roots),
+        "2024/01/a.jpg"
+    );
+    // 剥不掉时回退 basename
+    assert_eq!(strip_source_root("/unrelated/x.jpg", &roots), "x.jpg");
+    // 空剩余（根就是文件本身）回退 basename
+    assert_eq!(strip_source_root("/photos", &roots), "photos");
+}

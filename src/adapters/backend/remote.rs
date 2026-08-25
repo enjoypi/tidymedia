@@ -3,16 +3,31 @@
 //! [`RemoteTarget`] / [`RemoteClient`] / [`RemoteAdapter`] 三个 trait 把 SMB / ADB / MTP
 //! 三套 90% 同构的 Backend 实现收敛到一个泛型 [`RemoteBackend<A>`] 上，消除 ~600 行
 //! 重复骨架代码。
+//!
+//! 拆分为四文件（原 514 行 → ≤300）：`remote_walk`（递归 walk/mkdir/统一错误日志）、
+//! `remote_writer`（`RemoteBufferedWriter` IO impl + 上限守卫）、`remote_backend`
+//!（`RemoteBackend` 的 `Debug` + `Backend` 实现）、本文件（trait 面 + 常量 + 错误映射 + 结构定义）。
 
-use std::collections::HashSet;
+#[path = "remote_backend.rs"]
+mod backend_impl;
+#[path = "remote_walk.rs"]
+mod walk;
+#[path = "remote_writer.rs"]
+mod writer;
+
 use std::io;
 use std::sync::Arc;
 
-use camino::{Utf8Path, Utf8PathBuf};
-use tracing::{debug, warn};
+use camino::Utf8PathBuf;
 
-use crate::entities::backend::{Backend, Entry, EntryKind, MediaReader, MediaWriter, Metadata};
+use crate::entities::backend::{Entry, Metadata};
 use crate::entities::uri::Location;
+
+#[cfg(test)]
+use crate::entities::backend::{Backend, MediaWriter};
+use walk::{map_and_log, mkdir_recursive, mkparent, walk_recursive};
+#[cfg(test)]
+use writer::check_buffer_size;
 
 /// 远端存储目标的协议相关参数（host/path/凭据等）。
 /// 每个远端协议实现自己的 Target 类型（`SmbTarget` / `AdbTarget` / `MtpTarget`）。
@@ -146,359 +161,10 @@ pub(crate) fn map_remote_error(e: io::Error, extra_not_found: &[&str]) -> io::Er
     e
 }
 
-/// 统一记录远端 op 失败并套用协议级错误映射（R3：外部调用失败不静默）。
-/// 非泛型：日志逻辑只编译一份，避免 monomorphization 覆盖率重复计数。
-///
-/// 级别分流：
-/// - `NotFound` / `AlreadyExists` → `debug!`：`exists()` 探测、`mkdir_recursive`
-///   容忍等高频预期态，info+ 级别下静默；
-/// - 其余（`PermissionDenied` / `TimedOut` / IO 链路错误）→ `warn!`：用户感知
-///   的远端业务错误，默认 info 级别下必须可见。
-fn map_and_log(
-    scheme: &'static str,
-    operation: &'static str,
-    path: &Utf8Path,
-    map: fn(io::Error) -> io::Error,
-    e: io::Error,
-) -> io::Error {
-    let mapped = map(e);
-    let err = mapped.to_string();
-    let path = path.as_str();
-    if matches!(
-        mapped.kind(),
-        io::ErrorKind::NotFound | io::ErrorKind::AlreadyExists
-    ) {
-        debug!(
-            feature = "backend",
-            scheme,
-            operation,
-            path,
-            result = "error",
-            err,
-            "remote op failed"
-        );
-    } else {
-        warn!(
-            feature = "backend",
-            scheme,
-            operation,
-            path,
-            result = "error",
-            err,
-            "remote op failed"
-        );
-    }
-    mapped
-}
-
-fn mkparent<A: RemoteAdapter>(target: &A::Target, client: &Arc<dyn RemoteClient<A::Target>>) {
-    if let Some(parent) = target.parent()
-        && let Err(e) = mkdir_recursive::<A>(&parent, client)
-    {
-        log_mkparent_err::<A>(&parent, &e);
-    }
-}
-
-/// best-effort：父目录创建失败由随后的 write/copy 自身报错；R3 要求所有外部调用
-/// 输出结构化日志，否则运维拿到的「写入 ENOENT」缺父目录创建失败上下文。
-/// 抽独立 fn + `coverage(off)`：debug! 宏 closure-form micro-region 在 release
-/// default subscriber 不订阅 debug 时永 0-hit，与 CLAUDE.md「tracing macro micro-region」
-/// 套路一致；调用方的 `if let Err` 分支由 `open_write_mkparent_failure_swallowed_to_debug_log`
-/// 等测试覆盖。
-fn log_mkparent_err<A: RemoteAdapter>(parent: &A::Target, e: &io::Error) {
-    debug!(
-        feature = "backend",
-        scheme = A::scheme(),
-        operation = "mkparent",
-        path = %parent.path(),
-        result = "error",
-        error = %e,
-        "mkparent best-effort failed; subsequent write will surface error"
-    );
-}
-
-/// 递归扫描远端目录树，把所有 entry（含 Dir，与 `LocalBackend::walk` 行为对齐）收集到 `out`。
-/// 单 list 失败即记 Err 不再下钻该子树；其余子树继续以"尽力而为"语义扫描。
-///
-/// **显式栈迭代（非递归）**：远端 Time Machine / rsync `--link-dest` 类深层备份
-/// 目录树可达数千层，递归调用会消耗线程栈（每帧 KB 级 + Vec 分配）致 SIGSEGV，
-/// 尤其在 `io_pool` 工作线程（默认 8 MiB）上更易触发。改用堆上 `Vec<Target>` worklist
-/// 后深度只受堆内存约束，与 `LocalBackend::walk` 用 `ignore::WalkBuilder` (heap-based)
-/// 的稳定性对齐。
-fn walk_recursive<A: RemoteAdapter>(
-    adapter: &A,
-    root: &A::Target,
-    out: &mut Vec<io::Result<Entry>>,
-) {
-    // symlink/junction 环防护：远端 FS（ADB Android /sdcard、SMB DFS/junction）
-    // 可能含循环 symlink 或挂载点回环，若 `kind_from_mode` 归类为 Dir → stack 无
-    // 限 push 同一子树致 Vec<Target> 堆爆 OOM。visited 按 path 字符串 dedup 让环
-    // 退化为 DAG。key 用 owned String（&Utf8Path 借用与 stack pop 生命周期冲突）；
-    // deep tree 内存开销 O(unique dirs) 可接受，比 SIGSEGV/OOM 好数量级。
-    // `LocalBackend::walk` 走 `ignore::WalkBuilder` 有 follow_links=false 缺省，此处对齐。
-    let mut stack: Vec<A::Target> = Vec::with_capacity(16);
-    let mut visited: HashSet<String> = HashSet::new();
-    stack.push(root.clone());
-    visited.insert(root.path().as_str().to_owned());
-    while let Some(target) = stack.pop() {
-        let listed = adapter
-            .client()
-            .list(&target)
-            .map_err(|e| map_and_log(A::scheme(), "list", target.path(), A::map_error, e));
-        let entries = match listed {
-            Ok(v) => v,
-            Err(e) => {
-                out.push(Err(e));
-                continue;
-            }
-        };
-        for entry in entries {
-            if entry.kind == EntryKind::Dir {
-                match A::Target::from_location(&entry.location, adapter.ctx()) {
-                    Ok(sub) => {
-                        // 已 visit（环/symlink loop 或 backend 重复返子项）直接跳
-                        // 过下钻；entry 本身仍 push 让 caller 得目录节点事件。
-                        if visited.insert(sub.path().as_str().to_owned()) {
-                            stack.push(sub);
-                        }
-                    }
-                    Err(e) => {
-                        // Dir entry 反向 from_location 失败：子树无法下钻，本目录条目
-                        // 也跳过 Ok push——否则 caller 既收到 Err（已记 walker_errors）
-                        // 又收到 Ok(Dir) 重复事件，且后者随后被 visit_location 静默
-                        // 过滤掉，纯属噪声。
-                        out.push(Err(e));
-                        continue;
-                    }
-                }
-            }
-            out.push(Ok(entry));
-        }
-    }
-}
-
-/// 远端 mkdir-p：自底向上用 stat 找到第一个已存在的祖先，再自浅入深逐层 mkdir。
-/// 远端协议的 mkdir 多为 POSIX 单层语义（父层缺失返回 ENOENT，如 pavao SMB），
-/// 叶节点单次 mkdir 对 `{year}/{month}` 等多层 archive 模板必败。
-/// `AlreadyExists` 容忍并发/重复创建；stat 的非 `NotFound` 错误（网络/权限）直接
-/// 传播，避免在故障链路上盲目 mkdir。
-fn mkdir_recursive<A: RemoteAdapter>(
-    target: &A::Target,
-    client: &Arc<dyn RemoteClient<A::Target>>,
-) -> io::Result<()> {
-    let mut missing: Vec<A::Target> = Vec::new();
-    let mut cur = Some(target.clone());
-    while let Some(t) = cur {
-        // pavao/adb_client 可能把"路径不存在"包成 Other("no such file")，必须经
-        // A::map_error 归一成 NotFound 才能正确驱动自底向上的祖先扫描。
-        match client.stat(&t).map_err(A::map_error) {
-            Ok(_) => break,
-            Err(e) if e.kind() == io::ErrorKind::NotFound => {
-                cur = t.parent();
-                missing.push(t);
-            }
-            Err(e) => return Err(e),
-        }
-    }
-    for t in missing.iter().rev() {
-        // 并发或重复创建：原始 ErrorKind 已是 AlreadyExists 时不映射也对；但同样
-        // 防御性走一遍映射，避免 Other("File exists") 之类文案被当硬错误传播。
-        if let Err(e) = client.mkdir(t).map_err(A::map_error)
-            && e.kind() != io::ErrorKind::AlreadyExists
-        {
-            return Err(e);
-        }
-    }
-    Ok(())
-}
-
-impl<A: RemoteAdapter> std::fmt::Debug for RemoteBackend<A> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("RemoteBackend")
-            .field("scheme", &A::scheme())
-            // adapter 含 Arc<dyn Client>，不 impl Debug，故用 finish_non_exhaustive
-            .finish_non_exhaustive()
-    }
-}
-
-impl<A: RemoteAdapter> Backend for RemoteBackend<A> {
-    fn scheme(&self) -> &'static str {
-        A::scheme()
-    }
-
-    fn metadata(&self, loc: &Location) -> io::Result<Metadata> {
-        let target = self.build_target(loc)?;
-        self.adapter
-            .client()
-            .stat(&target)
-            .map_err(|e| map_and_log(A::scheme(), "stat", target.path(), A::map_error, e))
-    }
-
-    fn exists(&self, loc: &Location) -> io::Result<bool> {
-        match self.metadata(loc) {
-            Ok(_) => Ok(true),
-            Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(false),
-            Err(e) => Err(e),
-        }
-    }
-
-    fn walk<'a>(
-        &'a self,
-        root: &Location,
-    ) -> Box<dyn Iterator<Item = io::Result<Entry>> + Send + 'a> {
-        let target = match self.build_target(root) {
-            Ok(t) => t,
-            Err(e) => return Box::new(std::iter::once(Err(e))),
-        };
-        // 与 LocalBackend WalkBuilder 同口径递归扫描子目录：单层 list 会让
-        // SMB/ADB/MTP source 下子目录的全部媒体文件被 visit_location 静默丢失
-        //（visit 仅消费 EntryKind::File，Dir entry 不会被递归驱动）。
-        // 远端 list 是同步 IO，eager 收集所有 entry 后一次性返回——sources 实测
-        // ≤ 数万文件，远小于 hash/EXIF 阶段的内存峰值，无需引入懒迭代复杂度。
-        let mut out: Vec<io::Result<Entry>> = Vec::new();
-        walk_recursive::<A>(&self.adapter, &target, &mut out);
-        Box::new(out.into_iter())
-    }
-
-    fn open_read(&self, loc: &Location) -> io::Result<Box<dyn MediaReader>> {
-        let target = self.build_target(loc)?;
-        let bytes = self
-            .adapter
-            .client()
-            .read(&target)
-            .map_err(|e| map_and_log(A::scheme(), "read", target.path(), A::map_error, e))?;
-        Ok(Box::new(std::io::Cursor::new(bytes)))
-    }
-
-    fn open_write(&self, loc: &Location, mkparents: bool) -> io::Result<Box<dyn MediaWriter>> {
-        let target = self.build_target(loc)?;
-        if mkparents {
-            mkparent::<A>(&target, self.adapter.client());
-        }
-        Ok(Box::new(RemoteBufferedWriter::<A> {
-            target,
-            client: Arc::clone(self.adapter.client()),
-            buffer: Vec::new(),
-        }))
-    }
-
-    fn remove_file(&self, loc: &Location) -> io::Result<()> {
-        let target = self.build_target(loc)?;
-        self.adapter
-            .client()
-            .unlink(&target)
-            .map_err(|e| map_and_log(A::scheme(), "unlink", target.path(), A::map_error, e))
-    }
-
-    fn mkdir_p(&self, loc: &Location) -> io::Result<()> {
-        let target = self.build_target(loc)?;
-        mkdir_recursive::<A>(&target, self.adapter.client())
-            .map_err(|e| map_and_log(A::scheme(), "mkdir", target.path(), A::map_error, e))
-    }
-
-    fn read_to_string(&self, loc: &Location) -> io::Result<String> {
-        let target = self.build_target(loc)?;
-        // 远端 client.read 一次性把整文件入堆；read_to_string 唯一调用方是 sidecar
-        // 发现（XMP / Takeout JSON），典型 < 10 KiB。先 stat 做大小封顶，防止
-        // 不受信远端共享上一个 N GB 的 .json/.xmp 拖爆进程内存。
-        let meta = self
-            .adapter
-            .client()
-            .stat(&target)
-            .map_err(|e| map_and_log(A::scheme(), "stat", target.path(), A::map_error, e))?;
-        if meta.size > MAX_TEXT_BYTES {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!(
-                    "remote text file too large: {} bytes (limit {MAX_TEXT_BYTES})",
-                    meta.size
-                ),
-            ));
-        }
-        let bytes = self
-            .adapter
-            .client()
-            .read(&target)
-            .map_err(|e| map_and_log(A::scheme(), "read", target.path(), A::map_error, e))?;
-        String::from_utf8(bytes).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
-    }
-
-    fn copy_file(&self, src: &Location, dst: &Location, mkparents: bool) -> io::Result<u64> {
-        // TODO(perf): 当前是 read(整文件到本地) + write(整文件回远端) 两次全量 RTT +
-        // 全文件堆分配。pavao 支持 SMB2 FSCTL_SRV_COPYCHUNK 服务端复制（零字节回
-        // 客户端），adb 同设备可走 `shell cp /sdcard/A /sdcard/B`，libmtp 有
-        // MoveObject API——同 scheme 同 host 场景理想上应先试 server-side copy，
-        // 失败再 fallback 到 read+write。改动依赖 RemoteClient trait 加
-        // `server_side_copy` 方法 + 每 adapter 实现，非本次重构范围。
-        let src_target = self.build_target(src)?;
-        let dst_target = self.build_target(dst)?;
-        if mkparents {
-            mkparent::<A>(&dst_target, self.adapter.client());
-        }
-        let bytes =
-            self.adapter.client().read(&src_target).map_err(|e| {
-                map_and_log(A::scheme(), "read", src_target.path(), A::map_error, e)
-            })?;
-        self.adapter
-            .client()
-            .write(&dst_target, &bytes)
-            .map_err(|e| map_and_log(A::scheme(), "write", dst_target.path(), A::map_error, e))
-    }
-}
-
 pub(crate) struct RemoteBufferedWriter<A: RemoteAdapter> {
     target: A::Target,
     client: Arc<dyn RemoteClient<A::Target>>,
     buffer: Vec<u8>,
-}
-
-impl<A: RemoteAdapter> std::fmt::Debug for RemoteBufferedWriter<A> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("RemoteBufferedWriter")
-            .field("target", &self.target)
-            .field("buffered_bytes", &self.buffer.len())
-            // client 是 Arc<dyn RemoteClient<_>>，不 impl Debug，故用 finish_non_exhaustive
-            .finish_non_exhaustive()
-    }
-}
-
-/// buffer 上限守卫抽独立 helper：`Vec<u8>` 塞 2 GiB 才触上限，测试无法真分配，
-/// 抽 `check_buffer_size(current, incoming)` 让上限判定纯逻辑可单测直触发。
-fn check_buffer_size(current: u64, incoming: u64) -> io::Result<()> {
-    let new_len = current.saturating_add(incoming);
-    if new_len > MAX_REMOTE_WRITE_BUFFER {
-        return Err(io::Error::new(
-            io::ErrorKind::OutOfMemory,
-            format!(
-                "remote write buffer exceeds {MAX_REMOTE_WRITE_BUFFER} bytes limit \
-                 (client.write is not streaming; single-file byte total capped to avoid OOM)"
-            ),
-        ));
-    }
-    Ok(())
-}
-
-impl<A: RemoteAdapter> io::Write for RemoteBufferedWriter<A> {
-    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        // 远端 client.write 一次性提交，buffer 必整体入堆。超 MAX_REMOTE_WRITE_BUFFER
-        // 时 fail-fast 让 stream_copy 触发半截 dst 清理，比静默 OOM 崩进程可诊断
-        // （Android FFI 2–4 GB RAM 场景尤其致命）。
-        check_buffer_size(self.buffer.len() as u64, buf.len() as u64)?;
-        self.buffer.extend_from_slice(buf);
-        Ok(buf.len())
-    }
-    fn flush(&mut self) -> io::Result<()> {
-        Ok(())
-    }
-}
-
-impl<A: RemoteAdapter> MediaWriter for RemoteBufferedWriter<A> {
-    fn finish(self: Box<Self>) -> io::Result<()> {
-        self.client
-            .write(&self.target, &self.buffer)
-            .map(|_| ())
-            .map_err(|e| map_and_log(A::scheme(), "write", self.target.path(), A::map_error, e))
-    }
 }
 
 #[cfg(test)]

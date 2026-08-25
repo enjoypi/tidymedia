@@ -12,7 +12,7 @@ pub(crate) use self::streams::read_fill;
 
 // 测试经 `super::X` 访问的内部项（私有 use 对子模块可见，生产侧不暴露）。
 #[cfg(test)]
-use self::info::pick_fs_fallback;
+use self::info::time::pick_fs_fallback;
 #[cfg(test)]
 use self::streams::{
     FAST_READ_SIZE, fast_hash, fast_hash_stream, full_hash, full_hash_stream, secure_hash,

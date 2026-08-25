@@ -9,8 +9,12 @@
 //!
 //! 依赖倒置：OCR 检测通过 `&dyn TextDetector` 注入，usecase 不感知 tract / 模型路径。
 
+mod delta;
+mod move_file;
 mod report;
 mod run;
+mod scan;
+mod target;
 
 pub use report::MoveTextShotReport;
 pub use run::move_text_shot;

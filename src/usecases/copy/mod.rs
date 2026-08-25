@@ -3,6 +3,8 @@
 //! 经 re-export 保持不变。
 
 pub(super) mod classify;
+pub(super) mod copy_loop;
+pub(super) mod index;
 pub(super) mod naming;
 pub(super) mod ops;
 pub(super) mod reporting;

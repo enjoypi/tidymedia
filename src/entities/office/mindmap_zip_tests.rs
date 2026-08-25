@@ -100,3 +100,55 @@ fn json_titles_empty_value_skipped() {
     collect_json_titles(br#"{"title":"","title":"x"}"#, &mut out, 64);
     assert_eq!(out, "x");
 }
+
+use super::{collect_json_titles, find_subslice, millis_to_secs};
+
+#[test]
+fn collect_json_titles_extracts_title_values() {
+    let json = br#"{"title":"Planning","children":[{"title":"Q1 Goals"}]}"#;
+    let mut out = String::new();
+    collect_json_titles(json, &mut out, 100);
+    assert!(out.contains("Planning"), "got: {out}");
+    assert!(out.contains("Q1 Goals"), "got: {out}");
+}
+
+#[test]
+fn collect_json_titles_skips_non_string_title() {
+    let json = br#"{"title":123,"other":"x"}"#;
+    let mut out = String::new();
+    collect_json_titles(json, &mut out, 100);
+    assert!(out.is_empty(), "got: {out}");
+}
+
+#[test]
+fn collect_json_titles_handles_escaped_quote() {
+    let json = br#"{"title":"say \"hi\" here"}"#;
+    let mut out = String::new();
+    collect_json_titles(json, &mut out, 100);
+    assert_eq!(out, "say \\\"hi\\\" here");
+}
+
+#[test]
+fn collect_json_titles_respects_max_bytes() {
+    let mut buf = Vec::new();
+    for i in 0..20 {
+        buf.extend_from_slice(format!("\"title\":\"verylongtitlevalue{i}\",").as_bytes());
+    }
+    let mut out = String::new();
+    collect_json_titles(&buf, &mut out, 10);
+    assert!(out.len() <= 10, "got len {}", out.len());
+}
+
+#[test]
+fn find_subslice_finds_first_occurrence() {
+    assert_eq!(find_subslice(b"abcXdef", b"X"), Some(3));
+    assert_eq!(find_subslice(b"abc", b"zzz"), None);
+    assert_eq!(find_subslice(b"", b"x"), None);
+}
+
+#[test]
+fn millis_to_secs_rejects_sub_day_and_converts() {
+    assert!(millis_to_secs(86_399_999).is_none());
+    assert_eq!(millis_to_secs(86_400_000), Some(86_400));
+    assert_eq!(millis_to_secs(1_700_000_000_000), Some(1_700_000_000));
+}
