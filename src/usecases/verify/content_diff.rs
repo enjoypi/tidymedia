@@ -112,7 +112,7 @@ fn stem_digit_variant(name_stem: &str, base_stem: &str) -> bool {
 }
 
 fn basename(p: &str) -> &str {
-    p.rsplit('/').next().unwrap_or(p)
+    p.rsplit(['/', '\\']).next().unwrap_or(p)
 }
 
 fn read_guarded(info: &Info, max_bytes: u64) -> Option<Vec<u8>> {

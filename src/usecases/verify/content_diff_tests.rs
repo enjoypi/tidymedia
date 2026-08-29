@@ -310,6 +310,17 @@ fn verdict_for_pixel_same_when_entropy_equal() {
 }
 
 #[test]
+fn verdict_for_pixel_same_with_windows_backslash_paths() {
+    let be = Arc::new(FakeBackend::new("local"));
+    // Windows LocalBackend walk 产出反斜杠路径；basename 必须同时识别 `\`
+    let src = fake_info(&be, r"C:\src\photo.jpg", minimal_jpeg(b"metadata-a"));
+    let out = fake_info(&be, r"C:\out\photo.jpg", minimal_jpeg(b"metadata-b"));
+    let idx = Index::new();
+    idx.add(out);
+    assert_eq!(verdict_for(&src, &idx, 10, 1000), "pixel_same");
+}
+
+#[test]
 fn verdict_for_rotated_same_when_phash_rotated() {
     let be = Arc::new(FakeBackend::new("local"));
     // src 图与候选图是旋转 90° 关系 → rotated_phash_similar 命中
