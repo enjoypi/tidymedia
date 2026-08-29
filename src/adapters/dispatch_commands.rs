@@ -160,12 +160,7 @@ pub(super) fn dispatch_verify(
 ) -> Result<CommandResult> {
     let src_pairs = build_sources(factory, sources)?;
     let out_pair = build_source(factory, output)?;
-    let phash_max = phash_max.unwrap_or_else(|| {
-        crate::usecases::config::config()
-            .backend
-            .face
-            .phash_hamming_max
-    });
+    let phash_max = phash_max.unwrap_or(crate::usecases::verify::DEFAULT_PHASH_MAX);
     let verify_report = crate::usecases::verify(
         &src_pairs,
         &out_pair,

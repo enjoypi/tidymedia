@@ -144,6 +144,21 @@ fn rotated_phash_detects_rotated_copy() {
 }
 
 #[test]
+fn rotated_phash_l4_recheck_rejects_same_scene_different_content() {
+    // pHash 宽阈值（20）召回的「同场景高相似」对，L4 逐像素均差必须拦截：
+    // 平移半幅的图低频统计相同（pHash 高相似），逐像素内容完全不同。
+    let base = noise_image(256, 7);
+    let shifted = RgbImage::from_fn(256, 256, |x, y| {
+        let nx = (x + 128) % 256;
+        *base.get_pixel(nx, y)
+    });
+    assert!(
+        !rotated_phash_similar(&encode_png(&base), &encode_png(&shifted), 20),
+        "shifted scene with identical noise statistics must be rejected by L4"
+    );
+}
+
+#[test]
 fn rotated_phash_decoding_failure_returns_false() {
     assert!(!rotated_phash_similar(b"not-an-image", b"also-not", 10));
 }

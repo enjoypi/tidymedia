@@ -156,8 +156,9 @@ pub fn entropy_hash(bytes: &[u8], ext: &str) -> Option<SecureHash> {
     }
 }
 
-/// 旋转校正 pHash 相似：源图 4 向（0/90/180/270）与目标图比较，任一方向 Hamming
-/// ≤ `max_hamming` 且尺寸（允许旋转交换宽高）一致 → 相似。解码失败返 `false`。
+/// 旋转校正 pHash 相似：源图 4 向（0/90/180/270）与目标图比较，最佳方向 Hamming
+/// ≤ `max_hamming` 且尺寸（允许旋转交换宽高）一致后，再经 L4 复核（512×512 归一
+/// 逐像素均差 < 5）防「同场景双机/连拍」假阳性。解码失败返 `false`。
 #[doc(hidden)]
 #[must_use]
 pub fn rotated_phash_similar(a: &[u8], b: &[u8], max_hamming: u8) -> bool {
@@ -175,9 +176,45 @@ pub fn rotated_phash_similar(a: &[u8], b: &[u8], max_hamming: u8) -> bool {
     let a90 = image::imageops::rotate90(&a_rgb);
     let a180 = image::imageops::rotate180(&a_rgb);
     let a270 = image::imageops::rotate270(&a_rgb);
-    [&a_rgb, &a90, &a180, &a270]
+    let rotations = [&a_rgb, &a90, &a180, &a270];
+    let (best_img, best_h) = rotations
         .iter()
-        .any(|img| hamming(phash(img), h_b) <= u32::from(max_hamming))
+        .map(|img| (img, hamming(phash(img), h_b)))
+        .min_by_key(|(_, h)| *h)
+        .expect("internal: rotations non-empty");
+    if best_h > u32::from(max_hamming) {
+        return false;
+    }
+    mean_abs_diff_normalized(best_img, &b_rgb) < MEAN_ABS_DIFF_MAX
+}
+
+const NORMALIZE_SIDE: u32 = 512;
+const MEAN_ABS_DIFF_MAX: f32 = 5.0;
+
+#[expect(
+    clippy::cast_precision_loss,
+    reason = "sum ≤ 255×3×512×512 ≈ 2×10^8，超 f32 尾数但 mean 阈值 5 的量级判定不受影响"
+)]
+fn mean_abs_diff_normalized(a: &image::RgbImage, b: &image::RgbImage) -> f32 {
+    let ra = image::imageops::resize(
+        a,
+        NORMALIZE_SIDE,
+        NORMALIZE_SIDE,
+        image::imageops::FilterType::Triangle,
+    );
+    let rb = image::imageops::resize(
+        b,
+        NORMALIZE_SIDE,
+        NORMALIZE_SIDE,
+        image::imageops::FilterType::Triangle,
+    );
+    let mut sum = 0u64;
+    for (pa, pb) in ra.pixels().zip(rb.pixels()) {
+        for ch in 0..3 {
+            sum += u64::from((i32::from(pa.0[ch]) - i32::from(pb.0[ch])).unsigned_abs());
+        }
+    }
+    sum as f32 / (NORMALIZE_SIDE * NORMALIZE_SIDE * 3) as f32
 }
 
 #[doc(hidden)]
