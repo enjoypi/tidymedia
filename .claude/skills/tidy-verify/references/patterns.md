@@ -1,7 +1,9 @@
 # Pattern 判定表与证据收集
 
-Step 5 对候选集 U（MISMATCH ∪ DIFFER）逐文件归类。verify 已自动判定 5 个
-（`verify.json` 的 `entries[].patterns`），其余需人工研判。
+Step 5 对候选集 U（MISMATCH ∪ DIFFER）逐文件归类。证据收集由
+`scripts/collect_evidence.ts` 自动完成（exiftool 全量 dump + 路径/文件名暗示 +
+出厂默认时钟判定），AI 只补「推荐」研判。verify 已自动判定 5 个
+（`verify.json` 的 `entries[].patterns`），脚本再判 4 个，其余需人工研判。
 
 ## verify 自动判定（diagnose.rs）
 
@@ -13,31 +15,25 @@ Step 5 对候选集 U（MISMATCH ∪ DIFFER）逐文件归类。verify 已自动
 | `FilenameDateDiffers` | `filename_bucket` ≠ `actual_bucket` | 文件名/路径日期与决策桶冲突 |
 | `ExactDuplicate` | `duplicate_verdict == "exact_dup"` | 目标库已有 SHA-512 相同副本 |
 
+## 脚本判定（collect_evidence.ts）
+
+| Pattern | 触发条件 | 含义 |
+|---|---|---|
+| `DefaultClockValue` | EXIF 三时间相同且形如 `YYYY:01:01 00:00:00` | 出厂默认值（CLAUDE.md「相机出厂默认时间陷阱」） |
+| `PathDirectoryHint` | 路径父目录含可信日期片段（`YYYY[.\-_]MM` / `YYYY年M月` / `YYYY年M-M月` 跨月→年精度 / 单独 `YYYY` 段→年精度） | 目录名是 ground truth；tidymedia 不解析路径，需手动补 EXIF |
+| `FilenameStrong` | stem 含合法到秒时间（`YYYY-MM-DD HH-MM-SS` 分隔变体 / `YYYYMMDD_HHMMSS`） | 相册命名风格，精度到秒 |
+| `FilenameWeakDate` | stem 含合法 `YYYYMMDD` 但无 HHMMSS | 精度到日，HHMMSS 须默认 |
+| `FilenameCoincidentalDigits` | stem 含 8 位连号但非合法日期 | 巧合 ID，MUST NOT 当日期用 |
+
 ## 人工研判
 
 | Pattern | 触发条件 | 含义 |
 |---|---|---|
-| `DefaultClockValue` | EXIF 三时间相同且形如 `YYYY:01:01 00:00:00`，且早于机型发布日 | 出厂默认值（CLAUDE.md「相机出厂默认时间陷阱」） |
 | `ModelReleaseConflict` | EXIF 时间早于 Make/Model 已知发布日 | 时钟未设 + 残留出厂值，等同 DefaultClockValue |
-| `PathDirectoryHint` | 路径父目录含可信日期片段 | 目录名是 ground truth；tidymedia 不解析路径，需手动补 EXIF |
-| `FilenameStrong` | stem 含合法 `YYYY-MM-DD HH-MM-SS` | 相册命名风格，精度到秒 |
-| `FilenameWeakDate` | stem 含合法 `YYYYMMDD` 但无 HHMMSS | 精度到日，HHMMSS 须默认 |
-| `FilenameCoincidentalDigits` | stem 是 8 位数字但非合法日期 | 巧合 ID，MUST NOT 当日期用 |
 
-## 证据收集（U 每个文件）
+## 证据卡片（脚本生成，`推荐` 待研判）
 
-1. EXIF/容器全量：`bin/exiftool/exiftool.exe -s -G -time:all -Make -Model "<file>"`；
-   视频如需 TrackCreateDate/MediaCreateDate/PreviewDate、图片如需 GPS 时间单独跑。
-   **关注 exiftool ≠ tidymedia 硬证据**：`from=QTCreationDate`/`QTCreateDate` 报
-   MISMATCH 即 tidymedia 漏读容器；`-MIMEType -FileType` 定位容器类型。
-2. 路径目录暗示：扫每段父目录，匹配 `YYYY[.\-_]MM` / `YYYY年M月` / `YYYY年M-M月`
-   （横跨多月 → 精度到年）/ 单独 `YYYY`（精度到年）。
-3. 文件名暗示：`analyze_verify.ts` 已给 `filename_bucket`；8 位连号非合法日期标记
-   `FilenameCoincidentalDigits`。
-
-## 证据卡片模板
-
-逐文件打印（MUST 全部列完再 AskUserQuestion）：
+`collect_evidence.ts` 对 U 逐文件输出：
 
 ```markdown
 ### <relative path from source root>
@@ -48,9 +44,9 @@ Step 5 对候选集 U（MISMATCH ∪ DIFFER）逐文件归类。verify 已自动
 - **路径暗示**: <段路径> → <YYYY[:MM[:DD]]> | 无
 - **文件名暗示**: <name=YYYY:MM 或 coincidental 或 无>
 - **tidymedia 桶**: <YYYY:MM> (from=<DTO|QTCreationDate|QTCreateDate|CreateDate|FsMtime|NONE>)
-- **exiftool 桶**: <YYYY:MM>（= analyze_verify 的 exp）
+- **exiftool 桶**: <YYYY:MM>（= verify 汇总的 exp）
 - **诊断**: `<Pattern1>` + `<Pattern2>` ...
-- **推荐**: <写入值 YYYY:MM:DD HH:MM:SS> （理由：<最强可信线索>）| 跳过（理由：<无可信线索>）
+- **推荐**: (待研判)
 ```
 
 推荐值优先级（高→低）：EXIF/容器时间合法 > FilenameStrong > FilenameWeakDate

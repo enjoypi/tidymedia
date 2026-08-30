@@ -21,6 +21,7 @@ use super::verify::diagnose::{DiagnoseInput, fix_suggestion, patterns};
 use super::verify::exif_tsv::{ExifRow, expected_bucket, normalize_sep, parse_tsv};
 use super::verify::filename_hint::parse_path_date_bucket;
 pub use report::{VerifyEntry, VerifyReport};
+pub(crate) use summary::format_summary;
 
 pub(crate) mod bucket;
 pub(crate) mod content_diff;
@@ -28,6 +29,7 @@ pub(crate) mod diagnose;
 pub(crate) mod exif_tsv;
 pub(crate) mod filename_hint;
 pub(crate) mod report;
+pub(crate) mod summary;
 
 // verify 的 pHash 召回阈值：与 cull 分组的 `backend.face.phash_hamming_max`(10)
 // 不同调——image crate JPEG 重编码（decode→re-encode）实测 hamming 16~18，阈值

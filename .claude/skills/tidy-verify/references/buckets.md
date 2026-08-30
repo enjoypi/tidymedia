@@ -1,7 +1,7 @@
 # 桶对账口径
 
 verify 内部所有桶统一 `YYYY:MM` 字符串（`actual_bucket` / `exif_exp_bucket` /
-`filename_bucket` 同格式），analyze_verify.ts 直接比较无转换。
+`filename_bucket` 同格式），stdout 汇总直接比较无转换。
 
 ## EXIF naive：首尾抵消
 
@@ -32,6 +32,6 @@ name_only / absent）判别。
 ## 桶格式陷阱
 
 - 归档目录是 `YYYY/MM`（斜杠），verify JSON 桶是 `YYYY:MM`（冒号）——两者只在
-  「路径 vs 对账结果」对照时需要转换，analyze_verify 输出已是冒号格式。
+  「路径 vs 对账结果」对照时需要转换，verify stdout 汇总输出已是冒号格式。
 - 预测桶由决策时间推得（`actual_bucket`），与 exiftool 期望桶
   （`exif_exp_bucket`）不一致即 `mismatch`。

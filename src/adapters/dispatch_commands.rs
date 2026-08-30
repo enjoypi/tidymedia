@@ -168,6 +168,11 @@ pub(super) fn dispatch_verify(
         include_non_media,
         exif_tsv.map(std::path::Path::new),
     );
+    // 汇总直接上 stdout（脚本可读）：skill 不再跑独立 analyze 脚本。
+    print!(
+        "{}",
+        crate::usecases::verify::format_summary(&verify_report)
+    );
     if let Some(path) = report_path {
         let sink = JsonFileReportSink::new(path);
         sink.write(&Report::Verify(&verify_report));
