@@ -37,7 +37,7 @@ fn backend_with(client: Arc<FakeClient>) -> SmbBackend {
 
 // ── mkdir_p 递归（mkdir_recursive 经 SmbAdapter 的行为锚定）────────────────
 
-// mkdir_p 对多层路径必须逐层创建：pavao 的 mkdir 是 POSIX 单层语义，父层缺失返
+// mkdir_p 对多层路径必须逐层创建：smb2 `create_directory` 是单层语义，父层缺失返
 // ENOENT；默认 archive_template 渲染出 `{year}/{month}` 两层，旧实现仅叶节点
 // 一次 mkdir 在真实 SMB 上必败（fake 的 mkdir 不校验父目录曾掩盖该缺陷）。
 #[test]

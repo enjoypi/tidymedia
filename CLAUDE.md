@@ -19,7 +19,7 @@
 - **`copy-doc`/`move-doc`**：仅归档文档族（`is_office_mime` 全集），媒体/未知 skip；默认模板 `{category}/{year}/{month}` 触发 bge zero-shot 内容分类（`backend.classify.categories` 配类目原型文本，cosine < `score_min` 落 uncategorized）；模板不含 `{category}` 则整个分类阶段跳过（不加载模型）
 - 测试 `cargo nextest run --release`；lint `cargo +nightly fmt && cargo clippy --release --all-targets --all-features --locked -- -D warnings`
 - **超 2 min 命令（llvm-cov 全量等）**：macOS 无 `timeout`，用 `uv run --quiet --no-project python -c 'import signal,os,sys; signal.alarm(110); os.execvp(sys.argv[1], sys.argv[1:])' <cmd> <args>` 截断 + 重复执行步进推进（cargo 增量让每轮前进；被杀轮 exit=142/137，正常完成的 nextest 失败是 exit=100）
-- **`--all-features` 仅 Linux 可验**（smb-backend 需 libsmbclient）
+- **`--all-features` 三平台可构建**（smb-backend 已纯 Rust 化）；覆盖率权威口径仍 Linux CI
 - CLI flag：`--log-level` 全局放最前；`--dry-run` 子命令级放 `copy`/`move` 后
 - debug 走 stderr；`| tail -N` 会截 copy_file 行 → 重定向文件再 grep
 - Windows：MSVC 链接固化在 `.cargo/config.toml`；全部工具链 MUST `x86_64-pc-windows-msvc`；vcvars64 未继承时 bash 内需 `.cmd` 脚本直执行（`cmd //c` 包装丢 VCToolsInstallDir）
@@ -112,7 +112,7 @@
 - **新增容器 EXIF 自解析** → `entities/<container>.rs`（chunk 遍历）+ 调 `tiff_ifd::parse_tiff`/`parse_ifds` + `entities/exif/image_<container>.rs` 或 fallback 接入 + `types.rs::from_reader` 分流 + `tests/fixtures/gen_<container>.ts`；**双 0 XMP fallback 调 `populate_image_xmp_fallback_if_empty`** 单点
 - **新增 office 容器** → `entities/office/<container>.rs`（`parse(reader, mime)` 入口 + `extract_text(reader, mime, max_bytes)` 文本提取 + 业务纯 helper lib unit 测全分支）+ `entities/office/mod.rs` MIME + 双路由（`populate_office_dates`/`extract_office_text`）+ `entities/exif/mime.rs::{is_office_mime, mime_from_ext}` + `OFFICE_FIXTURES` 数组 + e2e `tests/lib_tidy/office_archive.rs`；**fixture 进 `OFFICE_FIXTURES` 后该容器全部业务 fn MUST `coverage(off)`**（subprocess bin instance 只跑 happy path，multi-instance branch 记录让 lib unit 全分支覆盖被拆散成 phantom miss）；剥标签/截断共用 `entities/office/scan.rs`
 - **新增子命令** → `Commands` enum + `CommandResult` variant + `tidy()` partial-failure arm + `tidy_with` match + `dispatch_<sub>` fn + `usecases/<name>/` 目录 + `usecases/report.rs::Report` variant + `report_sink.rs::FEATURE_<NAME>` 常量 + match + `lib.rs` re-export
-- **新增 path 拼接调用点** MUST 用 `Location::join_path(segment)`（Local `Utf8PathBuf::join` / 远端 `/` 字符串拼）不直接 `loc.path().join(...)`：Windows host 上 std `PathBuf::push` 产 `\` 让 SMB pavao/ADB shell/libmtp 找不到路径；`SmbTarget/AdbTarget/MtpTarget.path` 内部拼子路径同理；纯 Local 计算保留 OS 分隔符
+- **新增 path 拼接调用点** MUST 用 `Location::join_path(segment)`（Local `Utf8PathBuf::join` / 远端 `/` 字符串拼）不直接 `loc.path().join(...)`：Windows host 上 std `PathBuf::push` 产 `\` 让 SMB smb2（反斜杠被映射 U+F026 普通字符）/ADB shell/libmtp 找不到路径；`SmbTarget/AdbTarget/MtpTarget.path` 内部拼子路径同理；纯 Local 计算保留 OS 分隔符
 - **新增 Output Port trait** MUST 落到内层：推理类（face/ocr/embedding）→ `usecases/<feature>/mod.rs`；基础设施类（`BackendFactory`）→ `entities/backend/`；具体 impl 留 `adapters/`；**反例**：trait 留 `adapters/` 破坏 CA 内向规则
 - **新增装配 Port**（factory 类，如 `DetectorFactory`/`BackendFactory`）→ trait 在内层（推理类 `usecases/<feature>` / 基础设施类 `entities/backend`）+ `Default<X>Factory` impl 在 `frameworks/<x>.rs`（"决定用哪个具体实现"归最外层；`adapters` 只留 Port 具体 impl）+ `dispatch::tidy_with` 签名增 `&dyn <X>Factory` 参数走 trait 消费 + `lib.rs` re-export `Default<X>Factory` + `<X>Factory` + 所有 `tidy_with` 调用点（含集成测试 ~30 处）扩参（Python `re` 脚本按多行/单行两模式批量改）
 - **新增 face 算法常量** MUST 入 `FaceConfig` 不留模块顶 const；helper-style 私有 fn 接单字段 `ratio: f32` 保持纯净便于微测试
@@ -179,7 +179,7 @@
 - **IPv6 host 用方括号**：`smb://[::1]/share`；`split_host_port` 优先识别 `[...]`
 
 ### 凭据
-- SMB：`SMB_USER` 经 `backend.smb.default_user` 兜底；`SMB_PASSWORD` 在 `build_target` 读 env；Kerberos 走 `KRB5CCNAME`；**密码永远不入 YAML**
+- SMB：`SMB_USER` 经 `backend.smb.default_user` 兜底；`SMB_PASSWORD` 在 `build_target` 读 env；smb2 首期 NTLM only，`KRB5CCNAME` 已读入 `SmbTarget` 但 Kerberos 未接入（smb2 `KerberosAuthenticator` 独立装配路径）；**密码永远不入 YAML**
 - ADB：`adb start-server` + 设备 USB 调试；多设备 URI 必须带 serial
 
 ### 工厂与远端 backend
@@ -206,7 +206,7 @@
 - **`expand_env` 递归上限 `EXPAND_ENV_MAX_DEPTH=32`** 防栈爆
 - **env value 拼回 yaml 前 MUST `sanitize_env_value`** 剥换行/控制字符防结构注入
 - 结构化日志字段：`feature` / `operation` / `result`
-- **R1 外置**：`copy.{timezone_offset_hours, unique_name_max_attempts, archive_template, doc_archive_template}` / `exif.valid_date_time_secs` / `backend.smb.{default_user,workgroup}` / `backend.adb.{server_host,server_port}` / `backend.classify.{embed_model_path,tokenizer_path,categories,score_min,max_text_bytes}` / `log.level`（`RUST_LOG` > flag > 配置）；**无消费点勿加占位**
+- **R1 外置**：`copy.{timezone_offset_hours, unique_name_max_attempts, archive_template, doc_archive_template}` / `exif.valid_date_time_secs` / `backend.smb.{default_user,workgroup,timeout_secs}` / `backend.adb.{server_host,server_port}` / `backend.classify.{embed_model_path,tokenizer_path,categories,score_min,max_text_bytes}` / `log.level`（`RUST_LOG` > flag > 配置）；**无消费点勿加占位**
 - **不外置例外**：算法常量（EPOCH_1904 等）/ 协议字面量 / 日志维度名 / 流式哈希（`FAST_READ_SIZE`, `STREAM_CHUNK=1MiB`, `MIME_SNIFF_BYTES=256`）
 - `usecases/copy/ops.rs::println!` 是 CLI 脚本可读输出**不是** R3 日志路径
 
@@ -219,7 +219,7 @@
 | `TIDYMEDIA_OCR_DET_MODEL` / `TIDYMEDIA_FACE_*` | 模型路径 + 阈值 |
 | `TIDYMEDIA_CLASSIFY_{MODEL,TOKENIZER,SCORE_MIN,MAX_TEXT_BYTES}` | copy-doc 内容分类模型 + 阈值 |
 | `TIDYMEDIA_DOC_ARCHIVE_TEMPLATE` | copy-doc/move-doc 默认归档模板 |
-| `SMB_USER` / `SMB_PASSWORD` / `KRB5CCNAME` | SMB 凭据 |
+| `SMB_USER` / `SMB_PASSWORD` / `SMB_TIMEOUT_SECS` / `KRB5CCNAME` | SMB 凭据与超时（KRB5CCNAME 读入未接入） |
 | `ANDROID_HOME` / `ANDROID_NDK_HOME` | 交叉编译 |
 
 ## Android（feature `android-app`）
@@ -239,7 +239,7 @@
 - **`Cargo.toml` 业务关键 dep MUST caret 锁主版本**（`sha2 = "0.11"` 非 `"*"`）
 - **`tokenizers` crate `default-features = false` MUST 加 `features = ["fancy-regex"]`**（正则后端二选一缺省即编译错；fancy-regex 纯 Rust 免 C 依赖）
 - **本地 `[patch.crates-io]` 验证**：`cp -r ~/.cargo/registry/src/<idx>/<crate>-<ver>/ <vendor>` + patch + path；Cargo.lock 中 patched crate 无 `source =`/`checksum =` 即生效
-- **远端 `RemoteClient::read` 整文件入堆**（已知限制）：pavao/adb_client API 限制，大视频在 Android 有 OOM 风险
+- **远端 `RemoteClient::read` 整文件入堆**（已知限制）：smb2 `read_file`/adb_client API 限制，大视频在 Android 有 OOM 风险
 - **远端 `mkdir_p` 是真递归**（`remote.rs::mkdir_recursive`）自底向上 stat；`FakeRemoteClient::mkdir` 不校验父目录（单层 vs 递归差异 fake 测不出）
 - **存在性查询 Err MUST 传播**，MUST NOT `unwrap_or(false)`（吞 Err 让后续 `open_write` truncate 覆盖）；`LocalBackend::exists` MUST `try_exists()?` 不 `.exists()`
 - **mkdir/exists best-effort 缓存 MUST `contains + insert`** 非 `insert-returns-bool`（try_op 失败时 set 未污染 → 后续不跳过重试）

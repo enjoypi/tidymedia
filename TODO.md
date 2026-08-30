@@ -33,7 +33,7 @@
 
 #### F5 RemoteClient::list_dir_with_size 默认 + SMB override（~1h）
 - `RemoteClient` trait 加默认方法 `list_dir_with_size(target) -> Vec<(name, kind, size)>`；默认走 `list_dir + 逐个 stat`（向后兼容）
-- SMB pavao 是否支持原生 stat-with-listing 待查（若否走并发 stat 池；⚠ 已核 `smb_real.rs` 每 file 二次 stat 是内部逻辑，收益 = pavao 原生能力，**SPIKE 先行**）
+- SMB smb2 `DirectoryEntry` 自带 size（QUERY_DIRECTORY 应答内含）——**已随 smb2 迁移顺带落地**（2026-08-30，`smb_real.rs::list` 免二次 stat）；剩余仅 ADB 侧（`ADBListItem` 已带 size，直接 wrap 免补 stat，**对 ADB 是 no-op**）
 - ADB `ADBListItem` 已带 size，直接 wrap 免补 stat（**对 ADB 是 no-op**，仅省 SMB）
 - 同步 `fake.rs` / `fake_remote.rs`；命名防与 F10 `Backend::list_dir` 串层
 - 1000 文件扁平目录 N+1 RTT → 1 RTT
@@ -55,7 +55,7 @@
 - 验收：`stream_copy` 峰值内存断言（fake cap RSS 或缓冲大小注入）+ 全量 grep `RemoteClient::read` 调用点后再动签名
 
 #### F15 远端 Backend override 原生原子 rename（~2h，消除 default 非原子 fallback）
-- SMB pavao：SMB2 `SET_INFO` `FileRenameInformation`（1 RTT 服务端原子）
+- SMB smb2：`SmbClient::rename`（SMB2 SET_INFO，1 RTT 服务端原子）——smb2 已具备协议能力，可直接 override
 - ADB：`adb shell mv src dst`（同 fs 原子）
 - MTP libmtp：`SendObjectPropList` Rename op
 - 每 backend override `Backend::rename` 走原生路径，非 default `copy_file + remove_file`（读整文件到本地 + 重传 + 断电半态）
@@ -65,7 +65,7 @@
 
 #### F16 远端 Backend `copy_file` server-side copy（~2h，同 backend 归档零字节回客户端）
 - 远端 `copy_file` 现是 `client.read(src) + client.write(dst)` 两次全量 RTT + 全字节回客户端
-- SMB pavao：SMB2 `FSCTL_SRV_COPYCHUNK`（服务器端复制，零字节回客户端）
+- SMB smb2：`client::copy`（SMB2 FSCTL_SRV_COPYCHUNK，服务器端复制，零字节回客户端）——smb2 已具备协议能力
 - ADB：`adb shell cp /sdcard/A /sdcard/B`（同设备内 shell 复制）
 - MTP libmtp：`SendObjectPropList` Copy op（若协议支持）
 - `RemoteClient` trait 加 `try_server_side_copy(src, dst) -> io::Result<Option<u64>>`：不支持返 Ok(None) 让 caller fallback；协议 Err 上抛
@@ -81,8 +81,12 @@
 2. F5 / F6 / F9 / F15 / F16 一并改 RemoteClient trait（避免多次破坏；F15+F16 复用同一批 backend override 骨架）
 3. 落地后跑 Linux + `--all-features` `cargo +nightly llvm-cov --branch` 严格 4 项 100% 验证
 
-## 媒体识别缺口（tidy-verify 实证）
+## SMB smb2 真机 PoC（2026-08-30 迁移后待验）
 
+- [ ] smb2 迁移（pavao→纯 Rust）本机验证全绿但**真连接未验证**：有可用 SMB share 后跑 `copy --dry-run smb://<host>/share -o /tmp/out` + `verify` + 小规模真跑 move；验证点：列目录递归 / stat size / 读写 / rename fast-path / 中文与空格文件名 / U+F0xx 映射 round-trip（需 samba 侧造含 `:` 文件名，Windows share 存不了）/ guest 认证（空 username/password）
+- [ ] 验证后删 `KerberosAuthenticator` 未接入的注释或接入 Kerberos（`SmbTarget.krb5_ccname` 当前读入不消费）
+
+## 媒体识别缺口（tidy-verify 实证）
 - [ ] **Panasonic RW2（RAW）未识别为媒体**（2026-08-09 tidy-verify `D:\Users\Public\Pictures\2023` 实证 218 个，`12/高一元旦晚会` Panasonic DMC-GF6）：magic `II U \0`（0x49 0x49 0x55 0x00，第三字节非 TIFF 0x2A），`infer` 不识 → `mime_from_ext` 无 .rw2 → 空 mime → `passes_type_filter` 跳过；应纳入媒体全集。⚠ **不能直调 `parse_tiff`**（`tiff_ifd.rs` 硬校验 0x002A 必 None），须参数化 magic 入口内部走 `parse_ifds` 复用（AVI `strd` 同款）；走「新增容器 EXIF 自解析」检查点（`mime_from_ext` 增映射 + `types.rs::from_reader` 新分支 + `image_rw2.rs` + `gen_rw2.ts` fixture）。⚠ 远端 `open_read` 整文件入堆（RAW ≥20 MB）OOM 面色，fixture 近端 only。落地前可用 `exiftool -FileModifyDate<DateTimeOriginal` + `--include-non-media` 兜底（本轮已如此归档）
 
 ## media_time 文件名解析缺口（tidy-verify 实证）

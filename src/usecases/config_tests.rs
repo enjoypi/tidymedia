@@ -11,6 +11,7 @@ fn config_defaults_match_historical_constants() {
     assert_eq!(c.exif.valid_date_time_secs, 946_684_800);
     assert_eq!(c.backend.smb.default_user, "");
     assert_eq!(c.backend.smb.workgroup, "WORKGROUP");
+    assert_eq!(c.backend.smb.timeout_secs, 30);
     assert_eq!(c.backend.adb.server_host, "127.0.0.1");
     assert_eq!(c.backend.adb.server_port, 5037);
     assert_eq!(c.backend.ocr.det_model_path, "");

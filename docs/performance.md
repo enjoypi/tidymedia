@@ -85,7 +85,7 @@ bun scripts/perf-collect.ts \
 
 - **不产 CPU 采样火焰图**：AI 消费不到；如需函数级热点定位，另用 `samply record -- ./target/release/tidymedia ...` 后打开 profiler.firefox.com（人工分析路径）
 - **不产 tracing span 时长**：`RUST_LOG=tidymedia=debug` 输出的现有 `debug!` 结构化日志已足够阶段级排查；专项 span 埋点 defer
-- **远端 backend 内存放大**：`RemoteClient::read` 整文件入堆（pavao/adb_client API 限制），大视频在 Android/低内存主机 RSS 峰值不代表 CPU 侧算法内存
+- **远端 backend 内存放大**：`RemoteClient::read` 整文件入堆（smb2 `read_file`/adb_client API 限制），大视频在 Android/低内存主机 RSS 峰值不代表 CPU 侧算法内存
 
 ## 参考实现
 

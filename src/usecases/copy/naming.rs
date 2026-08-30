@@ -106,7 +106,7 @@ pub(super) fn generate_unique_name(
 
 /// 把模板渲染出的相对路径挂到 `output_dir` 下。`Location::join_path` 按 scheme
 /// 分流分隔符（Local 走 OS 原生、Smb/Mtp/Adb 强制 `/`）——旧实现 `Utf8PathBuf::join`
-/// 在 Windows host + 远端 output 时注入 `\` 让 pavao/adb shell/libmtp 找不到路径
+/// 在 Windows host + 远端 output 时注入 `\` 让 smb2/adb shell/libmtp 找不到路径
 /// （CLAUDE.md 「`Location::join_path`」单点规则）。防御 `..` / `.` 段：
 /// `archive_template::sanitize_path_segment` 已洗 EXIF make/model，此为覆盖
 /// `valuable_name` 等其它渠道的第二道防线。清洗后的相对路径一次 `join_path`

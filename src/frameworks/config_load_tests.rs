@@ -79,6 +79,18 @@ fn load_sanitizes_zero_unique_name_max_attempts_to_default() {
     remove_env_var("TIDYMEDIA_CONFIG");
 }
 
+// 0 让 smb2 每次请求立即超时：sanitize 必须 warn + 回退默认 30。
+#[test]
+fn load_sanitizes_zero_smb_timeout_secs_to_default() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("zerosmb.yaml");
+    std::fs::write(&path, "backend:\n  smb:\n    timeout_secs: 0\n").unwrap();
+    set_env_var("TIDYMEDIA_CONFIG", path.to_str().unwrap());
+    let cfg = load();
+    assert_eq!(cfg.backend.smb.timeout_secs, 30);
+    remove_env_var("TIDYMEDIA_CONFIG");
+}
+
 // 超 ±23h 时区（chrono::FixedOffset / time::UtcOffset 在更大值上越界静默回退 UTC）：
 // sanitize 必须 warn + 回退默认 8，避免月末文件按 UTC 解释跨月归错桶且无告警。
 #[test]

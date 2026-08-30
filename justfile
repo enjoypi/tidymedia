@@ -2,7 +2,8 @@
 #
 # 跨平台：Windows 的 build/test/lint 经 tools/msvc-env.cmd 导入 MSVC 环境
 # （vcvars64 + UCRT 补全 + RUSTFLAGS /LIBPATH，固化本机两个坑的解法）；
-# Linux/macOS 直接跑 cargo。llvm-cov 完整门禁仅 Linux（--all-features 需 libsmbclient）。
+# Linux/macOS 直接跑 cargo。llvm-cov 完整门禁权威口径仅 Linux CI（三平台
+# 均可 --all-features 构建，smb-backend 已纯 Rust 化）。
 #
 # 用法：
 #   just build            日常构建（全平台默认 opt=3）

@@ -39,7 +39,7 @@ pub(super) fn build_smb_backend(loc: &Location) -> Result<Arc<dyn Backend>> {
     };
     let cfg = &crate::usecases::config::config().backend.smb;
     // Error 已 #[from] io::Error，直接 `?` 自动转换。
-    let client = RealSmbClient::new(&target, &cfg.default_user, &cfg.workgroup)?;
+    let client = RealSmbClient::new(&target, &cfg.default_user, &cfg.workgroup, cfg.timeout_secs)?;
     Ok(SmbBackend::arc_with_client(Arc::new(client)))
 }
 

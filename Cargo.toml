@@ -5,10 +5,10 @@ edition = "2024"
 
 [features]
 default = []
-# 启用真实 SMB 后端（pavao + libsmbclient C 库）。
-# 编译前需安装系统包：`apt install -y libsmbclient-dev libsmbclient`。
+# 启用真实 SMB 后端（smb2 crate：纯 Rust SMB2/3 客户端，零 C 依赖，
+# Windows/macOS/Linux 均可构建；async API 经内嵌 tokio runtime block_on 桥接）。
 # 未启用时 SmbBackend::new() 返 Unsupported，但 SmbBackend::with_client(fake) 仍可用于测试。
-smb-backend = ["dep:pavao"]
+smb-backend = ["dep:smb2", "dep:tokio"]
 # 占位：真实 MTP 后端待 future PR 选定 crate（libmtp-rs / gphoto2 / 自接 rusb）。
 # 当前启用 feature 也仍是 stub，运行期返 Unsupported。
 mtp-backend = []
@@ -46,7 +46,6 @@ infer = "0.19"
 memmap2 = "0.9"
 nom-exif = "3.6"
 parking_lot = "0.12"
-pavao = { version = "0.2", optional = true }
 percent-encoding = "2.3"
 plist = "1.9"
 rayon = "1.12"
@@ -56,9 +55,11 @@ serde_derive = "1.0"
 serde_json = "1.0"
 serde_yaml = "0.9"
 sha2 = "0.11"
+smb2 = { version = "0.20", optional = true }
 tempfile = "3"
 thiserror = "2"
 time = "0.3"
+tokio = { version = "1", features = ["rt", "net", "time", "io-util"], optional = true }
 tract-onnx = "0.23"
 image = "0.25"
 tracing = "0.1"

@@ -61,6 +61,20 @@ pub fn sanitize(mut cfg: Config) -> Config {
     sanitize_ocr(&mut cfg.backend.ocr);
     face::sanitize_face(&mut cfg.backend.face);
     sanitize_classify(&mut cfg.backend.classify);
+    // 0 让 smb2 每次请求立即超时，归档全量失败且报错指向超时而非配置。
+    if cfg.backend.smb.timeout_secs == 0 {
+        let fallback = crate::usecases::config::SmbBackendConfig::default().timeout_secs;
+        warn!(
+            feature = "config",
+            operation = "sanitize",
+            result = "invalid_value",
+            field = "backend.smb.timeout_secs",
+            value = cfg.backend.smb.timeout_secs,
+            fallback,
+            "smb timeout_secs must be >= 1; falling back to default"
+        );
+        cfg.backend.smb.timeout_secs = fallback;
+    }
     // 非法 level 会让 CLI 端 parse 失败静默退 info；此处统一回退 + 告警。
     // sanitize 在 install_logging 之前由 OnceLock lazy init 触发 → tracing subscriber
     // 尚未安装，`warn!` 投到默认 no-op dispatcher 被丢弃；user 看不到 fallback。

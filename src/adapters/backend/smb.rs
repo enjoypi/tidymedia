@@ -6,7 +6,7 @@
 //!
 //! ## 环境变量
 //! - `SMB_PASSWORD`：URI 中没有 `user@` 时由 `default_user` 兜底；密码总是经环境变量
-//! - `KRB5CCNAME`：Kerberos ticket cache 路径（让 client 走 SSO）
+//! - `KRB5CCNAME`：读入 `SmbTarget` 但 Kerberos 未接入（smb2 首期 NTLM only）
 //!
 //! 详见 CLAUDE.md「URI 与 Backend」段。
 

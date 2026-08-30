@@ -4,8 +4,9 @@
 //! 本文件在 feature 启用时编译，否则 `--all-features` 严格覆盖率下
 //! `factory.rs::for_location` 的真实 builder 调用位点与 `dispatch.rs` 的
 //! `build_source(s)` / `for_location` `?` Err arm 无测试触发。
-//! 确定性依据：`RealMtpClient::new` 是 stub 必 Err；`PavaoClient::new` /
-//! `ADBServerDevice::new` 仅初始化不连网。
+//! 确定性依据：`RealMtpClient::new` 是 stub 必 Err；smb2 `SmbClient::connect`
+//! 对不可达 fixture 主机必 Err（文案带 `smb2` 前缀）；`ADBServerDevice::new`
+//! 仅初始化不连网。
 
 #[cfg(feature = "mtp-backend")]
 use tempfile::tempdir;
@@ -25,16 +26,17 @@ use super::smb_loc;
 #[cfg(feature = "mtp-backend")]
 use super::{DATA_DIR, local, mtp_loc};
 
-/// `PavaoClient::new` 只初始化 smbc 上下文不连接服务器；初始化成败取决于
-/// 本机 libsmbclient 环境，两种结果都是确定性断言。
+/// smb2 的 `SmbClient::connect` 是真连接（TCP + NTLM + tree connect）：fixture
+/// 主机 `nas` 在多数环境不可达必 Err（文案带 `map_smb_err` 的 `smb2` 前缀）；
+/// 恰好可达（开发网内真 NAS）则构造成功。两态皆确定性断言。
 #[cfg(feature = "smb-backend")]
 #[test]
-fn factory_smb_for_location_builds_real_backend_or_reports_pavao_error() {
+fn factory_smb_for_location_builds_real_backend_or_reports_smb2_error() {
     match DefaultBackendFactory.for_location(&smb_loc("Inbox")) {
         Ok(backend) => assert_eq!(backend.scheme(), "smb"),
         Err(e) => {
             let msg = format!("{e}");
-            assert!(msg.contains("pavao"), "got: {msg}");
+            assert!(msg.contains("smb2"), "got: {msg}");
         }
     }
 }

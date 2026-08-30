@@ -26,8 +26,10 @@ backend:
   smb:
     # URI 未写 `user@` 时兜底用户名；真实 client 接入后由 SmbBackend 读取
     default_user: ${SMB_USER:-}
-    # NTLM 工作组；pavao SmbCredentials::workgroup 必填
+    # NTLM 工作组；smb2 ClientConfig::domain 必填
     workgroup: ${SMB_WORKGROUP:-WORKGROUP}
+    # smb2 连接/请求超时秒数；0 非法由 sanitize 回退 30
+    timeout_secs: ${SMB_TIMEOUT_SECS:-30}
   adb:
     # 本机 adb daemon 监听地址；adb_client 通过 TCP 连接此端口
     server_host: ${TIDYMEDIA_ADB_SERVER_HOST:-127.0.0.1}

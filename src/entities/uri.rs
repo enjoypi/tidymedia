@@ -188,7 +188,7 @@ impl Location {
     /// 在 path 末尾追加一段，按 scheme 决定分隔符：Local 用 `Utf8PathBuf::join`
     /// （Windows 走 `\`、Unix 走 `/`，符合 `fs::File` 调用要求），远端
     /// （Smb/Mtp/Adb）始终用 `/` 字符串拼，保 POSIX 协议路径不被 Windows host
-    /// 注入反斜杠（ADB shell / pavao SMB / libmtp 都接收 path 字符串原样下发）。
+    /// 注入反斜杠（ADB shell / smb2 SMB / libmtp 都接收 path 字符串原样下发）。
     /// segment 多段（如 `year/month`）直接拼接，调用方自行清理 `..`/`.`。
     #[must_use]
     pub fn join_path(&self, segment: &str) -> Self {

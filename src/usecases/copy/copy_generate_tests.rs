@@ -308,7 +308,9 @@ fn generate_unique_name_authoritative_skips_backend_exists() {
     )
     .unwrap()
     .expect("authoritative index miss should yield target without probing");
-    assert_eq!(got.display(), target.display());
+    // Windows 上 join_path 产 `\` 分隔符（混合 `/out` 字面 + `\1970/01`），
+    // 归一后比较（Linux 行为不变）。
+    assert_eq!(got.display().replace('\\', "/"), target.display());
 }
 
 // output 扫描遇空文件（不入索引，skipped_empty>0）→ 索引非权威 → 保留磁盘探测：
