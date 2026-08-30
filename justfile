@@ -5,7 +5,7 @@
 # Linux/macOS 直接跑 cargo。llvm-cov 完整门禁仅 Linux（--all-features 需 libsmbclient）。
 #
 # 用法：
-#   just build            日常构建（Windows 默认 opt=3，unix 默认 opt=0）
+#   just build            日常构建（全平台默认 opt=3）
 #   just OPT=0 build      快速编译验证（opt=0，编译如 debug）
 #   just test             nextest 全量
 #   just test xavc        nextest 按名字子串过滤
@@ -14,8 +14,8 @@
 
 set shell := ["bash", "-cu"]
 
-# Windows 默认 opt=3（本机真跑为主）；unix 日常 opt=0，真跑 `just OPT=3 <recipe>` 覆盖
-OPT := if os() == "windows" { "3" } else { "0" }
+# 全平台默认 opt=3（真跑性能）；快速编译验证 `just OPT=0 <recipe>` 覆盖
+OPT := "3"
 export CARGO_PROFILE_RELEASE_OPT_LEVEL := OPT
 
 # Windows 下经 cmd 调 msvc-env.cmd 设环境后执行；unix 直接跑

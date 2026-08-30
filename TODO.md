@@ -3,7 +3,7 @@
 ## cull 子命令（4 模型印证流水线 + 覆盖率 100% 已落地）
 
 ### P0 e2e 真跑验证
-- [ ] 真跑 dry-run + Netron 校对：`cargo run --release -- cull /tmp/test-photos -o /tmp/culled --dry-run --report /tmp/culled/cull-report.json`（profile.release opt-level=0 让 ONNX 推理慢，e2e 真跑前应临时切 opt=3 或部署后再验）
+- [ ] 真跑 dry-run + Netron 校对：`cargo run --release -- cull /tmp/test-photos -o /tmp/culled --dry-run --report /tmp/culled/cull-report.json`（release 默认 opt=3 直接真跑；若编译时用过 `just OPT=0` 需先 `just build` 切回）
 - [ ] 按真跑反馈微调（如 YOLOv8 EyeState closed_index 是 0 或 1、SCRFD-10G 三 stride 输出顺序）
 
 ### P2 性能 / 鲁棒性优化

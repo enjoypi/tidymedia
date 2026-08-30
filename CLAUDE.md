@@ -11,8 +11,8 @@
 - 优先使用 justfile
 - 禁止直接使用 cargo
 
-- **所有 cargo 命令 MUST 带 `--release`**（`profile.release opt-level=0` 编译如 debug，统一 target 目录）
-- **ONNX 推理 e2e 真跑切 opt=3**：`CARGO_PROFILE_RELEASE_OPT_LEVEL=3 cargo run --release -- cull ...`；日常测试用 Fake 注入
+- **所有 cargo 命令 MUST 带 `--release`**（`profile.release opt-level=3`，统一 target 目录；快速编译验证用 `just OPT=0 build`）
+- **ONNX 推理 e2e 默认即 opt=3**；日常测试用 Fake 注入
 - **tract 加载分流**：4 face 模型（simplify 固化静态 shape）走 `into_optimized().into_runnable()`；PaddleOCR DBNet 动态 H/W 输入 MUST `into_typed().into_runnable()` 跳 optimize；bge BERT symbolic seq 维 MUST `into_typed()` → `set_symbols({batch_size:1, sequence_length:256})` → `into_optimized().into_runnable()`（`set_input_fact` 固化与图内 Unsqueeze 规则 unify 冲突，run 也不会自动绑 symbol）+ tokenizer encode 后手动 pad/truncate 到 SEQ
 - **tract 0.23 `run` 接收者是 `self: &Arc<Self>`**：runnable MUST Arc 持有才能调 `run`；`into_runnable()` 已返 Arc，勿再 `Arc::new` 双包
 - 典型归档 4 步：① `copy --dry-run --report /tmp/r.json` ② `/tidy-verify /src /out` ③ `copy` 真跑（或 `move` 删源） ④ `find /out` 兜底查重（输出 Python 脚本人工 review）
@@ -215,7 +215,7 @@
 |---|---|
 | `TIDYMEDIA_CONFIG` | 指定 config.yaml 路径 |
 | `RUST_LOG` | 日志级别（优先级最高） |
-| `CARGO_PROFILE_RELEASE_OPT_LEVEL` | e2e 真跑切 opt=3 |
+| `CARGO_PROFILE_RELEASE_OPT_LEVEL` | 快速编译验证切 opt=0（justfile `OPT` 单点） |
 | `TIDYMEDIA_OCR_DET_MODEL` / `TIDYMEDIA_FACE_*` | 模型路径 + 阈值 |
 | `TIDYMEDIA_CLASSIFY_{MODEL,TOKENIZER,SCORE_MIN,MAX_TEXT_BYTES}` | copy-doc 内容分类模型 + 阈值 |
 | `TIDYMEDIA_DOC_ARCHIVE_TEMPLATE` | copy-doc/move-doc 默认归档模板 |

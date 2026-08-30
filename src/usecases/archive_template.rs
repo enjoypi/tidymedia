@@ -128,7 +128,7 @@ fn read_exif_field(
 /// 恶意值经字面 replace 渗入路径后跨目录写入：路径分隔符、控制字符、`NUL` 一律
 /// 替换为 `_`；纯 `.` 段（包括 `.` / `..` / `...`）整段替换为 `_`，避免与
 /// `naming::generate_unique_name` 的逐段 `Utf8PathBuf::join` 拼出 `output/..`。
-/// `#[inline(never)]`：opt-level=0 时小函数仍可能被 LLVM 内联到 `read_exif_field`
+/// `#[inline(never)]`：小函数会被 LLVM 内联进 `read_exif_field`
 /// 让 region instrumentation 丢失，强制独立 codegen 保证覆盖率工具能看到本函数行。
 #[inline(never)]
 fn sanitize_path_segment(s: &str) -> String {

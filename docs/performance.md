@@ -79,7 +79,7 @@ bun scripts/perf-collect.ts \
 - **Linux**：`/usr/bin/time`（默认自带）
 - **macOS**：`brew install gnu-time` 后 `gtime` 可用
 - **Windows**：暂未支持（`/usr/bin/time -v` 缺失）
-- **ONNX 真跑**：`export CARGO_PROFILE_RELEASE_OPT_LEVEL=3` 后重 build（`perf-collect.ts` 已自动设 env）；否则 `profile.release opt-level=0` 编译如 debug，推理慢 10-100 倍
+- **ONNX 真跑**：`profile.release` 默认 opt=3（`perf-collect.ts` 亦显式设 env）；若用 `just OPT=0` 快速编译后真跑，推理慢 10-100 倍
 
 ## 已知限制
 

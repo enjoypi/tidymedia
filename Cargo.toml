@@ -93,7 +93,7 @@ pedantic = { level = "warn", priority = -1 }
 redundant_clone = "deny"
 
 [profile.release]
-opt-level = 0
+opt-level = 3
 
 # 临时 patch：nom-exif 3.6.0 入口 MIME gate（file.rs parse_bmff_mime）只认 ftyp/wide
 # 起头，不识别老 QuickTime MOV 的两种变体：pnot 起头（NIKON COOLPIX S5/P5000、Casio
