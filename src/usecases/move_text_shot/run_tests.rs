@@ -1333,6 +1333,33 @@ fn do_move_file_skips_mkdir_p_when_cache_contains_target_dir() {
     assert!(fake.exists(&local_loc("/out/sub/b.png")).unwrap());
 }
 
+/// 确定性命中 mkdir_cache `contains=true` 分支：rayon 主流程下 cache hit 依赖线程
+/// 调度（上面 `do_move_file_skips_mkdir_p_when_cache_contains_target_dir` 只保证
+/// miss 路径可达），直测 `do_move_file` + 预填充 cache 让 hit 分支必中。
+#[test]
+fn do_move_file_cache_prefilled_never_calls_mkdir_p() {
+    let src_fake = Arc::new(FakeBackend::new("local"));
+    let out_fake = Arc::new(FakeBackend::new("local"));
+    src_fake.add_file(local_loc("/src/a.png"), tiny_png());
+    let cache = Arc::new(dashmap::DashSet::new());
+    cache.insert(local_loc("/out"));
+    let src: Arc<dyn Backend> = src_fake.clone();
+    let out: Arc<dyn Backend> = out_fake.clone();
+    crate::usecases::move_text_shot::move_file::do_move_file(
+        &src,
+        &local_loc("/src/a.png"),
+        &out,
+        &local_loc("/out"),
+        &local_loc("/out/a.png"),
+        b"png-bytes",
+        &cache,
+    )
+    .unwrap();
+    assert_eq!(out_fake.mkdir_p_calls(), 0);
+    assert!(out_fake.exists(&local_loc("/out/a.png")).unwrap());
+    assert!(!src_fake.exists(&local_loc("/src/a.png")).unwrap());
+}
+
 /// `ensure_no_overlap` 内 sources 两两检查的对称分支（j==i skip）实测：
 /// 单 source 时 for j 走一遍 i==j continue（其他 j 无）；两 source 无 overlap 时 j!=i 但
 /// `under_prefix` false → 不 Err，正常返回 Ok。补 line 136-137 continue 分支覆盖。

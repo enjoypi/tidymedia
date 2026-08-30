@@ -19,3 +19,7 @@
 
 # exiftool / 某些 Windows 工具未展开 env var 留下的字面目录
 /%SystemDrive%/
+
+# rust-cov-100 gate 产物与临时日志
+cov.json
+target_*.log
