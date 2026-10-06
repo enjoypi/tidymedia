@@ -98,6 +98,47 @@ pub fn copy_png_to(
     Ok(dst)
 }
 
+#[derive(Debug)]
+pub struct FlakyIo {
+    inner: std::io::Cursor<Vec<u8>>,
+    seeks_left: usize,
+    read_left: u64,
+}
+
+impl FlakyIo {
+    pub fn new(data: Vec<u8>, seeks_left: usize, read_left: u64) -> Self {
+        Self {
+            inner: std::io::Cursor::new(data),
+            seeks_left,
+            read_left,
+        }
+    }
+}
+
+impl std::io::Read for FlakyIo {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        if self.read_left == 0 {
+            return Err(std::io::Error::other("flaky read"));
+        }
+        let cap = usize::try_from(self.read_left)
+            .unwrap_or(usize::MAX)
+            .min(buf.len());
+        let n = std::io::Read::read(&mut self.inner, &mut buf[..cap])?;
+        self.read_left -= n as u64;
+        Ok(n)
+    }
+}
+
+impl std::io::Seek for FlakyIo {
+    fn seek(&mut self, pos: std::io::SeekFrom) -> std::io::Result<u64> {
+        if self.seeks_left == 0 {
+            return Err(std::io::Error::other("flaky seek"));
+        }
+        self.seeks_left -= 1;
+        std::io::Seek::seek(&mut self.inner, pos)
+    }
+}
+
 #[cfg(test)]
 #[path = "test_common_tests.rs"]
 mod tests;

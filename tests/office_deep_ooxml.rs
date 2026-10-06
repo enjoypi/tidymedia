@@ -231,3 +231,6 @@ fn parse_iso8601_invalid_format_returns_none() {
 fn parse_iso8601_pre_epoch_returns_none() {
     assert!(ooxml_parse_iso8601_to_epoch("1969-12-31T00:00:00Z").is_none());
 }
+
+#[path = "support/tracing_fixture_tests.rs"]
+mod tracing_fixture;

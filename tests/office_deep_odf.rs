@@ -213,3 +213,6 @@ fn scan_element_text_non_utf8_returns_none() {
         odf_scan_element_text(&buf, b"<meta:creation-date", b"</meta:creation-date>").is_none()
     );
 }
+
+#[path = "support/tracing_fixture_tests.rs"]
+mod tracing_fixture;

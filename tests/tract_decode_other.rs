@@ -96,3 +96,6 @@ fn image_png(w: u32, h: u32) -> Vec<u8> {
         .expect("in-memory PNG encode");
     buf
 }
+
+#[path = "support/tracing_fixture_tests.rs"]
+mod tracing_fixture;

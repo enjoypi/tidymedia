@@ -267,7 +267,7 @@ pub fn png_idat_hash(bytes: &[u8]) -> Option<SecureHash> {
     let mut found = false;
     let mut pos = SIG.len();
     while pos + 8 <= bytes.len() {
-        let ln = u32::from_be_bytes(bytes[pos..pos + 4].try_into().ok()?) as usize;
+        let ln = be_u32(bytes, pos) as usize;
         let typ = &bytes[pos + 4..pos + 8];
         if typ == b"IDAT" {
             found = true;
@@ -281,6 +281,10 @@ pub fn png_idat_hash(bytes: &[u8]) -> Option<SecureHash> {
     found.then(|| h.finalize())
 }
 
+fn be_u32(bytes: &[u8], pos: usize) -> u32 {
+    u32::from_be_bytes([bytes[pos], bytes[pos + 1], bytes[pos + 2], bytes[pos + 3]])
+}
+
 #[doc(hidden)]
 #[must_use]
 pub fn bmff_mdat_hash(bytes: &[u8]) -> Option<SecureHash> {
@@ -288,14 +292,14 @@ pub fn bmff_mdat_hash(bytes: &[u8]) -> Option<SecureHash> {
     let mut found = false;
     let mut pos = 0;
     while pos + 8 <= bytes.len() {
-        let ln32 = u32::from_be_bytes(bytes[pos..pos + 4].try_into().ok()?);
+        let ln32 = be_u32(bytes, pos);
         let typ = &bytes[pos + 4..pos + 8];
         let (ln, hdr_len) = match ln32 {
             1 => {
-                let wide = u64::from_be_bytes(bytes.get(pos + 8..pos + 16)?.try_into().ok()?);
+                let wide = u64::from_be_bytes(*bytes[pos + 8..].first_chunk::<8>()?);
                 (wide, 16)
             }
-            0 => (u64::try_from(bytes.len() - pos).ok()?, 8),
+            0 => (u64::try_from(bytes.len() - pos).unwrap_or(u64::MAX), 8),
             n => (u64::from(n), 8),
         };
         if ln < 8 {
@@ -305,11 +309,11 @@ pub fn bmff_mdat_hash(bytes: &[u8]) -> Option<SecureHash> {
             found = true;
             let start = pos + hdr_len;
             let end = pos
-                .saturating_add(usize::try_from(ln).ok()?)
+                .saturating_add(usize::try_from(ln).unwrap_or(usize::MAX))
                 .min(bytes.len());
             h.update(bytes.get(start..end)?);
         }
-        pos = pos.saturating_add(usize::try_from(ln).ok()?);
+        pos = pos.saturating_add(usize::try_from(ln).unwrap_or(usize::MAX));
     }
     found.then(|| h.finalize())
 }

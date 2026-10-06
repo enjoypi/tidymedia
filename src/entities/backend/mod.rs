@@ -210,16 +210,10 @@ pub fn stream_copy(
     let writer = dst_be.open_write(dst, false)?;
     let mut br = BufReader::with_capacity(STREAM_BUFFER_BYTES, reader);
     let mut bw = BufWriter::with_capacity(STREAM_BUFFER_BYTES, writer);
-    // 三阶段闭合：copy 字节、flush 缓冲、finish 提交。BufWriter::into_inner
-    // 在 flush 失败时把 inner 一并返回让 caller 决定释放策略——这里只取 io::Error
-    // 让 best-effort 清理半截目标。BufWriter Drop 会再次 flush 忽略 Err，但 inner
-    // 已 move 进 finish 路径，不会重入；写失败语义一次性可观测。
     let result: io::Result<u64> = (|| {
         let bytes = io::copy(&mut br, &mut bw)?;
-        bw.flush()?;
         let inner = bw.into_inner().map_err(io::IntoInnerError::into_error)?;
-        inner.finish()?;
-        Ok(bytes)
+        inner.finish().map(|()| bytes)
     })();
     match result {
         Ok(bytes) => Ok(bytes),

@@ -11,3 +11,6 @@ fn hash() {
 
     assert_eq!(XXH3SUM, hash);
 }
+
+#[path = "support/tracing_fixture_tests.rs"]
+mod tracing_fixture;

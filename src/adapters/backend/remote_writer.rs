@@ -42,9 +42,10 @@ impl<A: RemoteAdapter> io::Write for RemoteBufferedWriter<A> {
         // 远端 client.write 一次性提交，buffer 必整体入堆。超 MAX_REMOTE_WRITE_BUFFER
         // 时 fail-fast 让 stream_copy 触发半截 dst 清理，比静默 OOM 崩进程可诊断
         // （Android FFI 2–4 GB RAM 场景尤其致命）。
-        check_buffer_size(self.buffer.len() as u64, buf.len() as u64)?;
-        self.buffer.extend_from_slice(buf);
-        Ok(buf.len())
+        check_buffer_size(self.buffer.len() as u64, buf.len() as u64).map(|()| {
+            self.buffer.extend_from_slice(buf);
+            buf.len()
+        })
     }
     fn flush(&mut self) -> io::Result<()> {
         Ok(())

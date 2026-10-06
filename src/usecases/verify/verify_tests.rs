@@ -126,3 +126,43 @@ fn strip_source_root_strips_root_prefix() {
     // 空剩余（根就是文件本身）回退 basename
     assert_eq!(strip_source_root("/photos", &roots), "photos");
 }
+
+#[test]
+fn verify_collects_conflicts_from_media_time_decision() {
+    crate::install_config_loader();
+    let src = tempfile::tempdir().unwrap();
+    let dst = src.path().join("IMG_20100101_120000.jpg");
+    std::fs::copy("tests/data/sample-with-exif.jpg", &dst).unwrap();
+    let ts = filetime::FileTime::from_unix_time(crate::entities::test_common::FIXED_MEDIA_MTIME, 0);
+    filetime::set_file_mtime(&dst, ts).unwrap();
+    let out = tempfile::tempdir().unwrap();
+    let be: std::sync::Arc<dyn crate::entities::backend::Backend> =
+        crate::adapters::backend::local::LocalBackend::arc();
+    let loc = |p: &std::path::Path| {
+        crate::entities::uri::Location::Local(camino::Utf8PathBuf::from(p.to_str().unwrap()))
+    };
+    let report = super::verify(
+        &[(loc(src.path()), be.clone())],
+        &(loc(out.path()), be),
+        super::DEFAULT_PHASH_MAX,
+        false,
+        None,
+    );
+    assert_eq!(report.entries.len(), 1);
+    let conflicts = &report.entries[0].conflicts;
+    assert!(conflicts.iter().any(|c| c == "FilenameOver1Day"));
+}
+
+#[test]
+fn load_tsv_reads_existing_file() {
+    let dir = tempfile::tempdir().unwrap();
+    let p = dir.path().join("exif.tsv");
+    std::fs::write(&p, "/a/IMG_1.jpg\t2024:01:01 12:00:00\t-\t-\t-\t-\t-\t-\n").unwrap();
+    assert_eq!(load_tsv(Some(&p)).len(), 1);
+}
+
+#[test]
+fn strip_source_root_without_file_name_returns_input() {
+    let roots = vec!["/photos".to_owned()];
+    assert_eq!(strip_source_root("..", &roots), "..");
+}

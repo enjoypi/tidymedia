@@ -382,3 +382,6 @@ fn extract_text_open_stream_error_skips() {
     let out = extract_text(&mut reader, "application/msword", 256);
     assert_eq!(out, "", "got: {out}");
 }
+
+#[path = "support/tracing_fixture_tests.rs"]
+mod tracing_fixture;

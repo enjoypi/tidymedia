@@ -224,3 +224,7 @@ pub(super) fn split_stem_ext(name: &str) -> (&str, &str) {
 pub(super) fn relative_to<'a>(src: &'a Utf8Path, source: &Utf8Path) -> &'a Utf8Path {
     src.strip_prefix(source).unwrap_or(src)
 }
+
+#[cfg(test)]
+#[path = "target_tests.rs"]
+mod tests;

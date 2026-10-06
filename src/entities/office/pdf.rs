@@ -71,8 +71,7 @@ fn read_windows(reader: &mut dyn MediaReader) -> Option<Vec<u8>> {
     let size = reader.seek(SeekFrom::End(0)).ok()?;
     let (head, tail) = scan_windows(size);
     reader.seek(SeekFrom::Start(head.start)).ok()?;
-    let head_len = usize::try_from(head.end - head.start).ok()?;
-    let mut buf = Vec::with_capacity(head_len);
+    let mut buf = Vec::with_capacity(usize::try_from(head.end - head.start).unwrap_or(0));
     reader
         .take(head.end - head.start)
         .read_to_end(&mut buf)

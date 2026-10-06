@@ -34,3 +34,6 @@ mod cross_validation;
 
 #[path = "media_time/result_fields.rs"]
 mod result_fields;
+
+#[path = "support/tracing_fixture_tests.rs"]
+mod tracing_fixture;

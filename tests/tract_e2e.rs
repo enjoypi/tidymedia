@@ -252,3 +252,6 @@ fn embed_empty_categories_returns_empty_classification() {
     let c = det.classify(Utf8Path::new("/t"), "任意文本").unwrap();
     assert!(c.category.is_empty() && c.score.is_infinite());
 }
+
+#[path = "support/tracing_fixture_tests.rs"]
+mod tracing_fixture;

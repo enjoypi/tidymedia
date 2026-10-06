@@ -135,3 +135,6 @@ fn extract_text_skips_entry_with_corrupt_data() {
     flip_byte(&mut zip, b"bravo");
     assert_eq!(extract_bytes(&zip, 64), "alpha");
 }
+
+#[path = "support/tracing_fixture_tests.rs"]
+mod tracing_fixture;

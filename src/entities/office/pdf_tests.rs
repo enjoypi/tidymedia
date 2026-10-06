@@ -401,3 +401,41 @@ fn parse_returns_zeros_on_read_error() {
     let mut r = FailRead;
     assert_eq!(parse(&mut r, "application/pdf"), (0, 0));
 }
+
+fn windows_of(io: &mut crate::entities::test_common::FlakyIo) -> Option<Vec<u8>> {
+    read_windows(io)
+}
+
+#[test]
+fn read_windows_none_when_seek_end_fails() {
+    let mut io = crate::entities::test_common::FlakyIo::new(vec![0; 16], 0, u64::MAX);
+    assert!(windows_of(&mut io).is_none());
+}
+
+#[test]
+fn read_windows_none_when_seek_head_fails() {
+    let mut io = crate::entities::test_common::FlakyIo::new(vec![0; 16], 1, u64::MAX);
+    assert!(windows_of(&mut io).is_none());
+}
+
+#[test]
+fn read_windows_none_when_seek_tail_fails() {
+    let size = usize::try_from(2 * PDF_SCAN_BYTES + 1).unwrap();
+    let mut io = crate::entities::test_common::FlakyIo::new(vec![0; size], 2, u64::MAX);
+    assert!(windows_of(&mut io).is_none());
+}
+
+#[test]
+fn read_windows_none_when_tail_read_fails() {
+    let size = usize::try_from(2 * PDF_SCAN_BYTES + 1).unwrap();
+    let mut io = crate::entities::test_common::FlakyIo::new(vec![0; size], 3, PDF_SCAN_BYTES);
+    assert!(windows_of(&mut io).is_none());
+}
+
+#[test]
+fn read_windows_reads_head_and_tail() {
+    let size = usize::try_from(2 * PDF_SCAN_BYTES + 1).unwrap();
+    let mut io = crate::entities::test_common::FlakyIo::new(vec![7; size], 3, u64::MAX);
+    let buf = windows_of(&mut io).unwrap();
+    assert_eq!(buf.len() as u64, 2 * PDF_SCAN_BYTES);
+}

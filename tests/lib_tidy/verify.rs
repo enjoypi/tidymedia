@@ -5,9 +5,10 @@ use std::fs::{read_to_string, write};
 use std::io::Cursor;
 use std::path::PathBuf;
 
+use camino::Utf8PathBuf;
 use image::RgbImage;
 use tempfile::tempdir;
-use tidymedia::{Commands, reset_config_loader, run_cli, tidy};
+use tidymedia::{Commands, Location, reset_config_loader, run_cli, tidy};
 
 use super::{DATA_DIR, local};
 
@@ -438,4 +439,39 @@ pub(super) fn write_small_max_bytes_config() -> tempfile::TempDir {
     }
     tidymedia::install_config_loader();
     dir
+}
+
+fn mtp_loc() -> Location {
+    Location::Mtp {
+        device: "Pixel 8".into(),
+        storage: "Internal".into(),
+        path: Utf8PathBuf::new(),
+    }
+}
+
+fn verify_command(sources: Vec<Location>, output: Location) -> Commands {
+    Commands::Verify {
+        sources,
+        output,
+        include_non_media: false,
+        exif_tsv: None,
+        phash_max: None,
+        report: None,
+    }
+}
+
+#[test]
+fn tidy_verify_rejects_unbuildable_source() {
+    let out = tempdir().unwrap();
+    let res = tidy(verify_command(
+        vec![mtp_loc()],
+        local(out.path().to_str().unwrap()),
+    ));
+    assert!(res.is_err());
+}
+
+#[test]
+fn tidy_verify_rejects_unbuildable_output() {
+    let res = tidy(verify_command(vec![local(DATA_DIR)], mtp_loc()));
+    assert!(res.is_err());
 }

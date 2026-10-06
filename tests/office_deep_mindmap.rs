@@ -289,3 +289,6 @@ fn extract_text_no_content_entries_yields_empty() {
     let mut reader = Cursor::new(zip);
     assert_eq!(extract_text(&mut reader, MIME_XMIND, 64), "");
 }
+
+#[path = "support/tracing_fixture_tests.rs"]
+mod tracing_fixture;

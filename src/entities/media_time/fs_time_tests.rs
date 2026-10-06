@@ -27,3 +27,18 @@ fn future_systemtime_is_kept() {
     let c = from_modified(Some(t)).unwrap();
     assert_eq!(c.utc.timestamp(), 1_704_110_400);
 }
+
+#[test]
+fn convert_secs_rejects_u64_beyond_i64() {
+    assert!(convert_secs_to_candidate(u64::MAX).is_none());
+}
+
+#[test]
+fn convert_secs_rejects_time_delta_overflow() {
+    assert!(convert_secs_to_candidate(u64::try_from(i64::MAX).unwrap()).is_none());
+}
+
+#[test]
+fn convert_secs_rejects_beyond_chrono_range() {
+    assert!(convert_secs_to_candidate(10_000_000_000_000).is_none());
+}

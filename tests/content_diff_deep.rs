@@ -261,3 +261,6 @@ fn rotated_phash_rejects_unrelated_same_size() {
 fn rotated_phash_decoding_failure_returns_false() {
     assert!(!rotated_phash_similar(b"not-an-image", b"also-not", 10));
 }
+
+#[path = "support/tracing_fixture_tests.rs"]
+mod tracing_fixture;

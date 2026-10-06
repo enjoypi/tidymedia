@@ -201,3 +201,7 @@ fn read_up_to(r: &mut dyn Read, buf: &mut [u8]) -> io::Result<usize> {
 pub(super) fn is_image(bytes: &[u8]) -> bool {
     infer::get(bytes).is_some_and(|t| t.mime_type().starts_with("image/"))
 }
+
+#[cfg(test)]
+#[path = "scan_tests.rs"]
+mod tests;

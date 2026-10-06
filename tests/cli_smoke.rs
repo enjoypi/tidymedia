@@ -37,3 +37,6 @@ fn cli_unknown_subcommand_fails() {
         .assert()
         .failure();
 }
+
+#[path = "support/tracing_fixture_tests.rs"]
+mod tracing_fixture;

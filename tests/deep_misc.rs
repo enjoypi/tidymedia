@@ -160,3 +160,6 @@ fn strip_source_root_handles_missing_filename() {
         "x.jpg"
     );
 }
+
+#[path = "support/tracing_fixture_tests.rs"]
+mod tracing_fixture;

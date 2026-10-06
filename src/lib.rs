@@ -168,3 +168,7 @@ pub fn install_config_loader() {
 pub fn reset_config_loader() {
     usecases::config::reset_config_loader();
 }
+
+#[cfg(test)]
+#[path = "../tests/support/tracing_fixture_tests.rs"]
+mod tracing_fixture;

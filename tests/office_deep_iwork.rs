@@ -134,3 +134,6 @@ fn extract_dates_non_date_value_returns_zero_for_that_field() {
         .unwrap();
     assert_eq!(iwork_extract_dates_from_plist(&buf), (0, 0));
 }
+
+#[path = "support/tracing_fixture_tests.rs"]
+mod tracing_fixture;

@@ -275,3 +275,8 @@ fn strip_xml_comments_no_comments_pass_through() {
     let s = "hello 世界";
     assert_eq!(strip_xml_comments(s), s);
 }
+
+#[test]
+fn find_element_none_when_key_ends_haystack() {
+    assert!(find_element_rfc3339("<xmp:CreateDate", "xmp:CreateDate").is_none());
+}

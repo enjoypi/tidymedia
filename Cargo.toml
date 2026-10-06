@@ -73,6 +73,7 @@ flate2 = "1.1.9"
 [dev-dependencies]
 assert_cmd = "2"
 chrono = "0.4"
+ctor = "1.0.13"
 filetime = "0.2"
 image = "0.25"
 predicates = "3"

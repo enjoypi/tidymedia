@@ -48,3 +48,8 @@ fn build_sub_dir_all_segments_stripped_falls_back_to_output() {
     let got = build_sub_dir(&out, "../..");
     assert_eq!(got.display(), out.display());
 }
+
+#[test]
+fn convert_dur_secs_rejects_u64_beyond_i64() {
+    assert!(convert_dur_secs_to_offsetdatetime(u64::MAX).is_none());
+}

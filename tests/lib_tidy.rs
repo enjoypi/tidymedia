@@ -118,3 +118,6 @@ mod copy_move_doc;
 mod verify;
 #[path = "lib_tidy/verify_content.rs"]
 mod verify_content;
+
+#[path = "support/tracing_fixture_tests.rs"]
+mod tracing_fixture;

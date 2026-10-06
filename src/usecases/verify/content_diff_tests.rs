@@ -347,3 +347,12 @@ fn verdict_for_rotated_same_when_phash_rotated() {
     idx.add(out);
     assert_eq!(verdict_for(&src, &idx, 10, 1_000_000), "rotated_same");
 }
+
+#[test]
+fn read_to_end_returns_none_when_read_fails() {
+    let be = Arc::new(FakeBackend::new("local"));
+    let info = fake_info(&be, "/src/a.txt", b"x".to_vec());
+    be.inject_reader_error(local("/src/a.txt"), std::io::ErrorKind::TimedOut);
+    let bytes = read_to_end(info.backend().as_ref(), info.location(), info.size);
+    assert!(bytes.is_none());
+}

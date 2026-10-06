@@ -101,3 +101,6 @@ fn scan_int_after_u32_covers_all_branches() {
     assert_eq!(rtf_scan_int_after::<u32>(br"\yr4x", b"\\yr"), Some(4));
     assert_eq!(rtf_scan_int_after::<u32>(br"\yr99999999999", b"\\yr"), None);
 }
+
+#[path = "support/tracing_fixture_tests.rs"]
+mod tracing_fixture;

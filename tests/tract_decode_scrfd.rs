@@ -158,3 +158,6 @@ fn scrfd_preprocess_builds_letterbox_tensor() {
     assert!(meta.pad_x >= 0.0 && meta.pad_y >= 0.0);
     assert_eq!(tensor.shape().len(), 4);
 }
+
+#[path = "support/tracing_fixture_tests.rs"]
+mod tracing_fixture;

@@ -53,7 +53,8 @@
 - 改 `Cargo.toml`/`coverage` 属性后必 `cargo +nightly llvm-cov clean --workspace`
 
 ### phantom miss 消除套路
-- **tracing macro / best-effort `if let Err` 抽独立 helper 加 `coverage(off)`**：`debug!`/`warn!` micro-region 在 release subscriber 未订阅时 0-hit；业务 `if let Err` 分支留原 fn 让测试可达
+- **tracing 宏 region**：测试进程由 `tests/support/tracing_fixture_tests.rs`（`ctor` 装全局 subscriber，仅 `tidymedia*` target 全级别开启）让宏字段求值；lib 根与每个 `tests/*.rs` 根 MUST `#[path]` 挂载该夹具，新增集成测试根同步；禁 `coverage(off)`（rust-cov-100 门禁 `--no-cfg-coverage-nightly` 下无效）
+- **结构不可达的 `?`**（定长切片 `try_into`、2 GiB 上限、`usize`↔`u64`）改 `.map(..)` / `unwrap_or` / 下标 helper，不留 0-hit Err region
 - **`?` Err arm 彻底消除**：helper 直返 caller final result（`-> io::Result<Option<T>>`）caller `return helper(...)` 无 `?`；for-loop 内 `Ok(true)/Err(e) => return`, `Ok(false) => {}` 显式 match 替 `?`
 - **assert 拆分**：`assert!(a && b)` → `assert!(a); assert!(b);`；`assert!(cond, "got: {}", expr)` panic 路径子表达式 0-hit → 提前 `let val = expr;`
 - **fn pointer 依赖注入**：thin wrapper 生产 OK arm 触发 + Err arm 难触发 → 抽 `*_with(fn pointer)` 参数化让测试注 mock
@@ -262,7 +263,7 @@
   - **Windows 输出陷阱**：Python stdout 默认 CRLF MUST `sys.stdout.reconfigure(newline='\n')`；GBK 中文乱码 → 写 UTF-8 文件再读；Python `re` alternation leftmost-first（长 token 放前）
 - **`tracing::*!` message 含 `{name}` 被当 named placeholder** → 转义 `{{name}}` 或改措辞避 `{`
 - **`MediaWriter::finish` flush MUST `?` 传播不 `.ok()`**（BufWriter 包装后 disk-full 在 finish 阶段暴露）
-- **`BufWriter::into_inner` 三阶段闭合**：`bw.flush()?; let inner = bw.into_inner().map_err(IntoInnerError::into_error)?; inner.finish()?`（Drop 默认 flush 忽略 Err）
+- **`BufWriter` 闭合**：`let inner = bw.into_inner().map_err(IntoInnerError::into_error)?; inner.finish().map(|()| bytes)`（`into_inner` 自带 flush 并返 Err；勿再前置 `bw.flush()?`，否则 `into_inner` 的 `?` 成不可达 region；Drop 默认 flush 忽略 Err）
 - **find 删除脚本 Python 输出**：`#!/usr/bin/env python3` + `import os` + `os.remove("...")` 待删 / `# os.remove("...")` 保护；路径转义 `\\` → `\\\\`, `"` → `\\"`；SURVIVOR 分支保护首份加 `# SURVIVOR (no copy under output)` 标记防用户删光副本
 - **tract `outputs[i].cast_to::<f32>()` 三步走**：`let cow = ...?; let view = cow.view(); let slice = view.as_slice::<f32>().map_err(io::Error::other)?;`（多输出模型每 tensor 独立持 binding 防 borrowed dropped）
 - **clippy `field_reassign_with_default`**：MUST 用 struct literal `T { field: v, ..T::default() }`；全字段显式给值时禁 `..Default::default()`

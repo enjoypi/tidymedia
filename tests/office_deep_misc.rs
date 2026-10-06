@@ -172,3 +172,6 @@ fn populate_office_dates_routes_rtf_text_mime() {
     assert_eq!(c, 1_487_068_200);
     assert_eq!(m, 1_514_808_000);
 }
+
+#[path = "support/tracing_fixture_tests.rs"]
+mod tracing_fixture;

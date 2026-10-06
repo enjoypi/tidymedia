@@ -118,3 +118,6 @@ fn generate_cfb_fixtures() {
         println!("wrote {}", path.display());
     }
 }
+
+#[path = "support/tracing_fixture_tests.rs"]
+mod tracing_fixture;
