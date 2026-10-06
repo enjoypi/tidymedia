@@ -83,7 +83,8 @@
 - **`FakeBackend.walk` 对不存在 root 静默返空**（`LocalBackend` 计 walker_errors=1）：「扫描完整性/权威性」类测试两者语义不同，勿用 Fake 断言 walker 错误路径
 
 ## 性能采集（AI 分析用）
-- **一次性汇总**：`bun scripts/perf-collect.ts --sub <copy|move|find|cull|move-text-shot> --data <真实源目录> --output-dir <dir>` → 产 `report.json`（含 `duration_ms`）+ `time-v.txt`（`/usr/bin/time -v` 抓 RSS/CPU/IO）+ `perf-report.md`（单一 markdown 直接扔 LLM 分析）
+- **一次性汇总**：`bun scripts/perf-collect.ts --sub <copy|move|find|cull|move-text-shot|verify> --data <真实源目录> --output-dir <dir>`（verify 必带 `--output-target`）→ 产 `report.json`（含 `duration_ms`）+ `time-v.txt`（Linux/macOS `/usr/bin/time -v`；Windows PowerShell 采样，同名字段 + 峰值私有内存）+ `perf-report.md`（单一 markdown 直接扔 LLM 分析）；单测 `bun test tests/scripts`
+- **Windows 峰值工作集 ≠ 堆**：本地读走 mmap，哈希大文件时文件页计入工作集（1.9 GB MP4 → WS 5.9 GB，私有内存仅 334 MB）；内存判断看峰值私有内存
 - **产物机器可读**：不产 SVG 火焰图/二进制 pprof profile；深度剖析走 samply attach（补充手段，非默认）
 - **详细指南**：`docs/performance.md`（字段字典 + AI 分析 prompt 模板 + 常见瓶颈判定路径）；用户问「性能怎么测」/ 「如何分析瓶颈」直接指到此文档
 

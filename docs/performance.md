@@ -20,7 +20,7 @@ bun scripts/perf-collect.ts \
 | `report.json` | tidymedia `--report` 落地的原始 JSON（含 `duration_ms`） | `jq` / LLM |
 | `time-v.txt` | `/usr/bin/time -v` 抓的 stderr 原文 | 备份参考 |
 
-`--sub` 支持：`copy` / `move` / `find` / `cull` / `move-text-shot`。`copy` 与 `move` 默认加 `--dry-run` 不写目标。
+`--sub` 支持：`copy` / `move` / `find` / `cull` / `move-text-shot` / `verify`。`copy` / `move` / `move-text-shot` 默认加 `--dry-run` 不写目标；`verify` 必带 `--output-target <目标库>`。
 
 ## 采集层级
 
@@ -68,6 +68,10 @@ bun scripts/perf-collect.ts \
 - SHA-512 → 评估 blake3 迁移（现约定 SHA-512 单点，改动大）
 - ONNX → 检查 `into_optimized` vs `into_typed` 分流是否正确
 
+**RSS 峰值 >> 峰值私有内存**（Windows）→ 本地 mmap 读的文件页计入工作集，可回收，非堆分配；以私有内存判断内存压力。
+
+**System CPU >> User CPU** → 系统调用密集。verify 实测 System 23.7 s / User 4.5 s：目标库每文件 stat ×2 + open + 4 KiB 读。
+
 **RSS 峰值 > 文件总大小** → 缓冲/驻留过多。查 `MAX_REMOTE_WRITE_BUFFER` / `STREAM_CHUNK` 配置。
 
 **Major page faults > 10** → 已开始换页。减小并发 worker 数或用更小 `STREAM_CHUNK`。
@@ -78,7 +82,7 @@ bun scripts/perf-collect.ts \
 
 - **Linux**：`/usr/bin/time`（默认自带）
 - **macOS**：`brew install gnu-time` 后 `gtime` 可用
-- **Windows**：暂未支持（`/usr/bin/time -v` 缺失）
+- **Windows**：PowerShell 采样（50 ms 轮询）：wall clock / 峰值工作集（记入 `max_rss_kb`）/ 峰值私有内存 / User+System CPU / 退出码；无 page fault、上下文切换、fs IO 字段；tidymedia stderr 落 `tidymedia-stderr.log`
 - **ONNX 真跑**：`profile.release` 默认 opt=3（`perf-collect.ts` 亦显式设 env）；若用 `just OPT=0` 快速编译后真跑，推理慢 10-100 倍
 
 ## 已知限制
@@ -89,6 +93,6 @@ bun scripts/perf-collect.ts \
 
 ## 参考实现
 
-- 采集脚本：`scripts/perf-collect.ts`（Bun+TypeScript，`bun scripts/perf-collect.ts`）
+- 采集脚本：`scripts/perf-collect.ts`（Bun+TypeScript，`bun scripts/perf-collect.ts`）；单测 `bun test tests/scripts`
 - 耗时单点：`src/usecases/report.rs::elapsed_ms`（`coverage(off)` 免宿主时钟波动）
 - 同步检查点：`CLAUDE.md`「新增 Report 时序/资源字段」

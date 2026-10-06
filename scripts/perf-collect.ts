@@ -12,12 +12,16 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { resolve } from "node:path";
 
-const SUBS = ["copy", "move", "find", "cull", "move-text-shot"];
+const SUBS = ["copy", "move", "find", "cull", "move-text-shot", "verify"];
+const NO_DRY_RUN_SUBS = ["find", "cull", "verify"];
+const IS_WINDOWS = process.platform === "win32";
 
 type Cast = "int" | "float" | "str";
 
 const TIME_V_FIELDS: [string, string, Cast][] = [
   ["Maximum resident set size (kbytes):", "max_rss_kb", "int"],
+  ["Peak private bytes (kbytes):", "peak_private_kb", "int"],
+  ["Exit status:", "exit_status", "int"],
   ["Elapsed (wall clock) time (h:mm:ss or m:ss):", "elapsed_wall", "str"],
   ["User time (seconds):", "user_time_sec", "float"],
   ["System time (seconds):", "system_time_sec", "float"],
@@ -31,7 +35,7 @@ const TIME_V_FIELDS: [string, string, Cast][] = [
   ["Major (requiring I/O) page faults:", "major_page_faults", "int"],
 ];
 
-function parseTimeV(text: string): Record<string, string | number> {
+export function parseTimeV(text: string): Record<string, string | number> {
   const result: Record<string, string | number> = {};
   for (const line of text.split(/\r?\n/)) {
     const stripped = line.trim();
@@ -58,7 +62,7 @@ function parseIsoNow(): string {
 }
 
 function findBinary(projectRoot: string): string {
-  const candidate = resolve(projectRoot, "target", "release", "tidymedia");
+  const candidate = resolve(projectRoot, "target", "release", IS_WINDOWS ? "tidymedia.exe" : "tidymedia");
   if (existsSync(candidate)) return candidate;
   console.error(`error: ${candidate} not found; build first with cargo build --release`);
   process.exit(1);
@@ -71,27 +75,15 @@ function findGnuTime(): string | null {
   return null;
 }
 
-function buildCli(
+export function buildCli(
   sub: string,
   data: string,
   extra: string[],
   reportPath: string,
   outputTarget: string | null,
 ): string[] {
-  const args = [sub];
-  if (sub === "find") {
-    args.push(data);
-    if (outputTarget) args.push("-o", outputTarget);
-  } else if (sub === "cull") {
-    args.push(data);
-    if (outputTarget) args.push("-o", outputTarget);
-  } else if (sub === "move-text-shot") {
-    args.push("--dry-run", data);
-    if (outputTarget) args.push("-o", outputTarget);
-  } else {
-    args.push("--dry-run", data);
-    if (outputTarget) args.push("-o", outputTarget);
-  }
+  const args = NO_DRY_RUN_SUBS.includes(sub) ? [sub, data] : [sub, "--dry-run", data];
+  if (outputTarget) args.push("-o", outputTarget);
   args.push("--report", reportPath);
   args.push(...extra);
   return args;
@@ -111,6 +103,41 @@ function runWithTimeV(
   return proc.status ?? 1;
 }
 
+function psQuote(s: string): string {
+  return `'${s.replaceAll("'", "''")}'`;
+}
+
+export function psSampleScript(bin: string, args: string[], stderrPath: string): string {
+  return [
+    "$t = [Diagnostics.Stopwatch]::StartNew()",
+    `$p = Start-Process -FilePath ${psQuote(bin)} -ArgumentList ${args.map(psQuote).join(",")} -NoNewWindow -PassThru -RedirectStandardOutput NUL -RedirectStandardError ${psQuote(stderrPath)}`,
+    "$null = $p.Handle; $ws = 0; $pv = 0",
+    "while (-not $p.HasExited) { $p.Refresh(); $ws = [Math]::Max($ws, $p.PeakWorkingSet64); $pv = [Math]::Max($pv, $p.PrivateMemorySize64); Start-Sleep -Milliseconds 50 }",
+    "$p.WaitForExit()",
+    "'Elapsed (wall clock) time (h:mm:ss or m:ss): ' + $t.Elapsed.ToString('h\\:mm\\:ss\\.ff')",
+    "'Maximum resident set size (kbytes): ' + [long]($ws / 1KB)",
+    "'Peak private bytes (kbytes): ' + [long]($pv / 1KB)",
+    "'User time (seconds): ' + $p.UserProcessorTime.TotalSeconds.ToString([Globalization.CultureInfo]::InvariantCulture)",
+    "'System time (seconds): ' + $p.PrivilegedProcessorTime.TotalSeconds.ToString([Globalization.CultureInfo]::InvariantCulture)",
+    "'Exit status: ' + $p.ExitCode",
+  ].join("; ");
+}
+
+function runWithPsSample(
+  tidyBin: string,
+  cliArgs: string[],
+  timeVOut: string,
+  stderrOut: string,
+  env: Record<string, string | undefined>,
+): number {
+  const script = psSampleScript(tidyBin, cliArgs, stderrOut);
+  const proc = spawnSync("powershell.exe", ["-NoProfile", "-Command", script], { env, stdio: ["ignore", "pipe", "inherit"] });
+  const stdout = proc.stdout ?? Buffer.alloc(0);
+  writeFileSync(timeVOut, stdout);
+  const exit = parseTimeV(stdout.toString("utf8")).exit_status;
+  return typeof exit === "number" ? exit : 1;
+}
+
 function fmt(val: unknown, spec = ""): string {
   if (val === null || val === undefined) return "n/a";
   if (typeof val === "number") {
@@ -121,7 +148,7 @@ function fmt(val: unknown, spec = ""): string {
   return String(val);
 }
 
-function renderReport(
+export function renderReport(
   sub: string,
   data: string,
   reportJson: Record<string, unknown>,
@@ -137,6 +164,8 @@ function renderReport(
     bytesRead && durationSec ? bytesRead / 1024 / 1024 / durationSec : null;
   const rssKb = Number(timeV.max_rss_kb ?? 0);
   const rssMiB = rssKb ? rssKb / 1024 : null;
+  const privateKb = Number(timeV.peak_private_kb ?? 0);
+  const privateMiB = privateKb ? `${fmt(privateKb / 1024, ".1f")} MiB` : "n/a";
 
   const lines = [
     "# tidymedia 性能采集报告",
@@ -156,12 +185,13 @@ function renderReport(
     `| 累计读字节 | ${fmt(bytesRead)} |`,
     `| 吞吐 | ${throughputMiB ? fmt(throughputMiB, ".2f") : "n/a"} MiB/s |`,
     "",
-    "## L4 - 系统资源（/usr/bin/time -v）",
+    "## L4 - 系统资源（/usr/bin/time -v；Windows 为 PowerShell 采样）",
     "",
     "| 指标 | 值 |",
     "|---|---|",
     `| Wall clock | ${fmt(timeV.elapsed_wall)} |`,
     `| 峰值 RSS | ${rssMiB ? fmt(rssMiB, ".1f") : "n/a"} MiB (${fmt(timeV.max_rss_kb)} KB) |`,
+    `| 峰值私有内存 | ${privateMiB} |`,
     `| User CPU | ${fmt(timeV.user_time_sec)} s |`,
     `| System CPU | ${fmt(timeV.system_time_sec)} s |`,
     `| CPU 利用率 | ${fmt(timeV.cpu_percent)} |`,
@@ -178,8 +208,9 @@ function renderReport(
     "",
     "1. 吞吐 vs 峰值 RSS：是否 IO/CPU/内存受限？",
     "2. `User/System CPU` 比例：kernel 时间占比高 → 系统调用密集（open/read 小文件）",
-    "3. `Major page faults` 高 → 内存不足开始换页；建议减小 `STREAM_CHUNK` 或增大 RAM",
-    "4. `duration_ms` 与 `elapsed_wall` 差 → 后者含 Rust 启动 + tract 加载 ONNX 等固定开销",
+    "3. 峰值 RSS 远大于峰值私有内存 → 多为本地 mmap 读的文件页（可回收），非堆分配",
+    "4. `Major page faults` 高 → 内存不足开始换页；建议减小 `STREAM_CHUNK` 或增大 RAM",
+    "5. `duration_ms` 与 `elapsed_wall` 差 → 后者含 Rust 启动 + tract 加载 ONNX 等固定开销",
     "",
   ];
   return lines.join("\n");
@@ -187,7 +218,7 @@ function renderReport(
 
 function usage(): void {
   console.error(
-    "用法：bun scripts/perf-collect.ts --sub <copy|move|find|cull|move-text-shot> --data <dir> --output-dir <dir> [--output-target <path>] [--extra <args>] [--project-root <root>]",
+    "用法：bun scripts/perf-collect.ts --sub <copy|move|find|cull|move-text-shot|verify> --data <dir> --output-dir <dir> [--output-target <path>] [--extra <args>] [--project-root <root>]",
   );
 }
 
@@ -207,51 +238,57 @@ function parseArgv(argv: string[]): Record<string, string> {
   return opts;
 }
 
-const opts = parseArgv(process.argv.slice(2));
-const sub = opts.sub;
-const data = opts.data;
-const outputDirArg = opts["output-dir"];
-if (!sub || !outputDirArg || !SUBS.includes(sub) || !data) {
-  usage();
-  process.exit(2);
-}
-const outputTarget = opts["output-target"] ?? null;
-const projectRoot = resolve(opts["project-root"] ?? ".");
-const outputDir = resolve(outputDirArg);
-mkdirSync(outputDir, { recursive: true });
-
-const tidyBin = findBinary(projectRoot);
-const timeBin = findGnuTime();
-if (timeBin === null) {
-  console.error(
-    "error: /usr/bin/time not found (Linux) or gtime not installed (macOS)",
-  );
-  process.exit(1);
-}
-
-const reportPath = resolve(outputDir, "report.json");
-const timeVPath = resolve(outputDir, "time-v.txt");
-const extraArgs = opts.extra ? opts.extra.split(/\s+/) : [];
-const cliArgs = buildCli(sub, data, extraArgs, reportPath, outputTarget);
-
-const env: Record<string, string | undefined> = { ...process.env };
-env.CARGO_PROFILE_RELEASE_OPT_LEVEL ??= "3";
-
-console.error(`[perf-collect] running: ${timeBin} -v ${tidyBin} ${cliArgs.join(" ")}`);
-const returnCode = runWithTimeV(timeBin, tidyBin, cliArgs, timeVPath, env);
-console.error(`[perf-collect] tidymedia exit code: ${returnCode}`);
-
-const timeVData = parseTimeV(readFileSync(timeVPath, "utf8"));
-let reportData: Record<string, unknown> = {};
-if (existsSync(reportPath)) {
-  try {
-    reportData = JSON.parse(readFileSync(reportPath, "utf8")) as Record<string, unknown>;
-  } catch (e) {
-    console.error(`warn: report.json parse failed: ${e}`);
+function main(): void {
+  const opts = parseArgv(process.argv.slice(2));
+  const sub = opts.sub;
+  const data = opts.data;
+  const outputDirArg = opts["output-dir"];
+  const outputTarget = opts["output-target"] ?? null;
+  if (!sub || !outputDirArg || !SUBS.includes(sub) || !data || (sub === "verify" && !outputTarget)) {
+    usage();
+    process.exit(2);
   }
+  const projectRoot = resolve(opts["project-root"] ?? ".");
+  const outputDir = resolve(outputDirArg);
+  mkdirSync(outputDir, { recursive: true });
+
+  const tidyBin = findBinary(projectRoot);
+  const timeBin = findGnuTime();
+  if (timeBin === null && !IS_WINDOWS) {
+    console.error(
+      "error: /usr/bin/time not found (Linux) or gtime not installed (macOS)",
+    );
+    process.exit(1);
+  }
+
+  const reportPath = resolve(outputDir, "report.json");
+  const timeVPath = resolve(outputDir, "time-v.txt");
+  const extraArgs = opts.extra ? opts.extra.split(/\s+/) : [];
+  const cliArgs = buildCli(sub, data, extraArgs, reportPath, outputTarget);
+
+  const env: Record<string, string | undefined> = { ...process.env };
+  env.CARGO_PROFILE_RELEASE_OPT_LEVEL ??= "3";
+
+  console.error(`[perf-collect] running: ${timeBin ?? "powershell-sample"} ${tidyBin} ${cliArgs.join(" ")}`);
+  const returnCode = timeBin
+    ? runWithTimeV(timeBin, tidyBin, cliArgs, timeVPath, env)
+    : runWithPsSample(tidyBin, cliArgs, timeVPath, resolve(outputDir, "tidymedia-stderr.log"), env);
+  console.error(`[perf-collect] tidymedia exit code: ${returnCode}`);
+
+  const timeVData = parseTimeV(readFileSync(timeVPath, "utf8"));
+  let reportData: Record<string, unknown> = {};
+  if (existsSync(reportPath)) {
+    try {
+      reportData = JSON.parse(readFileSync(reportPath, "utf8")) as Record<string, unknown>;
+    } catch (e) {
+      console.error(`warn: report.json parse failed: ${e}`);
+    }
+  }
+
+  const md = renderReport(sub, data, reportData, timeVData, returnCode, outputDir);
+  writeFileSync(resolve(outputDir, "perf-report.md"), md);
+  console.error(`[perf-collect] wrote ${resolve(outputDir, "perf-report.md")}`);
+  process.exit(returnCode === 0 ? 0 : returnCode);
 }
 
-const md = renderReport(sub, data, reportData, timeVData, returnCode, outputDir);
-writeFileSync(resolve(outputDir, "perf-report.md"), md);
-console.error(`[perf-collect] wrote ${resolve(outputDir, "perf-report.md")}`);
-process.exit(returnCode === 0 ? 0 : returnCode);
+if (import.meta.main) main();
