@@ -213,7 +213,7 @@ fn is_filename_source(s: Source) -> bool {
 }
 
 #[cfg(test)]
-#[path = "resolve_test_helpers.rs"]
+#[path = "resolve_fixture_tests.rs"]
 mod tests_common;
 
 #[cfg(test)]

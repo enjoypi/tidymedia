@@ -168,7 +168,7 @@ pub(crate) struct RemoteBufferedWriter<A: RemoteAdapter> {
 }
 
 #[cfg(test)]
-#[path = "remote_test_helpers.rs"]
+#[path = "remote_fixture_tests.rs"]
 mod test_helpers;
 
 #[cfg(test)]

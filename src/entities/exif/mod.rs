@@ -49,7 +49,7 @@ use self::video::populate_video_dates;
 use super::backend::MediaReader;
 
 #[cfg(test)]
-#[path = "exif_test_helpers.rs"]
+#[path = "exif_fixture_tests.rs"]
 mod tests_common;
 
 #[cfg(test)]

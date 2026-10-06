@@ -19,6 +19,7 @@ pub(crate) mod png;
 pub(crate) mod riff;
 pub(crate) mod rw2;
 #[cfg(test)]
+#[path = "test_common_fixture_tests.rs"]
 pub(crate) mod test_common;
 pub(crate) mod threadpool;
 pub(crate) mod tiff_ifd;

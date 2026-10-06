@@ -75,7 +75,7 @@ pub(crate) fn load() -> Config {
 }
 
 #[cfg(test)]
-#[path = "config_test_helpers.rs"]
+#[path = "config_fixture_tests.rs"]
 mod test_common;
 
 #[cfg(test)]

@@ -1,5 +1,5 @@
 //! `remote.rs` 测试：成功路径 + `Backend` trait IO 方法的基础 ok / err 分支。
-//! 共享 helpers (`DummyTarget`/`DummyClient`/`DummyAdapter`) 见 `remote_test_helpers.rs`。
+//! 共享 helpers (`DummyTarget`/`DummyClient`/`DummyAdapter`) 见 `remote_fixture_tests.rs`。
 //! 进阶分支（`buffered_writer` + `from_location_err` 系列 + root context）见 `remote_advanced_tests.rs`。
 
 use std::io;
