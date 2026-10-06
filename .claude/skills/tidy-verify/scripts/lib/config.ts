@@ -41,6 +41,7 @@ export interface SkillConfig {
   exifTsv: string;
   verifyReport: string;
   exiftoolTsvP: string;
+  exiftoolConcurrency: number;
 }
 
 export async function loadConfig(
@@ -54,6 +55,7 @@ export async function loadConfig(
     exifTsv: raw.exif_tsv ?? "exif.tsv",
     verifyReport: raw.verify_report ?? "verify.json",
     exiftoolTsvP: (raw.exiftool_tsv_p ?? "").replaceAll("\\t", "\t"),
+    exiftoolConcurrency: Number(raw.exiftool_concurrency ?? "8"),
   };
 }
 

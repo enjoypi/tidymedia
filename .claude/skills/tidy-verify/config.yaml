@@ -11,6 +11,8 @@ exiftool_bin: bin/exiftool/exiftool
 exif_tsv: exif.tsv
 verify_report: verify.json
 
+exiftool_concurrency: 8
+
 # exiftool -p 8 列契约（与 src/usecases/verify/exif_tsv.rs、src/adapters/cli.rs
 # 互指单点）：path / DTO / QT:CreationDate / QT:CreateDate / CreateDate /
 # FileModifyDate / Make / Model。顺序对齐 tidymedia P0..P4，改 MUST 三处同步。

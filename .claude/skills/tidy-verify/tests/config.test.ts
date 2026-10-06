@@ -1,7 +1,7 @@
 /// <reference path="../scripts/lib/bun.d.ts" />
 
 import { expect, test } from "bun:test";
-import { resolveBin, workPath } from "../scripts/lib/config.ts";
+import { loadConfig, resolveBin, workPath } from "../scripts/lib/config.ts";
 import type { SkillConfig } from "../scripts/lib/config.ts";
 
 const cfg: SkillConfig = {
@@ -11,7 +11,15 @@ const cfg: SkillConfig = {
   exifTsv: "exif.tsv",
   verifyReport: "verify.json",
   exiftoolTsvP: "a\tb",
+  exiftoolConcurrency: 8,
 };
+
+test("loadConfig 读取 skill config.yaml 全部字段", async () => {
+  const c = await loadConfig("config.yaml");
+  expect(c.exifTsv).toBe("exif.tsv");
+  expect(c.exiftoolConcurrency).toBe(8);
+  expect(c.exiftoolTsvP.split("\t").length).toBe(8);
+});
 
 test("resolveBin 命中当前平台可执行文件（非 win 不探测 .exe）", async () => {
   // cwd=repo 根：config.yaml 存在，config.yaml.exe 不存在

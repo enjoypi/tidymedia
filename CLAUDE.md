@@ -162,7 +162,7 @@
 ### EXIF vs 归档桶对账
 - EXIF naive 按 `timezone_offset_hours`（默认 +8）转 epoch、归档再 `.to_offset(+8)` → 首尾抵消，**归档桶 = EXIF 字符串前 7 字符 `YYYY:MM`**
 - **QuickTime/视频是 UTC，对账须 +tz——「前 7 字符」规则仅对 EXIF naive 成立**：verify 已内化（`verify::bucket::qt_bucket` 对 QT 列 0-based idx 1/2 按 UTC→配置时区转换）
-- `/tidy-verify <source> <output>` slash command（`.claude/commands/tidy-verify.md` 薄壳 → `.claude/skills/tidy-verify/SKILL.md`，脚本 Bun+TS）：dry-run → exiftool 抽 → `verify` 对账（stdout 内建汇总）→ exiftool 修 → 真跑 move；长步骤 MUST Monitor 后台（Bash 前台/`run_in_background` 2 分钟必被杀）
+- `/tidy-verify <source> <output>` skill（`.claude/skills/tidy-verify/SKILL.md`，脚本 Bun+TS）：`run.ts` 一次调用完成 exiftool 并行抽 tsv + `verify` 对账（stdout 内建汇总）→ exiftool 修 → 真跑 move；不跑 move dry-run（GB 级视频 SHA-512 是最慢一步，verify `duplicate_verdict` 已覆盖）；前台 Bash `timeout: 600000`，预计超 10 分钟才 Monitor
 - **dry-run 年月分析**：MUST 剥源/目标根前缀到相对路径再比年月段
 
 ### copy/move 重叠保护

@@ -1,13 +1,13 @@
 # exiftool 抽取与写回
 
-## 抽取（extract_exif.ts）
+## 抽取（run.ts → lib/extract.ts）
 
 - 8 列契约在 `config.yaml` 的 `exiftool_tsv_p`（契约单点，与
   `src/usecases/verify/exif_tsv.rs`、`src/adapters/cli.rs` 互指同步）。
 - MUST NOT 加 `-fast2`：会跳过 QuickTime moov atom 致 QT 时间读不到，老 QuickTime
   （pnot 起头 MOV）被误判桶一致。
-- Windows Perl 对含中文入口路径按 ANSI(GBK) 输出文件名字节；脚本已统一规范化为
-  UTF-8（`lib/gbk.ts`），勿移除。
+- 并行抽取走 argfile + `-charset filename=utf8`，中文路径直出 UTF-8；直接 `-r`
+  中文入口时 Windows Perl 按 ANSI(GBK) 输出，`lib/gbk.ts` 兜底规范化，勿移除。
 - 平台探测：Windows 用 repo 内 `bin/exiftool/exiftool.exe`；macOS 需自装
   （homebrew `brew install exiftool`），缺失时脚本退出 2 且交叉比对跳过。
 

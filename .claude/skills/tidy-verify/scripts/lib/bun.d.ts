@@ -14,18 +14,42 @@ interface BunSubprocess {
   readonly exited: Promise<number>;
 }
 
-interface BunSpawnOptions {}
+interface BunSpawnOptions {
+  stdout?: "pipe" | "inherit" | "ignore";
+  stderr?: "pipe" | "inherit" | "ignore";
+}
+
+interface BunGlobScanOptions {
+  cwd?: string;
+  onlyFiles?: boolean;
+  dot?: boolean;
+}
 
 declare namespace Bun {
   function file(path: string): BunFile;
   function write(path: string, data: string | Uint8Array): Promise<number>;
   function spawn(cmd: string[], opts?: BunSpawnOptions): BunSubprocess;
   function which(name: string): string | null;
+  class Glob {
+    constructor(pattern: string);
+    scan(opts?: BunGlobScanOptions): AsyncIterable<string>;
+  }
+}
+
+declare module "node:fs" {
+  export function mkdirSync(path: string, opts?: { recursive?: boolean }): void;
+  export function mkdtempSync(prefix: string): string;
+  export function rmSync(path: string, opts?: { recursive?: boolean; force?: boolean }): void;
+}
+
+declare module "node:os" {
+  export function tmpdir(): string;
 }
 
 declare namespace process {
   const argv: string[];
   const platform: string;
+  const execPath: string;
   function exit(code?: number): never;
 }
 
