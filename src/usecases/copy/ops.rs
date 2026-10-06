@@ -8,7 +8,9 @@ use dashmap::DashSet;
 use tracing::warn;
 
 use super::run::CopyOpts;
-use crate::entities::backend::{Backend, partial_move_error, stream_copy as backend_stream_copy};
+use crate::entities::backend::{
+    Backend, output_write_error, partial_move_error, stream_copy as backend_stream_copy,
+};
 use crate::entities::common;
 #[cfg(test)]
 use crate::entities::file_index::Index;
@@ -115,6 +117,8 @@ pub(super) fn do_copy_with_default_cache(
 #[inline(never)]
 fn stream_copy(src: &Info, target: &Location, out_be: &dyn Backend) -> common::Result<()> {
     let src_be = src.backend();
-    backend_stream_copy(src_be.as_ref(), src.location(), out_be, target, false).map(drop)?;
+    backend_stream_copy(src_be.as_ref(), src.location(), out_be, target, false)
+        .map(drop)
+        .map_err(output_write_error)?;
     Ok(())
 }

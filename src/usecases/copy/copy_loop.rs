@@ -3,6 +3,7 @@
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use camino::Utf8PathBuf;
 use dashmap::DashSet;
@@ -11,7 +12,8 @@ use tracing::error;
 
 use super::ops::do_copy;
 use super::run::CopyOpts;
-use crate::entities::backend::Backend;
+use crate::entities::backend::{Backend, is_output_write_denied};
+use crate::entities::common;
 use crate::entities::file_index::{Index, VisitStats};
 use crate::entities::threadpool::install_io;
 use crate::entities::uri::Location;
@@ -53,6 +55,7 @@ pub(super) fn run_copy_loop(
     // 「首次失败永驻 false-positive」陷阱）。DashSet 让跨 par_iter 边界并发 contains
     // + insert，双 worker 撞同桶最坏多一次 mkdir_p RTT，mkdir_p 幂等可接受。
     let mkdir_cache: DashSet<Location> = DashSet::new();
+    let abort = AtomicBool::new(false);
 
     // Phase A：按 fast_hash 分桶 + 桶内 full_path 字典序。同 fast_hash 组内的 winner
     // 顺序（谁先入 output_index → 后续同 hash src 命中 exists → ignored）由此串行序
@@ -73,7 +76,7 @@ pub(super) fn run_copy_loop(
     // Phase B：桶间 par_iter 并行；每桶内串行处理，reduce 汇总 CopyDelta。
     // install_io 让循环走 I/O 池（CPU×4 clamp[8,64]）；do_copy 内的远端 open_read /
     // mkdir_p / rename 是同步阻塞 IO，走全局 rayon 池会挤占 CPU-bound 阶段。
-    let delta = install_io(|| {
+    let mut delta = install_io(|| {
         groups
             .par_iter()
             .map(|grp| {
@@ -82,6 +85,7 @@ pub(super) fn run_copy_loop(
                     source,
                     &output_index,
                     &mkdir_cache,
+                    &abort,
                     index_authoritative,
                     opts,
                     output_loc,
@@ -91,6 +95,9 @@ pub(super) fn run_copy_loop(
             })
             .reduce(CopyDelta::default, CopyDelta::merge)
     });
+    if abort.load(Ordering::Relaxed) {
+        record_write_abort(&mut delta, output_loc, feature);
+    }
 
     (
         delta.copied,
@@ -112,6 +119,7 @@ fn process_group(
     source: &Index,
     output_index: &Index,
     mkdir_cache: &DashSet<Location>,
+    abort: &AtomicBool,
     index_authoritative: bool,
     opts: &CopyOpts<'_>,
     output_loc: &Location,
@@ -120,6 +128,10 @@ fn process_group(
 ) -> CopyDelta {
     let mut local = CopyDelta::default();
     for key in grp {
+        if abort.load(Ordering::Relaxed) {
+            local.aborted += 1;
+            continue;
+        }
         // grp 内 key 来自本次 build_source_index 后 source.iter() 的 snapshot；
         // 本 fn 运行期间无人 remove，`.get()` 必 Some。若真 None 表示 Index 状态破坏，
         // 内部 bug 直接 panic 让上游可查（CLAUDE.md「不可达用 `.expect("internal: ...")`」）。
@@ -139,6 +151,10 @@ fn process_group(
             Ok(true) => local.copied += 1,
             Ok(false) => local.ignored += 1,
             Err(e) => {
+                let common::Error::Io(io_err) = &e;
+                if is_output_write_denied(io_err) {
+                    abort.store(true, Ordering::Relaxed);
+                }
                 local.failed += 1;
                 let msg = e.to_string();
                 error!(
@@ -172,6 +188,7 @@ struct CopyDelta {
     copied: usize,
     ignored: usize,
     failed: usize,
+    aborted: usize,
     errors: Vec<ReportError>,
     errors_truncated: bool,
 }
@@ -181,6 +198,7 @@ impl CopyDelta {
         a.copied += b.copied;
         a.ignored += b.ignored;
         a.failed += b.failed;
+        a.aborted += b.aborted;
         extend_errors_capped(
             &mut a.errors,
             &mut a.errors_truncated,
@@ -189,4 +207,28 @@ impl CopyDelta {
         );
         a
     }
+}
+
+fn record_write_abort(delta: &mut CopyDelta, output_loc: &Location, feature: &'static str) {
+    let output = output_loc.display();
+    let message = format!(
+        "output not writable (permission denied): aborted {} remaining items; check write permission on {output} (on Windows, Controlled Folder Access may block tidymedia.exe: allow it under Ransomware protection)",
+        delta.aborted
+    );
+    error!(
+        feature,
+        operation = "write_abort",
+        result = "error",
+        error = %message,
+        "output write denied, aborting remaining items"
+    );
+    delta.failed += delta.aborted;
+    push_error_capped(
+        &mut delta.errors,
+        &mut delta.errors_truncated,
+        ReportError {
+            path: output,
+            message,
+        },
+    );
 }

@@ -9,7 +9,7 @@ use tracing::debug;
 
 use super::super::naming::generate_unique_name;
 use super::super::run::CopyOpts;
-use crate::entities::backend::{Backend, is_partial_move};
+use crate::entities::backend::{Backend, is_partial_move, output_write_error};
 use crate::entities::common;
 use crate::entities::file_index::Index;
 use crate::entities::file_info::Info;
@@ -62,7 +62,9 @@ pub(crate) fn do_copy(
         }
 
         if !mkdir_cache.contains(&target_dir_loc) {
-            output_backend.mkdir_p(&target_dir_loc)?;
+            output_backend
+                .mkdir_p(&target_dir_loc)
+                .map_err(output_write_error)?;
             mkdir_cache.insert(target_dir_loc);
         }
 
@@ -89,8 +91,9 @@ pub(crate) fn do_copy(
                     if is_partial_move(&e) {
                         output_index
                             .add(src.cloned_at(target_loc.clone(), Arc::clone(output_backend)));
+                        return Err(e.into());
                     }
-                    return Err(e.into());
+                    return Err(output_write_error(e).into());
                 }
             }
         }
