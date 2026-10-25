@@ -141,7 +141,7 @@ fn discover_returns_empty_when_no_sidecar() {
     let media = dir.path().join("lone.jpg");
     std::fs::write(&media, b"jpg-bytes").unwrap();
     let mp = camino::Utf8PathBuf::from_path_buf(media).unwrap();
-    assert!(discover(&mp).is_empty());
+    assert_eq!(discover(&mp), []);
 }
 
 /// xmp 文件存在但内容无法解析 → `parse_xmp_date` None → `try_xmp` None
@@ -185,7 +185,7 @@ fn discover_with_backend_smb_returns_empty() {
         path: Utf8PathBuf::from("dir/x.jpg"),
     };
     let backend = LocalBackend::arc();
-    assert!(discover_with_backend(&smb_loc, &backend).is_empty());
+    assert_eq!(discover_with_backend(&smb_loc, &backend), []);
 }
 
 /// ADB Location 走同一非 Local guard，应直接返回空 Vec。
@@ -196,7 +196,7 @@ fn discover_with_backend_adb_returns_empty() {
         path: Utf8PathBuf::from("/sdcard/DCIM/x.jpg"),
     };
     let backend = LocalBackend::arc();
-    assert!(discover_with_backend(&adb_loc, &backend).is_empty());
+    assert_eq!(discover_with_backend(&adb_loc, &backend), []);
 }
 
 /// MTP Location 同样走非 Local guard。
@@ -208,7 +208,7 @@ fn discover_with_backend_mtp_returns_empty() {
         path: Utf8PathBuf::from("DCIM/Camera/x.jpg"),
     };
     let backend = LocalBackend::arc();
-    assert!(discover_with_backend(&mtp_loc, &backend).is_empty());
+    assert_eq!(discover_with_backend(&mtp_loc, &backend), []);
 }
 
 /// `NotFound` 是 sidecar 缺失常态，不值得记日志；其余 IO 错误（超时/权限）才需诊断。
@@ -235,7 +235,7 @@ fn discover_with_fake_backend_read_error_returns_empty() {
     fake.inject_error(xmp, Op::ReadToString, std::io::ErrorKind::TimedOut);
     fake.inject_error(json, Op::ReadToString, std::io::ErrorKind::TimedOut);
     let backend: std::sync::Arc<dyn Backend> = fake;
-    assert!(discover_with_backend(&media, &backend).is_empty());
+    assert_eq!(discover_with_backend(&media, &backend), []);
 }
 
 /// `FakeBackend` 用 Local Location `喂入：read_to_string` 走 fake 数据，验证 backend 调度

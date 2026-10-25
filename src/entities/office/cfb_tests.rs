@@ -308,7 +308,7 @@ fn flush_run_appends_with_space_separator() {
     let mut out = "existing".to_owned();
     flush_run(&mut run, &mut out, 100);
     assert_eq!(out, "existing aaaaaaaabbbbbbbb");
-    assert!(run.is_empty());
+    assert_eq!(run, "");
 }
 
 #[test]

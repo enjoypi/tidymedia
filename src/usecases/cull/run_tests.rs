@@ -845,7 +845,7 @@ fn filter_multi_image_groups_skips_singleton() {
     let scanned = vec![make_scanned_helper(200.0)];
     let groups = vec![vec![0]];
     let (kept, dropped) = filter_multi_image_groups(groups, &scanned, 0.0);
-    assert!(kept.is_empty());
+    assert_eq!(kept, [] as [Vec<usize>; 0]);
     assert_eq!(dropped, 0);
 }
 

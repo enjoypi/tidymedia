@@ -52,5 +52,5 @@ fn no_sidecar_yields_empty() {
     let media = dir.path().join("alone.jpg");
     std::fs::write(&media, b"jpg").unwrap();
     let mp = camino::Utf8PathBuf::from_path_buf(media).unwrap();
-    assert!(discover(&mp).is_empty());
+    assert_eq!(discover(&mp), []);
 }

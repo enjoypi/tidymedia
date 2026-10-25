@@ -80,7 +80,7 @@ fn classify_empty_categories_short_circuits_without_model() {
     // 返回空类目 + -inf 让任何阈值裁决为 uncategorized。
     let c = build_classifier(&cfg_with_categories(Vec::new())).unwrap();
     let r = c.classify(Utf8Path::new("/a.pdf"), "any").unwrap();
-    assert!(r.category.is_empty());
+    assert_eq!(r.category, "");
     assert!(r.score.is_infinite() && r.score.is_sign_negative());
 }
 
@@ -151,7 +151,7 @@ fn normalize_nan_norm_unchanged() {
 #[test]
 fn best_match_empty_prototypes_returns_neg_inf() {
     let r = best_match(&[1.0], &[]);
-    assert!(r.category.is_empty());
+    assert_eq!(r.category, "");
     assert!(r.score.is_infinite() && r.score.is_sign_negative());
 }
 
@@ -173,5 +173,5 @@ fn best_match_all_nan_still_returns_some_category() {
     ];
     let r = best_match(&[1.0], &protos);
     assert!(r.score.is_nan());
-    assert!(!r.category.is_empty());
+    assert_ne!(r.category, "");
 }

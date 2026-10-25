@@ -12,13 +12,13 @@ fn embedding(seed: f32) -> [f32; EMBED_DIM] {
 #[test]
 fn cluster_identities_returns_empty_when_no_faces() {
     let out = cluster_identities(&[], 0.5);
-    assert!(out.is_empty());
+    assert_eq!(out, [] as [Vec<usize>; 0]);
 }
 
 #[test]
 fn cluster_identities_returns_empty_when_all_images_have_no_faces() {
     let out = cluster_identities(&[vec![], vec![], vec![]], 0.5);
-    assert!(out.is_empty());
+    assert_eq!(out, [] as [Vec<usize>; 0]);
 }
 
 #[test]

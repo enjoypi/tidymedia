@@ -89,9 +89,7 @@ pub fn candidates_from_filename(path: &Utf8Path, default_offset: FixedOffset) ->
     let Some(name) = path.file_name() else {
         return Vec::new();
     };
-    filename::parse_filename(name, default_offset)
-        .map(|c| vec![c])
-        .unwrap_or_default()
+    filename::parse_filename(name, default_offset).map_or_default(|c| vec![c])
 }
 
 fn push_epoch(

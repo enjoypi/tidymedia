@@ -188,14 +188,15 @@ pub fn decide(
     binarize_threshold: f32,
     min_text_pixel_ratio: f32,
 ) -> io::Result<bool> {
+    // 空 tensor 的 data pointer 可能不对齐；必须在 tract view/as_slice 之前返回。
+    if output.len() == 0 {
+        return Ok(false);
+    }
     let cast = output.cast_to::<f32>().expect("numeric→f32 cast 恒成功");
     let view = cast.view();
     let slice = view
         .as_slice::<f32>()
         .expect("cast 成功后 view 恒 contiguous");
-    if slice.is_empty() {
-        return Ok(false);
-    }
     let hits = slice.iter().filter(|&&v| v > binarize_threshold).count();
     #[expect(
         clippy::cast_precision_loss,

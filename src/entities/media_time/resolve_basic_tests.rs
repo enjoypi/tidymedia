@@ -132,7 +132,7 @@ fn gps_diff_within_24h_no_conflict() {
         now(),
     )
     .unwrap();
-    assert!(d.conflicts.is_empty());
+    assert_eq!(d.conflicts, []);
 }
 
 #[test]
@@ -182,7 +182,7 @@ fn mtime_later_than_p0_not_recorded() {
         now(),
     )
     .unwrap();
-    assert!(d.conflicts.is_empty());
+    assert_eq!(d.conflicts, []);
 }
 
 #[test]
@@ -198,7 +198,7 @@ fn non_p0_best_skips_conflict_detection() {
     )
     .unwrap();
     assert_eq!(d.priority, Priority::P2);
-    assert!(d.conflicts.is_empty());
+    assert_eq!(d.conflicts, []);
 }
 
 #[test]

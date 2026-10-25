@@ -219,7 +219,7 @@ fn flush_run_respects_budget() {
     let mut run = String::from("aaaaaaaaaaaaaaaa");
     flush_run(&mut run, &mut out, 2);
     assert_eq!(out, "xx");
-    assert!(run.is_empty());
+    assert_eq!(run, "");
 }
 
 #[test]
@@ -228,13 +228,13 @@ fn flush_run_appends_with_space_and_truncates() {
     let mut out = "existing".to_owned();
     flush_run(&mut run, &mut out, 100);
     assert_eq!(out, "existing aaaaaaaaaaaaaaaa");
-    assert!(run.is_empty());
+    assert_eq!(run, "");
 
     let mut run2 = "bbbbbbbbcccccccc".to_owned();
     let mut out2 = String::new();
     flush_run(&mut run2, &mut out2, 10);
     assert!(out2.chars().count() <= 10, "got: {out2}");
-    assert!(run2.is_empty());
+    assert_eq!(run2, "");
 }
 
 #[test]

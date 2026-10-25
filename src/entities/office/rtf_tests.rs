@@ -310,5 +310,5 @@ fn hex_val_covers_ranges() {
 fn consume_control_empty_rest_returns_zero() {
     let mut text = Vec::new();
     assert_eq!(consume_control(b"", &mut text), 0);
-    assert!(text.is_empty());
+    assert_eq!(text, [] as [u8; 0]);
 }

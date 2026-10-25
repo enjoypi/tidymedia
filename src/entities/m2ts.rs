@@ -132,7 +132,7 @@ fn parse_mdpm(data: &[u8]) -> Option<String> {
     let entries = data.get(5..5 + count * 5)?;
     let mut rec_date: Option<&[u8]> = None;
     let mut rec_time: Option<&[u8]> = None;
-    for e in entries.chunks_exact(5) {
+    for e in entries.as_chunks::<5>().0 {
         match e[0] {
             TAG_RECORD_DATE => rec_date = Some(&e[1..]),
             TAG_RECORD_TIME => rec_time = Some(&e[1..]),

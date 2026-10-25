@@ -19,7 +19,7 @@ fn exif_with_all_three_fields_produces_three_candidates() {
 #[test]
 fn exif_with_no_fields_produces_empty() {
     let exif = Exif::with_mime("image/jpeg");
-    assert!(candidates_from_exif(&exif, utc()).is_empty());
+    assert_eq!(candidates_from_exif(&exif, utc()), []);
 }
 
 #[test]
@@ -33,21 +33,21 @@ fn filename_candidate_extracted_from_path() {
 #[test]
 fn filename_no_match_returns_empty() {
     let p = camino::Utf8Path::new("/tmp/random.jpg");
-    assert!(candidates_from_filename(p, east8()).is_empty());
+    assert_eq!(candidates_from_filename(p, east8()), []);
 }
 
 #[test]
 fn empty_path_filename_returns_empty() {
     // Utf8Path::new("") 的 file_name() 返回 None
     let p = camino::Utf8Path::new("");
-    assert!(candidates_from_filename(p, east8()).is_empty());
+    assert_eq!(candidates_from_filename(p, east8()), []);
 }
 
 #[test]
 fn push_epoch_zero_skipped() {
     let mut v = Vec::new();
     push_epoch(&mut v, 0, Source::ExifDateTimeOriginal, None, false);
-    assert!(v.is_empty());
+    assert_eq!(v, []);
 }
 
 #[test]

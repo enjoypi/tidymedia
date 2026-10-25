@@ -176,7 +176,7 @@ fn group_by_hash_transitive_closure() {
 
 #[test]
 fn group_by_hash_empty_input() {
-    assert!(group_by_hash(&[], 5).is_empty());
+    assert_eq!(group_by_hash(&[], 5), [] as [Vec<usize>; 0]);
 }
 
 #[test]
