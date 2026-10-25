@@ -1,59 +1,63 @@
 #!/usr/bin/env bash
-# cov：覆盖率门禁 = report 四指标 fail-under + lcov DA/BRDA `,0` 真值 plate（branch 唯一硬门禁）
-# + 生产文件完整性自检。机制与阈值依据见 CLAUDE.md「测试与覆盖率」。
-# MUST 独占跑（并行 cargo 易 SIGKILL rc=104）；跑前先 tools/fmt.sh + tools/lint.sh（行号对齐）。
-# FEATURES 默认 http,sqlite，可覆盖：FEATURES=http,postgres ./tools/cov.sh
+# cov：覆盖率门禁 = report 四指标 fail-under + lcov DA/BRDA `,0` 真值 plate
+# + 生产文件完整性自检。MUST 独占跑；跑前先 just fmt + just lint（行号对齐）。
+# Windows 必须从 just cov 进入，由 tools/msvc-env.cmd 先准备 MSVC 环境。
 set -euo pipefail
 
 SCRIPT_DIR="$(dirname "${BASH_SOURCE[0]}")"
-source "$SCRIPT_DIR/cargo-env.sh"
 cd "$SCRIPT_DIR/.."
 
 LCOV_OUT=target/coverage.lcov
+COV_IGNORE='(adapters[/\\]backend[/\\][a-z]+_real\.rs|adapters[/\\](ocr|face|classify)[/\\]tract_[a-z_]+\.rs|_phantom\.rs)$'
+COV_PLATFORM_ARGS=()
 
-# --profraw-only：只清覆盖率原始数据，保留 instrumented 编译产物——重跑免全量重编
-# （源码变更由 cargo 指纹自动重编）；stale 行号风险由「跑前先 fmt」顺序约束覆盖。
-cargo llvm-cov clean --profraw-only
+if [[ "${OS:-}" == "Windows_NT" ]]; then
+  COV_PLATFORM_ARGS+=(--no-rustc-wrapper)
+  COV_ROOT="$(cygpath -m "$(pwd)")"
+else
+  COV_ROOT="$(pwd)"
+fi
 
-# nextest 必须：进程级单例 + env 覆盖测试在 cargo test 单进程多线程下争用必 fail
-cargo +nightly llvm-cov \
-  nextest \
-  "${CARGO_COMMON_FLAGS[@]}" \
-  "$CARGO_LOCKED" \
-  --branch \
-  --cargo-quiet \
-  --failure-output immediate-final \
-  --no-fail-fast \
-  --no-report \
-  --show-progress none \
-  --status-level fail \
-  --success-output never
+# 保留调用方及 Windows MSVC 的 /LIBPATH，再追加 coverage 专用 cfg。
+export RUSTFLAGS="${RUSTFLAGS:+$RUSTFLAGS }--cfg=coverage_nightly"
 
-# 四指标：file-lines 99.999 兜聚合 float 缺陷（全满仍 99.99999%）；其余全 100——多 instance 虚报
-# 已由「擦 generic + spawn smoke + 不可达 expect 化」全量消解（见 CLAUDE.md）。
-# report 不支持 --fail-under-branches，branch 由下方 lcov plate 守。输出只留 <100% 的行 + TOTAL。
-cargo +nightly llvm-cov report --release \
+# 只清覆盖率原始数据，保留 instrumented 编译产物（重跑免全量重编）。
+cargo +nightly llvm-cov clean --profraw-only
+
+# nextest 必须：进程级单例 + env 覆盖测试在 cargo test 单进程多线程下争用必 fail。
+cargo +nightly llvm-cov "${COV_PLATFORM_ARGS[@]}" nextest \
+  --all-features --locked \
+  --branch --cargo-quiet --failure-output immediate-final --no-fail-fast \
+  --no-report --show-progress none --status-level fail --success-output never
+
+# 第一阶段只生成 lcov，不启用其他 fail-under，确保 branch 缺口优先报告。
+cargo +nightly llvm-cov report \
+  --ignore-filename-regex="$COV_IGNORE" \
+  --lcov --output-path "$LCOV_OUT"
+
+# 1. branch 100%：BRDA `,0` 必须为空；失败时不再运行后续 region report。
+branch_miss=$(awk '/^SF:/{sf=$0} /^BRDA:.*,0$/{print sf": "$0}' "$LCOV_OUT")
+[[ -z "$branch_miss" ]] || { printf '%s\n' "$branch_miss"; echo "coverage gate failed: branch BRDA ,0 entries above" >&2; exit 1; }
+
+# 2. region 100%（function/line 同门禁）；file-lines 99.999 兜聚合 float 缺陷。
+cargo +nightly llvm-cov report \
+  --ignore-filename-regex="$COV_IGNORE" \
+  --summary-only \
   --fail-under-file-lines 99.999 \
   --fail-under-functions 100 \
   --fail-under-lines 100 \
-  --fail-under-regions 100 \
-  | awk '
-      /^Filename|^-+$|^TOTAL/ { print; next }
-      /100\.00%[[:space:]]+.*100\.00%[[:space:]]+.*100\.00%[[:space:]]+.*(100\.00%|-)[[:space:]]*$/ { next }
-      { print }
-  '
+  --fail-under-regions 100
 
-cargo +nightly llvm-cov report --release --lcov --output-path "$LCOV_OUT"
+# 3. lcov DA 真值 plate 复核行覆盖。
+line_miss=$(awk '/^SF:/{sf=$0} /^DA:.*,0$/{print sf": "$0}' "$LCOV_OUT")
+[[ -z "$line_miss" ]] || { printf '%s\n' "$line_miss"; echo "coverage gate failed: line DA ,0 entries above" >&2; exit 1; }
 
-# lcov 真值 plate：DA（行）/BRDA（分支）`,0` 必须为空
-miss=$(awk '/^SF:/{sf=$0} /^(DA|BRDA):.*,0$/ {print sf": "$0}' "$LCOV_OUT")
-[[ -z "$miss" ]] || { printf '%s\n' "$miss"; echo "coverage gate failed: lcov DA/BRDA ,0 entries above" >&2; exit 1; }
-
-# 完整性自检：ignore 之外含 impl 块/顶层 fn 的 .rs 必须出现在 lcov SF（防漏 instrument 的虚假全绿）
+# 完整性自检：ignore 之外含 impl/fn 的 .rs 必须出现在 lcov SF（防漏 instrument 的虚假全绿）。
+# 两侧统一为相对正斜杠路径，兼容 Windows lcov 的盘符和反斜杠。
 missing=$(comm -23 \
-    <(fd -e rs -c never -E '*_tests.rs' -E '*_test_helpers.rs' . entities/src usecases/src adapters/src frameworks/src | sort) \
-    <(grep '^SF:' "$LCOV_OUT" | sed "s|^SF:$(pwd)/||" | sort) \
+    <(fd -e rs -c never -E '*_tests.rs' -E '*_test_helpers.rs' . src/entities src/usecases src/adapters src/frameworks | sed 's|\\|/|g' | sort) \
+    <(grep '^SF:' "$LCOV_OUT" | sed -e 's|\\|/|g' -e "s|^SF:${COV_ROOT}/||" -e 's|^SF:||' | sort) \
   | xargs -I{} rg -l '^impl |^pub impl |^fn |^pub fn |^pub\(crate\) fn ' {} 2>/dev/null) || true
-[[ -z "$missing" ]] || { echo "coverage gate failed: production source not in lcov (cov missing stats):" >&2; printf '%s\n' "$missing"; exit 1; }
+[[ -z "$missing" ]] || { echo "coverage gate failed: production source not in lcov:" >&2; printf '%s\n' "$missing"; exit 1; }
 
 echo "COV_PASS"

@@ -11,13 +11,13 @@
 - 优先使用 justfile
 - 禁止直接使用 cargo
 
-- **所有 cargo 命令 MUST 带 `--release`**（`profile.release opt-level=3`，统一 target 目录；快速编译验证用 `just OPT=0 build`）
-- **ONNX 推理 e2e 默认即 opt=3**；日常测试用 Fake 注入
+- **日常 build/test/lint/cov 统一 nightly + dev**（普通 build/test 用 default features，lint/cov 用 all-features，各自 target 增量复用）；发布/性能/真跑用 `just build-release`（release opt=3，快速 release 编译用 `just OPT=0 build-release`）
+- **ONNX 真模型 e2e/性能真跑用 release opt=3**；日常测试用 Fake 注入，dev coverage 的真模型测试耗时不代表生产性能
 - **tract 加载分流**：4 face 模型（simplify 固化静态 shape）走 `into_optimized().into_runnable()`；PaddleOCR DBNet 动态 H/W 输入 MUST `into_typed().into_runnable()` 跳 optimize；bge BERT symbolic seq 维 MUST `into_typed()` → `set_symbols({batch_size:1, sequence_length:256})` → `into_optimized().into_runnable()`（`set_input_fact` 固化与图内 Unsqueeze 规则 unify 冲突，run 也不会自动绑 symbol）+ tokenizer encode 后手动 pad/truncate 到 SEQ
 - **tract 0.23 `run` 接收者是 `self: &Arc<Self>`**：runnable MUST Arc 持有才能调 `run`；`into_runnable()` 已返 Arc，勿再 `Arc::new` 双包
 - 典型归档 4 步：① `copy --dry-run --report /tmp/r.json` ② `/tidy-verify /src /out` ③ `copy` 真跑（或 `move` 删源） ④ `find /out` 兜底查重（输出 Python 脚本人工 review）
 - **`copy-doc`/`move-doc`**：仅归档文档族（`is_office_mime` 全集），媒体/未知 skip；默认模板 `{category}/{year}/{month}` 触发 bge zero-shot 内容分类（`backend.classify.categories` 配类目原型文本，cosine < `score_min` 落 uncategorized）；模板不含 `{category}` 则整个分类阶段跳过（不加载模型）
-- 测试 `cargo nextest run --release`；lint `cargo +nightly fmt && cargo clippy --release --all-targets --all-features --locked -- -D warnings`
+- 测试 `just test`；lint `just fmt && just lint`；最短完整门禁 `just gate`（fmt → lint → cov → build，cov 已含全量 nextest，勿再重复 `just test`）
 - **超 2 min 命令（llvm-cov 全量等）**：macOS 无 `timeout`，用 `uv run --quiet --no-project python -c 'import signal,os,sys; signal.alarm(110); os.execvp(sys.argv[1], sys.argv[1:])' <cmd> <args>` 截断 + 重复执行步进推进（cargo 增量让每轮前进；被杀轮 exit=142/137，正常完成的 nextest 失败是 exit=100）
 - **`--all-features` 三平台可构建**（smb-backend 已纯 Rust 化）；覆盖率权威口径仍 Linux CI
 - CLI flag：`--log-level` 全局放最前；`--dry-run` 子命令级放 `copy`/`move` 后
@@ -43,14 +43,14 @@
 - **`infer` 把 zip 容器（OOXML/ODF/EPUB/iWork）识别为 `application/zip`、CFB（doc/xls/ppt）识别为 `application/x-ole-storage`**（infer 的 CLSID 细分需完整 CFB header，256 字节 sniff 窗口必失败）：`Exif::open_filtered` MUST 对两者都走 `mime_from_ext` 扩展名重映射
 
 ## 测试与覆盖率
-- **门槛 region/function/line/branch 四项全 100%**（Linux + `--all-features` + `--branch`）；**任何存量 miss 归属判定**（平台差异 / 疑似非本次引入）：同 filter `git stash -u`（含 untracked 新文件）对照 main HEAD 跑一遍
+- **门禁顺序：先 branch 100%，再 region 100%**；region/function/line/branch 四项门槛均为 100%（Linux + `--all-features` + `--branch`）；**任何存量 miss 归属判定**（平台差异 / 疑似非本次引入）：同 filter `git stash -u`（含 untracked 新文件）对照 main HEAD 跑一遍
 - **macOS 本机覆盖率已知缺口（勿追，Linux CI 口径 100%）**：`local.rs` 非 UTF-8 `?` edge（APFS 强制文件名 UTF-8，`fs::write` 返 EILSEQ 无法造 fixture）+ `remote.rs`/`entities/backend/mod.rs` 泛型 instance 宏 micro-region，main 基线即如此
-- 严格 100% 命令：`RUSTFLAGS="--cfg=coverage_nightly" cargo +nightly llvm-cov --release nextest --summary-only --branch --ignore-filename-regex='(adapters[/\\]backend[/\\][a-z]+_real\.rs|adapters[/\\](ocr|face|classify)[/\\]tract_[a-z_]+\.rs|_phantom\.rs)$' --all-features`；`_phantom.rs` 是 per-instance phantom branch 所在函数的独立文件（函数已 100% 覆盖但某 instance 分支计 0，无法测试补，独立后整文件排除）
-- **Windows 覆盖率两坑**（2026-08-30 实排）：① cargo-llvm-cov 0.8.7 的 `RUSTC_WRAPPER` 在 Windows + nightly 上解析 rustc 调用失败 → instrument 静默不注入（binary 无 `llvm_profile` 符号、profraw 零生成、merge 报 `not found *.profraw`），MUST `--no-rustc-wrapper` 改 RUSTFLAGS 直注（本机门禁走 rust-cov-100 skill gate，已内置该 flag）② lcov `SF:` 路径在 Windows 是反斜杠 → ignore-regex 必须 `[/\\]` 兼容写法否则排除组全失效
+- **严格 100% 命令：`just cov`**（nightly + dev + `--all-features` + `--branch`；唯一实现 `tools/cov.sh`，内含跨平台 ignore-regex）；`_phantom.rs` 是 per-instance phantom branch 所在函数的独立文件（函数已 100% 覆盖但某 instance 分支计 0，无法测试补，独立后整文件排除）
+- **Windows 覆盖率两坑**（2026-08-30 实排）：① cargo-llvm-cov 0.8.7 的 `RUSTC_WRAPPER` 在 Windows + nightly 上解析 rustc 调用失败 → instrument 静默不注入（binary 无 `llvm_profile` 符号、profraw 零生成、merge 报 `not found *.profraw`），MUST `--no-rustc-wrapper` 改 RUSTFLAGS 直注；`just cov` 已内置该 flag，并经 `.cmd` 包装先 `call tools\msvc-env.cmd`（否则 zstd-sys 的 cl.exe 缺头文件），脚本追加 coverage cfg 时保留 `/LIBPATH` ② lcov `SF:` 路径在 Windows 是反斜杠 → ignore-regex 必须 `[/\\]` 兼容写法，完整性自检先归一化为相对正斜杠路径
 - `lib.rs`/`bin/tidymedia.rs` 顶 `#![cfg_attr(coverage_nightly, feature(coverage_attribute))]`；`[lints.rust] unexpected_cfgs` 注册
 - **覆盖率排除三组**：① `adapters/backend/*_real.rs`（大 + 需真环境）走 ignore-regex；② `adapters/(ocr|face)/tract_*_real.rs`（小）走 `#[coverage(off)]`；③ 主体 `tract_dbnet.rs` / `tract_{4face}.rs` / `tract_embed*.rs` 走 ignore-regex
-- **子行 region miss 定位**：`llvm-cov report --release --text` 复用 profdata（`report` 不接 `--all-features`），`^0` 即 miss；branch miss 过滤 `BRDA` 第 4 字段 0；**function miss 用 `--lcov` 的 `FNDA:0`**（mangled 名可辨 closure/泛型；per-instance 有噪声，跨 instance 全 0 才是真 miss，summary 合并数为权威）
-- 改 `Cargo.toml`/`coverage` 属性后必 `cargo +nightly llvm-cov clean --workspace`
+- **子行 region miss 定位**：`llvm-cov report --text` 复用 profdata（`report` 不接 `--all-features`），`^0` 即 miss；branch miss 过滤 `BRDA` 第 4 字段 0；**function miss 用 `--lcov` 的 `FNDA:0`**（mangled 名可辨 closure/泛型；per-instance 有噪声，跨 instance 全 0 才是真 miss，summary 合并数为权威）
+- 日常及源码变更重跑只 `cargo +nightly llvm-cov clean --profraw-only`，保留插桩编译缓存；改 `Cargo.toml`/`coverage` 属性后才必 `cargo +nightly llvm-cov clean --workspace`
 
 ### phantom miss 消除套路
 - **tracing 宏 region**：测试进程由 `tests/support/tracing_fixture_tests.rs`（`ctor` 装全局 subscriber，仅 `tidymedia*` target 全级别开启）让宏字段求值；lib 根与每个 `tests/*.rs` 根 MUST `#[path]` 挂载该夹具，新增集成测试根同步；禁 `coverage(off)`（rust-cov-100 门禁 `--no-cfg-coverage-nightly` 下无效）
@@ -208,8 +208,8 @@
 - 非法值走 `frameworks/config.rs::sanitize`（warn + 回退默认）；关键 fallback（`log.level`/`archive_template`）走 `eprintln_sanitize_fallback` stderr 兜底（sanitize 在 `install_logging` 之前触发）
 - **`expand_env` 递归上限 `EXPAND_ENV_MAX_DEPTH=32`** 防栈爆
 - **env value 拼回 yaml 前 MUST `sanitize_env_value`** 剥换行/控制字符防结构注入
-- 结构化日志字段：`feature` / `operation` / `result`
-- **R1 外置**：`copy.{timezone_offset_hours, unique_name_max_attempts, archive_template, doc_archive_template}` / `exif.valid_date_time_secs` / `backend.smb.{default_user,workgroup,timeout_secs}` / `backend.adb.{server_host,server_port}` / `backend.classify.{embed_model_path,tokenizer_path,categories,score_min,max_text_bytes}` / `log.level`（`RUST_LOG` > flag > 配置）；**无消费点勿加占位**
+- 结构化日志字段：`feature` / `operation` / `result`；逐文件事件 MUST `debug!`，用户提示走一条汇总 `warn!`（77 万行逐文件 warn 让 dry-run 33 s → 2 min）
+- **R1 外置**：`copy.{timezone_offset_hours, unique_name_max_attempts, archive_template, doc_archive_template, skip_extensions}` / `exif.valid_date_time_secs` / `backend.smb.{default_user,workgroup,timeout_secs}` / `backend.adb.{server_host,server_port}` / `backend.classify.{embed_model_path,tokenizer_path,categories,score_min,max_text_bytes}` / `log.level`（`RUST_LOG` > flag > 配置）；**无消费点勿加占位**
 - **不外置例外**：算法常量（EPOCH_1904 等）/ 协议字面量 / 日志维度名 / 流式哈希（`FAST_READ_SIZE`, `STREAM_CHUNK=1MiB`, `MIME_SNIFF_BYTES=256`）
 - `usecases/copy/ops.rs::println!` 是 CLI 脚本可读输出**不是** R3 日志路径
 
@@ -218,7 +218,7 @@
 |---|---|
 | `TIDYMEDIA_CONFIG` | 指定 config.yaml 路径 |
 | `RUST_LOG` | 日志级别（优先级最高） |
-| `CARGO_PROFILE_RELEASE_OPT_LEVEL` | 快速编译验证切 opt=0（justfile `OPT` 单点） |
+| `CARGO_PROFILE_RELEASE_OPT_LEVEL` | 显式 release 构建覆盖 opt-level（justfile `OPT` 单点，默认 3；不影响 dev） |
 | `TIDYMEDIA_OCR_DET_MODEL` / `TIDYMEDIA_FACE_*` | 模型路径 + 阈值 |
 | `TIDYMEDIA_CLASSIFY_{MODEL,TOKENIZER,SCORE_MIN,MAX_TEXT_BYTES}` | copy-doc 内容分类模型 + 阈值 |
 | `TIDYMEDIA_DOC_ARCHIVE_TEMPLATE` | copy-doc/move-doc 默认归档模板 |
@@ -245,6 +245,7 @@
 - **远端 `RemoteClient::read` 整文件入堆**（已知限制）：smb2 `read_file`/adb_client API 限制，大视频在 Android 有 OOM 风险
 - **远端 `mkdir_p` 是真递归**（`remote.rs::mkdir_recursive`）自底向上 stat；`FakeRemoteClient::mkdir` 不校验父目录（单层 vs 递归差异 fake 测不出）
 - **存在性查询 Err MUST 传播**，MUST NOT `unwrap_or(false)`（吞 Err 让后续 `open_write` truncate 覆盖）；`LocalBackend::exists` MUST `try_exists()?` 不 `.exists()`
+- **Local 写入 MUST 不覆盖**：`rename`/`copy_file` 先 `create_new` 占位再覆盖占位，`open_write` 用 `create_new`，目标已存在返 `AlreadyExists`（Windows `fs::rename` 自带 REPLACE_EXISTING）；`do_copy` 遇 `AlreadyExists` 换下一候选名；目标名 MUST 经 `Index::try_reserve_target` 原子占位（键按路径组件 + 小写折叠），否则并行桶间 check-then-act 让同名不同内容互相覆盖
 - **mkdir/exists best-effort 缓存 MUST `contains + insert`** 非 `insert-returns-bool`（try_op 失败时 set 未污染 → 后续不跳过重试）
 - **测试 shim MUST `#[cfg(test)]` gate**：`Info::from` / `Index::visit_dir` / `Exif::from_path_with_offset` / `fake_remote`
 - **`#[cfg(test)]` 标在方法/import 上不标在 `impl Foo {}` 块**（同块生产方法会一起 gate 掉）
@@ -259,7 +260,7 @@
 - **`use rayon::prelude::*` 违反 P0 §5**：最小 import = `use rayon::iter::{IntoParallelRefIterator, IntoParallelRefMutIterator, ParallelIterator}`
 - **同盘 move fast-path**：`opts.remove && src.scheme()=="local" && output.scheme()=="local"` 走 `Backend::rename`（OS 内核唯一权威源判同卷，MUST NOT Rust 层重复判）
 - **大文件 OOM fixture 用 random-noise PNG**（≥ 1500×1500，纯色压缩太小无效）
-- **dry-run log / 路径聚合用 Bun**：临时 `cat > x.ts <<'TSEOF' ... TSEOF` + `bun x.ts`；独立脚本 MUST `bun <script>`
+- **dry-run log / 路径聚合用 Bun**：临时 `cat > x.ts <<'TSEOF' ... TSEOF` + `bun x.ts`；独立脚本 MUST `bun <script>`；hook 会压缩 heredoc / `bun -e` 内反斜杠（`\user` 成非法 unicode 转义），含反斜杠的改动 MUST 用 Edit 工具
   - **Windows 输出陷阱**：Python stdout 默认 CRLF MUST `sys.stdout.reconfigure(newline='\n')`；GBK 中文乱码 → 写 UTF-8 文件再读；Python `re` alternation leftmost-first（长 token 放前）
 - **`tracing::*!` message 含 `{name}` 被当 named placeholder** → 转义 `{{name}}` 或改措辞避 `{`
 - **`MediaWriter::finish` flush MUST `?` 传播不 `.ok()`**（BufWriter 包装后 disk-full 在 finish 阶段暴露）

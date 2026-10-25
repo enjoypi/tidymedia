@@ -12,7 +12,7 @@ rem NOTE: comments stay ASCII - cmd parses .cmd with the ANSI codepage (GBK here
 rem UTF-8 CJK bytes would corrupt parsing. Keep this file ASCII-only.
 rem
 rem Usage (call leaks set into caller; the && command after inherits the env):
-rem   cmd //c "call tools\msvc-env.cmd && cargo build --release"
+rem   cmd //c "call tools\msvc-env.cmd && cargo +nightly build --locked"
 
 rem 1. discover vcvars64 (glob newest install; vswhere does not recognize VS 18 preview)
 rem    powershell by full path: cmd launched from Git Bash may lack System32 in PATH
