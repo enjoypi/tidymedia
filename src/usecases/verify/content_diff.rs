@@ -14,19 +14,23 @@ use crate::entities::uri::Location;
 use crate::usecases::copy::Source;
 use crate::usecases::cull::phash::{hamming, phash};
 
+use super::candidates::CandidateIndex;
+
 /// 对单个源文件裁定内容比对 verdict（`exact_dup`/`pixel_same`/`rotated_same`/
 /// `name_only`/`absent`）。读失败或超 `max_bytes` 的文件降级 `name_only`（有同名
 /// 候选）或 `absent`（无候选）。
-pub(crate) fn verdict_for(info: &Info, out: &Index, phash_max: u8, max_bytes: u64) -> String {
+pub(crate) fn verdict_for(
+    info: &Info,
+    lib: &OutputLibrary,
+    phash_max: u8,
+    max_bytes: u64,
+) -> String {
+    let out = &lib.index;
     if matches!(out.exists(info, true), Ok(Some(_))) {
         return "exact_dup".to_owned();
     }
-    let base = info
-        .full_path
-        .file_name()
-        .map(str::to_owned)
-        .unwrap_or_default();
-    let cands = find_candidates(out, &base);
+    let base = info.full_path.file_name().map_or_default(str::to_owned);
+    let cands = lib.cands.find(&base);
     if cands.is_empty() {
         return "absent".to_owned();
     }
@@ -36,8 +40,7 @@ pub(crate) fn verdict_for(info: &Info, out: &Index, phash_max: u8, max_bytes: u6
     let ext = info
         .full_path
         .extension()
-        .map(str::to_ascii_lowercase)
-        .unwrap_or_default();
+        .map_or_default(str::to_ascii_lowercase);
     let src_entropy = entropy_hash(&src_bytes, &ext);
     for path in &cands {
         let Some(c_bytes) = read_guarded_by_path(out, path, max_bytes) else {
@@ -58,6 +61,18 @@ pub(crate) fn verdict_for(info: &Info, out: &Index, phash_max: u8, max_bytes: u6
     "name_only".to_owned()
 }
 
+pub(crate) struct OutputLibrary {
+    index: Index,
+    cands: CandidateIndex,
+}
+
+impl OutputLibrary {
+    pub(crate) fn new(index: Index) -> Self {
+        let cands = CandidateIndex::build(&index);
+        Self { index, cands }
+    }
+}
+
 /// 构建输出库索引（output 非目录时为空，验证未归档场景）。
 pub(crate) fn build_output_index(output: &Source) -> Index {
     let mut idx = Index::new();
@@ -71,47 +86,14 @@ pub(crate) fn build_output_index(output: &Source) -> Index {
     idx
 }
 
-fn find_candidates(out: &Index, base: &str) -> Vec<Utf8PathBuf> {
-    let base_lower = base.to_ascii_lowercase();
-    let (stem, ext) = split_stem_ext(&base_lower);
-    out.iter()
-        .filter_map(|entry| {
-            let name = basename(entry.key().as_str());
-            let name_lower = name.to_ascii_lowercase();
-            if name_lower == base_lower {
-                return Some(entry.key().clone());
-            }
-            let (nstem, next) = split_stem_ext(&name_lower);
-            if next == ext && stem_digit_variant(&nstem, &stem) {
-                Some(entry.key().clone())
-            } else {
-                None
-            }
-        })
-        .collect()
-}
-
-fn split_stem_ext(name: &str) -> (String, String) {
+pub(crate) fn split_stem_ext(name: &str) -> (String, String) {
     match name.rfind('.') {
         Some(i) => (name[..i].to_owned(), name[i..].to_owned()),
         None => (name.to_owned(), String::new()),
     }
 }
 
-fn stem_digit_variant(name_stem: &str, base_stem: &str) -> bool {
-    let Some(digits) = name_stem
-        .strip_prefix(base_stem)
-        .and_then(|rest| rest.strip_prefix('_'))
-    else {
-        return false;
-    };
-    if digits.is_empty() {
-        return false;
-    }
-    digits.chars().all(|c| c.is_ascii_digit())
-}
-
-fn basename(p: &str) -> &str {
+pub(crate) fn basename(p: &str) -> &str {
     p.rsplit(['/', '\\']).next().unwrap_or(p)
 }
 

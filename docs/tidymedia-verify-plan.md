@@ -68,7 +68,7 @@
 
 ## Verification
 
-每阶段 `cargo nextest run --release` + Linux `--branch` 4×100%；e2e JSON 断言 + 与 compare_buckets.py/filename_conflict.py 输出对拍；`--exif-tsv` 注入实测 tsv 判定一致。
+每阶段 `just test` + Linux `just cov`（`--branch` 4×100%）；e2e JSON 断言 + 与 compare_buckets.py/filename_conflict.py 输出对拍；`--exif-tsv` 注入实测 tsv 判定一致。
 
 ## 风险
 

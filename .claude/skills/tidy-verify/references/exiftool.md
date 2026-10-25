@@ -8,6 +8,8 @@
   （pnot 起头 MOV）被误判桶一致。
 - 并行抽取走 argfile + `-charset filename=utf8`，中文路径直出 UTF-8；直接 `-r`
   中文入口时 Windows Perl 按 ANSI(GBK) 输出，`lib/gbk.ts` 兜底规范化，勿移除。
+- Windows `exiftool.exe` 单进程常驻约 200 MB：并发按空闲内存折算，残留进程由
+  pid 文件在下轮清理（见 SKILL.md Step 1）。
 - 平台探测：Windows 用 repo 内 `bin/exiftool/exiftool.exe`；macOS 需自装
   （homebrew `brew install exiftool`），缺失时脚本退出 2 且交叉比对跳过。
 

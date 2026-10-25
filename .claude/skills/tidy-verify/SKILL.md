@@ -33,8 +33,11 @@ bun .claude/skills/tidy-verify/scripts/run.ts "<SRC>" "<OUT>" "<WORK>"
 ```
 
 `run.ts` 顺序执行：
-- **exiftool 并行抽 tsv**：按目录文件数均衡分 `exiftool_concurrency` 组，每组
-  argfile + `-charset filename=utf8` 一个进程，语义同 `-r`（跳 `.` 开头目录）。
+- **exiftool 并行抽 tsv**：按目录文件数均衡分组，组数 = min(`exiftool_concurrency`,
+  空闲内存 / `exiftool_mem_mb`)，每组 argfile + `-charset filename=utf8` 一个进程，
+  语义同 `-r`（跳 `.` 开头目录）；输出直写 `exif-<i>.tsv` 再逐组合并（内存不随
+  文件数增长）。Windows 杀父进程不连带子进程：pid 记入 `exiftool_pids`，下轮启动
+  先结束残留（打 `stale_exiftool_killed=`）。
   exiftool 缺失 → 打 `exiftool_missing=1`，省略 `--exif-tsv`（`mismatch` 恒
   false，verify 内部判定仍有效）。
 - **`tidymedia verify`**：决策上浮 + 预测桶、tsv 交叉比对、文件名/路径日期桶、

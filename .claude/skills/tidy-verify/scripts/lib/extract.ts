@@ -1,5 +1,6 @@
 /// <reference path="./bun.d.ts" />
 
+import { appendFileSync, writeFileSync } from "node:fs";
 import { decodeExifText } from "./gbk.ts";
 
 export interface ExecResult {
@@ -44,18 +45,35 @@ export async function listDirCounts(root: string): Promise<Map<string, number>> 
   return counts;
 }
 
+export interface FileRun {
+  cmd: string[];
+  out: string;
+  err: string;
+  onSpawn: (pid: number) => void;
+}
+
+export type FileRunner = (r: FileRun) => Promise<number>;
+
+export function spawnToFiles(r: FileRun): Promise<number> {
+  const proc = Bun.spawn(r.cmd, { stdout: Bun.file(r.out), stderr: Bun.file(r.err) });
+  r.onSpawn(proc.pid);
+  return proc.exited;
+}
+
 export interface ExtractOptions {
   bin: string;
   fmt: string;
   counts: Map<string, number>;
   work: string;
   concurrency: number;
-  run: Runner;
+  run: FileRunner;
+  tsv: string;
+  err: string;
+  onSpawn: (pid: number) => void;
 }
 
 export interface ExtractResult {
-  tsv: string;
-  err: string;
+  rows: number;
   exit: number;
   groups: number;
 }
@@ -65,21 +83,33 @@ function normalize(bytes: Uint8Array): string {
   return text === "" || text.endsWith("\n") ? text : `${text}\n`;
 }
 
+export async function mergeParts(parts: string[], dest: string): Promise<number> {
+  writeFileSync(dest, "");
+  let rows = 0;
+  for (const part of parts) {
+    const text = normalize(new Uint8Array(await Bun.file(part).arrayBuffer()));
+    rows += text.split("\n").length - 1;
+    appendFileSync(dest, text);
+  }
+  return rows;
+}
+
 export async function extractExif(opts: ExtractOptions): Promise<ExtractResult> {
   const groups = planGroups(opts.counts, opts.concurrency);
-  const results = await Promise.all(
+  const part = (i: number, ext: string) => `${opts.work}/exif-${i}.${ext}`;
+  const exits = await Promise.all(
     groups.map(async (dirs, i) => {
       const argfile = `${opts.work}/exif-args-${i}.txt`;
       await Bun.write(argfile, `${dirs.join("\n")}\n`);
-      return opts.run([
-        opts.bin, "-charset", "filename=utf8", "-q", "-T", "-p", opts.fmt, "-@", argfile,
-      ]);
+      return opts.run({
+        cmd: [opts.bin, "-charset", "filename=utf8", "-q", "-T", "-p", opts.fmt, "-@", argfile],
+        out: part(i, "tsv"),
+        err: part(i, "err"),
+        onSpawn: opts.onSpawn,
+      });
     }),
   );
-  return {
-    tsv: results.map((r) => normalize(r.out)).join(""),
-    err: results.map((r) => normalize(r.err)).join(""),
-    exit: results.reduce((max, r) => Math.max(max, r.exit), 0),
-    groups: groups.length,
-  };
+  const rows = await mergeParts(groups.map((_, i) => part(i, "tsv")), opts.tsv);
+  await mergeParts(groups.map((_, i) => part(i, "err")), opts.err);
+  return { rows, exit: exits.reduce((max, e) => Math.max(max, e), 0), groups: groups.length };
 }

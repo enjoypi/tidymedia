@@ -40,6 +40,11 @@ test("psSampleScript 单引号转义并输出 GNU time 同名字段", () => {
   }
 });
 
+test("psSampleScript 内存峰值用 Int64 累计，超 2 GiB 不溢出", () => {
+  const s = psSampleScript("t.exe", [], "e.log");
+  expect(s).toContain("$ws = [long]0; $pv = [long]0");
+});
+
 test("renderReport 输出峰值私有内存，缺失时 n/a", () => {
   const withPrivate = renderReport("verify", "S", {}, { peak_private_kb: 2048 }, 0, "O");
   expect(withPrivate).toContain("| 峰值私有内存 | 2.0 MiB |");

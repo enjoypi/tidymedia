@@ -1,9 +1,12 @@
 /// <reference path="./lib/bun.d.ts" />
 
-import { mkdirSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { freemem } from "node:os";
+import { dirname } from "node:path";
 import { exiftoolBin, loadConfig, tidymediaBin, workPath } from "./lib/config.ts";
 import type { SkillConfig } from "./lib/config.ts";
-import { extractExif, listDirCounts, spawnRunner } from "./lib/extract.ts";
+import { extractExif, listDirCounts, spawnRunner, spawnToFiles } from "./lib/extract.ts";
+import { isImageRunning, killTree, pickConcurrency, reapStale, recordPid } from "./lib/procs.ts";
 import { verifyCommand } from "./lib/verify.ts";
 
 async function extractStep(cfg: SkillConfig, src: string): Promise<string | null> {
@@ -12,16 +15,21 @@ async function extractStep(cfg: SkillConfig, src: string): Promise<string | null
     console.log("exiftool_missing=1（跳过 --exif-tsv，verify 内部判定仍有效）");
     return null;
   }
+  const pids = `${dirname(cfg.workDir)}/${cfg.exiftoolPids}`;
+  const stale = await reapStale(pids, (pid) => isImageRunning(pid, "exiftool"), killTree);
+  if (stale.length > 0) {
+    console.log(`stale_exiftool_killed=${stale.join(",")}`);
+  }
   const t0 = performance.now();
   const counts = await listDirCounts(src);
-  const r = await extractExif({
-    bin, fmt: cfg.exiftoolTsvP, counts, work: cfg.workDir, concurrency: cfg.exiftoolConcurrency, run: spawnRunner,
-  });
+  const concurrency = pickConcurrency(cfg.exiftoolConcurrency, freemem(), cfg.exiftoolMemMb * 1024 * 1024);
   const tsv = workPath(cfg, cfg.exifTsv);
-  await Bun.write(tsv, r.tsv);
-  await Bun.write(`${tsv}.err`, r.err);
-  const rows = r.tsv === "" ? 0 : r.tsv.split("\n").length - 1;
-  console.log(`exif_rows=${rows} exif_groups=${r.groups} exif_exit=${r.exit} extract_ms=${Math.round(performance.now() - t0)}`);
+  const r = await extractExif({
+    bin, fmt: cfg.exiftoolTsvP, counts, work: cfg.workDir, concurrency, run: spawnToFiles,
+    tsv, err: `${tsv}.err`, onSpawn: (pid) => recordPid(pids, pid),
+  });
+  writeFileSync(pids, "");
+  console.log(`exif_rows=${r.rows} exif_groups=${r.groups} exif_exit=${r.exit} extract_ms=${Math.round(performance.now() - t0)}`);
   return tsv;
 }
 
@@ -45,7 +53,7 @@ async function main(args: string[]): Promise<number> {
   const cfg = { ...(await loadConfig()), workDir: work };
   const bin = await tidymediaBin(cfg);
   if (!bin) {
-    console.error(`tidymedia 缺失：${cfg.tidymediaBin}，先 just build`);
+    console.error(`tidymedia 缺失：${cfg.tidymediaBin}，先 just build-release`);
     return 2;
   }
   mkdirSync(work, { recursive: true });

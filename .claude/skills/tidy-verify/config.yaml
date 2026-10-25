@@ -11,7 +11,11 @@ exiftool_bin: bin/exiftool/exiftool
 exif_tsv: exif.tsv
 verify_report: verify.json
 
+# 并发上限；实际并发 = min(上限, 空闲内存 / exiftool_mem_mb)，保底 1。
 exiftool_concurrency: 8
+exiftool_mem_mb: 300
+# 记录本轮 exiftool pid（相对 work_dir 的父目录）；下轮启动先结束仍存活的残留。
+exiftool_pids: exiftool-pids.txt
 
 # exiftool -p 8 列契约（与 src/usecases/verify/exif_tsv.rs、src/adapters/cli.rs
 # 互指单点）：path / DTO / QT:CreationDate / QT:CreateDate / CreateDate /

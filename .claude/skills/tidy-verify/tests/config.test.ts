@@ -12,12 +12,16 @@ const cfg: SkillConfig = {
   verifyReport: "verify.json",
   exiftoolTsvP: "a\tb",
   exiftoolConcurrency: 8,
+  exiftoolMemMb: 300,
+  exiftoolPids: "exiftool-pids.txt",
 };
 
 test("loadConfig 读取 skill config.yaml 全部字段", async () => {
   const c = await loadConfig("config.yaml");
   expect(c.exifTsv).toBe("exif.tsv");
   expect(c.exiftoolConcurrency).toBe(8);
+  expect(c.exiftoolMemMb).toBe(300);
+  expect(c.exiftoolPids).toBe("exiftool-pids.txt");
   expect(c.exiftoolTsvP.split("\t").length).toBe(8);
 });
 

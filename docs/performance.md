@@ -78,12 +78,29 @@ bun scripts/perf-collect.ts \
 
 **Wall clock >> duration_ms** → 固定开销大（ONNX 模型加载）。仅 `cull` / `move-text-shot` 走 ONNX；其他子命令启动开销应 < 500 ms。
 
+**逐文件 `warn!` 刷 stderr** → 同一批非媒体文件 dry-run，默认级别 2 min 08 s vs `--log-level error` 33 s（77 万行 stderr，64 线程争用无缓冲 stderr）。逐文件事件 MUST `debug!`，用户可见提示走一条汇总 `warn!`。
+
+## Windows 实测（D:\old → D:\user\Pictures，NVMe）
+
+规模：源 86.8 万文件（多数 AppData 非媒体），目标库 15.5 万文件 / 697 GB。
+
+**真跑 move 零风险**：同卷硬链接沙箱 `cp -al D:/old D:/perf/src; cp -al D:/user/Pictures D:/perf/out`（Git Bash 走 CreateHardLinkW），move 只改链接名；每轮重建 src；`rm -rf` 只删链接名。perf-collect 对 move 强制 `--dry-run`，而 dry-run 给每个待复制文件额外算 SHA-512，热点与真跑不同。
+
+| 场景 | 优化前 | 优化后 |
+|---|---|---|
+| verify 1900 源 vs 目标库 | 32.4 s | 9.6 s（主循环并行；报告逐字段一致） |
+| 非媒体为主 dry-run（77 万文件） | 2 min 08 s | 20–30 s（逐文件 warn 降 debug + 扩展名黑名单） |
+| 真跑 move（硬链接沙箱） | 7 min 11 s | 6 min 53 s |
+
+- verify 截距（1 源）3.6 s、斜率 16.6 ms/源（优化前）：截距 = 目标库建索引，斜率 = 逐源 SHA-512 + 候选比对
+- 真跑 move 复制循环受 SHA-512 约束：重复文件双侧全量哈希（判重删源的安全前提，不可削弱）
+
 ## 环境要求
 
 - **Linux**：`/usr/bin/time`（默认自带）
 - **macOS**：`brew install gnu-time` 后 `gtime` 可用
 - **Windows**：PowerShell 采样（50 ms 轮询）：wall clock / 峰值工作集（记入 `max_rss_kb`）/ 峰值私有内存 / User+System CPU / 退出码；无 page fault、上下文切换、fs IO 字段；tidymedia stderr 落 `tidymedia-stderr.log`
-- **ONNX 真跑**：`profile.release` 默认 opt=3（`perf-collect.ts` 亦显式设 env）；若用 `just OPT=0` 快速编译后真跑，推理慢 10-100 倍
+- **ONNX 真跑**：先用 `just build-release` 构建（`profile.release` 默认 opt=3，`perf-collect.ts` 亦显式设 env）；若用 `just OPT=0 build-release` 快速编译后真跑，推理慢 10-100 倍
 
 ## 已知限制
 

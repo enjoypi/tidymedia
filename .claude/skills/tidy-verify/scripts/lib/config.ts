@@ -42,6 +42,8 @@ export interface SkillConfig {
   verifyReport: string;
   exiftoolTsvP: string;
   exiftoolConcurrency: number;
+  exiftoolMemMb: number;
+  exiftoolPids: string;
 }
 
 export async function loadConfig(
@@ -56,6 +58,8 @@ export async function loadConfig(
     verifyReport: raw.verify_report ?? "verify.json",
     exiftoolTsvP: (raw.exiftool_tsv_p ?? "").replaceAll("\\t", "\t"),
     exiftoolConcurrency: Number(raw.exiftool_concurrency ?? "8"),
+    exiftoolMemMb: Number(raw.exiftool_mem_mb ?? "300"),
+    exiftoolPids: raw.exiftool_pids ?? "exiftool-pids.txt",
   };
 }
 

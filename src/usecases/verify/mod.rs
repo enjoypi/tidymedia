@@ -3,29 +3,32 @@
 //! 提示 `filename_hint.rs` → 内容像素比对 `content_diff.rs` → 9 pattern 诊断
 //! `diagnose.rs`。
 
+use std::collections::HashMap;
 use std::path::Path;
 use std::time::Instant;
 
+use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use tracing::debug;
 use tracing::warn;
 
 use crate::entities::file_index;
-use crate::entities::media_time::ConflictKind;
+use crate::entities::file_info::Info;
 use crate::entities::media_time::MediaTimeDecision;
 use crate::usecases::report::elapsed_ms;
 
 use super::copy::Source;
 use super::report::FEATURE_VERIFY;
-use super::verify::bucket::actual_bucket;
-use super::verify::diagnose::{DiagnoseInput, fix_suggestion, patterns};
-use super::verify::exif_tsv::{ExifRow, expected_bucket, normalize_sep, parse_tsv};
-use super::verify::filename_hint::parse_path_date_bucket;
+use super::verify::content_diff::{OutputLibrary, build_output_index};
+use super::verify::evaluate::{EvalCtx, Evaluated, evaluate};
+use super::verify::exif_tsv::{ExifRow, normalize_sep, parse_tsv};
 pub use report::{VerifyEntry, VerifyReport};
 pub(crate) use summary::format_summary;
 
 pub(crate) mod bucket;
+pub(crate) mod candidates;
 pub(crate) mod content_diff;
 pub(crate) mod diagnose;
+mod evaluate;
 pub(crate) mod exif_tsv;
 pub(crate) mod filename_hint;
 pub(crate) mod report;
@@ -47,101 +50,75 @@ pub(crate) fn verify(
     exif_tsv: Option<&Path>,
 ) -> VerifyReport {
     let start = Instant::now();
+    let skip_ext = super::copy::source_skip_extensions(include_non_media, false);
     let mut src_index = file_index::Index::new();
     for (loc, backend) in sources {
-        src_index.visit_location(loc, backend);
+        src_index.visit_location_skipping(loc, backend, skip_ext);
     }
     let tz = crate::usecases::config::config().copy.timezone_offset_hours;
     let offset = crate::usecases::config::chrono_offset_from_hours(tz);
-    // 与 copy 同口径：parse_exif 填 MIME 才能判 is_media / 走 P0..P1 候选；
-    // include_non_media=false 时对非媒体 MIME 短路解析。
     src_index.parse_exif(offset, include_non_media, false);
+    let scanned = src_index.len();
     debug!(
         feature = FEATURE_VERIFY,
         operation = "scan_complete",
         result = "ok",
-        files = src_index.len(),
+        files = scanned,
         "verify source index built"
     );
-
     let tsv_rows = load_tsv(exif_tsv);
+    let tsv = index_tsv(&tsv_rows);
     let roots: Vec<String> = sources.iter().map(|(loc, _)| loc.display()).collect();
-    let out_index = super::verify::content_diff::build_output_index(output);
-    let max_bytes = crate::usecases::config::config()
-        .backend
-        .face
-        .max_image_bytes;
+    let out = OutputLibrary::new(build_output_index(output));
+    let ctx = EvalCtx {
+        offset,
+        tz,
+        tsv: &tsv,
+        roots: &roots,
+        out: &out,
+        phash_max,
+        max_bytes: crate::usecases::config::config()
+            .backend
+            .face
+            .max_image_bytes,
+    };
+    let infos: Vec<Info> = src_index
+        .into_infos()
+        .into_iter()
+        .filter(|i| include_non_media || i.is_media())
+        .collect();
+    let evaluated: Vec<Evaluated> = infos.par_iter().map(|i| evaluate(i, &ctx)).collect();
     let mut report = VerifyReport {
-        scanned: src_index.len(),
+        scanned,
         include_non_media,
         dry_run: true,
         ..Default::default()
     };
-    for item in src_index.iter() {
-        let info = item.value();
-        // 与 copy 落盘过滤同口径：非媒体文件不入对账（skill 只对 copy_file 行比对）。
-        if !include_non_media && !info.is_media() {
-            continue;
-        }
-        report.compared += 1;
-        let decision = info.media_time_decision(offset);
-        if decision.is_none() {
-            report.decision_failed += 1;
-        }
-        let bucket = decision.as_ref().map(|d| actual_bucket(d.utc, offset));
-        let exif = lookup_tsv(&tsv_rows, info.full_path.as_str());
-        let (exp, from_label) = exif.map_or((None, None), |r| expected_bucket(r, tz));
-        let mismatch = match (exp.as_deref(), bucket.as_deref()) {
-            (Some(e), Some(b)) => e != b,
-            _ => false,
-        };
-        if mismatch {
-            report.mismatched += 1;
-        }
-        let filename_bucket =
-            parse_path_date_bucket(&strip_source_root(info.full_path.as_str(), &roots));
-        let verdict =
-            super::verify::content_diff::verdict_for(info, &out_index, phash_max, max_bytes);
-        let conflicts: Vec<ConflictKind> = decision
-            .as_ref()
-            .map_or_else(Vec::new, |d| d.conflicts.iter().map(|c| c.kind).collect());
-        let diag = DiagnoseInput {
-            actual_bucket: bucket.as_deref(),
-            exp_bucket: exp.as_deref(),
-            exif_from: from_label.as_deref(),
-            filename_bucket: filename_bucket.as_deref(),
-            conflicts: &conflicts,
-            duplicate_verdict: &verdict,
-            mismatch,
-        };
-        let pats = patterns(&diag);
-        for p in &pats {
-            *report.pattern_counts.entry(p.clone()).or_insert(0) += 1;
-        }
-        let suggestion = fix_suggestion(&diag);
-        report.entries.push(build_entry(
-            info.full_path.as_str(),
-            decision.as_ref(),
-            bucket,
-            exp,
-            mismatch,
-            from_label,
-            exif.map(|r| r.make.clone()),
-            exif.map(|r| r.model.clone()),
-            filename_bucket,
-            verdict,
-            pats,
-            suggestion,
-        ));
-    }
+    fold_evaluated(&mut report, evaluated);
     report.duration_ms = elapsed_ms(start);
     report
 }
 
-#[allow(clippy::too_many_arguments)]
-fn build_entry(
-    path: &str,
-    decision: Option<&MediaTimeDecision>,
+fn fold_evaluated(report: &mut VerifyReport, mut evaluated: Vec<Evaluated>) {
+    evaluated.sort_by(|a, b| a.entry.source_path.cmp(&b.entry.source_path));
+    for ev in evaluated {
+        report.compared += 1;
+        if ev.decision_failed {
+            report.decision_failed += 1;
+        }
+        if ev.entry.mismatch {
+            report.mismatched += 1;
+        }
+        for p in &ev.entry.patterns {
+            *report.pattern_counts.entry(p.clone()).or_insert(0) += 1;
+        }
+        report.entries.push(ev.entry);
+    }
+}
+
+struct EntryParts<'a> {
+    path: &'a str,
+    decision: Option<&'a MediaTimeDecision>,
     actual_bucket: Option<String>,
     exif_exp_bucket: Option<String>,
     mismatch: bool,
@@ -152,19 +129,22 @@ fn build_entry(
     duplicate_verdict: String,
     patterns: Vec<String>,
     fix_suggestion: Option<String>,
-) -> VerifyEntry {
+}
+
+fn build_entry(p: EntryParts<'_>) -> VerifyEntry {
+    let decision = p.decision;
     VerifyEntry {
-        source_path: path.to_string(),
-        actual_bucket: actual_bucket.unwrap_or_default(),
-        exif_exp_bucket,
-        exif_from,
-        exif_make,
-        exif_model,
-        filename_bucket,
-        duplicate_verdict,
-        patterns,
-        fix_suggestion,
-        mismatch,
+        source_path: p.path.to_string(),
+        actual_bucket: p.actual_bucket.unwrap_or_default(),
+        exif_exp_bucket: p.exif_exp_bucket,
+        exif_from: p.exif_from,
+        exif_make: p.exif_make,
+        exif_model: p.exif_model,
+        filename_bucket: p.filename_bucket,
+        duplicate_verdict: p.duplicate_verdict,
+        patterns: p.patterns,
+        fix_suggestion: p.fix_suggestion,
+        mismatch: p.mismatch,
         chosen_priority: decision
             .map_or_else(|| "(none)".to_owned(), |d| format!("{:?}", d.priority)),
         chosen_source: decision.map_or_else(|| "(none)".to_owned(), |d| format!("{:?}", d.source)),
@@ -200,9 +180,16 @@ fn load_tsv(exif_tsv: Option<&Path>) -> Vec<ExifRow> {
     }
 }
 
-fn lookup_tsv<'a>(rows: &'a [ExifRow], path: &str) -> Option<&'a ExifRow> {
-    let norm = normalize_sep(path);
-    rows.iter().find(|r| r.path == norm)
+fn index_tsv(rows: &[ExifRow]) -> HashMap<&str, &ExifRow> {
+    let mut map = HashMap::with_capacity(rows.len());
+    for r in rows {
+        map.entry(r.path.as_str()).or_insert(r);
+    }
+    map
+}
+
+fn lookup_tsv<'a>(map: &HashMap<&str, &'a ExifRow>, path: &str) -> Option<&'a ExifRow> {
+    map.get(normalize_sep(path).as_str()).copied()
 }
 
 // 剥 source 根前缀得相对路径（skill 的 SOURCE_ROOT 语义），避免根目录年份段污染

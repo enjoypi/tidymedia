@@ -111,7 +111,7 @@ export function psSampleScript(bin: string, args: string[], stderrPath: string):
   return [
     "$t = [Diagnostics.Stopwatch]::StartNew()",
     `$p = Start-Process -FilePath ${psQuote(bin)} -ArgumentList ${args.map(psQuote).join(",")} -NoNewWindow -PassThru -RedirectStandardOutput NUL -RedirectStandardError ${psQuote(stderrPath)}`,
-    "$null = $p.Handle; $ws = 0; $pv = 0",
+    "$null = $p.Handle; $ws = [long]0; $pv = [long]0",
     "while (-not $p.HasExited) { $p.Refresh(); $ws = [Math]::Max($ws, $p.PeakWorkingSet64); $pv = [Math]::Max($pv, $p.PrivateMemorySize64); Start-Sleep -Milliseconds 50 }",
     "$p.WaitForExit()",
     "'Elapsed (wall clock) time (h:mm:ss or m:ss): ' + $t.Elapsed.ToString('h\\:mm\\:ss\\.ff')",

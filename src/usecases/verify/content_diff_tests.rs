@@ -2,24 +2,7 @@ use std::io::Cursor;
 
 use image::RgbImage;
 
-use super::{entropy_hash, rotated_phash_similar, sha512_bytes, stem_digit_variant};
-
-/// `photo_2021_12.jpg` 类：`basename` 剥掉 `base_stem` + `_` 后是纯数字后缀
-/// （重复导出序号）→ 视为同内容变体。
-#[test]
-fn stem_digit_variant_detects_numeric_suffix() {
-    assert!(stem_digit_variant("photo_2021_12", "photo_2021"));
-    assert!(stem_digit_variant("IMG_20210501_3", "IMG_20210501"));
-}
-
-#[test]
-fn stem_digit_variant_rejects_non_digit_or_missing() {
-    assert!(!stem_digit_variant("photo_2021_abc", "photo_2021"));
-    assert!(!stem_digit_variant("photo_2021", "photo_2021"));
-    assert!(!stem_digit_variant("photo_2021_", "photo_2021"));
-    assert!(!stem_digit_variant("other_2021_12", "photo_2021"));
-    assert!(!stem_digit_variant("photo_2021_1_x", "photo_2021_1"));
-}
+use super::{entropy_hash, rotated_phash_similar, sha512_bytes};
 
 fn chunk(typ: [u8; 4], data: &[u8]) -> Vec<u8> {
     let mut out = Vec::new();
@@ -168,7 +151,7 @@ use std::sync::Arc;
 use camino::Utf8PathBuf;
 
 use super::{
-    basename, build_output_index, find_candidates, read_guarded, read_guarded_by_path, read_to_end,
+    OutputLibrary, basename, build_output_index, read_guarded, read_guarded_by_path, read_to_end,
     split_stem_ext, verdict_for,
 };
 use crate::adapters::backend::fake::FakeBackend;
@@ -233,33 +216,13 @@ fn read_guarded_by_path_returns_none_when_missing() {
 }
 
 #[test]
-fn find_candidates_matches_exact_and_digit_variant() {
-    let be = Arc::new(FakeBackend::new("local"));
-    let a = fake_info(&be, "/out/photo_2021.jpg", b"a".to_vec());
-    let b = fake_info(&be, "/out/photo_2021_2.jpg", b"b".to_vec());
-    let c = fake_info(&be, "/out/unrelated.jpg", b"c".to_vec());
-    let idx = Index::new();
-    idx.add(a);
-    idx.add(b);
-    idx.add(c);
-    let cands = find_candidates(&idx, "photo_2021.jpg");
-    assert!(cands.iter().any(|p| p.as_str().ends_with("photo_2021.jpg")));
-    assert!(
-        cands
-            .iter()
-            .any(|p| p.as_str().ends_with("photo_2021_2.jpg"))
-    );
-    assert!(!cands.iter().any(|p| p.as_str().ends_with("unrelated.jpg")));
-}
-
-#[test]
 fn verdict_for_exact_dup_when_hash_equal() {
     let be = Arc::new(FakeBackend::new("local"));
     let src = fake_info(&be, "/src/a.jpg", b"same".to_vec());
     let out = fake_info(&be, "/out/a.jpg", b"same".to_vec());
     let idx = Index::new();
     idx.add(out);
-    let verdict = verdict_for(&src, &idx, 10, 1000);
+    let verdict = verdict_for(&src, &OutputLibrary::new(idx), 10, 1000);
     assert_eq!(verdict, "exact_dup");
 }
 
@@ -268,7 +231,10 @@ fn verdict_for_absent_when_no_candidate() {
     let be = Arc::new(FakeBackend::new("local"));
     let src = fake_info(&be, "/src/a.jpg", b"same".to_vec());
     let idx = Index::new();
-    assert_eq!(verdict_for(&src, &idx, 10, 1000), "absent");
+    assert_eq!(
+        verdict_for(&src, &OutputLibrary::new(idx), 10, 1000),
+        "absent"
+    );
 }
 
 #[test]
@@ -279,7 +245,10 @@ fn verdict_for_name_only_when_oversize() {
     let idx = Index::new();
     idx.add(out);
     // max_bytes=1 让 src 读超限 → 无字节可比 → name_only
-    assert_eq!(verdict_for(&src, &idx, 10, 1), "name_only");
+    assert_eq!(
+        verdict_for(&src, &OutputLibrary::new(idx), 10, 1),
+        "name_only"
+    );
 }
 
 #[test]
@@ -321,7 +290,10 @@ fn verdict_for_pixel_same_when_entropy_equal() {
     let out = fake_info(&be, "/out/photo.jpg", minimal_jpeg(b"metadata-b"));
     let idx = Index::new();
     idx.add(out);
-    assert_eq!(verdict_for(&src, &idx, 10, 1000), "pixel_same");
+    assert_eq!(
+        verdict_for(&src, &OutputLibrary::new(idx), 10, 1000),
+        "pixel_same"
+    );
 }
 
 #[test]
@@ -332,7 +304,10 @@ fn verdict_for_pixel_same_with_windows_backslash_paths() {
     let out = fake_info(&be, r"C:\out\photo.jpg", minimal_jpeg(b"metadata-b"));
     let idx = Index::new();
     idx.add(out);
-    assert_eq!(verdict_for(&src, &idx, 10, 1000), "pixel_same");
+    assert_eq!(
+        verdict_for(&src, &OutputLibrary::new(idx), 10, 1000),
+        "pixel_same"
+    );
 }
 
 #[test]
@@ -345,7 +320,10 @@ fn verdict_for_rotated_same_when_phash_rotated() {
     let out = fake_info(&be, "/out/r.jpg", encode_png(&rotated));
     let idx = Index::new();
     idx.add(out);
-    assert_eq!(verdict_for(&src, &idx, 10, 1_000_000), "rotated_same");
+    assert_eq!(
+        verdict_for(&src, &OutputLibrary::new(idx), 10, 1_000_000),
+        "rotated_same"
+    );
 }
 
 #[test]

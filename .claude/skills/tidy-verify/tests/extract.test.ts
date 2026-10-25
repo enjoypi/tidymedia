@@ -3,10 +3,8 @@
 import { expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { extractExif, listDirCounts, planGroups, spawnRunner } from "../scripts/lib/extract.ts";
-import type { ExecResult } from "../scripts/lib/extract.ts";
-
-const enc = new TextEncoder();
+import { extractExif, listDirCounts, mergeParts, planGroups, spawnRunner, spawnToFiles } from "../scripts/lib/extract.ts";
+import type { FileRun } from "../scripts/lib/extract.ts";
 
 function sums(groups: string[][], counts: Map<string, number>): number[] {
   return groups.map((g) => g.reduce((s, d) => s + (counts.get(d) ?? 0), 0));
@@ -53,31 +51,51 @@ test("listDirCounts 统计每个目录直属文件数并跳过隐藏目录", asy
   }
 });
 
-test("extractExif 每组写 UTF-8 argfile 并行调用，拼接输出取最大退出码", async () => {
+test("extractExif 每组输出落盘再逐组合并，回报 pid、行数与最大退出码", async () => {
   const work = mkdtempSync(`${tmpdir()}/tv-ex-`).replaceAll("\\", "/");
-  const calls: string[][] = [];
-  const run = async (cmd: string[]): Promise<ExecResult> => {
-    calls.push(cmd);
-    const argfile = cmd[cmd.length - 1];
-    const dirs = (await Bun.file(argfile).text()).trim().split("\n");
-    const rows = dirs.map((d) => `${d}/f.jpg\t-\r\n`).join("");
-    return { out: enc.encode(rows), err: enc.encode(`e${dirs.length}\n`), exit: dirs.length === 1 ? 1 : 0 };
+  const calls: FileRun[] = [];
+  const pids: number[] = [];
+  const run = async (r: FileRun): Promise<number> => {
+    calls.push(r);
+    r.onSpawn(100 + calls.length);
+    const dirs = (await Bun.file(r.cmd[r.cmd.length - 1]).text()).trim().split("\n");
+    await Bun.write(r.out, dirs.map((d) => `${d}/f.jpg\t-\r\n`).join(""));
+    await Bun.write(r.err, `e${dirs.length}`);
+    return dirs.length === 1 ? 1 : 0;
   };
   try {
     const counts = new Map([["D:/s/a", 5], ["D:/s/b", 3], ["D:/s/c", 2]]);
-    const r = await extractExif({ bin: "exiftool", fmt: "F", counts, work, concurrency: 2, run });
+    const r = await extractExif({
+      bin: "exiftool", fmt: "F", counts, work, concurrency: 2, run,
+      tsv: `${work}/exif.tsv`, err: `${work}/exif.tsv.err`, onSpawn: (pid) => pids.push(pid),
+    });
     expect(calls.length).toBe(2);
-    expect(calls[0].slice(0, 7)).toEqual(["exiftool", "-charset", "filename=utf8", "-q", "-T", "-p", "F"]);
-    expect(calls[0][7]).toBe("-@");
-    expect(r.groups).toBe(2);
-    expect(r.exit).toBe(1);
-    expect(r.tsv.split("\n").filter((l) => l !== "").sort()).toEqual([
+    expect(calls[0].cmd.slice(0, 7)).toEqual(["exiftool", "-charset", "filename=utf8", "-q", "-T", "-p", "F"]);
+    expect(calls[0].cmd[7]).toBe("-@");
+    expect(calls[0].out).toBe(`${work}/exif-0.tsv`);
+    expect(pids.sort()).toEqual([101, 102]);
+    expect(r).toEqual({ rows: 3, exit: 1, groups: 2 });
+    const tsv = await Bun.file(`${work}/exif.tsv`).text();
+    expect(tsv.split("\n").filter((l) => l !== "").sort()).toEqual([
       "D:/s/a/f.jpg\t-",
       "D:/s/b/f.jpg\t-",
       "D:/s/c/f.jpg\t-",
     ]);
-    expect(r.err).toContain("e1");
-    expect(r.err).toContain("e2");
+    const err = await Bun.file(`${work}/exif.tsv.err`).text();
+    expect(err).toContain("e1\n");
+    expect(err).toContain("e2\n");
+  } finally {
+    rmSync(work, { recursive: true, force: true });
+  }
+});
+
+test("mergeParts 按 GBK 兜底解码非 UTF-8 分片", async () => {
+  const work = mkdtempSync(`${tmpdir()}/tv-merge-`).replaceAll("\\", "/");
+  try {
+    await Bun.write(`${work}/a`, new Uint8Array([0xd6, 0xd0, 0x0d, 0x0a]));
+    await Bun.write(`${work}/b`, "");
+    expect(await mergeParts([`${work}/a`, `${work}/b`], `${work}/out`)).toBe(1);
+    expect(await Bun.file(`${work}/out`).text()).toBe("中\n");
   } finally {
     rmSync(work, { recursive: true, force: true });
   }
@@ -90,13 +108,39 @@ test("spawnRunner 收集 stdout/stderr 与退出码", async () => {
   expect(r.exit).toBe(3);
 });
 
-test("extractExif 无目录时不调用 exiftool", async () => {
+test("spawnToFiles 输出直写文件并回报 pid 与退出码", async () => {
+  const work = mkdtempSync(`${tmpdir()}/tv-spawn-`).replaceAll("\\", "/");
+  let pid = 0;
+  try {
+    const exit = await spawnToFiles({
+      cmd: [process.execPath, "-e", "console.log('o'); console.error('e'); process.exit(3)"],
+      out: `${work}/o`, err: `${work}/e`, onSpawn: (p) => { pid = p; },
+    });
+    expect(exit).toBe(3);
+    expect(pid).toBeGreaterThan(0);
+    expect(await Bun.file(`${work}/o`).text()).toBe("o\n");
+    expect(await Bun.file(`${work}/e`).text()).toBe("e\n");
+  } finally {
+    rmSync(work, { recursive: true, force: true });
+  }
+});
+
+test("extractExif 无目录时不调用 exiftool 且产空 tsv", async () => {
+  const work = mkdtempSync(`${tmpdir()}/tv-empty-`).replaceAll("\\", "/");
   let called = false;
-  const run = async (): Promise<ExecResult> => {
+  const run = async (): Promise<number> => {
     called = true;
-    return { out: new Uint8Array(), err: new Uint8Array(), exit: 0 };
+    return 0;
   };
-  const r = await extractExif({ bin: "x", fmt: "F", counts: new Map(), work: tmpdir(), concurrency: 4, run });
-  expect(called).toBe(false);
-  expect(r).toEqual({ tsv: "", err: "", exit: 0, groups: 0 });
+  try {
+    const r = await extractExif({
+      bin: "x", fmt: "F", counts: new Map(), work, concurrency: 4, run,
+      tsv: `${work}/t`, err: `${work}/e`, onSpawn: () => {},
+    });
+    expect(called).toBe(false);
+    expect(r).toEqual({ rows: 0, exit: 0, groups: 0 });
+    expect(await Bun.file(`${work}/t`).text()).toBe("");
+  } finally {
+    rmSync(work, { recursive: true, force: true });
+  }
 });

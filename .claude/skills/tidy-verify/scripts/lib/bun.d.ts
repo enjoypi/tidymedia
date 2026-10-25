@@ -9,14 +9,20 @@ interface BunFile {
 }
 
 interface BunSubprocess {
+  readonly pid: number;
   readonly stdout: ReadableStream<Uint8Array>;
   readonly stderr: ReadableStream<Uint8Array>;
   readonly exited: Promise<number>;
 }
 
 interface BunSpawnOptions {
-  stdout?: "pipe" | "inherit" | "ignore";
-  stderr?: "pipe" | "inherit" | "ignore";
+  stdout?: "pipe" | "inherit" | "ignore" | BunFile;
+  stderr?: "pipe" | "inherit" | "ignore" | BunFile;
+}
+
+interface BunSyncSubprocess {
+  readonly stdout: Uint8Array;
+  readonly exitCode: number;
 }
 
 interface BunGlobScanOptions {
@@ -29,6 +35,7 @@ declare namespace Bun {
   function file(path: string): BunFile;
   function write(path: string, data: string | Uint8Array): Promise<number>;
   function spawn(cmd: string[], opts?: BunSpawnOptions): BunSubprocess;
+  function spawnSync(cmd: string[], opts?: BunSpawnOptions): BunSyncSubprocess;
   function which(name: string): string | null;
   class Glob {
     constructor(pattern: string);
@@ -39,11 +46,19 @@ declare namespace Bun {
 declare module "node:fs" {
   export function mkdirSync(path: string, opts?: { recursive?: boolean }): void;
   export function mkdtempSync(prefix: string): string;
+  export function appendFileSync(path: string, data: string): void;
+  export function writeFileSync(path: string, data: string): void;
+  export function existsSync(path: string): boolean;
   export function rmSync(path: string, opts?: { recursive?: boolean; force?: boolean }): void;
+}
+
+declare module "node:path" {
+  export function dirname(path: string): string;
 }
 
 declare module "node:os" {
   export function tmpdir(): string;
+  export function freemem(): number;
 }
 
 declare namespace process {
@@ -51,6 +66,7 @@ declare namespace process {
   const platform: string;
   const execPath: string;
   function exit(code?: number): never;
+  function kill(pid: number, signal?: string): void;
 }
 
 declare module "bun:test" {
@@ -61,6 +77,7 @@ declare module "bun:test" {
     toBeTruthy(): void;
     toBeGreaterThan(n: number): void;
     toContain(expected: unknown): void;
+    readonly not: Expect;
   }
   export function test(name: string, fn: () => void | Promise<void>): void;
   export function expect<T>(actual: T): Expect;
