@@ -1,5 +1,5 @@
 //! `copy` use case 进阶路径测试：`do_copy_propagates_*` / `include_non_media` / `archive_template` / report。
-//! 从 `copy_tests.rs` 拆出避免单文件 > 512 行（P0 §6）。
+//! 从 `copy_tests.rs` 拆出避免单文件 > 512 行。
 
 #[cfg(test)]
 mod test_advanced {

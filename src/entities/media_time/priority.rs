@@ -1,4 +1,4 @@
-// docs/media-time-detection.md §三：来源等级 P0–P4。
+// src/CLAUDE.md「media_time 与容器解析」：来源等级 P0–P4。
 // 等级越小越权威；同等级冲突时由 resolve 取较早值。
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]

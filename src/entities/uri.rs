@@ -8,7 +8,7 @@
 //!   `adb_client` 自动选唯一在线设备；path 始终是设备上的绝对路径（`/sdcard/...`）
 //!
 //! 字段内的空格 / 中文 / 路径分隔符走 percent-encoding。
-//! 详细约定见 CLAUDE.md「URI 与 Backend」段。
+//! 详细约定见 src/CLAUDE.md「URI、路径与 Backend」段。
 
 use std::str::FromStr;
 

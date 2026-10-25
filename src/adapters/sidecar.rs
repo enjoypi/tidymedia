@@ -3,7 +3,7 @@
 //!   - `<media>.xmp` 中的 `photoshop:DateCreated="<RFC3339>"`（纯文本搜索）
 //!   - Google Takeout `<media>.<ext>.json` 中的 `photoTakenTime.timestamp`（`serde_json`）
 //!
-//! `docs/media-time-detection.md` §二.P3。本模块属 Interface Adapters：把外部
+//! `src/CLAUDE.md「media_time 与容器解析」`。本模块属 Interface Adapters：把外部
 //! sidecar 协议解析成内层 [`Candidate`]，protocol 细节（XMP 字面量 / Takeout schema /
 //! `serde_json`）不泄漏到 entities / usecases。
 
@@ -94,7 +94,7 @@ fn append_suffix(loc: &Location, sfx: &str) -> Location {
     loc.with_path(Utf8PathBuf::from(format!("{p}{sfx}")))
 }
 
-/// 读 sidecar 内容；失败时按需输出诊断日志（R3：外部读取不静默）。
+/// 读 sidecar 内容；失败时按需输出诊断日志（外部读取不静默）。
 fn read_sidecar(loc: &Location, backend: &dyn Backend, operation: &'static str) -> Option<String> {
     match backend.read_to_string(loc) {
         Ok(content) => Some(content),

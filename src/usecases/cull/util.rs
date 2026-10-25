@@ -1,5 +1,5 @@
 //! `cull::run` 低层 helper：日志、IO、MIME 嗅探、source-output 重叠保护。
-//! 外置以让 `run.rs` 保 ≤ 512 行（P0 §7）。
+//! 外置以让 `run.rs` 保 ≤ 512 行。
 
 use std::io::{self, Read};
 use std::sync::Arc;

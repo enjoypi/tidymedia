@@ -236,7 +236,7 @@ fn mtp_percent_decode_invalid_in_storage() {
 }
 
 // ── IPv6 bracket host parsing ──
-// CLAUDE.md「URI 格式」明确支持 `smb://[::1]/share` 与 `smb://[2001:db8::1]:445/share`
+// src/CLAUDE.md「URI、路径与 Backend」明确支持 `smb://[::1]/share` 与 `smb://[2001:db8::1]:445/share`
 // 形态，但旧测试集无任何 IPv6 用例，让 `split_host_port` 的 `[...]` 分支全部
 // branch-uncovered。下述用例锚定 bracket 分支：成功/缺右括号/无端口/有端口/
 // 端口前缺冒号/端口非法 6 路径，杀 uri.rs:254-263 整段 BRDA 0 簇。

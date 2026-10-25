@@ -1,5 +1,5 @@
 //! `tidy_with` 走 `FakeBackendFactory` 注入的远端 backend 业务测试。
-//! 从 `tests/lib_tidy.rs` 拆出避免单文件 > 512 行（P0 §6）。
+//! 从 `tests/lib_tidy.rs` 拆出避免单文件 > 512 行。
 
 use std::sync::Arc;
 

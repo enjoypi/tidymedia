@@ -144,7 +144,7 @@ fn process_group(
         }
         // grp 内 key 来自本次 build_source_index 后 source.iter() 的 snapshot；
         // 本 fn 运行期间无人 remove，`.get()` 必 Some。若真 None 表示 Index 状态破坏，
-        // 内部 bug 直接 panic 让上游可查（CLAUDE.md「不可达用 `.expect("internal: ...")`」）。
+        // 内部 bug 直接 panic 让上游可查（tests/CLAUDE.md「覆盖率处理」）。
         let kv = source
             .get(key.as_path())
             .expect("internal: fast_hash group key must resolve in source snapshot");

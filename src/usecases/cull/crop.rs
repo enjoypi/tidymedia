@@ -1,5 +1,5 @@
 //! `cull` 几何/数值 helper：bbox / eye crop + u32 clamp + NaN 比较。
-//! 纯函数无 `ScannedFile` 依赖，外置以让 `run.rs` 保 ≤ 512 行（P0 §7）。
+//! 纯函数无 `ScannedFile` 依赖，外置以让 `run.rs` 保 ≤ 512 行。
 
 use image::RgbImage;
 

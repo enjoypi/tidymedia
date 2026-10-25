@@ -139,7 +139,7 @@ fn walk_socket_entry_kind_other() {
 
 // 把 parent dir chmod 0 让 try_exists 报 PermissionDenied：旧实现用 path.exists()
 // 把 IO 错吞成 Ok(false)，naming::generate_unique_name 接 ?，误判目标不存在 →
-// move 模式下覆盖现有归档文件 + 源被删 = 永久数据丢失（CLAUDE.md「Gotcha」R3）。
+// move 模式下覆盖现有归档文件 + 源被删 = 永久数据丢失（src/CLAUDE.md「URI、路径与 Backend」）。
 // 修复后必须把 Err 直接传播给调用方。root 用户因 DAC override 仍能 stat，与
 // 同文件 `open_read_chmod_000_permission_denied` 同假设：CI 跑非 root。
 #[cfg(unix)]

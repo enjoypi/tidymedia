@@ -1,4 +1,4 @@
-// docs/media-time-detection.md 契约测试共享 helper。
+// src/CLAUDE.md「media_time 与容器解析」 契约测试共享 helper。
 // 主要服务于程序化构造 Candidate 的测试；fixture 路径常量按需在用到的子模块里
 // 直接写字面量，避免维护多份 src/entities/test_common.rs 镜像。
 

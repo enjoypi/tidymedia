@@ -1,4 +1,4 @@
-// `LocalBackend::rename` 单元测试。从 `local_tests.rs` 拆出避免单文件 > 512 行（P0 §6）。
+// `LocalBackend::rename` 单元测试。从 `local_tests.rs` 拆出避免单文件 > 512 行。
 
 use std::fs;
 use std::io;

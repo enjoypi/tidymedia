@@ -1,4 +1,4 @@
-// docs/media-time-detection.md 的方法论实现：
+// src/CLAUDE.md「media_time 与容器解析」 的方法论实现：
 //   P0/P1 候选来自 EXIF + 视频容器（exif::Exif 已经在上层解析好对应字段）
 //   P2 候选来自文件名（filename::parse_filename）
 //   P3 候选来自 sidecar——协议解析在 `adapters::sidecar` Gateway（XMP/Takeout 是外部

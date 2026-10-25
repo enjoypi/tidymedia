@@ -131,7 +131,7 @@ pub fn extract_dates(buf: &[u8]) -> (u64, u64) {
 #[must_use]
 pub fn scan_element_text<'a>(buf: &'a [u8], open_tag: &[u8], close_tag: &[u8]) -> Option<&'a str> {
     // start 来自 find_subslice 返回值 → start + open_tag.len() ≤ buf.len() 必成立
-    // → `&buf[after_open..]` 永不越界（CLAUDE.md「逻辑不可达的 `?` 死区消除」套路）。
+    // → `&buf[after_open..]` 永不越界（tests/CLAUDE.md「覆盖率处理」套路）。
     let start = find_subslice(buf, open_tag)?;
     let after_open = start + open_tag.len();
     let rest = &buf[after_open..];

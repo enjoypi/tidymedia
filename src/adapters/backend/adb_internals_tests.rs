@@ -1,6 +1,6 @@
 //! `AdbBackend` 内部 helpers / 适配器测试：`map_error`、`AdbTarget` impl、
 //! `parent_target`、`build_target`、`adb_buffered_writer`、`arc_with_client`、`shell_quote`。
-//! 从 `adb_tests.rs` 拆出避免单文件 > 512 行（P0 §6）。
+//! 从 `adb_tests.rs` 拆出避免单文件 > 512 行。
 
 use std::io;
 use std::sync::Arc;

@@ -170,8 +170,7 @@ fn split_stem_ext(name: &str) -> (&str, &str) {
 /// 且同 scheme 时走 `copy_file` 原生 op（Local `fs::copy` sendfile / reflink；远端
 /// 未来可加 `SMB2` `SRV_COPYCHUNK`），否则走 1 MiB buffered stream + 三阶段闭合 +
 /// 半截 dst 清理。旧版走 stdlib 8 KiB buffer 让远端大视频 128× RTT，抽 helper 后与
-/// `copy/ops.rs::stream_copy` 同款高效骨架（CLAUDE.md「`stream_copy` 与
-/// `copy_file_cross_scheme` 双份实现」finding 修复）。
+/// `copy/ops.rs::stream_copy` 同款高效骨架（src/CLAUDE.md「复制、移动、报告与推理」）。
 fn copy_file_cross_scheme(
     src_backend: &Arc<dyn Backend>,
     src: &Location,

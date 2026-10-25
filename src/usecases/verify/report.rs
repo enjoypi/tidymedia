@@ -14,7 +14,7 @@ pub struct VerifyReport {
     pub compared: usize,
     pub mismatched: usize,
     pub decision_failed: usize,
-    /// 9 种诊断 pattern 命中计数，key 见 `diagnose.rs`；空 = 尚未诊断。
+    /// 诊断 pattern 命中计数，key 见 `diagnose.rs`；空 = 尚未诊断。
     pub pattern_counts: BTreeMap<String, usize>,
     pub entries: Vec<VerifyEntry>,
     pub errors: Vec<ReportError>,

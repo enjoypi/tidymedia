@@ -58,7 +58,7 @@ pub trait RemoteTarget: Clone + Send + Sync + std::fmt::Debug + Eq + 'static {
 ///（大视频在内存受限环境有 OOM 风险）。这是依赖层形态决定的：pavao 的
 /// `SmbFile` 借用 client 生命周期，无法装入 `Box<dyn MediaReader + 'static>`；
 /// `adb_client` 的 pull 是回调式写入 API。真正流式需要换库或线程+管道泵数据，
-/// 当前按 YAGNI 不做（CLAUDE.md「项目 Gotcha」有记录）。
+/// 当前按 YAGNI 不做（src/CLAUDE.md「URI、路径与 Backend」）。
 pub trait RemoteClient<T: RemoteTarget>: Send + Sync + std::fmt::Debug {
     fn stat(&self, t: &T) -> io::Result<Metadata>;
     fn list(&self, t: &T) -> io::Result<Vec<Entry>>;

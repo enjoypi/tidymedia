@@ -14,7 +14,7 @@ use tracing::warn;
 use super::Info;
 use crate::entities::{exif, media_time};
 
-/// 计算创建时间。走 docs/media-time-detection.md 的 P0→P4 优先级判定：
+/// 计算创建时间。走 src/CLAUDE.md「media_time 与容器解析」 的 P0→P4 优先级判定：
 /// 把 EXIF/视频容器字段（P0/P1）、文件名启发式（P2）、外部注入的 sidecar
 /// 候选（P3，见 [`Info::add_candidates`]）、文件 mtime（P4）一起喂给
 /// `media_time::resolve`，decision 时间若小于 `valid_threshold_secs`
@@ -91,7 +91,7 @@ pub fn media_time_decision(
     decision
 }
 
-/// P4 fs 兜底：按 CLAUDE.md「P4 = FsMtime」定义优先用 mtime；mtime 缺失才退 btime；
+/// P4 fs 兜底：按 src/CLAUDE.md「media_time 与容器解析」定义优先用 mtime；mtime 缺失才退 btime；
 /// 两者都缺失退 `UNIX_EPOCH`。btime 在 copy 后通常 = 复制时刻（晚于源 mtime），
 /// 在某些 fs 上 == ctime（inode 变更时刻），比 mtime 更不稳定，故不取较早值。
 pub fn pick_fs_fallback(modified: Option<SystemTime>, created: Option<SystemTime>) -> SystemTime {

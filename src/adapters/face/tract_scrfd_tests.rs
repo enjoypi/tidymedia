@@ -1,5 +1,5 @@
 //! `tract_scrfd` 单元测试：装配 + preprocess（letterbox + `ScaleMeta`）+ stub 注入。
-//! anchor 解码 + NMS 算法在 `_real.rs` 由 ignore-regex 排除（e2e 真跑步骤 6 验证）。
+//! anchor 解码 + NMS 算法在 `_real.rs` 由 ignore-regex 排除，由真模型运行验证。
 
 use super::*;
 use camino::Utf8Path;

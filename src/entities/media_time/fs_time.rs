@@ -1,4 +1,4 @@
-// docs/media-time-detection.md §二.P4 / §五.10：mtime 兜底。
+// src/CLAUDE.md「media_time 与容器解析」：mtime 兜底。
 // 只取 mtime；btime/ctime 在 spec 中明确不可用：
 //   - btime/birthtime 在复制后变成"复制时刻"
 //   - ctime 是 inode 元数据变更时间，与拍摄无关
@@ -28,7 +28,7 @@ pub fn from_modified(modified: Option<SystemTime>) -> Option<Candidate> {
 /// （Linux 内部用 i64 `tv_sec` 承载；Windows `FILETIME` 100ns 上限远低于 `i64::MAX` 秒）
 /// 不可触发；不沿用 [`super::epoch_to_candidate`] 因为它把 `secs == 0` 视为未填 None，
 /// 而 fs mtime = 1970-01-01 是合法值（fixture / 测试 `FakeBackend` 默认 mtime）。
-/// `coverage(off)` 与 CLAUDE.md「难测/不可达分支」一致：调用入口由
+/// `coverage(off)` 与 tests/CLAUDE.md「覆盖率处理」一致：调用入口由
 /// `from_modified` 单测覆盖，本 helper 的 Err arm 物理不可达。
 fn convert_secs_to_candidate(secs_u64: u64) -> Option<Candidate> {
     let signed = i64::try_from(secs_u64).ok()?;

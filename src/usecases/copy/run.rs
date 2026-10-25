@@ -170,7 +170,7 @@ pub fn copy_with_sidecar(
 }
 
 // copy_with_sidecar 的非空源主路径：mkdir → run_copy_loop → 日志 → finalize。
-// 拆出让入口函数保持在 64 行限内（P0 §10）。
+// 拆出让入口函数保持在 64 行限内。
 fn execute_copy(
     source: &Index,
     output: Source,

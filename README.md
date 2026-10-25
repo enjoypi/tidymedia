@@ -1,114 +1,152 @@
 # tidymedia
 
-Tidy media files. 跨目录扫描、去重、按时间归档。Rust 单二进制 CLI，无外部进程依赖。
+按拍摄时间或创建时间去重整理照片、视频和文档。将 `tidymedia`（Windows 为 `tidymedia.exe`）放入 PATH 后使用。
 
-## 子命令
+## 准备
 
-### `find`：列出重复文件
+- 本地核心处理不启动外部进程；只有选择执行 `find` 生成的 Python 脚本时才需要 Python。
+- SMB 和 ADB 需要所用二进制在编译时启用 `smb-backend`、`adb-backend` 支持；默认 `just build-release` 不包含这些后端，未启用时会返回 Unsupported。
+- 从 Android 设备读取前，安装 Android Platform Tools，开启 USB 调试，并执行 `adb start-server` 与 `adb devices` 确认设备已授权。多设备必须在 URI 中指定 serial。
+- 使用 SMB 时，通过 `SMB_USER`、`SMB_PASSWORD` 提供凭据；也可在 URI 的 `user@` 中指定用户名。密码不要写入配置文件。
+- `cull`、`move-text-shot` 和按内容分类的文档归档需要相应模型。模型路径及阈值见 `config.yaml`，也可用对应的 `TIDYMEDIA_*` 环境变量覆盖。
+- MTP 来源目前不可用；Android 设备请使用 ADB URI。
 
-扫描 sources 下的文件，把重复组打印为一段删除脚本到 stdout（Linux/Mac 用 `rm`，Windows 用 `DEL`）。
-默认用快速非加密哈希 xxh3-64；加 `--secure` 改用 SHA-512。
+## 通用用法
 
+```text
+tidymedia [--log-level <LEVEL>] <COMMAND> [OPTIONS] <SOURCES...>
 ```
-tidymedia find <SOURCES...>                            # 默认快速模式
-tidymedia find --secure <SOURCES...>                   # 严格判等
-tidymedia find -o <KEEP_DIR> <SOURCES...>              # 在 KEEP_DIR 下的文件，对应删除命令被注释
-tidymedia find --report /tmp/find.json <SOURCES...>    # 附加 JSON 报告
+
+- `SOURCES` 可包含一个或多个文件、目录或 URI；含空格的路径要加引号。
+- 除 `find` 外，需要输出的命令都用 `-o <DIR>` 或 `--output <DIR>` 指定归档目录。
+- `copy`、`move`、`copy-doc`、`move-doc`、`move-text-shot`、`cull` 支持 `--dry-run`，不修改源或归档媒体；显式指定 `--report` 时仍会写报告。
+- 所有子命令都支持 `--report <PATH>`，将本次结果写为 JSON 报告。
+- 全局参数放在子命令前，例如 `tidymedia --log-level debug copy ...`；`--dry-run` 放在子命令后。
+- `find` 的脚本和 `verify` 的汇总写 stdout；普通 `copy`/`move` 的逐文件对应关系通过 debug 日志写 stderr，其他日志和错误也使用 stderr。
+- 报告中的 `failed` 和 `errors` 应作为验收依据。完整参数可用 `tidymedia <COMMAND> --help` 查看。
+
+来源格式：
+
+```text
+C:\Photos
+/home/user/Photos
+local:///home/user/Photos
+smb://[user@]host[:port]/share/path
+adb://[serial]/absolute/path
 ```
 
-`-o/--output` 指向的目录视为"保留区"，该目录内文件的删除行会被注释掉，便于人工 review 再执行。
+URI 字段中的空格、中文等字符使用 percent-encoding；IPv6 地址用方括号，例如 `smb://[::1]/share/photos`。单设备 ADB 可写 `adb:///sdcard/DCIM`，多设备则写 `adb://SERIAL/sdcard/DCIM`。
 
-### `copy`：去重复制媒体文件
+## 复制或移动媒体
 
-把 sources 下尚未出现在 output 的媒体文件（image / video，由 `infer` magic-bytes MIME 判定）复制到 output，按归档模板分桶（默认 `年/月/有中文的最内层目录名`）。
-
-```
+```bash
 tidymedia copy -o <OUT> <SOURCES...>
-tidymedia copy -o <OUT> --dry-run <SOURCES...>
-tidymedia copy -o <OUT> --include-non-media <SOURCES...>
-tidymedia copy -o <OUT> --archive-template '{year}/{month}/{day}' <SOURCES...>
-tidymedia copy -o <OUT> --report /tmp/report.json <SOURCES...>
-```
-
-默认会**静默跳过非媒体**（文档、未识别 raw 等），并在 stderr 记 warn。要一并复制，加 `--include-non-media`。
-
-判重用 SHA-512（fast_hash 初筛 + size + secure_hash），杜绝快速哈希碰撞误判。
-
-#### 归档模板（`--archive-template`）
-
-占位符：`{year}` `{month}` `{day}` `{make}` `{model}` `{valuable_name}`
-
-- `{year}` — 4 位年份（如 `2024`）
-- `{month}` — 2 位月份（如 `01`）
-- `{day}` — 2 位日期（如 `15`）
-- `{make}` — EXIF 相机厂商；无 EXIF 时填 `unknown`
-- `{model}` — EXIF 相机型号；无 EXIF 时填 `unknown`
-- `{valuable_name}` — 源路径中第一个含非 ASCII 的目录段；无则省略该段
-
-默认模板：`{year}/{month}/{valuable_name}`，通过配置 `copy.archive_template` 或 `--archive-template` CLI flag 覆盖。
-
-#### JSON 报告（`--report`）
-
-`--report <PATH>` 将操作摘要以 JSON 写入指定文件（原子写，先写临时文件再 rename）。格式：
-
-```json
-{"scanned": 24, "copied": 16, "ignored": 8, "failed": 0, "dry_run": true, "remove": false, "include_non_media": false, "errors": []}
-```
-
-写入失败仅在 stderr 记 warn，不阻断主流程。
-
-### `move`：去重移动
-
-与 `copy` 同语义，但是**物理 move**（成功后源被删）；命中 output 已有重复的源文件会被**直接 rm**（无回收站）。建议先 `--dry-run` 跑一遍。支持 `--archive-template` 与 `--report`。
-
-```
+tidymedia copy -o <OUT> --dry-run --report <REPORT> <SOURCES...>
 tidymedia move -o <OUT> <SOURCES...>
-tidymedia move -o <OUT> --dry-run <SOURCES...>
 ```
 
-## 行为说明（容易踩的坑）
+- 默认只处理照片和视频；其他文件会跳过。需要一并处理时加 `--include-non-media`。
+- 目标库已有相同内容时，不重复归档。`copy` 保留源文件；`move` 会删除已确认重复的源文件。
+- `move` 还会移动其他待归档源文件，成功后源文件不再保留。
+- 目标存在同名但内容不同的文件时，会选择新名称；本地写入不覆盖已有文件。远端没有统一的原子防覆盖保证，整理期间不要让其他进程同时修改目标库。
 
-- **目录遍历不再尊重 `.gitignore` / `.ignore`**：早期版本会继承 ripgrep 风格的 ignore 规则；现在统一关闭，避免媒体目录恰好在 git 工作树里时被静默漏扫。
-- **空文件 / 不可读文件被跳过且记 warn**：扫描阶段计数会出现在 `summary` 日志的 `skipped_empty` / `skipped_unreadable` / `walker_errors` 字段。
-- **非媒体被跳过**：见 `copy` / `move` 节。
-- **`move` 会物理删除源**：判等已经用 SHA-512，理论碰撞概率 1/2^256，但删除不可逆，敏感场景请保留备份。
-- **`find` 输出是脚本，不会自动执行**：默认全部删除行已加注释或未注释（取决于 `--output`），用户拿到后自行 `bash | sh`。
+归档模板用 `--archive-template` 覆盖，默认 `{year}/{month}/{valuable_name}`：
 
-## 输出
+| 占位符 | 含义 |
+|---|---|
+| `{year}` `{month}` `{day}` | 归档时间的年、月、日 |
+| `{make}` `{model}` | 相机厂商和型号；未知时为 `unknown` |
+| `{valuable_name}` | 最靠近文件的含非 ASCII 字符目录段；没有则省略 |
 
-- 成功复制 / 移动的条目用 `"<source>"<TAB>"<target>"` 写入 stdout，便于管道串行。
-- 日志、warn、error、summary 走 stderr。
+示例：
+
+```bash
+tidymedia copy -o <OUT> --archive-template '{year}/{month}/{day}' <SOURCES...>
+```
+
+## 复制或移动文档
+
+```bash
+tidymedia copy-doc -o <OUT> <SOURCES...>
+tidymedia move-doc -o <OUT> <SOURCES...>
+```
+
+只处理支持的文档，包括 PDF、传统及新版 Office、OpenDocument、RTF、EPUB、iWork、常见思维导图，以及 TXT、Markdown、RST、CSV、TSV；媒体和未知格式保持跳过。`copy-doc` 不改源；`move-doc` 会移动文件并删除已确认重复的源文件。
+
+文档默认模板为 `{category}/{year}/{month}`。除媒体模板占位符外，还支持 `{category}`。模板包含 `{category}` 且配置了类目时，按内容分类；置信度不足时归入 `uncategorized`。不需要分类时，可改用不含 `{category}` 的模板，例如：
+
+```bash
+tidymedia copy-doc -o <OUT> --archive-template '{year}/{month}' <SOURCES...>
+```
+
+## 查找重复文件
+
+```bash
+tidymedia find <SOURCES...> > <REVIEW_SCRIPT>
+tidymedia find --secure -o <KEEP_DIR> <SOURCES...> > <REVIEW_SCRIPT>
+```
+
+- `find` 只生成 Python 删除脚本，不执行删除；未经逐行审查不得执行。
+- 默认使用快速判重；`--secure` 使用更严格的内容判等，速度较慢。
+- 不传 `-o` 时，所有删除行默认注释。传入 `-o/--output` 指定保留目录后，保留目录之外的删除行可能默认启用。
+- 执行前逐行审查：给不想删除的启用行补回注释，只取消确认可删除的保护行注释，再用 Python 执行。带 `SURVIVOR` 标记的保护行不要放开，否则可能删光某组副本。
+
+## 整理含文字的图片
+
+```bash
+tidymedia move-text-shot -o <OUT> --dry-run <SOURCES...>
+tidymedia move-text-shot -o <OUT> <SOURCES...>
+```
+
+检测图片中的文字，将命中的图片按源目录相对路径移到输出目录；非图片和未命中文件不移动。此命令会改动源文件，正式执行前先预演。
+
+## 筛选相似照片
+
+```bash
+tidymedia cull -o <OUT> --dry-run <SOURCES...>
+tidymedia cull -o <OUT> [--phash-max <N>] [--report <REPORT>] <SOURCES...>
+```
+
+将相似或连拍照片分组，保留评分较高的一张，并把其余候选照片移到 `output/<最佳照片相对源目录>/group-NNN/`；同时放置 `BEST_` 前缀的最佳照片副本供对比。单图、被清晰度门槛剔除的照片，以及过滤后不足两张的组保留在源位置。正式执行会移动源文件。`--phash-max` 越大，分组条件越宽松。
+
+## 归档前核对
+
+```bash
+tidymedia verify -o <OUT> [--report <REPORT>] <SOURCES...>
+tidymedia verify -o <OUT> --include-non-media <SOURCES...>
+```
+
+`verify` 不移动或修改源文件及归档媒体，用于检查预测归档位置、时间冲突、目标库重复情况及修复建议。指定 `--report` 时仍会写报告文件。视频修复必须同时核对 QuickTime `CreationDate` 与 `CreateDate`，不能直接执行只覆盖其中一个字段的建议；操作系统时区与配置时区不同时，基于文件修改时间的交叉对账结果不可直接采用。高级选项 `--exif-tsv` 和 `--phash-max` 可用 `tidymedia verify --help` 查看。
 
 ## 配置
 
-可选 `config.yaml`（项目根；用 `TIDYMEDIA_CONFIG=/path/to.yaml` 指定其他位置）。所有键都有内置默认值，文件缺失不致命。
+默认读取进程当前工作目录下的 `config.yaml`；从其他目录运行时，通过 `TIDYMEDIA_CONFIG=<PATH>` 指定配置文件。所有配置都有内置默认值，未找到配置文件时会静默使用这些默认值。
 
 ```yaml
 copy:
   timezone_offset_hours: ${TIDYMEDIA_TIMEZONE_OFFSET_HOURS:-8}
-  unique_name_max_attempts: ${TIDYMEDIA_UNIQUE_NAME_MAX_ATTEMPTS:-10}
-  archive_template: ${TIDYMEDIA_ARCHIVE_TEMPLATE:-{year}/{month}/{valuable_name}}
-exif:
-  valid_date_time_secs: ${TIDYMEDIA_VALID_DATE_TIME_SECS:-946684800}
+  archive_template: "${TIDYMEDIA_ARCHIVE_TEMPLATE:-{year}/{month}/{valuable_name}}"
+  doc_archive_template: "${TIDYMEDIA_DOC_ARCHIVE_TEMPLATE:-{category}/{year}/{month}}"
 ```
 
-- `timezone_offset_hours`：按年/月分桶时使用的时区（整数小时，越界回退 UTC）
-- `unique_name_max_attempts`：目标重名时 `_1` `_2` … 最多尝试次数；用尽后该文件 copy 失败
-- `valid_date_time_secs`：EXIF 时间戳低于该 UNIX 秒数视为不可信，回退到文件 mtime
-- `archive_template`：归档子目录模板，支持占位符（见上文；默认 `{year}/{month}/{valuable_name}`）
+- `timezone_offset_hours`：解释无时区的拍摄时间和确定归档年月时使用的整小时时区偏移。
+- 归档模板以 `{` 开头时，YAML 值必须加引号。
+- `RUST_LOG` 的日志级别优先级高于 `--log-level`，后者高于配置文件。
+- 其余跳过扩展名、重名尝试次数、模型路径、分类类目和阈值，直接参考 `config.yaml` 中的说明按需修改。
 
-## Roadmap
+## 安全操作建议
 
-- [ ] `--state` 增量扫描：基于 mtime+size 状态库跳过未变更文件的重哈希
-- [ ] MTP backend 真实实现：调研 libmtp-rs / gphoto2-rs / 自接 rusb-PTP 三选项（需 Android NDK 友好 + 跨平台），当前 `--features mtp-backend` 启用后仍返 Unsupported
+1. 先备份重要数据，选择一个确实较小且具有代表性的目录做预演；工具不会自动限制文件数量。
+2. 检查预演报告和归档年月，再正式执行。典型顺序为 `copy --dry-run`、`verify`、正式 `copy` 或 `move`、最后用 `find` 审查目标库重复。
+3. `move`、`move-doc`、`move-text-shot`、`cull` 都会移动或删除源文件，且不进入回收站；其中移动类归档在发现目标已有相同内容时也可能直接删除重复源。
+4. `copy`、`copy-doc`、`find` 不修改源文件；`verify` 不修改源或归档媒体。
+5. 尽量不要让来源和输出目录重叠。来源位于输出目录内会被拒绝；输出位于来源内时，已归档子树会被排除。
+6. 跨卷或远端移动中断时，可能留下未完成副本。保留现场并结合报告核对源和目标，不要仅凭文件大小删除文件；排除故障后再重跑。同卷移动通常减少数据复制和额外空间，但完整过程仍需扫描和判重，不保证秒级完成。
+7. 重跑不会产生正常重复副本，但当前没有增量状态，未变化文件也可能重新扫描和判重。
 
-## 开发
+## 当前使用限制
 
-构建 / 测试 / 覆盖率 / lint 流程见 [`CLAUDE.md`](CLAUDE.md)。
-
-## 验收
-
-Windows 用户从 Android 复制照片或本地整理 600G 库前，按
-[`docs/acceptance-windows.md`](docs/acceptance-windows.md) 渐进式走流程 A（Android → Win copy）
-与流程 B（本地 move 整理）。覆盖 adb 设备识别、大视频内存规避、move 中断半文件清理、
-幂等重跑、人工抽样验收。
+- 本地隐藏文件可能未被扫描；不要据此假定目录已全量处理，应检查报告和源目录。
+- 空文件、不可读文件及被配置排除的文件会跳过，相关计数或错误以报告和日志为准。
+- 远端大文件读写目前可能把单个文件整体装入内存，部分远端写入路径还有单文件 2 GiB 上限，超限会报错。单个文件过大时，拆分目录也不能保证安全，应先改用其他方式导入或转存。
+- 手机内容确认已完整导入并抽样验收后，再自行决定是否清理手机；不要在 ADB 来源上使用移动类命令。

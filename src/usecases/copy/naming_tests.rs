@@ -2,7 +2,7 @@ use super::*;
 use std::time::Duration;
 
 /// pre-epoch `SystemTime` → `duration_since(UNIX_EPOCH)` Err arm 命中，早返 None。
-/// 覆盖 CLAUDE.md「P0 §2 用户输入 MUST NOT panic」防御性 branch。
+/// 覆盖 src/CLAUDE.md「Rust 与依赖陷阱」防御性 branch。
 /// 测试自身的 let-else `return;`（Windows/CI 平台差异 skip 路径）在 Linux
 /// 恒不可达，`coverage(off)` 将其从严格 100% 分母剔除；被测函数本身仍被
 /// `at_epoch` 用例正常计数。

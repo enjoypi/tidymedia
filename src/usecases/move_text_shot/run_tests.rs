@@ -911,7 +911,7 @@ fn move_text_shot_does_not_prefix_mkdir_p_output_when_source_empty() {
     assert_eq!(report.scanned, 0);
 }
 
-// ---- 新增分支覆盖（fix all 15 项对应） ----
+// ---- 重叠与失败分支覆盖 ----
 
 /// `ensure_no_overlap` 内 sources 两两 overlap 检查：/a 与 /a/sub 互相重叠 → InvalidInput
 /// 覆盖 line 138-149（内层 for j 判定 + Err arm）。
@@ -1070,7 +1070,7 @@ fn reduce_delta_sums_counts_and_extends_errors() {
     assert_eq!(r.errors.len(), 2);
 }
 
-/// P0 §2 兜底：source 是单文件（walker yield entry.location == source）时 rel 空
+/// 用户输入兜底：source 是单文件（walker yield entry.location == source）时 rel 空
 /// → `file_name()` = None → record_failure 而非 expect panic。
 #[test]
 fn move_text_shot_records_failure_when_source_is_single_file_without_name() {

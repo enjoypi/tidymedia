@@ -73,7 +73,7 @@ pub fn chrono_offset_from_hours(hours: i8) -> FixedOffset {
 }
 
 /// 默认归档模板：`{year}/{month}/{valuable_name}`。
-/// `{valuable_name}` 为路径中首个含非 ASCII 的目录段；若不存在则该段为空串。
+/// `{valuable_name}` 为最靠近文件的含非 ASCII 字符目录段；若不存在则该段为空串。
 pub const DEFAULT_ARCHIVE_TEMPLATE: &str = "{year}/{month}/{valuable_name}";
 pub const DEFAULT_DOC_ARCHIVE_TEMPLATE: &str = "{category}/{year}/{month}";
 

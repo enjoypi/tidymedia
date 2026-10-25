@@ -8,7 +8,7 @@ copy:
   # copy/move 扫源时按扩展名直接跳过（不打开文件）；--include-non-media 与 copy-doc/move-doc 不生效
   skip_extensions: [js, json, svg, css, ts, html, xml, map]
   # 归档目录模板；占位符：{year} {month} {day} {make} {model} {valuable_name}
-  # {valuable_name} = 路径中第一个含非 ASCII 的目录段（无则省略此段）
+  # {valuable_name} = 最靠近文件的含非 ASCII 字符目录段（无则省略此段）
   # 注意：值展开后以 `{` 开头，必须加引号否则 YAML 按 flow mapping 解析
   archive_template: "${TIDYMEDIA_ARCHIVE_TEMPLATE:-{year}/{month}/{valuable_name}}"
   # copy-doc / move-doc 未传 --archive-template 时的默认模板（{category} 按内容类目分桶）

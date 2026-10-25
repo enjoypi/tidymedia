@@ -6,15 +6,14 @@ use std::time::Instant;
 use serde_derive::Serialize;
 
 /// wall-clock 毫秒；`u128 → u64` overflow（~5 亿年不可能触发）走饱和 `u64::MAX`。
-/// 4 个 usecase 入口共用：`let start = Instant::now();` ... `duration_ms: elapsed_ms(start)`。
+/// 各 usecase 入口共用：`let start = Instant::now();` ... `duration_ms: elapsed_ms(start)`。
 /// `coverage(off)`：耗时随宿主时钟波动，无法稳定断言。
 #[must_use]
 pub fn elapsed_ms(start: Instant) -> u64 {
     u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX)
 }
 
-/// 结构化日志 `feature` 维度值：copy / move / find / cull / `move_text_shot`
-/// 单点定义。所有 use case + report sink 从此 `use`，避免任一处 const 漂移让
+/// 结构化日志 `feature` 维度值统一定义。所有 use case + report sink 从此 `use`，避免任一处 const 漂移让
 /// tracing 聚合按 feature 维度分裂。
 pub const FEATURE_COPY: &str = "copy";
 pub const FEATURE_MOVE: &str = "move";

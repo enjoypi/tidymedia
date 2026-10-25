@@ -336,7 +336,7 @@ fn camera_named_vote_still_overrules_p0() {
 
 // 触发 majority_verdict line 130 `matches!(v, Validity::Valid)` 的 false arm：
 // filename 候选 utc 在 pre-1995（LowConfidencePre1995 validity）时，多数派仲裁
-// 必须拒绝它推翻 P0（CLAUDE.md「多数派仲裁仅认 Validity::Valid」）。
+// 必须拒绝它推翻 P0（src/CLAUDE.md「media_time 与容器解析」）。
 #[test]
 fn pre_1995_filename_low_confidence_does_not_overrule_p0() {
     let p0 = Utc

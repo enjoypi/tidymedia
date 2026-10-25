@@ -1,4 +1,4 @@
-//! tract-onnx 实现 `FaceDetector`：跑 SCRFD-500M-bn-kps 输出人脸 bbox + 5 点关键点。
+//! tract-onnx 实现 `FaceDetector`：跑 SCRFD-10G-bn-kps 输出人脸 bbox + 5 点关键点。
 //!
 //! 设计：
 //! - preprocess letterbox 到 640×640（保持长宽比 + 灰色 padding）；scale + padding

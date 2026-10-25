@@ -13,7 +13,7 @@ use tracing::{debug, warn};
 
 use super::{RemoteAdapter, RemoteClient, RemoteTarget};
 
-/// 统一记录远端 op 失败并套用协议级错误映射（R3：外部调用失败不静默）。
+/// 统一记录远端 op 失败并套用协议级错误映射（外部调用失败不静默）。
 /// 非泛型：日志逻辑只编译一份，避免 monomorphization 覆盖率重复计数。
 ///
 /// 级别分流：

@@ -36,7 +36,7 @@ pub enum Commands {
         report: Option<String>,
     },
 
-    /// Find duplicate files under the sources and print a shell script (batch syntax on Windows) that deletes the duplicates. Default uses a fast non-cryptographic hash (xxh3-64); pass --secure to use SHA-512 instead. If --output is given, deletions for files under that directory are commented out.
+    /// Find duplicate files under the sources and print a Python script of reviewed os.remove calls. Without --output all deletion lines are commented; with --output, files under it are protected and deletion lines outside it may be enabled. Default uses xxh3-64; pass --secure for SHA-512. The script is never executed automatically.
     Find {
         /// Use the cryptographic hash (SHA-512) instead of the default fast non-cryptographic hash (xxh3-64). Slower but eliminates the (already astronomically small) collision risk.
         #[arg(short, long)]
@@ -170,7 +170,7 @@ pub enum Commands {
         report: Option<String>,
     },
 
-    /// Verify pending archive decisions without moving anything: report each source file's predicted archive bucket, `media_time` decision and its conflicts, and (with `--exif-tsv`) cross-check against a second implementation's expected bucket to catch container times that tidymedia's own reader missed. Diagnostic only; writes no files.
+    /// Verify pending archive decisions without modifying source or archived media: report each source file's predicted archive bucket, `media_time` decision and its conflicts, and (with `--exif-tsv`) cross-check against a second implementation's expected bucket to catch container times that tidymedia's own reader missed. Diagnostic only; stdout and an explicitly requested `--report` are still written.
     Verify {
         /// The source directories or files (URI or local path)
         #[arg(required = true)]

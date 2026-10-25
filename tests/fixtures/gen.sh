@@ -6,7 +6,7 @@
 #   bash tests/fixtures/gen.sh
 #
 # 设计原则：
-#   - 每个产物对应 docs/media-time-detection.md 中某条具体规则
+#   - 每个产物对应 src/CLAUDE.md「media_time 与容器解析」的具体规则
 #   - 文件尽可能小（多数 < 2KB）
 #   - 所有 EXIF/容器日期固定为可预测时间，便于 assert_eq
 set -euo pipefail
@@ -28,7 +28,7 @@ exiftool -q -overwrite_original \
   sample-with-offset.jpg
 
 #######################################
-# P1 / Trap §5.4: 仅 ModifyDate，无 DateTimeOriginal/CreateDate
+# P1 / 仅 ModifyDate，无 DateTimeOriginal/CreateDate
 #######################################
 
 cp sample-with-exif.jpg sample-modifydate-only.jpg
@@ -38,7 +38,7 @@ exiftool -q -overwrite_original \
   sample-modifydate-only.jpg
 
 #######################################
-# Trap §5.1: MP4 1904-epoch（不传 creation_time → nom-exif 返回 1904-01-01）
+# MP4 1904-epoch（不传 creation_time → nom-exif 返回 1904-01-01）
 #######################################
 
 ffmpeg -y -loglevel error \
@@ -47,7 +47,7 @@ ffmpeg -y -loglevel error \
   sample-mp4-1904-epoch.mp4
 
 #######################################
-# Trap §5.2: 未来时间（2099）
+# 未来时间（2099）
 #######################################
 
 cp sample-with-exif.jpg sample-future-2099.jpg
@@ -57,7 +57,7 @@ exiftool -q -overwrite_original \
   sample-future-2099.jpg
 
 #######################################
-# Trap §5.3: 1995 之前
+# 1995 之前
 #######################################
 
 cp sample-with-exif.jpg sample-pre-1995.jpg

@@ -1,4 +1,4 @@
-// Step 5 证据收集纯函数：exiftool 全量 dump 解析 / 路径目录日期暗示 / 文件名
+// Step 3 证据收集纯函数：exiftool 全量 dump 解析 / 路径目录日期暗示 / 文件名
 // 日期暗示（strong/weak/coincidental）/ 出厂默认时钟判定 / 证据卡片组装。
 // 判定表口径见 references/patterns.md；I/O 在 scripts/collect_evidence.ts。
 

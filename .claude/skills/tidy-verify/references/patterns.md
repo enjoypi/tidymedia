@@ -1,57 +1,41 @@
-# Pattern 判定表与证据收集
+# Pattern 判定与证据研判
 
-Step 5 对候选集 U（MISMATCH ∪ DIFFER）逐文件归类。证据收集由
-`scripts/collect_evidence.ts` 自动完成（exiftool 全量 dump + 路径/文件名暗示 +
-出厂默认时钟判定），AI 只补「推荐」研判。verify 已自动判定 5 个
-（`verify.json` 的 `entries[].patterns`），脚本再判 4 个，其余需人工研判。
+Step 3 对 MISMATCH、DIFFER 和 decision_failed 条目逐文件研判。`collect_evidence.ts` 自动收集前两类的时间、路径、文件名和相机信息；仅有 decision_failed 的条目按 SKILL 手工补齐。AI 只补充推荐与需要用户确认的冲突。
 
-## verify 自动判定（diagnose.rs）
-
-| Pattern | 触发条件 |
-|---|---|
-| `TidymediaContainerMiss` | `mismatch` 且 `exif_from ∈ {QTCreationDate, QTCreateDate}` | exiftool 读到容器时间但 tidymedia/nom-exif 漏读（如 pnot 起头老 QuickTime MOV），tidymedia 走 mtime 兜底桶错——tidymedia ≠ exiftool 的硬证据 |
-| `CameraClockUnset` | `exif_exp_bucket` 以 `0000:` 开头 | 相机时钟未设，EXIF 时间不可信 |
-| `FsTimeIsCopyStamp` | 决策含 `MtimeMuchEarlierThanP0` conflict | mtime 是拷盘/写卡时戳而非拍摄时间，P4 fallback 不可信 |
-| `FilenameDateDiffers` | `filename_bucket` ≠ `actual_bucket` | 文件名/路径日期与决策桶冲突 |
-| `ExactDuplicate` | `duplicate_verdict == "exact_dup"` | 目标库已有 SHA-512 相同副本 |
-
-## 脚本判定（collect_evidence.ts）
+## verify 自动判定
 
 | Pattern | 触发条件 | 含义 |
 |---|---|---|
-| `DefaultClockValue` | EXIF 三时间相同且形如 `YYYY:01:01 00:00:00` | 出厂默认值（CLAUDE.md「相机出厂默认时间陷阱」） |
-| `PathDirectoryHint` | 路径父目录含可信日期片段（`YYYY[.\-_]MM` / `YYYY年M月` / `YYYY年M-M月` 跨月→年精度 / 单独 `YYYY` 段→年精度） | 目录名是 ground truth；tidymedia 不解析路径，需手动补 EXIF |
-| `FilenameStrong` | stem 含合法到秒时间（`YYYY-MM-DD HH-MM-SS` 分隔变体 / `YYYYMMDD_HHMMSS`） | 相册命名风格，精度到秒 |
-| `FilenameWeakDate` | stem 含合法 `YYYYMMDD` 但无 HHMMSS | 精度到日，HHMMSS 须默认 |
-| `FilenameCoincidentalDigits` | stem 含 8 位连号但非合法日期 | 巧合 ID，MUST NOT 当日期用 |
+| `TidymediaContainerMiss` | mismatch 且 exif_from 为 QuickTime 来源 | exiftool 读到容器时间而 tidymedia 未采用，需核查容器解析 |
+| `CameraClockUnset` | exif_exp_bucket 以 `0000:` 开头 | 相机时钟未设置，时间不可信 |
+| `FsTimeIsCopyStamp` | 决策含 MtimeMuchEarlierThanP0 冲突 | mtime 可能是复制时间，不宜作为拍摄时间 |
+| `FilenameDateDiffers` | filename_bucket 与 actual_bucket 不同 | 文件名或路径日期与当前决策冲突 |
+| `ExactDuplicate` | duplicate_verdict 为 exact_dup | 目标库已有内容完全相同的副本 |
+
+## collect_evidence.ts 判定
+
+| Pattern | 触发条件 | 含义 |
+|---|---|---|
+| `DefaultClockValue` | EXIF 三时间相同且形如 `YYYY:01:01 00:00:00` | 可能是出厂默认值，需结合机型和其他证据 |
+| `PathDirectoryHint` | 父目录含可信年月或日期片段 | 重要旁证，不是自动覆盖其他证据的真相来源 |
+| `FilenameStrong` | stem 含合法且精确到秒的时间 | 可作为强文件名证据 |
+| `FilenameWeakDate` | stem 只有合法日期 | 可作为日级证据，时分秒需用户确认默认值 |
+| `FilenameCoincidentalDigits` | 连续数字形似日期但不合法 | 不得当作日期 |
+
+“合法日期”必须是真实日历日期。当前脚本只做初步数字校验，AI 必须额外核对月份天数和闰年；例如 `20230231`、非闰年 2 月 29 日和小月 31 日都不得作为证据。
 
 ## 人工研判
 
 | Pattern | 触发条件 | 含义 |
 |---|---|---|
-| `ModelReleaseConflict` | EXIF 时间早于 Make/Model 已知发布日 | 时钟未设 + 残留出厂值，等同 DefaultClockValue |
+| `ModelReleaseConflict` | EXIF 时间早于已知机型发布日 | 可能未设置时钟或残留出厂值 |
 
-## 证据卡片（脚本生成，`推荐` 待研判）
+## 证据卡片
 
-`collect_evidence.ts` 对 U 逐文件输出：
+脚本为 MISMATCH/DIFFER 条目生成卡片，decision_failed 条目由 AI 按 SKILL 手工补齐。卡片包含相对路径、EXIF/容器/文件系统时间、相机、路径和文件名暗示、双方桶、诊断及待填推荐。合并后必须覆盖全部候选文件，再集中提问。
 
-```markdown
-### <relative path from source root>
-- **EXIF 时间**: DTO=<v>, CreateDate=<v>, ModifyDate=<v>
-- **容器时间**: QT:CreationDate=<v>, QT:CreateDate=<v>, Matroska:DateUTC=<v>
-- **文件系统**: mtime=<v>, FileCreateDate=<v>
-- **相机**: Make=<v>, Model=<v>
-- **路径暗示**: <段路径> → <YYYY[:MM[:DD]]> | 无
-- **文件名暗示**: <name=YYYY:MM 或 coincidental 或 无>
-- **tidymedia 桶**: <YYYY:MM> (from=<DTO|QTCreationDate|QTCreateDate|CreateDate|FsMtime|NONE>)
-- **exiftool 桶**: <YYYY:MM>（= verify 汇总的 exp）
-- **诊断**: `<Pattern1>` + `<Pattern2>` ...
-- **推荐**: (待研判)
-```
+推荐顺序：经证据确认可信的拍摄或容器时间 > FilenameStrong > FilenameWeakDate > PathDirectoryHint > 跳过。出厂默认值、机型冲突或其他反证优先否决看似合法的时间；证据相互矛盾时必须询问用户，不机械套用顺序。
 
-推荐值优先级（高→低）：EXIF/容器时间合法 > FilenameStrong > FilenameWeakDate
-（日 + 12:00:00）> PathDirectoryHint（日=1 + 12:00:00）> 跳过。MUST NOT 用
-`FilenameCoincidentalDigits` 推。
+只有日期时默认建议 `12:00:00`；只有年月或年时，默认日期和时刻也必须由用户确认。`FilenameCoincidentalDigits` 永不能推出时间。
 
-`TidymediaContainerMiss` 场景：用 exiftool 读到的 QT:CreateDate 写回 AllDates +
-FileModifyDate 让 tidymedia 下次走 P0；MUST 追问是否把容器解析缺口记 TODO.md。
+`TidymediaContainerMiss` 可向用户报告疑似解析缺口，并按已核实的容器时间提出写回建议；未核实前不得修改归档规则或把旧调查结论当作事实。

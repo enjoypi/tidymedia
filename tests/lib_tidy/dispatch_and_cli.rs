@@ -1,5 +1,5 @@
 //! `tidy` / `run_cli` 调度 + scheme rejection 测试。
-//! 从 `tests/lib_tidy.rs` 拆出避免单文件 > 512 行（P0 §6）。
+//! 从 `tests/lib_tidy.rs` 拆出避免单文件 > 512 行。
 
 #[cfg(not(all(
     feature = "smb-backend",

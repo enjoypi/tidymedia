@@ -232,8 +232,7 @@ fn join_abs(parent: &camino::Utf8Path, name: &str) -> camino::Utf8PathBuf {
 ///
 /// `None` MUST 视为失败：旧实现 `unwrap_or(0)` 把 `adb_client` 报回的"shell 命令未带
 /// 退出码"等价为成功，让 unlink/mkdir 在连接断开时静默返 Ok，move 模式 src 被认
-/// 为已删而实际仍在；违反 CLAUDE.md「跨设备 rename fallback copy+remove 半态文案
-/// 必须含错误」。
+/// 为已删而实际仍在；违反 src/CLAUDE.md「复制、移动、报告与推理」。
 fn check_shell_exit(code: Option<u8>, stderr: &[u8], op: &str) -> io::Result<()> {
     let tail = String::from_utf8_lossy(stderr);
     match code {

@@ -1,4 +1,4 @@
-// docs/media-time-detection.md §七：每个候选携带来源、时区、推断标记。
+// src/CLAUDE.md「media_time 与容器解析」：每个候选携带来源、时区、推断标记。
 
 use chrono::DateTime;
 use chrono::FixedOffset;

@@ -71,7 +71,7 @@ pub(super) fn commit_scored_group(
         moved,
     ) {
         Ok(g) => {
-            // P0 §14 业务 debug：写盘成功后落地的 group 计划（best 路径 + culled 数 + dry_run flag）。
+            // 业务 debug：写盘成功后落地的 group 计划（best 路径 + culled 数 + dry_run flag）。
             log_commit_group(
                 group_id_attempt,
                 &best.src_loc.display(),

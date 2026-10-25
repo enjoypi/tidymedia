@@ -27,7 +27,7 @@ pub(super) fn generate_unique_name(
     let display_path = Utf8Path::new(src_file.full_path.as_str());
     // file_name 缺失（源 Location 是纯 root 如 `smb://host/share/` 或末尾 '/'）
     // 走 Ok(None) 让 caller 报 "无法为 ... 生成目标目录的文件名"，不再 expect panic
-    // （P0 §2「MUST NOT 因用户输入而 panic」）。
+    // （禁止因用户输入而 panic）。
     let Some(file_name) = display_path.file_name() else {
         return Ok(None);
     };
@@ -43,7 +43,7 @@ pub(super) fn generate_unique_name(
     // 未来 kernel / 损坏 FS mtime 越界会让整个 copy 进程崩溃、中间态无法收敛。
     // 走 `duration_since(UNIX_EPOCH)` + `i64::try_from` + `from_unix_timestamp` 三段
     // 守护，任一溢出兜底到 `UNIX_EPOCH`，让越界文件归档到 1970/01 桶（用户可后续
-    // 修 EXIF/mtime 手动 re-archive）而非 panic 掉整批。P0 §2 硬约束。
+    // 修 EXIF/mtime 手动 re-archive）而非 panic 掉整批。用户输入安全的硬约束。
     let dt = system_time_to_offsetdatetime(create_time)
         .unwrap_or(OffsetDateTime::UNIX_EPOCH)
         .to_offset(configured_offset());
@@ -126,7 +126,7 @@ fn build_sub_dir(output_dir: &Location, sub_dir_rel: &str) -> Location {
 }
 
 /// Panic-safe `SystemTime → OffsetDateTime`：`OffsetDateTime::from(SystemTime)` 内含
-/// `.expect(...)` 会在越界（future `mtime` / 损坏 FS）触发 panic 违反 P0 §2。三段
+/// `.expect(...)` 会在越界（future `mtime` / 损坏 FS）触发 panic 违反用户输入不得 panic 的约束。三段
 /// 守护（`duration_since` / `i64::try_from` / `from_unix_timestamp`）任一失败返 None，
 /// 让 caller fallback 到 `UNIX_EPOCH` 归档到 1970/01 桶而非崩进程。
 fn system_time_to_offsetdatetime(t: SystemTime) -> Option<OffsetDateTime> {

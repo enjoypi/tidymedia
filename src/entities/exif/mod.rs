@@ -10,7 +10,7 @@ mod video;
 pub use self::types::Exif;
 
 // 测试要访问的内部 helper 在父 mod 私有 re-export，
-// 让 `exif_tests.rs` 的 `super::xxx` 引用照常解析（CLAUDE.md「测试要访问的内部项」节）。
+// 让 `exif_tests.rs` 的 `super::xxx` 引用照常解析（tests/CLAUDE.md「门禁与组织」节）。
 #[cfg(test)]
 use self::image::apply_tiff_ifd;
 #[cfg(test)]

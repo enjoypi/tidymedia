@@ -1,6 +1,6 @@
 ---
 name: tidy-verify
-description:
+description: 归档前核对拍摄时间、预测归档位置和重复关系，收集异常证据，经用户确认后修复时间并正式移动。
 argument-hint: <source_dir> <output_dir>
 ---
 
@@ -8,101 +8,76 @@ argument-hint: <source_dir> <output_dir>
 
 **原始参数字符串**：`$ARGUMENTS`
 
-**MUST** 自行解析 `source_dir` 与 `output_dir`：Claude Code 内置位置参数拆分器对
-Windows 反斜杠路径不可靠，只用 `$ARGUMENTS` 整串。解析规则：按空格拆 2 token，
-token 两端引号剥掉，反斜杠/正斜杠原样保留；任一为空 → 提示
-`/tidy-verify <source_dir> <output_dir>` 停下。下方 `<SRC>`/`<OUT>` 是占位符。
+自行解析 `source_dir` 与 `output_dir`，不要使用内置位置参数拆分器。仅使用双引号分组：成对首尾双引号去除，引号内空格属于同一参数，其他字符包括 Windows 反斜杠均原样保留。必须恰好得到两个非空参数；无法唯一解析时，提示 `/tidy-verify <source_dir> <output_dir>` 并停止。下文 `<SRC>`、`<OUT>` 为占位符。
 
-cwd **MUST** 是 tidymedia repo 根（`target/release/tidymedia` 相对路径）。
+cwd 必须是 tidymedia 仓库根目录。
 
-## 执行环境铁律
+## 执行环境
 
-1. **禁 `rm`**：Windows Git Bash 下 `rm`/`cat`/`tail` 可能被映射到 bat 失效。
-   工作目录用 UTC 时间戳子目录，每轮全新免清理；删文件用
-   `bun -e 'import fs from "fs"; fs.rmSync(...)'`。`<WORK>` 取字面路径
-   `/tmp/tm/<UTC 时间戳>`（如 `/tmp/tm/20261006T030000Z`），后续命令内联展开。
+1. 禁止使用 `rm`。每次 tidy-verify 任务使用新的 `<WORK>=/tmp/tm/<UTC 时间戳>`，避免清理旧目录；同一任务内写回后的复核对同一目录覆盖更新。确需删除时使用 Bun 文件 API。
+2. 前台 Bash 使用 `timeout: 600000`。仅预计超过 10 分钟才改用 Monitor；输出重定向到 `<WORK>/`，命令末尾附加 `; echo "exit=$?"` 作为完成信号。
+3. 中文或含空格路径在 shell 中统一加双引号。日志重定向到文件后读取，不用管道截断输出。
+4. 若操作系统时区与 `timezone_offset_hours` 不同，FsMtime 的 exiftool 对账可能偏离实际归档桶；暂停依赖该结果的写回和移动，先统一时区或修正对账口径。
 
-2. **前台 Bash + `timeout: 600000`**：实测 190 文件源 + 15.5 万文件目标库全流程
-   约 8s。仅预计超 10 分钟（大源首轮、百 GB 真跑 move）才用 **Monitor**：
-   输出重定向到 `<WORK>/` 文件，末尾 `; echo "exit=$?"` 作完成信号。
-
-## Step 1：一次调用完成抽取 + 对账
+## Step 1：抽取并对账
 
 ```bash
 bun .claude/skills/tidy-verify/scripts/run.ts "<SRC>" "<OUT>" "<WORK>"
 ```
 
-`run.ts` 顺序执行：
-- **exiftool 并行抽 tsv**：按目录文件数均衡分组，组数 = min(`exiftool_concurrency`,
-  空闲内存 / `exiftool_mem_mb`)，每组 argfile + `-charset filename=utf8` 一个进程，
-  语义同 `-r`（跳 `.` 开头目录）；输出直写 `exif-<i>.tsv` 再逐组合并（内存不随
-  文件数增长）。Windows 杀父进程不连带子进程：pid 记入 `exiftool_pids`，下轮启动
-  先结束残留（打 `stale_exiftool_killed=`）。
-  exiftool 缺失 → 打 `exiftool_missing=1`，省略 `--exif-tsv`（`mismatch` 恒
-  false，verify 内部判定仍有效）。
-- **`tidymedia verify`**：决策上浮 + 预测桶、tsv 交叉比对、文件名/路径日期桶、
-  内容比对（`duplicate_verdict`）、pattern 诊断与 `fix_suggestion`。
+`run.ts` 依次执行：
 
-stdout 直接打印完整对账汇总（summary 计数 / MISMATCH 明细 / DIFFER 明细 /
-verdict 分布 / pattern 计数）与 `extract_ms` / `verify_ms`；产物 `exif.tsv`、
-`verify.json`、`summary.txt`、`verify.err` 落 `<WORK>`。`mismatched>0` 或
-`decision_failed>0` 时退出码非 0（预期内，继续流程）。桶格式统一 `YYYY:MM`
-（口径见 `references/buckets.md`）。
+- 并行调用 exiftool，按目录文件数和可用内存分组，使用 argfile 与 UTF-8 文件名输出；TSV 先分组写入再合并。残留进程按 pid 文件清理。
+- 调用 `tidymedia verify`，生成预测归档桶、时间决策、冲突、内容重复裁定、诊断和修复建议。
 
-**不做 move dry-run**：verify 的 `duplicate_verdict` 已覆盖重复判定；dry-run
-要对 GB 级视频跑 SHA-512，是全流程最慢一步。
+stdout 输出汇总和耗时；产物按执行情况写入 `<WORK>`，包括 `verify.json`、`summary.txt`、`verify.err`，成功抽取时另有 `exif.tsv`。`mismatched > 0` 或 `decision_failed > 0` 会产生非零退出码，这是需要继续研判的对账结果，不是脚本崩溃。
 
-## Step 2：读汇总分流
+exiftool 缺失时输出 `exiftool_missing=1`，省略 `--exif-tsv` 并继续 verify；此时没有第二实现交叉比对，内部判定仍有效。执行过抽取时必须确认 `exif_exit=0`；非零表示交叉比对不完整，立即停止后续写回和移动，不得把残缺 TSV 当作完整证据，即使脚本仍继续调用 verify。
 
-- `MISMATCH_count=0` 且 `DIFFER_count=0` → 直进 Step 4。
-- 否则进 Step 3。**MUST NOT** 见 MISMATCH 直接 AskUserQuestion。
+桶格式统一为 `YYYY:MM`，详见 `references/buckets.md`。不要另跑 move dry-run；verify 已提供重复裁定，而 dry-run 会对大文件重复判重。
 
-## Step 3：证据卡片 → 决策 → 写 EXIF
+## Step 2：按汇总分流
 
-> 用户调 tidy-verify 是为了把可疑文件改对。证据收集已脚本化，AI 只做研判与提问。
+- `MISMATCH_count=0`、`DIFFER_count=0`、`decision_failed=0` 且没有执行错误：进入 Step 4。
+- 任一时间异常计数非零：进入 Step 3。`decision_failed` 单独非零时也必须研判，不得因另外两个计数为 0 而跳过。
+- 抽取、verify 或报告存在执行错误：先停止并排除错误，不进入正式移动。不得仅因出现 MISMATCH 就直接向用户提问，必须先收集完整证据。
+
+## Step 3：研判、确认、写回
 
 ```bash
 bun .claude/skills/tidy-verify/scripts/collect_evidence.ts "<WORK>/verify.json" "<SRC>" "<WORK>/evidence.md"
 ```
 
-产出 `<WORK>/evidence.md`：候选集 U（MISMATCH ∪ DIFFER）逐文件证据卡片，除「推荐」
-外全部字段已填（exiftool 全量时间 / 路径暗示 / 文件名暗示 / 诊断 patterns /
-出厂默认时钟判定）。AI 逐卡片补「推荐」值——推荐值优先级与人工研判项
-（`ModelReleaseConflict` 需机型发布日知识）见 `references/patterns.md`；拿不准的
-用 `"/c/Windows/explorer.exe" "<file>"` 开图核实。
+证据收集缺少 exiftool 时退出 2，不能假装已获得第二实现证据。脚本只为 MISMATCH 与 DIFFER 的并集生成证据卡片；仅有 `decision_failed` 的文件必须另行逐文件运行 exiftool，按同一卡片格式补齐时间、文件名和路径证据。AI 根据 `references/patterns.md` 补齐推荐值，无法确定时打开原文件人工核实。
 
-- **MUST** 全部卡片列完再 `AskUserQuestion`（至少三问，第一项推荐）：批量策略 /
-  HHMMSS 缺失默认值（`12:00:00` 推荐）/ 字段范围（`AllDates + FileModifyDate`
-  推荐）。
-- 证据矛盾（如路径暗示 vs EXIF 冲突）MUST 单独问该文件信哪边。
-- 写 EXIF（`references/exiftool.md` 陷阱，默认不留备份）：
+任一 exiftool 调用报错、证据卡片意外全空或关键字段均为 `<无>` 时，必须停止并逐文件手工核查，不得把工具失败当作“已收集完整证据”。
+
+- 必须列完全部卡片后再用 AskUserQuestion 集中确认。至少覆盖批量策略、缺少时分秒时的默认值、写字段范围；选项使用数字编号，第 1 项为推荐项。
+- 路径、文件名和时间元数据冲突时，必须单独询问用户信任哪项证据。
+- 默认建议时间为 `12:00:00`，字段范围为 AllDates + FileModifyDate，是否保留 `_original` 由用户选择。
+- 用户确认写回后才可执行 exiftool。Windows 使用仓内 `bin/exiftool/exiftool.exe`，macOS 使用已安装的 `exiftool`；下列 `<EXIFTOOL>` 按平台替换：
 
 ```bash
-bin/exiftool/exiftool.exe -P -overwrite_original "-AllDates=YYYY:MM:DD HH:MM:SS" "-FileModifyDate=YYYY:MM:DD HH:MM:SS" "<file>"
+<EXIFTOOL> -P -overwrite_original "-AllDates=YYYY:MM:DD HH:MM:SS" "-FileModifyDate=YYYY:MM:DD HH:MM:SS<OFFSET>" "<file>"
 ```
 
-写完回 Step 1 重跑 `run.ts`（复用同 `<WORK>`，tsv 重抽反映写回），确认
-MISMATCH/DIFFER 收敛到 0 或可接受残余。
+`<OFFSET>` 是配置时区偏移，例如 UTC+8 写 `+08:00`。`-overwrite_original` 表示不留备份，只有用户选择该方式时才使用。视频必须同时核对并修正 QuickTime CreationDate 与 CreateDate，不能只写较低优先级字段；详见 `references/exiftool.md`。
 
-## Step 4：真跑 move
+写回后返回 Step 1，复用同一 `<WORK>` 重新抽取并对账，确认异常收敛到 0 或仅剩用户接受的项。
 
-**MUST** 用户显式 "move truly" / "真跑" 类同意后才执行（物理删除源，不可逆）：
+## Step 4：正式移动
+
+只有用户明确表达“真跑”“正式移动”等同意后才可执行。移动会物理删除源文件，不可撤销。执行前检查最新 verify：未接受的 MISMATCH、DIFFER、decision_failed 和执行错误必须已清零，任何残余都有用户的明确决定。
 
 ```bash
-target/release/tidymedia --log-level=debug move --output "<OUT>" "<SRC>" > "<WORK>/run_real.log" 2>&1; echo "step4 exit=$?"
+target/release/tidymedia --log-level=debug move --output "<OUT>" --report "<WORK>/move.json" "<SRC>" > "<WORK>/run_real.log" 2>&1; echo "step4 exit=$?"
 ```
 
-完成后核对源端清空（tidymedia 不删空目录，按需手动清）：
+Windows 可执行文件使用 `target/release/tidymedia.exe`。完成后检查日志、`move.json` 的 `failed`、`errors` 和实际移动计数，以及源端剩余文件；tidymedia 不删除空目录，空目录由用户另行处理。
 
 ```bash
 find "<SRC>" -type f | wc -l
 find "<SRC>" -type d -empty | wc -l
 ```
 
-## 陷阱速查
-
-- `--log-level=debug`（带连字符）全局放最前；`--dry-run` 子命令级放 `move` 后。
-- stdout 不能 `| tail`（debug 走 stderr 一起被砍）——重定向文件再 Read。
-- 测试：`cd .claude/skills/tidy-verify && bun test`。
-- 桶/时区口径见 `references/buckets.md`；exiftool 写回见 `references/exiftool.md`。
-- 中文/空格路径拼 shell 一律双引号。
+测试：`cd .claude/skills/tidy-verify && bun test`。

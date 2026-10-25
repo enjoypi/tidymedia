@@ -32,7 +32,7 @@ pub(super) fn move_one(
     let rel = relative_to(src_loc.path(), source.path());
     let target_dir_loc = target_dir(output, rel.parent());
     // walker File entry 通常有 file_name；但 source 恰为单文件时 rel 空 → None。
-    // P0 §2 违反用户输入 panic 兜底：转为 record_failure 保命而非 expect 崩溃。
+    // 用户输入 panic 兜底：转为 record_failure 保命而非 expect 崩溃。
     let Some(file_name) = rel.file_name() else {
         record_failure(
             delta,

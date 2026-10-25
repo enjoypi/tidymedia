@@ -1,5 +1,5 @@
 //! `Info::open` 远端 backend 集成 + `create_time` warn/阈值 + `read_fill` 边界测试。
-//! 从 `file_info_stream_tests.rs` 拆出避免单文件超限（P0 §6）。
+//! 从 `file_info_stream_tests.rs` 拆出避免单文件超限。
 
 use std::fs;
 use std::io;

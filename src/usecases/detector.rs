@@ -2,7 +2,7 @@
 //!
 //! 与 [`crate::entities::backend::factory::BackendFactory`] 对偶——backend 是
 //! 基础设施 Gateway 抽象故落在 `entities/`，detector 是推理 Port 故落在 `usecases/`
-//! （CLAUDE.md「新增 Output Port trait MUST 落到内层」）。具体实现
+//! （src/CLAUDE.md「架构与文件组织」）。具体实现
 //! [`crate::frameworks::detector::DefaultDetectorFactory`] 在 frameworks 层装配
 //! 决定「用哪个真实 detector」，adapters 层的 dispatch 只消费 trait method。
 //!

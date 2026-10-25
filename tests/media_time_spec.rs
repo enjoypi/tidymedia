@@ -1,4 +1,4 @@
-// docs/media-time-detection.md 的可执行契约测试。
+// src/CLAUDE.md「media_time 与容器解析」 的可执行契约测试。
 // 每个子模块对应 spec 一章；测试名映射到具体 §X.Y 规则。
 // 此文件本身仅做模块装配，不放断言。
 

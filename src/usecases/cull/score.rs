@@ -65,9 +65,8 @@ pub(super) fn pick_best_for_group(
             face_cfg,
         ));
     }
-    // TODO: per-identity 策略接入：clusters 当前仅产 debug 日志，pick_best 按全组
-    // max(total) 选 best 不区分身份；若需「同人多张里选最佳 + 不同人各自保留」语义，
-    // 在此按 clusters 分桶再于每桶内 max_by_key 取首张 → 当前 face_cosine_min 才有效。
+    // clusters 当前仅产 debug 日志，pick_best 按全组 max(total) 选 best，不区分身份；
+    // per-identity 策略尚未接入，因此 face_cosine_min 当前不影响 best 选择。
     let clusters =
         identity_cluster::cluster_identities(&per_image_embeddings, face_cfg.face_cosine_min);
     log_identity_clusters(&clusters);
@@ -84,7 +83,7 @@ pub(super) fn pick_best_for_group(
         .map_or(0, |(p, _)| p);
     let best_idx = indices[best_pos];
     let best_breakdown = breakdowns[best_pos];
-    // P0 §14 业务 debug：组规模 + 选中分数。
+    // 业务 debug：组规模 + 选中分数。
     log_pick_best(indices.len(), best_idx, best_breakdown.total);
     (best_idx, best_breakdown, breakdowns)
 }
@@ -159,7 +158,7 @@ pub(super) fn analyze_image(
         analysis.meshes.push(mesh);
         analysis.eye_states.push(eye_pair);
     }
-    // P0 §14 ONNX 外部调用 debug：SCRFD 检测到的脸数 + 成功 embed/对齐的脸数（req=image，resp=faces）。
+    // ONNX 外部调用 debug：SCRFD 检测到的脸数 + 成功 embed/对齐的脸数（req=image，resp=faces）。
     log_analyze_image(
         &item.src_loc.display(),
         detections.len(),

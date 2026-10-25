@@ -20,8 +20,8 @@ fn gradient() -> RgbImage {
     gradient_at(64)
 }
 
-/// 任意分辨率渐变图。≥ 256 × 256 大尺寸用于稳定性测试（与 CLAUDE.md
-/// 「pHash 测试 fixture 设计」一致：低分辨率 + checker 经 phash 32 × 32 缩放
+/// 任意分辨率渐变图。≥ 256 × 256 大尺寸用于稳定性测试（与
+/// tests/CLAUDE.md「Fixture 与 Fake」一致：低分辨率 + checker 经 phash 32 × 32 缩放
 /// 高频损失严重，不适合做缩放/重压缩稳定性断言）。
 fn gradient_at(side: u32) -> RgbImage {
     let mut img = RgbImage::new(side, side);
@@ -56,7 +56,7 @@ fn phash_stable_under_minor_brightness_shift() {
     // 256×256 high-entropy random fill + 像素 ±5 平移 → DCT 系数远离中位数 →
     // 小幅 brightness 偏移翻转的低频系数符号极少 → Hamming 距离应很小。
     // 旧实现用 64×64 checker：经 phash 32×32 缩放后高频损失严重让断言脆弱
-    // （CLAUDE.md「pHash 测试 fixture 设计」明确大图 + random/gradient 才是
+    // （tests/CLAUDE.md「Fixture 与 Fake」明确大图 + random/gradient 才是
     // 稳定性测试口径，本测试用 random 而非纯 gradient 以避开后者中位数附近
     // 系数密集的脆弱性）。
     let mut a = RgbImage::new(256, 256);

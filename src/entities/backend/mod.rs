@@ -1,7 +1,7 @@
 //! Backend Gateway 抽象：把"按 [`Location`] 做文件 IO"的差异封进单一 trait，
 //! 让 entities / usecases 层不再硬绑 `std::fs`。具体实现（Local/SMB/MTP/ADB/Fake）
 //! 落在 `adapters::backend::*`；entities 只持 trait 与值类型，编译期对 adapters
-//! 零依赖（Clean Architecture 依赖方向规则）。CLAUDE.md「URI 与 Backend」段记录
+//! 零依赖（Clean Architecture 依赖方向规则）。src/CLAUDE.md「URI、路径与 Backend」段记录
 //! 使用约定。
 
 use std::io::{self, BufReader, BufWriter, Read, Seek, Write};

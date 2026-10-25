@@ -1,4 +1,4 @@
-//! `group_writer` 单测：tests 外置以保 `group_writer.rs` ≤ 512 行（P0 §7）。
+//! `group_writer` 单测：tests 外置以保 `group_writer.rs` ≤ 512 行。
 
 use super::*;
 use crate::adapters::backend::factory::DefaultBackendFactory;

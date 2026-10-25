@@ -1,5 +1,5 @@
 //! `Info` 的流式 hash + `Info::open` 远端 backend 集成 + `create_time` warn 测试。
-//! 从 `file_info_tests.rs` 拆出避免单文件 > 512 行（P0 §6）。
+//! 从 `file_info_tests.rs` 拆出避免单文件 > 512 行。
 
 use std::fs;
 use std::io;

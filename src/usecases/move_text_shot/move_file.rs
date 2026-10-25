@@ -127,8 +127,7 @@ pub(super) fn do_move_file(
 }
 
 /// 拼接 `output / rel_dir`：`rel_dir` 为 `None` 或空 → 直接返 output。Local/远端 backend
-/// 都通过 `Location::join_path` 单点扩展（CLAUDE.md「跨 scheme sibling 路径用
-/// `Location::join_path` 单点」）。
+/// 都通过 `Location::join_path` 单点扩展（src/CLAUDE.md「URI、路径与 Backend」）。
 pub(super) fn target_dir(output: &Location, rel_dir: Option<&Utf8Path>) -> Location {
     match rel_dir {
         None => output.clone(),

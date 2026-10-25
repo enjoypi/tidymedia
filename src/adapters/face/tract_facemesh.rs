@@ -112,7 +112,7 @@ pub fn decode(output: &Tensor) -> io::Result<Vec<[f32; 3]>> {
         // 严格匹配 468*3 = 1404，不用 `<`：误配 face_mesh 变体（attention refinement
         // 版顶点顺序不同）时 len > 1404 若沿用 `<` 检查会通过而取前 468 得非 468
         // 面部点集致 EAR/嘴部索引错位。对齐 MobileFaceNet EMBED_DIM 严格 `!=` 套路
-        // （CLAUDE.md「face embedding decode `slice.len()` MUST `!=` 严格匹配」）。
+        // （src/CLAUDE.md「复制、移动、报告与推理」）。
         return Err(io::Error::other(format!(
             "facemesh output len {} != expected {expected}; \
              check facemesh_model_path: must be 468*3=1404 static-shape mesh model, \

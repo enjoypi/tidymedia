@@ -124,12 +124,8 @@ impl<A: RemoteAdapter> Backend for RemoteBackend<A> {
     }
 
     fn copy_file(&self, src: &Location, dst: &Location, mkparents: bool) -> io::Result<u64> {
-        // TODO(perf): 当前是 read(整文件到本地) + write(整文件回远端) 两次全量 RTT +
-        // 全文件堆分配。pavao 支持 SMB2 FSCTL_SRV_COPYCHUNK 服务端复制（零字节回
-        // 客户端），adb 同设备可走 `shell cp /sdcard/A /sdcard/B`，libmtp 有
-        // MoveObject API——同 scheme 同 host 场景理想上应先试 server-side copy，
-        // 失败再 fallback 到 read+write。改动依赖 RemoteClient trait 加
-        // `server_side_copy` 方法 + 每 adapter 实现，非本次重构范围。
+        // 当前是 read(整文件到本地) + write(整文件回远端) 两次全量 RTT +
+        // 全文件堆分配；尚无 server-side copy，大文件场景必须考虑内存与网络开销。
         let src_target = self.build_target(src)?;
         let dst_target = self.build_target(dst)?;
         if mkparents {

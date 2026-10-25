@@ -8,7 +8,7 @@
 #   SCRFD-10G   → src/adapters/face/tract_scrfd*.rs        (face 检测)
 #   EyeState    → src/adapters/face/tract_eyestate*.rs     (YOLOv8 检测头)
 #   FaceMesh    → src/adapters/face/tract_facemesh*.rs     (468 点 landmark)
-#   MobileFaceNet → src/adapters/face/tract_mobilefacenet*.rs (512 维 embedding)
+#   MobileFaceNet → src/adapters/face/tract_mobilefacenet*.rs (128 维 embedding)
 #   bge-small-zh-v1.5 int8 → src/adapters/classify/tract_embed*.rs (文档分类)
 #
 # 用法：bash scripts/download_models.sh

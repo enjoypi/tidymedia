@@ -16,7 +16,7 @@ const INPUT_SIDE: u32 = 192;
 /// `Array4::from_shape_vec` 形状失配返 Err（const 形状下数学上不可达，? 兼容未来动态 shape）。
 #[doc(hidden)]
 pub fn preprocess(img: &image::RgbImage) -> Tensor {
-    // 已对齐 INPUT_SIDE 时 Cow::Borrowed 零拷贝；P0 §3 借用参数避免不必要克隆。
+    // 已对齐 INPUT_SIDE 时 Cow::Borrowed 零拷贝；借用参数避免不必要克隆。
     let resized: std::borrow::Cow<'_, image::RgbImage> =
         if img.width() == INPUT_SIDE && img.height() == INPUT_SIDE {
             std::borrow::Cow::Borrowed(img)

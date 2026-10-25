@@ -1,7 +1,6 @@
-//! 真实 SCRFD-500M-bn-kps ONNX 加载 + 三 stride anchor 解码 + NMS。
+//! 真实 SCRFD-10G-bn-kps ONNX 加载 + 三 stride anchor 解码 + NMS。
 //! 走 `--ignore-filename-regex='_real\.rs$'` 排除整文件：anchor 解码 + NMS 算法
-//! 完整实现需要按真实 ONNX 输出 layout 调参（plan F 节风险 #1 已明示需 e2e 真跑），
-//! 算法主体放此处与真 `model.run` 一起，简化生产/测试分界。
+//! 与真 `model.run` 放在同一模块，由真模型运行验证，简化生产/测试分界。
 
 use std::io;
 use std::path::Path;
@@ -58,7 +57,7 @@ impl RawScrfd for TractRawScrfd {
     }
 }
 
-/// SCRFD-500M-bn-kps 三 stride（8/16/32）输出解 anchor + NMS。
+/// SCRFD-10G-bn-kps 三 stride（8/16/32）输出解 anchor + NMS。
 /// 输出 layout 假设：`[score_8, bbox_8, kps_8, score_16, bbox_16, kps_16, score_32, bbox_32, kps_32]`，
 /// 每个 score `[1, A, 1]`、bbox `[1, A, 4]`、kps `[1, A, 10]`，`A=grid_h*grid_w*num_anchors`。
 /// `#[doc(hidden)]`：暴露给集成 e2e 直调畸形输入（`outputs.len()<9` / NaN / 越界），

@@ -1,4 +1,4 @@
-// docs/media-time-detection.md §三 + §六：合并 + 冲突校验。
+// src/CLAUDE.md「media_time 与容器解析」：合并 + 冲突校验。
 //   - 按 Priority 升序排序（P0 优先），同优先级取较早 utc
 //   - 1904 / 未来时间过滤，1995 之前降置信
 //   - 当 best.priority == P0 时做交叉校验：GPS、filename、mtime

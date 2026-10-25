@@ -1,4 +1,4 @@
-//! 外部 exiftool TSV 注入解析：把 skill `extract_exif.ts`（契约在
+//! 外部 exiftool TSV 注入解析：把 skill `scripts/lib/extract.ts`（契约在
 //! `.claude/skills/tidy-verify/config.yaml` 的 `exiftool_tsv_p`）的 8 列表转成
 //! 可对账的 `ExifRow`，并按其 P0..P4 列序取「期望桶」。契约单点：本文件与
 //! `config.yaml` 的 `-p` 列序必须互指同步。

@@ -97,7 +97,7 @@ pub fn tidy(command: Commands) -> Result<()> {
 /// 当 backend / detector 构造失败、IO 操作出错或业务逻辑出错时返回 `Err`。
 #[expect(
     clippy::too_many_lines,
-    reason = "六子命令 match 每 arm 是纯解构透传；拆分只会把 enum 解构搬到别处"
+    reason = "各子命令 match 每 arm 是纯解构透传；拆分只会把 enum 解构搬到别处"
 )]
 pub fn tidy_with(
     factory: &dyn BackendFactory,

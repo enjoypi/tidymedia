@@ -1,5 +1,5 @@
 //! `archive_template` 验证 + `--report` 写盘的 dispatch 路径测试。
-//! 从 `tests/lib_tidy.rs` 拆出避免单文件 > 512 行（P0 §6）。
+//! 从 `tests/lib_tidy.rs` 拆出避免单文件 > 512 行。
 
 use std::sync::Arc;
 

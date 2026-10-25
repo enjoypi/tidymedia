@@ -1,4 +1,4 @@
-// docs/media-time-detection.md §五.1/§五.2/§五.3：三层闸口
+// src/CLAUDE.md「media_time 与容器解析」：三层闸口
 //   §5.1 1904 占位（MP4 未写 creation_time 时 nom-exif 返回 1904-01-01Z）→ 剔除
 //   §5.2 未来时间 > now + 1 天 → 剔除（相机日期未设置）
 //   §5.3 1995 之前 → 软阈值，保留但降低置信度

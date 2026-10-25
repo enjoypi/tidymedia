@@ -1,6 +1,5 @@
-//! 9 pattern 诊断引擎（移植 `tidy-verify.md` Step 5.2 的判定表）：基于对账结果
-//! 归因可疑文件。当前实现可判定的子集：`TidymediaContainerMiss` /
-//! `CameraClockUnset` / `FsTimeIsCopyStamp` / `FilenameDateDiffers` / `ExactDuplicate`；
+//! Pattern 诊断引擎：基于对账结果归因可疑文件。当前实现可判定：
+//! `TidymediaContainerMiss` / `CameraClockUnset` / `FsTimeIsCopyStamp` / `FilenameDateDiffers` / `ExactDuplicate`；
 //! 需机型发布日 DB 的 `ModelReleaseConflict` 与精确日期值的 `DefaultClockValue`
 //! 留外部 skill 人工研判。
 

@@ -13,7 +13,7 @@ fn quicktime_legacy_mime_detects_pnot_atom() {
 // mdat-first MOV 变体（无任何头 atom、moov 在文件末尾的早期 QuickTime）：
 // `infer` 0.19 不识别 (无 ftyp)；旧实现仅查 pnot 也漏识 → MIME 为空 →
 // from_reader 不调 populate_video_dates → fork 后的 nom-exif 永远拿不到执行机会
-// → is_media() false，整段视频被 ignore（CLAUDE.md「项目 Gotcha」mdat-first 条）。
+// → is_media() false，整段视频被 ignore（src/CLAUDE.md「media_time 与容器解析」）。
 #[test]
 fn quicktime_legacy_mime_detects_mdat_atom() {
     let mut buf = vec![0u8, 0x10, 0, 0]; // mdat 大 box size

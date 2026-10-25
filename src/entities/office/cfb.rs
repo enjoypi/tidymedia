@@ -171,7 +171,7 @@ pub fn extract_dates(buf: &[u8]) -> (u64, u64) {
 /// `PropertySet` 布局：48 字节 header + section（section size + num props + entries + data）。
 ///
 /// `buf.len()` >= 48 守护后 `byteorder` / `fmtid` / `section_off` 用直接索引
-/// （不可达 `?` 消除，CLAUDE.md「逻辑不可达的 `?` 死区消除」套路）。
+/// （不可达 `?` 消除，tests/CLAUDE.md「覆盖率处理」套路）。
 #[doc(hidden)]
 #[must_use]
 pub fn find_property_filetime(buf: &[u8], pid: u32) -> Option<u64> {

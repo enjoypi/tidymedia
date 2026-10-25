@@ -65,7 +65,7 @@ impl Write for LocalWriter {
 }
 
 impl MediaWriter for LocalWriter {
-    // P0 §2：MUST 优先 ? 传播错误。std::fs::File::flush 当前是 noop，但若未来加
+    // 必须优先 ? 传播错误。std::fs::File::flush 当前是 noop，但若未来加
     // BufWriter 包装会让 disk-full 等场景静默丢数据（move 模式下源随后删除即丢失）。
     fn finish(self: Box<Self>) -> io::Result<()> {
         let mut me = *self;

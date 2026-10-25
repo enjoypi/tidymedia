@@ -1,7 +1,5 @@
 //! verify use case：把「tidy-verify skill」的确定性对账业务内化为子命令。
-//! 阶段化落地：骨架（本文件）→ 桶对账 `bucket.rs`/`exif_tsv.rs` → 文件名/目录段
-//! 提示 `filename_hint.rs` → 内容像素比对 `content_diff.rs` → 9 pattern 诊断
-//! `diagnose.rs`。
+//! 流程：时间决策与桶对账 → 文件名/目录段提示 → 内容像素比对 → pattern 诊断。
 
 use std::collections::HashMap;
 use std::path::Path;

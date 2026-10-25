@@ -203,7 +203,7 @@ impl Info {
         }
     }
 
-    /// 计算创建时间。走 docs/media-time-detection.md 的 P0→P4 优先级判定：
+    /// 计算创建时间。走 src/CLAUDE.md「media_time 与容器解析」 的 P0→P4 优先级判定：
     /// 把 EXIF/视频容器字段（P0/P1）、文件名启发式（P2）、外部注入的 sidecar
     /// 候选（P3，见 [`Self::add_candidates`]）、文件 mtime（P4）一起喂给
     /// `media_time::resolve`，decision 时间若小于 `valid_threshold_secs`

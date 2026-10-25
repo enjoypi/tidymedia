@@ -18,9 +18,7 @@ mtp-backend = []
 adb-backend = ["dep:adb_client"]
 # 启用 Android 应用层（uniffi 接口 + cdylib），交叉编译到 aarch64-linux-android 用。
 # 桌面 build 不应启用此 feature（cdylib 在 Linux 上会拉空 stub）。
-# 编译流程：`cargo ndk -t aarch64-linux-android -p 30 rustc --lib --crate-type cdylib --release --features android-app`
-# 之后 `uniffi-bindgen generate ... --library libtidymedia.so --language kotlin`
-# 生成 Kotlin 绑定，见 `mobile/build-android.sh`。
+# 编译流程见 mobile/build-android.sh；之后用 uniffi-bindgen 从生成的库生成 Kotlin 绑定。
 android-app = ["dep:uniffi"]
 # 仅 rlib：cdylib 只在 Android 交叉编译时需要，由 build-android.sh 用
 # `cargo rustc --crate-type cdylib` 按需产出。若写死 cdylib，Windows 上
@@ -28,9 +26,7 @@ android-app = ["dep:uniffi"]
 [lib]
 crate-type = ["rlib"]
 
-# 业务关键 dep MUST 用 caret 约束（不写 `"*"` 通配）：
-# cargo update 拉到不兼容主版本会编译失败（sha2 0.10→0.11 已踩坑，CLAUDE.md「项目 Gotcha」记录）。
-# 锁主版本 + 副版本，让 patch 自由升；新主版本需手动验证后才升。
+# 业务关键 dep 使用 caret 主版本约束，规则见 src/CLAUDE.md「Rust 与依赖陷阱」。
 [dependencies]
 adb_client = { version = "3.2", optional = true }
 uniffi = { version = "0.31", optional = true }

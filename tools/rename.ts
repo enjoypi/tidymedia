@@ -1,4 +1,4 @@
-// 模板改名：把仓库内全部模板 crate 名替换为新项目名（clone 后必改清单第 1 项）。
+// 模板改名：把仓库内全部模板 crate 名替换为新项目名。
 //
 // 用法：
 //   bun tools/rename.ts <new_crate_name>
@@ -85,4 +85,4 @@ if (check.status !== 0) {
   console.error("cargo check 失败，请检查上方输出");
   process.exit(1);
 }
-console.log("完成。后续步骤见 CLAUDE.md「clone 后必改清单」2-7 项。");
+console.log("完成。请按 CLAUDE.md 与各作用域规则人工复核后续配置。");

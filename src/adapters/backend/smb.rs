@@ -8,7 +8,7 @@
 //! - `SMB_PASSWORD`：URI 中没有 `user@` 时由 `default_user` 兜底；密码总是经环境变量
 //! - `KRB5CCNAME`：读入 `SmbTarget` 但 Kerberos 未接入（smb2 首期 NTLM only）
 //!
-//! 详见 CLAUDE.md「URI 与 Backend」段。
+//! 详见 src/CLAUDE.md「URI、路径与 Backend」段。
 
 use std::io;
 use std::sync::Arc;

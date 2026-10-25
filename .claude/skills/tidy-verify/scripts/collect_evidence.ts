@@ -1,4 +1,4 @@
-// Step 5 前半：对 verify.json 的候选集 U（MISMATCH ∪ DIFFER）逐文件跑 exiftool
+// Step 3 前半：对 verify.json 的候选集 U（MISMATCH ∪ DIFFER）逐文件跑 exiftool
 // 全量时间 dump，组装证据卡片 markdown（除「推荐」外全填），AI 只研判+提问。
 // Usage: bun collect_evidence.ts <verify.json> <src_root> [out.md]
 /// <reference path="./lib/bun.d.ts" />

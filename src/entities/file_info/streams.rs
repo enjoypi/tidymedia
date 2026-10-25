@@ -78,7 +78,7 @@ pub(crate) fn read_fill(r: &mut dyn MediaReader, buf: &mut [u8]) -> io::Result<u
 }
 
 // 测试专用 path-only 哈希实现：file_info_tests 用作 stream 版的对照基线。
-// helper 内 IO 失败直接 panic（测试 fixture 必须存在；P0 §13 允许测试 expect）。
+// helper 内 IO 失败直接 panic（测试 fixture 必须存在；测试允许 expect）。
 
 #[cfg(test)]
 pub(super) fn fast_hash(path: &str) -> (usize, u64, u64) {

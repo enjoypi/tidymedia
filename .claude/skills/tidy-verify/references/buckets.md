@@ -1,37 +1,26 @@
 # 桶对账口径
 
-verify 内部所有桶统一 `YYYY:MM` 字符串（`actual_bucket` / `exif_exp_bucket` /
-`filename_bucket` 同格式），stdout 汇总直接比较无转换。
+verify 内部桶统一为 `YYYY:MM` 字符串，`actual_bucket`、`exif_exp_bucket`、`filename_bucket` 使用相同格式，stdout 汇总直接比较。
 
-## EXIF naive：首尾抵消
+## EXIF naive：时区转换相互抵消
 
-EXIF naive 时间（DTO/CreateDate）在 tidymedia 按 `timezone_offset_hours`（默认 +8）
-转 epoch，归档桶再 `.to_offset(+8)` 取年月——首尾抵消，**直接看 EXIF 字符串前 7
-字符 `YYYY:MM` 即桶**。`from` 优先级对齐 P0..P4：DTO > QTCreationDate >
-QTCreateDate > CreateDate > FsMtime。
+无时区的 EXIF DTO/CreateDate 先按 `timezone_offset_hours` 转为时间点，归档时再按同一配置时区取年月，因此可直接用 EXIF 字符串前 7 个字符 `YYYY:MM` 对账。
 
-## QuickTime/视频：UTC 须 +tz
+`exif_from` 表示 exiftool 期望桶采用的时间来源，选择顺序与 verify 的 TSV 契约一致；不要把文件名或 sidecar 候选混入该字段。
 
-QuickTime 系字段（QT:CreationDate / QT:CreateDate）是 UTC 语义，对账须按配置时区
-+N 取本地年月（verify 已内化 `bucket.rs::qt_bucket`，带 `±HH:MM`/`Z` 后缀先归一到
-UTC 再 +tz）。「前 7 字符」规则仅对 EXIF naive 成立。
+## QuickTime 与视频：先按 UTC 换算
 
-## dry-run 口径
+QuickTime CreationDate/CreateDate 是 UTC 语义。带 `±HH:MM` 或 `Z` 后缀的值先归一到 UTC，再按配置时区取本地年月。EXIF naive 的“前 7 个字符”规则不适用于 UTC 容器时间。
 
-`move --dry-run` 的 `copied=N` 只表示「目标库无 SHA-512 完全相同副本」，
-**不等于新文件**——copied 里可能混 EXIF 已修版 / 旋转或重编码版 / 撞名版。
-是否重复由 verify 的 `duplicate_verdict`（exact_dup / pixel_same / rotated_same /
-name_only / absent）判别。
+## dry-run 与内容裁定
 
-## 时区来源
+`move --dry-run` 的 `copied=N` 只表示目标库没有内容完全相同的副本，不等于都是全新内容；其中可能有时间写回、旋转或重编码版本。
 
-`timezone_offset_hours` 从 tidymedia `config.yaml` 读（env
-`TIDYMEDIA_TIMEZONE_OFFSET_HOURS` > config > 默认 8）。verify 内部处理，脚本侧无需
-再取。
+是否重复以 verify 的 `duplicate_verdict` 为准，包括 exact_dup、pixel_same、rotated_same、name_only、absent 等结果。不要只用文件名或预测桶判断重复。
 
-## 桶格式陷阱
+## 时区与路径格式
 
-- 归档目录是 `YYYY/MM`（斜杠），verify JSON 桶是 `YYYY:MM`（冒号）——两者只在
-  「路径 vs 对账结果」对照时需要转换，verify stdout 汇总输出已是冒号格式。
-- 预测桶由决策时间推得（`actual_bucket`），与 exiftool 期望桶
-  （`exif_exp_bucket`）不一致即 `mismatch`。
+- `timezone_offset_hours` 由 verify 从配置读取，脚本无需重复解析。
+- 归档目录使用 `YYYY/MM`，verify JSON 桶使用 `YYYY:MM`；只有对照路径和对账结果时才转换格式。
+- `actual_bucket` 来自 tidymedia 决策，`exif_exp_bucket` 来自注入 TSV；两者不一致即产生 mismatch。
+- `exif_from=FsMtime` 当前直接使用 exiftool 字符串的年月，只有操作系统时区与配置时区一致时才可与实际归档桶比较；不一致时先停止该对账，不得通过手工改月份掩盖问题。

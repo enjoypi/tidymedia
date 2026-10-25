@@ -107,7 +107,7 @@ pub fn extract_text(reader: &mut dyn MediaReader, _mime: &str, max_bytes: usize)
 }
 
 /// `slice::iter().position(closure)` 的非 closure 等价物 —— closure region 在多
-/// codegen instance 下易出 phantom miss（CLAUDE.md「closure 算独立 function」）；
+/// codegen instance 下易出 phantom miss（tests/CLAUDE.md「覆盖率处理」）；
 /// 手写 for 循环让 LLVM 把整 fn 算单 region 累加到两 instance。
 fn find_subslice(haystack: &[u8], needle: &[u8]) -> Option<usize> {
     haystack

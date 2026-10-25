@@ -1,5 +1,5 @@
 //! `Index` 进阶/远端测试：`similar_files` / `exists_secure` / `visit_dir` 高级 / `visit_stats` / `visit_location` 多 backend。
-//! 从 `file_index_tests.rs` 拆出避免单文件 > 512 行（P0 §6）。
+//! 从 `file_index_tests.rs` 拆出避免单文件 > 512 行。
 
 use std::collections::HashSet;
 use std::fs;
@@ -291,8 +291,7 @@ fn visit_location_accepts_multiple_backends_in_one_index() {
 
 // 文件名含非 UTF-8 字节时，Utf8PathBuf::from_path_buf 失败 → 计 walker_errors。
 // macOS APFS 强制文件名 UTF-8（create 返 EILSEQ）无法构造 fixture → 运行期 skip；
-// 测试 fn 标 coverage(off) 让 skip 分支从分母剔除（CLAUDE.md「测试自身的平台差异
-// skip 分支」套路），Linux 上完整断言照跑。
+// 测试 fn 标 coverage(off) 让 skip 分支从分母剔除（tests/CLAUDE.md「覆盖率处理」套路），Linux 上完整断言照跑。
 #[test]
 #[cfg(unix)]
 fn visit_dir_counts_non_utf8_path() {

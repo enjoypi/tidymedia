@@ -1,4 +1,4 @@
-// docs/media-time-detection.md §七：判定结果的完整字段。
+// src/CLAUDE.md「media_time 与容器解析」：判定结果的完整字段。
 
 use chrono::DateTime;
 use chrono::FixedOffset;

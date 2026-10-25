@@ -66,8 +66,7 @@ impl TractDbnetDetector {
     // `coverage(off)`：真实模型加载路径——`load_runnable` 在 `_real.rs` 由
     // ignore-regex 排除；CI 不分发 ONNX 文件，ensure_raw 在 lib unit / 集成测试
     // 始终因为 `with_raw` 提前注入 `Some(...)` 而 early return。逻辑由
-    // `dispatch_returns_invalid_input_when_model_path_empty` + 真模型手动验证
-    // （plan「验证」第 5 步）覆盖。
+    // `dispatch_returns_invalid_input_when_model_path_empty` + 真模型手动验证覆盖。
 }
 
 impl TextDetector for TractDbnetDetector {

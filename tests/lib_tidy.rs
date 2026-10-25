@@ -1,6 +1,6 @@
 //! `tidy` / `tidy_with` / `run_cli` 端到端集成测试。
 //! root：use + helpers + `FakeBackendFactory` + smb/mtp/adb Location 构造器。
-//! 业务测试拆到 `lib_tidy/*.rs` 三个子文件以保持单文件 < 512 行（P0 §6）。
+//! 业务测试拆到 `lib_tidy/*.rs` 三个子文件以保持单文件 < 512 行。
 
 use std::collections::HashMap;
 use std::sync::Arc;

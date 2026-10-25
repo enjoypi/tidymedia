@@ -258,7 +258,7 @@ fn binary_emits_debug_log_to_stderr_when_log_level_debug() {
 
 /// spawn `tidymedia copy --include-non-media --dry-run` 跑各 office fixture 让 bin
 /// instance 走 `office::*` 业务路径，消除 LLVM multi-instance phantom miss
-/// （CLAUDE.md「--branch multi-binary instance 陷阱」套路）。新增 office 解析模块
+/// （tests/CLAUDE.md「覆盖率处理」套路）。新增 office 解析模块
 /// 时把对应 fixture 加入 `OFFICE_FIXTURES` 即可，无需新增 subprocess fn。
 const OFFICE_FIXTURES: &[&str] = &[
     "sample-pdf-dated.pdf",
@@ -334,8 +334,7 @@ fn binary_copy_doc_with_office_fixtures_walks_doc_paths() {
 }
 
 /// spawn `tidymedia cull --dry-run` 让 subprocess instance 也跑 cull pub fn 主流程，
-/// 消除 multi-binary LLVM region phantom miss（CLAUDE.md「--branch multi-binary
-/// instance 陷阱」套路：subprocess 必须真跑到该业务路径，instance 才计入 covered）。
+/// 消除 multi-binary LLVM region phantom miss（tests/CLAUDE.md「覆盖率处理」套路：subprocess 必须真跑到该业务路径，instance 才计入 covered）。
 #[test]
 fn binary_cull_dry_run_walks_main_flow() {
     use image::ImageEncoder;

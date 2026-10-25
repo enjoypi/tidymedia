@@ -45,7 +45,7 @@ struct State {
     reader_errors: HashMap<Location, io::ErrorKind>,
     /// 让 `open_read` 成功但返回的 reader 在 seek 时立即报错；read 仍透传
     /// 内容。覆盖 `sniff_mime` 等 "read OK 后 seek 失败" 的 Err 分支
-    /// （Cursor seek 永不失败，CLAUDE.md「Cursor 的 seek 永不失败」套路）。
+    /// （Cursor seek 永不失败，tests/CLAUDE.md「覆盖率处理」套路）。
     seek_errors: HashMap<Location, io::ErrorKind>,
     /// 让 `open_write` 成功但返回的 writer 在 `write` 时立即报错。覆盖
     /// `stream_copy` 中 `std::io::copy` 阶段失败（区别于 `Op::OpenWrite` 早返）。

@@ -174,7 +174,7 @@ fn try_takeout_unparseable_returns_none() {
 /// `InvalidInput`，`read_sidecar` 把 Err 转 None，`discover_with_backend` 返空 Vec。
 /// 注意 `should_log_read_error(InvalidInput) == true`，此路径会 debug! 日志而非静默；
 /// 未来若新增真实 SMB/MTP/ADB sidecar 支持，需在 adapter 层各自实现 `read_to_string`，
-/// 不能依赖此处「scheme 守卫」错觉（见 docs/media-time-detection.md 末「Known limitations」）。
+/// 不能依赖此处「scheme 守卫」错觉（见 src/CLAUDE.md「media_time 与容器解析」）。
 #[test]
 fn discover_with_backend_smb_returns_empty() {
     let smb_loc = Location::Smb {

@@ -9,8 +9,7 @@
 //!   Err 注入键，便于 e2e 写「这份文档分类失败」类断言
 //! - 命名避开 `TextClassifier`——项目已有 `TextDetector`（OCR 判「有没有文字」），
 //!   `DocumentClassifier` 消歧
-//! - **位置**：推理类 Output Port 定义在 use case 层（CLAUDE.md「新增 Output
-//!   Port trait MUST 落到内层」）；具体实现（`tract_embed*.rs` + Fake）在
+//! - **位置**：推理类 Output Port 定义在 use case 层（src/CLAUDE.md「架构与文件组织」）；具体实现（`tract_embed*.rs` + Fake）在
 //!   `adapters::classify`
 
 use std::io;

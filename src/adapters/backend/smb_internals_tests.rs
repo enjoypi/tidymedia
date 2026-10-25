@@ -1,6 +1,6 @@
 //! `SmbBackend` 内部 helpers / 适配器测试：`map_error`、`BufferedWriter`、
 //! `parent_target`、`build_target`、`SmbTarget` impl、`arc_with_client`。
-//! 从 `smb_tests.rs` 拆出避免单文件 > 512 行（P0 §6）。
+//! 从 `smb_tests.rs` 拆出避免单文件 > 512 行。
 
 use std::io;
 use std::sync::Arc;

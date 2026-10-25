@@ -25,7 +25,7 @@ pub(crate) mod scan;
 pub(crate) mod text;
 
 // MIME 常量集中此处避免与 exif/mime.rs 双向引用循环。`mime_from_ext` 会用同套
-// 字面量做扩展名→MIME 反查；新增容器 MUST 在两处同步（CLAUDE.md「同步检查点」）。
+// 字面量做扩展名→MIME 反查；新增容器 MUST 在两处同步（src/CLAUDE.md「同步检查点」）。
 pub(crate) const MIME_PDF: &str = "application/pdf";
 pub(crate) const MIME_DOCX: &str =
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document";

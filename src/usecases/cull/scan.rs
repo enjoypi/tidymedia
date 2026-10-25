@@ -135,7 +135,7 @@ fn scan_entry(
     // 整图克隆（20 MiB 大图 peak RSS 三倍放大致批量扫 OOM 风险）。
     let luma = image::imageops::grayscale(&img);
     let sharp = laplacian_variance(&luma);
-    // P0 §14 业务 debug：单图特征供 AI 分析分组前分布。
+    // 业务 debug：单图特征供 AI 分析分组前分布。
     log_scan_entry_ok(&location.display(), bytes.len() as u64, hash, sharp);
     // scan 阶段产出仅含 metadata + hash + sharpness：bytes 与 img 走出作用域立即释放，
     // 避免整批图驻留 OOM；analyze_image 对组内成员重读+重 decode（多图组承担）。
