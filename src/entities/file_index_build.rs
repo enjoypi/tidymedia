@@ -8,7 +8,7 @@ use dashmap::DashMap;
 use dashmap::mapref::entry::Entry;
 use parking_lot::Mutex;
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
-use tracing::warn;
+use tracing::{debug, warn};
 
 use super::{DuplicateGroup, FEATURE_INDEX, Index};
 use crate::entities::backend::{Backend, EntryKind};
@@ -191,6 +191,7 @@ impl Index {
                 key
             }
         };
+        self.reserve_name(&key);
         // files entry guard 已在上一 statement 边界 drop；此处独立拿 similar shard 锁。
         self.similar_files
             .entry(hash)
@@ -235,6 +236,15 @@ impl Index {
     /// F1：入口保持 `&mut self` 语义（顶层唯一入口，`stats` 单线程更新）；内部
     /// `add` 是 `&self`，仍可并发调用但本 fn 主循环串行走 for-loop。
     pub fn visit_location(&mut self, root: &Location, backend: &Arc<dyn Backend>) {
+        self.visit_location_skipping(root, backend, &[]);
+    }
+
+    pub fn visit_location_skipping(
+        &mut self,
+        root: &Location,
+        backend: &Arc<dyn Backend>,
+        skip_ext: &[String],
+    ) {
         let mut locs: Vec<Location> = Vec::new();
         for entry_res in backend.walk(root) {
             let entry = match entry_res {
@@ -256,9 +266,13 @@ impl Index {
             if entry.kind != EntryKind::File {
                 continue;
             }
+            if has_extension_in(&entry.location, skip_ext) {
+                self.stats.skipped_by_ext += 1;
+                continue;
+            }
             if entry.size == 0 {
                 self.stats.skipped_empty += 1;
-                warn!(
+                debug!(
                     feature = FEATURE_INDEX,
                     operation = "walk",
                     result = "skipped_empty",
@@ -297,4 +311,10 @@ impl Index {
             }
         }
     }
+}
+
+fn has_extension_in(loc: &Location, list: &[String]) -> bool {
+    loc.path()
+        .extension()
+        .is_some_and(|e| list.iter().any(|x| x.eq_ignore_ascii_case(e)))
 }

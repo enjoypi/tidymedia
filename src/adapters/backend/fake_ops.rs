@@ -76,7 +76,12 @@ impl Backend for FakeBackend {
 
     fn open_write(&self, loc: &Location, _mkparents: bool) -> io::Result<Box<dyn MediaWriter>> {
         self.check_error(loc, Op::OpenWrite)?;
-        let write_error = self.state.lock().unwrap().writer_errors.get(loc).copied();
+        let s = self.state.lock().unwrap();
+        if s.metas.contains_key(loc) {
+            return Err(io::Error::from(io::ErrorKind::AlreadyExists));
+        }
+        let write_error = s.writer_errors.get(loc).copied();
+        drop(s);
         Ok(Box::new(FakeWriter {
             target: loc.clone(),
             buffer: Vec::new(),
@@ -129,6 +134,9 @@ impl Backend for FakeBackend {
             .get(src)
             .cloned()
             .ok_or_else(|| io::Error::from(io::ErrorKind::NotFound))?;
+        if s.metas.contains_key(dst) {
+            return Err(io::Error::from(io::ErrorKind::AlreadyExists));
+        }
         let size = bytes.len() as u64;
         s.files.insert(dst.clone(), bytes);
         s.metas.insert(dst.clone(), file_meta(size));

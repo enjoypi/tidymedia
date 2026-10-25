@@ -68,7 +68,8 @@ mod test_advanced {
         b.push(b'B');
         fs::write(&src_path, &b).unwrap();
 
-        let info_src = Info::from(src_path.to_str().unwrap()).unwrap();
+        let mut info_src = Info::from(src_path.to_str().unwrap()).unwrap();
+        info_src.set_exif(crate::entities::exif::Exif::with_mime("image/png"));
 
         let idx = crate::entities::file_index::Index::new();
         idx.insert(indexed_path.to_str().unwrap()).unwrap();

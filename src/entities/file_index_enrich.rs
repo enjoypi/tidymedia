@@ -10,6 +10,7 @@ use rayon::iter::{ParallelBridge, ParallelIterator};
 use super::Index;
 use crate::entities::backend::Backend;
 use crate::entities::exif;
+use crate::entities::file_info::Info;
 use crate::entities::media_time;
 use crate::entities::threadpool::install_io;
 use crate::entities::uri::Location;
@@ -60,12 +61,19 @@ impl Index {
 
     /// 并行对每个 indexed 文件调用 provider 注入额外时间候选（P3 sidecar 等），
     /// 与 `parse_exif` 同为"尽力而为"富集步骤：无 sidecar 时 provider 返空即可。
-    pub fn enrich_candidates(&mut self, provider: CandidateProvider) {
+    pub fn enrich_candidates(
+        &mut self,
+        provider: CandidateProvider,
+        keep: &(dyn Fn(&Info) -> bool + Sync),
+    ) {
         // provider 通常调 backend.read_to_string 读 sidecar（远端 stat + read），
         // 同 visit_location 是 I/O-bound，包 I/O 池。
         install_io(|| {
             self.files.iter_mut().par_bridge().for_each(|mut kv| {
                 let info = kv.value_mut();
+                if !keep(info) {
+                    return;
+                }
                 let candidates = provider(info.location(), &info.backend());
                 if !candidates.is_empty() {
                     info.add_candidates(candidates);
@@ -90,8 +98,7 @@ impl Index {
                 }
                 let mime = info
                     .exif_ref()
-                    .map(|e| e.mime_type().to_string())
-                    .unwrap_or_default();
+                    .map_or_default(|e| e.mime_type().to_string());
                 if let Some(category) = provider(info.location(), &info.backend(), &mime) {
                     info.set_category(category);
                 }

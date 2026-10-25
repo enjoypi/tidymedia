@@ -10,7 +10,7 @@ use ignore::WalkBuilder;
 
 use super::LocalBackend;
 use super::mmap::{LocalWriter, open_read_inner};
-use super::{local_path, rename_or_fallback, to_metadata, walk_entry_to_io};
+use super::{local_path, noreplace, rename_or_fallback, to_metadata, walk_entry_to_io};
 use crate::adapters::backend::remote::MAX_TEXT_BYTES;
 use crate::entities::backend::{Backend, Entry, MediaReader, MediaWriter, Metadata};
 use crate::entities::uri::Location;
@@ -65,7 +65,10 @@ impl Backend for LocalBackend {
         if mkparents && let Some(parent) = path.parent() {
             fs::create_dir_all(parent.as_std_path())?;
         }
-        let file = fs::File::create(path.as_std_path())?;
+        let file = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(path.as_std_path())?;
         Ok(Box::new(LocalWriter { file }))
     }
 
@@ -100,7 +103,7 @@ impl Backend for LocalBackend {
         if mkparents && let Some(parent) = dst.parent() {
             fs::create_dir_all(parent.as_std_path())?;
         }
-        fs::copy(src.as_std_path(), dst.as_std_path())
+        noreplace::copy_noreplace(src.as_std_path(), dst.as_std_path())
     }
 
     /// `std::fs::rename` 在同一文件系统时是原子操作。跨设备（`ErrorKind::CrossesDevices`）
@@ -111,7 +114,11 @@ impl Backend for LocalBackend {
         if mkparents && let Some(parent) = to_path.parent() {
             fs::create_dir_all(parent.as_std_path())?;
         }
-        rename_or_fallback(from_path.as_std_path(), to_path.as_std_path())
+        noreplace::rename_noreplace_with(
+            from_path.as_std_path(),
+            to_path.as_std_path(),
+            rename_or_fallback,
+        )
     }
 
     /// 双端均 Local 时声明支持原生 rename：`fs::rename` 同卷 OS 原子 +

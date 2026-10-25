@@ -5,6 +5,8 @@ copy:
   timezone_offset_hours: ${TIDYMEDIA_TIMEZONE_OFFSET_HOURS:-8}
   # 目标文件命中重名时尝试 file_stem_<i>.<ext> 的最大次数
   unique_name_max_attempts: ${TIDYMEDIA_UNIQUE_NAME_MAX_ATTEMPTS:-10}
+  # copy/move 扫源时按扩展名直接跳过（不打开文件）；--include-non-media 与 copy-doc/move-doc 不生效
+  skip_extensions: [js, json, svg, css, ts, html, xml, map]
   # 归档目录模板；占位符：{year} {month} {day} {make} {model} {valuable_name}
   # {valuable_name} = 路径中第一个含非 ASCII 的目录段（无则省略此段）
   # 注意：值展开后以 `{` 开头，必须加引号否则 YAML 按 flow mapping 解析

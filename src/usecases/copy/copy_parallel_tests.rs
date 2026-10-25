@@ -14,6 +14,7 @@ mod test_parallel {
     use camino::Utf8PathBuf;
     use tempfile::tempdir;
 
+    use super::super::png_fixture::write_unique_png;
     use super::super::*;
     use crate::adapters::backend::local::LocalBackend;
     use crate::entities::backend::Backend;
@@ -26,24 +27,6 @@ mod test_parallel {
             Location::Local(Utf8PathBuf::from(p.to_str().unwrap())),
             LocalBackend::arc(),
         )
-    }
-
-    // PNG magic + IHDR 前缀让 infer 识别为 image/png（is_media 命中走生产路径）；
-    // 内容尾追唯一字节让 fast_hash 分裂。size 保持 ≥ 128 B 避免 skipped_empty。
-    fn write_unique_png(dir: &Path, name: &str, unique: u64) -> std::path::PathBuf {
-        let mut bytes = vec![
-            0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, // PNG magic
-            0x00, 0x00, 0x00, 0x0D, // IHDR chunk length
-            0x49, 0x48, 0x44, 0x52, // "IHDR"
-        ];
-        bytes.extend_from_slice(&unique.to_le_bytes());
-        bytes.resize(256, 0);
-        let p = dir.join(name);
-        fs::write(&p, &bytes).unwrap();
-        let ts =
-            filetime::FileTime::from_unix_time(crate::entities::test_common::FIXED_MEDIA_MTIME, 0);
-        filetime::set_file_mtime(&p, ts).unwrap();
-        p
     }
 
     // 复制已生成的 unique png，让 fast_hash + secure_hash 精确等价源。

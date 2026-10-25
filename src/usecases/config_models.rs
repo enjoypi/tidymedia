@@ -13,6 +13,7 @@ pub struct CopyConfig {
     /// `copy-doc`/`move-doc` 未传 `--archive-template` 时的默认模板
     /// （文档按内容类目分桶，时间在内层）。
     pub doc_archive_template: String,
+    pub skip_extensions: Vec<String>,
 }
 
 impl Default for CopyConfig {
@@ -22,6 +23,9 @@ impl Default for CopyConfig {
             unique_name_max_attempts: 10,
             archive_template: DEFAULT_ARCHIVE_TEMPLATE.to_string(),
             doc_archive_template: DEFAULT_DOC_ARCHIVE_TEMPLATE.to_string(),
+            skip_extensions: ["js", "json", "svg", "css", "ts", "html", "xml", "map"]
+                .map(str::to_owned)
+                .to_vec(),
         }
     }
 }

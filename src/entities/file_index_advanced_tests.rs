@@ -203,7 +203,8 @@ fn visit_stats_default_is_zero() {
         super::VisitStats {
             skipped_empty: 0,
             skipped_unreadable: 0,
-            walker_errors: 0
+            walker_errors: 0,
+            skipped_by_ext: 0,
         }
     );
 }
@@ -454,4 +455,22 @@ fn remove_under_prefix_concurrent_with_readers_does_not_deadlock() {
     stop.store(true, Ordering::Relaxed);
     reader.join().unwrap();
     assert_eq!(removed, 50, "prefix 下 50 文件必须全部移除");
+}
+
+#[test]
+fn visit_location_skipping_drops_listed_extensions_case_insensitively() {
+    let dir = tempdir().unwrap();
+    fs::write(dir.path().join("a.js"), b"js").unwrap();
+    fs::write(dir.path().join("b.JSON"), b"json").unwrap();
+    fs::write(dir.path().join("c.png"), b"png").unwrap();
+    fs::write(dir.path().join("noext"), b"x").unwrap();
+    let root = Utf8PathBuf::from(dir.path().to_str().unwrap());
+    let mut index = Index::new();
+    index.visit_location_skipping(
+        &crate::entities::uri::Location::Local(root),
+        &crate::adapters::backend::local::LocalBackend::arc(),
+        &["js".to_owned(), "json".to_owned()],
+    );
+    assert_eq!(index.len(), 2);
+    assert_eq!(index.stats().skipped_by_ext, 2);
 }

@@ -2,8 +2,8 @@ use std::collections::HashSet;
 use std::fmt;
 
 use camino::{Utf8Path, Utf8PathBuf};
-use dashmap::DashMap;
 use dashmap::mapref::one::Ref;
+use dashmap::{DashMap, DashSet};
 use parking_lot::Mutex;
 
 use super::file_info::Info;
@@ -28,6 +28,7 @@ pub struct VisitStats {
     pub skipped_unreadable: u64,
     /// walker 自身报错的 entry（包括非 UTF-8 路径、metadata 失败）
     pub walker_errors: u64,
+    pub skipped_by_ext: u64,
 }
 
 /// F1 并行化：`DashMap` 让 `exists`/`add`/`remove_under_prefix` 全 `&self`，
@@ -39,7 +40,22 @@ pub struct Index {
     similar_files: DashMap<u64, Mutex<HashSet<Utf8PathBuf>>>,
     // file path -> file meta
     files: DashMap<Utf8PathBuf, Info>,
+    names: DashSet<String>,
     stats: VisitStats,
+}
+
+fn target_key(loc: &Location) -> Utf8PathBuf {
+    match loc {
+        Location::Local(p) => p.clone(),
+        other => other.display().into(),
+    }
+}
+
+fn name_key(key: &Utf8Path) -> String {
+    key.components()
+        .map(|c| c.as_str().to_lowercase())
+        .collect::<Vec<_>>()
+        .join("/")
 }
 
 impl fmt::Debug for Index {
@@ -63,6 +79,7 @@ impl Index {
         Self {
             files: DashMap::new(),
             similar_files: DashMap::new(),
+            names: DashSet::new(),
             stats: VisitStats::default(),
         }
     }
@@ -100,14 +117,18 @@ impl Index {
         self.files.iter()
     }
 
+    #[must_use]
+    pub fn into_infos(self) -> Vec<Info> {
+        self.files.into_iter().map(|(_, info)| info).collect()
+    }
+
     /// `similar_files` 桶内所有 path 的 snapshot（clone）；调用方拿到 owned Vec 后
     /// bucket lock 立即释放，避免长时持锁与 `add` 并发冲突。
     #[must_use]
     pub fn similar_paths(&self, fast_hash: u64) -> Vec<Utf8PathBuf> {
         self.similar_files
             .get(&fast_hash)
-            .map(|bucket| bucket.value().lock().iter().cloned().collect())
-            .unwrap_or_default()
+            .map_or_default(|bucket| bucket.value().lock().iter().cloned().collect())
     }
 
     /// `similar_files` 桶数（不同 `fast_hash` 值的个数）；调试日志用。
@@ -122,13 +143,18 @@ impl Index {
     /// 目标名，避免同 basename 多源被静默分派到同一 target 字符串致 dry-run 报表
     /// 与真跑归档路径分裂。真跑路径下同 hash src 走 `exists` 判去重，此 helper
     /// 只对「未真写但已 add `cloned_at`」的 dry-run 语义生效。
+    #[cfg(test)]
     #[must_use]
     pub fn contains_target(&self, loc: &Location) -> bool {
-        let key: Utf8PathBuf = match loc {
-            Location::Local(p) => p.clone(),
-            other => other.display().into(),
-        };
-        self.files.contains_key(&key)
+        self.names.contains(&name_key(&target_key(loc)))
+    }
+
+    pub fn try_reserve_target(&self, loc: &Location) -> bool {
+        self.names.insert(name_key(&target_key(loc)))
+    }
+
+    pub(super) fn reserve_name(&self, key: &Utf8Path) {
+        self.names.insert(name_key(key));
     }
 
     /// tracing debug 展示样本用；F1 后 `Info` 不再可克隆（内含 `Mutex<Lazy>`），

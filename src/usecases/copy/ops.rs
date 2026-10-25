@@ -5,17 +5,17 @@ use std::sync::Arc;
 
 #[cfg(test)]
 use dashmap::DashSet;
-use tracing::warn;
+use tracing::debug;
 
 use super::run::CopyOpts;
 use crate::entities::backend::{
     Backend, output_write_error, partial_move_error, stream_copy as backend_stream_copy,
 };
 use crate::entities::common;
-#[cfg(test)]
 use crate::entities::file_index::Index;
 use crate::entities::file_info::Info;
 use crate::entities::uri::Location;
+use camino::Utf8Path;
 
 #[path = "ops_phantom.rs"]
 mod phantom;
@@ -27,31 +27,35 @@ pub(crate) use self::phantom::do_copy;
 // （clippy too_many_lines）；`coverage(off)` 理由与 do_copy 相同（multi-binary
 // instance 下 `warn!` micro-region 虚假 miss），业务由 `copy_doc_only_tests` /
 // `copy_advanced_tests::include_non_media` 系列真测。
-fn passes_type_filter(src: &Info, opts: &CopyOpts<'_>, feature: &'static str, disp: &str) -> bool {
-    if opts.doc_only {
-        if !src.is_office() {
-            warn!(
-                feature,
-                operation = "filter_media",
-                result = "skipped_non_document",
-                source = %disp,
-                "file is not a document (copy-doc/move-doc only archive document formats)"
-            );
-            return false;
-        }
+pub(super) fn type_allowed(src: &Info, include_non_media: bool, doc_only: bool) -> bool {
+    if doc_only {
+        return src.is_office();
+    }
+    if include_non_media {
         return true;
     }
-    if !opts.include_non_media && !src.is_media() {
-        warn!(
-            feature,
-            operation = "filter_media",
-            result = "skipped_non_media",
-            source = %disp,
-            "file is not an image or video (pass --include-non-media to copy anyway)"
-        );
-        return false;
+    src.is_media()
+}
+
+pub(super) fn count_type_filtered(source: &Index, opts: &CopyOpts<'_>) -> usize {
+    source
+        .iter()
+        .filter(|kv| !type_allowed(kv.value(), opts.include_non_media, opts.doc_only))
+        .count()
+}
+
+fn passes_type_filter(src: &Info, opts: &CopyOpts<'_>, feature: &'static str, disp: &str) -> bool {
+    if type_allowed(src, opts.include_non_media, opts.doc_only) {
+        return true;
     }
-    true
+    debug!(
+        feature,
+        operation = "filter_media",
+        result = "skipped_by_type",
+        source = %disp,
+        "file skipped by type filter"
+    );
+    false
 }
 
 // stream_copy + remove(=move) 路径下的 src 删除步骤。抽出独立 fn 是为了用
@@ -115,6 +119,21 @@ pub(super) fn do_copy_with_default_cache(
 /// `"local"`）语义正确；fast-path 优化由 `do_copy` 的 `supports_native_rename_to`
 /// 分支承担。
 #[inline(never)]
+pub(super) fn refuse_self_duplicate(src: &Location, dup: &Utf8Path) -> common::Result<()> {
+    let Location::Local(p) = src else {
+        return Ok(());
+    };
+    if let (Ok(a), Ok(b)) = (std::fs::canonicalize(p), std::fs::canonicalize(dup))
+        && a == b
+    {
+        return Err(common::Error::Io(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            format!("refusing to remove {p}: it is the output duplicate {dup} itself"),
+        )));
+    }
+    Ok(())
+}
+
 fn stream_copy(src: &Info, target: &Location, out_be: &dyn Backend) -> common::Result<()> {
     let src_be = src.backend();
     backend_stream_copy(src_be.as_ref(), src.location(), out_be, target, false)

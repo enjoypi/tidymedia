@@ -84,7 +84,7 @@ pub(super) fn generate_unique_name(
         // dry_run 也 add cloned_at 到 output_index（ops.rs），此处校验避免第二个
         // 同 basename+同月+不同 hash 源被静默分派到同一 target；否则 dry-run 报告
         // target 相同、真跑却走 _N 后缀，tidy-verify 桶对账漏 collision。
-        if output_index.contains_target(&target_loc) {
+        if !output_index.try_reserve_target(&target_loc) {
             continue;
         }
         // output_index 权威（output 扫描零 skip/零 walker 错误，或 root 不存在）

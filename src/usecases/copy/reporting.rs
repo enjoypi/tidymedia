@@ -107,8 +107,10 @@ fn make_report(
 ) -> CopyReport {
     // indexed = copied + ignored + failed（do_copy 三态都来自已入索引的文件）。
     let indexed = copied + ignored + failed;
-    let skipped_total =
-        scan_stats.skipped_empty + scan_stats.skipped_unreadable + scan_stats.walker_errors;
+    let skipped_total = scan_stats.skipped_empty
+        + scan_stats.skipped_unreadable
+        + scan_stats.walker_errors
+        + scan_stats.skipped_by_ext;
     let scanned = indexed + usize::try_from(skipped_total).unwrap_or(usize::MAX);
     CopyReport {
         scanned,

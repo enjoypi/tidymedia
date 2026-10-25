@@ -11,6 +11,7 @@ pub(super) mod reporting;
 pub(super) mod run;
 
 pub(crate) use self::classify::{make_classify_provider, template_needs_category};
+pub(crate) use self::index::source_skip_extensions;
 pub(crate) use self::run::{Source, copy_with_sidecar, resolved_template};
 
 // 测试经 `super::super::*` glob 访问的内部项（私有 use 对子模块可见，生产侧不暴露）。
@@ -62,3 +63,15 @@ mod parallel_tests;
 #[cfg(test)]
 #[path = "copy_abort_tests.rs"]
 mod abort_tests;
+
+#[cfg(test)]
+#[path = "copy_png_fixture_tests.rs"]
+mod png_fixture;
+
+#[cfg(test)]
+#[path = "copy_safety_tests.rs"]
+mod safety_tests;
+
+#[cfg(test)]
+#[path = "copy_type_filter_tests.rs"]
+mod type_filter_tests;

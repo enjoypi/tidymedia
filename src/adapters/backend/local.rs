@@ -10,6 +10,8 @@
 mod backend_impl;
 #[path = "local_mmap.rs"]
 mod mmap;
+#[path = "local_noreplace.rs"]
+mod noreplace;
 
 use std::fs;
 use std::io;
@@ -191,3 +193,7 @@ mod rename_tests;
 #[cfg(test)]
 #[path = "local_edge_tests.rs"]
 mod edge_tests;
+
+#[cfg(test)]
+#[path = "local_noreplace_tests.rs"]
+mod noreplace_tests;

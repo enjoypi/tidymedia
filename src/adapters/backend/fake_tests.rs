@@ -67,3 +67,27 @@ fn rename_propagates_remove_error() {
         "must label half-state, got: {msg}"
     );
 }
+
+#[test]
+fn rename_refuses_existing_target() {
+    let b = FakeBackend::new("smb");
+    let src = smb_loc("a.bin");
+    let dst = smb_loc("b.bin");
+    b.add_file(src.clone(), b"new".to_vec());
+    b.add_file(dst.clone(), b"old".to_vec());
+    let err = b.rename(&src, &dst, false).unwrap_err();
+    assert_eq!(err.kind(), io::ErrorKind::AlreadyExists);
+    assert_eq!(b.read_bytes(&src).as_deref(), Some(b"new".as_ref()));
+    assert_eq!(b.read_bytes(&dst).as_deref(), Some(b"old".as_ref()));
+}
+
+#[test]
+fn open_write_refuses_existing_target() {
+    let b = FakeBackend::new("smb");
+    let dst = smb_loc("b.bin");
+    b.add_file(dst.clone(), b"old".to_vec());
+    let Err(err) = b.open_write(&dst, false) else {
+        panic!("open_write must refuse an existing target");
+    };
+    assert_eq!(err.kind(), io::ErrorKind::AlreadyExists);
+}

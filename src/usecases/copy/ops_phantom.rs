@@ -30,6 +30,10 @@ pub(crate) fn do_copy(
     let src_display = src.full_path.as_str();
     let feature = feature_of(opts.remove);
 
+    if !super::passes_type_filter(src, opts, feature, src_display) {
+        return Ok(false);
+    }
+
     if let Some(dup) = output_index.exists(src, true)? {
         debug!(
             feature,
@@ -40,16 +44,13 @@ pub(crate) fn do_copy(
             "source duplicates an existing file in output"
         );
         if opts.remove && !opts.dry_run {
+            super::refuse_self_duplicate(&src_loc, &dup)?;
             src.backend().remove_file(&src_loc)?;
         }
         return Ok(false);
     }
 
-    if !super::passes_type_filter(src, opts, feature, src_display) {
-        return Ok(false);
-    }
-
-    if let Some((target_dir_loc, target_loc)) = generate_unique_name(
+    while let Some((target_dir_loc, target_loc)) = generate_unique_name(
         src,
         output_dir,
         output_backend,
@@ -93,12 +94,18 @@ pub(crate) fn do_copy(
                             .add(src.cloned_at(target_loc.clone(), Arc::clone(output_backend)));
                         return Err(e.into());
                     }
+                    if e.kind() == std::io::ErrorKind::AlreadyExists {
+                        continue;
+                    }
                     return Err(output_write_error(e).into());
                 }
             }
         }
 
-        super::stream_copy(src, &target_loc, output_backend.as_ref())?;
+        match super::stream_copy(src, &target_loc, output_backend.as_ref()) {
+            Err(common::Error::Io(e)) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            r => r?,
+        }
         output_index.add(src.cloned_at(target_loc.clone(), Arc::clone(output_backend)));
         if opts.remove {
             super::remove_src_after_stream_copy(src, &src_loc, src_display, &target_loc)?;
@@ -112,12 +119,11 @@ pub(crate) fn do_copy(
             target = %target_display,
             "file transferred"
         );
-        Ok(true)
-    } else {
-        Err(common::Error::Io(std::io::Error::other(format!(
-            "无法为\"{src_display}\"生成目标目录的文件名"
-        ))))
+        return Ok(true);
     }
+    Err(common::Error::Io(std::io::Error::other(format!(
+        "无法为\"{src_display}\"生成目标目录的文件名"
+    ))))
 }
 
 fn record_dry_run(

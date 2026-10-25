@@ -27,6 +27,17 @@ fn under_prefix_matches_windows_backslash_rest() {
 }
 
 #[test]
+fn under_prefix_rejects_prefix_longer_than_path() {
+    assert!(!under_prefix("C:", r"C:\photos"));
+}
+
+#[test]
+#[cfg(windows)]
+fn under_prefix_ignores_ascii_case_on_windows() {
+    assert!(under_prefix(r"d:\user\Pictures\a.jpg", r"D:\User\pictures"));
+}
+
+#[test]
 fn best_effort_remove_partial_dst_covers_err_and_ok() {
     let be = FakeBackend::new("local");
     let missing = Location::Local(Utf8PathBuf::from("out/group-000/BEST_x.jpg"));

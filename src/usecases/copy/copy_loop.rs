@@ -8,9 +8,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use camino::Utf8PathBuf;
 use dashmap::DashSet;
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
-use tracing::error;
+use tracing::{error, warn};
 
-use super::ops::do_copy;
+use super::ops::{count_type_filtered, do_copy};
 use super::run::CopyOpts;
 use crate::entities::backend::{Backend, is_output_write_denied};
 use crate::entities::common;
@@ -72,6 +72,16 @@ pub(super) fn run_copy_loop(
         g.sort();
     }
     let groups: Vec<Vec<Utf8PathBuf>> = by_hash.into_values().collect();
+    let filtered = count_type_filtered(source, opts);
+    if filtered > 0 {
+        warn!(
+            feature,
+            operation = "filter_media",
+            result = "skipped_by_type",
+            filtered,
+            "files skipped by type filter (copy/move: not image or video, pass --include-non-media to include; copy-doc/move-doc: not a document)"
+        );
+    }
 
     // Phase B：桶间 par_iter 并行；每桶内串行处理，reduce 汇总 CopyDelta。
     // install_io 让循环走 I/O 池（CPU×4 clamp[8,64]）；do_copy 内的远端 open_read /

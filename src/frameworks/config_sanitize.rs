@@ -48,6 +48,7 @@ pub fn sanitize(mut cfg: Config) -> Config {
         );
         cfg.copy.unique_name_max_attempts = fallback;
     }
+    cfg.copy.skip_extensions = normalize_extensions(&cfg.copy.skip_extensions);
     sanitize_template_field(
         &mut cfg.copy.archive_template,
         CopyConfig::default().archive_template,
@@ -110,6 +111,13 @@ pub(super) fn eprintln_sanitize_fallback(
 
 // archive_template / doc_archive_template 共用的模板校验回退：非法模板会渲染出
 // 字面 `{xxx}` 目录，warn + stderr 兜底 + 回退默认（关键 fallback 双通道可见）。
+fn normalize_extensions(list: &[String]) -> Vec<String> {
+    list.iter()
+        .map(|e| e.trim().trim_start_matches('.').to_lowercase())
+        .filter(|e| !e.is_empty())
+        .collect()
+}
+
 fn sanitize_template_field(value: &mut String, fallback: String, field: &'static str) {
     if let Err(e) = validate_archive_template(value) {
         warn!(

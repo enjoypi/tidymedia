@@ -8,6 +8,10 @@ fn config_defaults_match_historical_constants() {
     assert_eq!(c.copy.unique_name_max_attempts, 10);
     assert_eq!(c.copy.archive_template, "{year}/{month}/{valuable_name}");
     assert_eq!(c.copy.doc_archive_template, "{category}/{year}/{month}");
+    assert_eq!(
+        c.copy.skip_extensions,
+        ["js", "json", "svg", "css", "ts", "html", "xml", "map"]
+    );
     assert_eq!(c.exif.valid_date_time_secs, 946_684_800);
     assert_eq!(c.backend.smb.default_user, "");
     assert_eq!(c.backend.smb.workgroup, "WORKGROUP");

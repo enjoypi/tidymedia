@@ -79,6 +79,21 @@ fn load_sanitizes_zero_unique_name_max_attempts_to_default() {
     remove_env_var("TIDYMEDIA_CONFIG");
 }
 
+#[test]
+fn load_normalizes_skip_extensions() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("ext.yaml");
+    std::fs::write(
+        &path,
+        "copy:\n  skip_extensions: [\".JS\", \" Json \", \"\"]\n",
+    )
+    .unwrap();
+    set_env_var("TIDYMEDIA_CONFIG", path.to_str().unwrap());
+    let cfg = load();
+    assert_eq!(cfg.copy.skip_extensions, ["js", "json"]);
+    remove_env_var("TIDYMEDIA_CONFIG");
+}
+
 // 0 让 smb2 每次请求立即超时：sanitize 必须 warn + 回退默认 30。
 #[test]
 fn load_sanitizes_zero_smb_timeout_secs_to_default() {

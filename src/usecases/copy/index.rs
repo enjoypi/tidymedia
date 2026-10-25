@@ -3,10 +3,12 @@
 
 use tracing::debug;
 
+use super::ops::type_allowed;
 use super::run::{Source, configured_chrono_offset};
 use crate::entities::common;
 use crate::entities::common::{canonical_prefix, under_prefix};
 use crate::entities::file_index::{CandidateProvider, Index, TextClassifyProvider};
+use crate::entities::file_info::Info;
 
 // 重叠保护：source ⊆ output（canonical 前缀含相等）时，dedup 会把每个源文件判为
 // output 中已存在的副本，move 模式下 remove 即删除文件自身——必须 fail fast。
@@ -44,9 +46,10 @@ pub(super) fn build_source_index(
     doc_only: bool,
 ) -> Index {
     let (output_prefix, output_literal) = output_prefixes;
+    let skip_ext = source_skip_extensions(include_non_media, doc_only);
     let mut source = Index::new();
     for (loc, backend) in sources {
-        source.visit_location(loc, backend);
+        source.visit_location_skipping(loc, backend, skip_ext);
     }
     // output ⊂ source（就地归档，如 copy /photos -o /photos/archive）：把已归档
     // 文件从 source 索引剔除，否则它们会被再次复制 / 在 move 模式下被误删。
@@ -69,11 +72,20 @@ pub(super) fn build_source_index(
     // P3 富集：adapters 层注入的 sidecar 发现（XMP / Takeout），entities 只消费
     // 转换好的 Candidate（依赖倒置，协议细节不进 usecases）。
     if let Some(provider) = sidecar {
-        source.enrich_candidates(provider);
+        source.enrich_candidates(provider, &|i: &Info| {
+            type_allowed(i, include_non_media, doc_only)
+        });
     }
     // 内容分类（copy-doc/move-doc）：MUST 在 parse_exif 之后（复用已 sniff MIME）。
     if let Some(provider) = classifier {
         source.classify_documents(&provider);
     }
     source
+}
+
+pub(crate) fn source_skip_extensions(include_non_media: bool, doc_only: bool) -> &'static [String] {
+    if include_non_media || doc_only {
+        return &[];
+    }
+    &crate::usecases::config::config().copy.skip_extensions
 }
