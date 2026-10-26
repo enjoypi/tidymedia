@@ -8,7 +8,7 @@ SCRIPT_DIR="$(dirname "${BASH_SOURCE[0]}")"
 cd "$SCRIPT_DIR/.."
 
 LCOV_OUT=target/coverage.lcov
-COV_IGNORE='(adapters[/\\]backend[/\\][a-z]+_real\.rs|adapters[/\\](ocr|face|classify)[/\\]tract_[a-z_]+\.rs|_phantom\.rs)$'
+COV_IGNORE='(adapters[/\\]backend[/\\][a-z]+_real\.rs|adapters[/\\](ocr|classify)[/\\]tract_[a-z_]+\.rs|_phantom\.rs)$'
 COV_PLATFORM_ARGS=()
 
 if [[ "${OS:-}" == "Windows_NT" ]]; then

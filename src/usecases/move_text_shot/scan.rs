@@ -147,7 +147,7 @@ pub(super) fn process_entry(
     delta
 }
 
-/// 见 [`common::entry_under_prefix`]（已上提 entities 单点，cull 共用）。
+/// 见 [`common::entry_under_prefix`]（已上提 entities 单点）。
 pub(super) fn is_entry_under_output(entry_loc: &Location, output_prefix: &str) -> bool {
     common::entry_under_prefix(entry_loc, output_prefix)
 }

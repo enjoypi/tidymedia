@@ -2,7 +2,6 @@
 pub(super) use copy::Source;
 pub(super) use copy::copy_with_sidecar;
 pub(super) use copy::{make_classify_provider, resolved_template, template_needs_category};
-pub(super) use cull::cull;
 pub(super) use find::find_duplicates;
 pub(super) use move_text_shot::move_text_shot;
 pub(super) use verify::verify;
@@ -10,12 +9,10 @@ pub(super) use verify::verify;
 pub(crate) mod classify;
 pub(crate) mod config;
 pub(crate) mod detector;
-pub(crate) mod face;
 pub(crate) mod ocr;
 
 mod archive_template;
 mod copy;
-pub(crate) mod cull;
 pub(crate) mod find;
 pub(crate) mod move_text_shot;
 pub(crate) mod report;

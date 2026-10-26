@@ -17,7 +17,7 @@ pub use self::phantom::under_prefix;
 
 /// 把 [`Location`] 规范化为 prefix 字符串：Local 路径直接 `std::fs::canonicalize`
 /// **解析符号链接**（Windows UNC `\\?\` 前缀剥离与 `full_path` 同口径）；远端 backend
-/// 直接 display。copy / move / cull / move-text-shot 4 个 use case 的「source 是否
+/// 直接 display。copy / move / move-text-shot 3 个 use case 的「source 是否
 /// 在 output 子树」判定共用此助手——朴素 `Location::display()` 在 output 是符号链接时
 /// （`/tmp/out → /photos/out`）会让 src `/photos/out/img.jpg` 与 output prefix
 /// `/tmp/out` 字面不匹配，`under_prefix` 误返 false，move 模式下源被当"output 外"
@@ -46,9 +46,9 @@ pub fn canonical_prefix(loc: &Location) -> String {
 /// entry 级「是否位于 output 子树」判定：`output_prefix` 已 canonical，而 walker
 /// yield 的 entry 路径是字面形式（含 symlink 段，如 macOS `/var → /private/var`、
 /// `/tmp → /private/tmp`）→ 纯字面 `under_prefix` 会误返 false，让 output 子树
-/// 文件被当 source 处理（cull/copy 就地归档保护失效）。字面 fast-path +
+/// 文件被当 source 处理（copy 就地归档保护失效）。字面 fast-path +
 /// entry canonicalize 补判；远端 backend `canonical_prefix` fallback 到 display
-/// 即等价。cull / move-text-shot 共用；copy 的 `Index::remove_under_prefix`
+/// 即等价。move-text-shot 使用；copy 的 `Index::remove_under_prefix`
 /// 场景（key 是字面 `&str` 非 `Location`）走双前缀方案（canonical + 字面各剔一遍）。
 ///
 /// 字面 fast-path + canonical fallback 收敛在同一 helper，让上层调用点只剩单

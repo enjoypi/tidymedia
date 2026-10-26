@@ -1,6 +1,6 @@
 // 子命令 dispatch 拆分文件：原 dispatch.rs 420 行拆为两份各 ≤300。
 // 本文件承接 `tidy_with` 各 arm 的透传执行（copy/move/copydoc/movedoc 合一
-// `dispatch_copy_or_move` + find/move-text-shot/cull/verify）与公共 helper
+// `dispatch_copy_or_move` + find/move-text-shot/verify）与公共 helper
 // （`validate_template_arg` / `build_source` / `build_sources`）。
 // 公开 API（`CommandResult` / `tidy` / `tidy_with`）留在 dispatch.rs；
 // 本文件函数 `pub(super)` 仅父模块可见，签名与行为完全不变。
@@ -110,43 +110,6 @@ pub(super) fn dispatch_move_text_shot(
         sink.write(&Report::MoveTextShot(&move_report));
     }
     Ok(CommandResult::MoveTextShot(move_report))
-}
-
-#[expect(
-    clippy::needless_pass_by_value,
-    reason = "由 Commands::Cull enum 解构 by-value 而来；usecase 接 &[]/& 借用"
-)]
-pub(super) fn dispatch_cull(
-    factory: &dyn BackendFactory,
-    detectors: &dyn DetectorFactory,
-    sources: Vec<Location>,
-    output: Location,
-    dry_run: bool,
-    phash_max: Option<u8>,
-    report_path: Option<&str>,
-) -> Result<CommandResult> {
-    let scrfd = detectors.build_face_detector()?;
-    let facenet = detectors.build_face_embedder()?;
-    let facemesh = detectors.build_face_mesh()?;
-    let eyestate = detectors.build_eye_state_classifier()?;
-    // phash_hamming_max 默认从 face config 取；detector 构造已完成后仍需 config 值。
-    let face_cfg = &crate::usecases::config::config().backend.face;
-    let cull_report = crate::usecases::cull(
-        scrfd.as_ref(),
-        facenet.as_ref(),
-        facemesh.as_ref(),
-        eyestate.as_ref(),
-        factory,
-        &sources,
-        &output,
-        dry_run,
-        phash_max.unwrap_or(face_cfg.phash_hamming_max),
-    )?;
-    if let Some(path) = report_path {
-        let sink = JsonFileReportSink::new(path);
-        sink.write(&Report::Cull(&cull_report));
-    }
-    Ok(CommandResult::Cull(cull_report))
 }
 
 pub(super) fn dispatch_verify(

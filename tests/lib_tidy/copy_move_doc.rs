@@ -10,30 +10,12 @@ use tidymedia::{
 use super::{DATA_DIR, local};
 
 /// 只提供 `DocumentClassifier` 的测试 factory：copy-doc/move-doc 不 build 其它
-/// detector，5 个 face/ocr 方法恒 Err 兜底（被调用即测试错误）。
+/// detector，OCR 方法恒 Err 兜底（被调用即测试错误）。
 struct ClassifierOnlyFactory {
     rules: Vec<(&'static str, &'static str, f32)>,
 }
 
 impl DetectorFactory for ClassifierOnlyFactory {
-    fn build_face_detector(&self) -> std::io::Result<Box<dyn tidymedia::FaceDetector>> {
-        Err(std::io::Error::other("not used by copy-doc"))
-    }
-
-    fn build_face_embedder(&self) -> std::io::Result<Box<dyn tidymedia::FaceEmbedder>> {
-        Err(std::io::Error::other("not used by copy-doc"))
-    }
-
-    fn build_face_mesh(&self) -> std::io::Result<Box<dyn tidymedia::FaceMeshDetector>> {
-        Err(std::io::Error::other("not used by copy-doc"))
-    }
-
-    fn build_eye_state_classifier(
-        &self,
-    ) -> std::io::Result<Box<dyn tidymedia::EyeStateClassifier>> {
-        Err(std::io::Error::other("not used by copy-doc"))
-    }
-
     fn build_text_detector(&self) -> std::io::Result<Box<dyn tidymedia::TextDetector>> {
         Err(std::io::Error::other("not used by copy-doc"))
     }

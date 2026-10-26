@@ -6,13 +6,13 @@
 use camino::Utf8PathBuf;
 use sha2::{Digest, Sha512};
 
+use super::phash::{hamming, phash};
 use crate::entities::SecureHash;
 use crate::entities::backend::{Backend, EntryKind};
 use crate::entities::file_index::Index;
 use crate::entities::file_info::Info;
 use crate::entities::uri::Location;
 use crate::usecases::copy::Source;
-use crate::usecases::cull::phash::{hamming, phash};
 
 use super::candidates::CandidateIndex;
 

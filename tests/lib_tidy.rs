@@ -56,6 +56,8 @@ fn smb_loc(path: &str) -> Location {
 #[path = "lib_tidy/dispatch_and_cli.rs"]
 mod dispatch_and_cli;
 
+#[path = "lib_tidy/binary_cli_flags.rs"]
+mod binary_cli_flags;
 #[path = "lib_tidy/run_cli_flags.rs"]
 mod run_cli_flags;
 
@@ -86,9 +88,6 @@ mod windows_same_volume;
 #[path = "lib_tidy/move_text_shot.rs"]
 mod move_text_shot;
 
-#[path = "lib_tidy/cull.rs"]
-mod cull;
-
 #[path = "lib_tidy/office_archive.rs"]
 mod office_archive;
 
@@ -99,6 +98,8 @@ mod copy_move_doc;
 mod verify;
 #[path = "lib_tidy/verify_content.rs"]
 mod verify_content;
+#[path = "lib_tidy/verify_time.rs"]
+mod verify_time;
 
 #[path = "support/tracing_fixture_tests.rs"]
 mod tracing_fixture;

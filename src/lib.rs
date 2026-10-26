@@ -11,12 +11,13 @@ pub use adapters::backend::local::LocalBackend;
 pub use adapters::backend::smb::{SmbBackend, SmbClient, SmbTarget};
 pub use adapters::cli::{Cli, Commands, run_cli};
 pub use adapters::dispatch::{CommandResult, tidy, tidy_with};
-pub use usecases::config::{CategoryDef, ClassifyConfig, FaceConfig, OcrConfig};
-pub use usecases::cull::{CullReport, CulledEntry, GroupReport, ScoreBreakdown};
+pub use usecases::config::{CategoryDef, ClassifyConfig, OcrConfig, VerifyConfig};
 pub use usecases::move_text_shot::MoveTextShotReport;
 pub use usecases::verify::{VerifyEntry, VerifyReport};
 // doc(hidden) 观测口：content_diff 字节级纯函数（JPEG/PNG/BMFF 熵 hash + 旋转
 // pHash）；供 tests/content_diff_deep.rs 在 release 实例直接构造 bytes 覆盖各分支。
+#[doc(hidden)]
+pub use adapters::ocr::tract_dbnet::{decide, preprocess as dbnet_preprocess};
 #[doc(hidden)]
 pub use usecases::verify::content_diff::{
     bmff_mdat_hash, entropy_hash, hash_rest, jpeg_entropy_hash, png_idat_hash,
@@ -24,22 +25,6 @@ pub use usecases::verify::content_diff::{
 };
 #[doc(hidden)]
 pub use usecases::verify::strip_source_root;
-// doc(hidden) 观测口：tract 内部纯算法函数（真模型输出不会触发其防御分支，
-// 如 SCRFD 恒 9 张、无 NaN）；供 tests/tract_decode_* 在 release 实例覆盖。
-#[doc(hidden)]
-pub use adapters::face::tract_eyestate::{
-    decode as eyestate_decode, preprocess as eyestate_preprocess,
-};
-#[doc(hidden)]
-pub use adapters::face::tract_facemesh::decode as facemesh_decode;
-#[doc(hidden)]
-pub use adapters::face::tract_mobilefacenet::decode as facenet_decode;
-#[doc(hidden)]
-pub use adapters::face::tract_scrfd::preprocess as scrfd_preprocess;
-#[doc(hidden)]
-pub use adapters::face::tract_scrfd_real::{ScaleMeta, decode_outputs, iou, nms};
-#[doc(hidden)]
-pub use adapters::ocr::tract_dbnet::{decide, preprocess as dbnet_preprocess};
 
 // doc(hidden) 观测口：office epub/rtf 防御/变体分支（zip 条目遍历/容器存在性/
 // 控制字边界）；供 tests/office_deep_* 在 release 实例覆盖。
@@ -69,8 +54,6 @@ pub use entities::office::rtf::{
     consume_control as rtf_consume_control, extract_text as rtf_extract_text, parse as rtf_parse,
     scan_int_after as rtf_scan_int_after, strip_rtf_into as rtf_strip_rtf_into,
 };
-#[doc(hidden)]
-pub use usecases::cull::best_effort_remove_partial_dst;
 // TEMP office_deep re-export（验证后移除；由主线程统一并入 lib.rs）
 #[doc(hidden)]
 pub use entities::office::cfb;
@@ -130,19 +113,6 @@ pub use adapters::classify::build_classifier;
 #[doc(hidden)]
 pub use adapters::classify::fake::FakeDocumentClassifier;
 pub use usecases::classify::{Classification, DocumentClassifier};
-
-// Face Ports（cull 子命令用）：4 个 trait + `FaceDetection` DTO 在 usecases/face；
-// 真实实现 + 4 个 build_* 装配函数 + Fake 在 adapters/face。
-#[doc(hidden)]
-pub use adapters::face::fake::{
-    FakeEyeStateClassifier, FakeFaceDetector, FakeFaceEmbedder, FakeFaceMeshDetector,
-};
-pub use adapters::face::{
-    build_eyestate_classifier, build_facemesh, build_facenet_embedder, build_scrfd_detector,
-};
-pub use usecases::face::{
-    EyeStateClassifier, FaceDetection, FaceDetector, FaceEmbedder, FaceMeshDetector,
-};
 
 pub fn install_config_loader() {
     frameworks::config::install_global_loader();

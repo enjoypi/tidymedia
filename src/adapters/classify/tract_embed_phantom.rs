@@ -46,7 +46,6 @@ fn cosine(a: &[f32], b: &[f32]) -> f32 {
     a.iter().zip(b).map(|(x, y)| x * y).sum()
 }
 
-// 与 `usecases::cull::crop::total_cmp_nan_as_neg_inf` 同语义的本地副本
 // （原件 `pub(super)` 对 adapters 不可见；4 行 helper 不值得为此上提公共层）。
 fn total_cmp_nan_as_neg_inf(a: f32, b: f32) -> std::cmp::Ordering {
     match (a.is_nan(), b.is_nan()) {

@@ -2,8 +2,8 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { resolve } from "node:path";
 
-const SUBS = ["copy", "move", "find", "cull", "move-text-shot", "verify"];
-const NO_DRY_RUN_SUBS = ["find", "cull", "verify"];
+const SUBS = ["copy", "move", "find", "move-text-shot", "verify"];
+const NO_DRY_RUN_SUBS = ["find", "verify"];
 const IS_WINDOWS = process.platform === "win32";
 
 type Cast = "int" | "float" | "str";
@@ -208,7 +208,7 @@ export function renderReport(
 
 function usage(): void {
   console.error(
-    "用法：bun scripts/perf-collect.ts --sub <copy|move|find|cull|move-text-shot|verify> --data <dir> --output-dir <dir> [--output-target <path>] [--extra <args>] [--project-root <root>]",
+    "用法：bun scripts/perf-collect.ts --sub <copy|move|find|move-text-shot|verify> --data <dir> --output-dir <dir> [--output-target <path>] [--extra <args>] [--project-root <root>]",
   );
 }
 

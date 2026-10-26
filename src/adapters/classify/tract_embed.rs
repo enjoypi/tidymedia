@@ -71,7 +71,7 @@ pub(crate) use self::phantom::best_match;
 pub(crate) use self::phantom::normalize;
 
 /// 装配入口：`DefaultDetectorFactory::build_document_classifier` 调用。
-/// 模型/tokenizer 路径为空时报 `InvalidInput`（与 face/ocr 先例一致）；
+/// 模型/tokenizer 路径为空时报 `InvalidInput`（与 OCR 一致）；
 /// `categories` 为空不报错——classify 时短路返 [`empty_classification`]，
 /// 调用方按低分落 uncategorized。
 ///

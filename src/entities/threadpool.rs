@@ -3,7 +3,7 @@
 //! CPU 线程，CPU-bound 后续阶段（pHash / EXIF 解析）无线程可用。
 //!
 //! 本 pool 默认 CPU × 4，clamp `[8, 64]`，仅服务 I/O-bound 阶段
-//! （`visit_location` / `parse_exif` / `enrich_candidates`），cull 等 CPU-heavy
+//! （`visit_location` / `parse_exif` / `enrich_candidates`），其他 CPU-heavy
 //! 路径继续走 rayon 全局池。OS 线程创建失败（如 ulimit nproc 耗尽）→ panic：
 //! 该环境下全局池同样无法构造，没有合理 fallback，让 user 看到资源耗尽根因
 //! 比静默退化到串行更可诊断。

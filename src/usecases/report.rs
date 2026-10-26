@@ -15,7 +15,6 @@ pub fn elapsed_ms(start: Instant) -> u64 {
 pub const FEATURE_COPY: &str = "copy";
 pub const FEATURE_MOVE: &str = "move";
 pub const FEATURE_FIND: &str = "find";
-pub const FEATURE_CULL: &str = "cull";
 pub const FEATURE_MOVE_TEXT_SHOT: &str = "move_text_shot";
 pub const FEATURE_VERIFY: &str = "verify";
 
@@ -123,7 +122,6 @@ pub enum Report<'a> {
     Copy(&'a CopyReport),
     Find(&'a FindReport),
     MoveTextShot(&'a crate::usecases::move_text_shot::MoveTextShotReport),
-    Cull(&'a crate::usecases::cull::CullReport),
     Verify(&'a crate::usecases::verify::VerifyReport),
 }
 

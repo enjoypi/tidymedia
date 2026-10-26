@@ -17,6 +17,16 @@ fn cli_help_exits_zero() {
 }
 
 #[test]
+fn cli_cull_subcommand_is_removed() {
+    tidymedia()
+        .arg("--help")
+        .assert()
+        .success()
+        .stdout(contains("cull").not());
+    tidymedia().args(["cull", "--help"]).assert().failure();
+}
+
+#[test]
 fn cli_version_exits_zero() {
     tidymedia().arg("--version").assert().success();
 }

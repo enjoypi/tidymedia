@@ -19,8 +19,8 @@ use time::UtcOffset;
 mod config_models;
 #[allow(unused_imports)]
 pub use config_models::{
-    BackendConfig, CategoryDef, ClassifyConfig, CopyConfig, ExifConfig, FaceConfig, LogConfig,
-    OcrConfig, SmbBackendConfig,
+    BackendConfig, CategoryDef, ClassifyConfig, CopyConfig, ExifConfig, LogConfig, OcrConfig,
+    SmbBackendConfig, VerifyConfig,
 };
 
 // `Mutex<Option<&'static Config>>` + `Box::leak`：config()` 永远返回可被安全解引用的
@@ -134,6 +134,7 @@ pub fn validate_archive_template(template: &str) -> Result<(), String> {
 pub struct Config {
     pub copy: CopyConfig,
     pub exif: ExifConfig,
+    pub verify: VerifyConfig,
     pub backend: BackendConfig,
     pub log: LogConfig,
 }

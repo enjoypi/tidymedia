@@ -74,29 +74,6 @@ pub enum Commands {
         report: Option<String>,
     },
 
-    /// Cull similar/burst photos: keep the best one in source and move lower-quality copies to `output/<relative-path>/group-NNN/`, with a `BEST_<basename>` copy of the best photo placed alongside for side-by-side review. Uses perceptual hashing for grouping plus 4 ONNX models (`SCRFD`/`MobileFaceNet`/`FaceMesh`/`EyeState`) configured under `backend.face.*` for face quality scoring.
-    Cull {
-        /// Dry run, do not move files or create output directories
-        #[arg(short, long)]
-        dry_run: bool,
-
-        /// The source directories or files (URI or local path)
-        #[arg(required = true)]
-        sources: Vec<Location>,
-
-        /// The output directory (URI or local path)
-        #[arg(short, long)]
-        output: Location,
-
-        /// Maximum pHash Hamming distance for grouping similar photos (overrides `backend.face.phash_hamming_max`)
-        #[arg(long)]
-        phash_max: Option<u8>,
-
-        /// Write a JSON operation report to this path
-        #[arg(long)]
-        report: Option<String>,
-    },
-
     /// Move non-duplicate media files from sources into the output directory. Sources that duplicate something already in output are physically deleted; duplicate detection uses SHA-512. Pass --include-non-media to also move everything else.
     Move {
         /// Dry run, do not move or delete files
@@ -188,7 +165,7 @@ pub enum Commands {
         #[arg(long)]
         exif_tsv: Option<String>,
 
-        /// Maximum pHash Hamming distance for pixel-level duplicate comparison (defaults to `backend.face.phash_hamming_max`)
+        /// Maximum pHash Hamming distance for pixel-level duplicate comparison (defaults to 20)
         #[arg(long)]
         phash_max: Option<u8>,
 

@@ -29,13 +29,10 @@ pub(crate) mod diagnose;
 mod evaluate;
 pub(crate) mod exif_tsv;
 pub(crate) mod filename_hint;
+pub(crate) mod phash;
 pub(crate) mod report;
 pub(crate) mod summary;
 
-// verify 的 pHash 召回阈值：与 cull 分组的 `backend.face.phash_hamming_max`(10)
-// 不同调——image crate JPEG 重编码（decode→re-encode）实测 hamming 16~18，阈值
-// 10 让旋转/重编码同媒体漏召回到 name_only；宽召回的假阳性由 L4 逐像素均差
-// 复核（mean_abs_diff < 5）拦截，见 content_diff::rotated_phash_similar。
 pub(crate) const DEFAULT_PHASH_MAX: u8 = 20;
 
 /// 归档验证：扫描源端，对每个文件做拍摄时间决策与桶对账；注入 `--exif-tsv`
@@ -75,10 +72,7 @@ pub(crate) fn verify(
         roots: &roots,
         out: &out,
         phash_max,
-        max_bytes: crate::usecases::config::config()
-            .backend
-            .face
-            .max_image_bytes,
+        max_bytes: crate::usecases::config::config().verify.max_image_bytes,
     };
     let infos: Vec<Info> = src_index
         .into_infos()

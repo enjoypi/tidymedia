@@ -27,7 +27,6 @@ impl RawDetector for TractRawDetector {
 ///
 /// **不 optimize**：`PaddleOCR` `DBNet` `det.onnx` 是 dynamic H/W 输入（`[1, 3, ?, ?]`），
 /// tract `into_optimized()` 对未固化的 symbolic dim 做不了形状传播，加载即失败；
-/// 4 个 face 模型经 `scripts/simplify_onnx.py` 化简到静态 shape 后才能 optimize，
 /// `DBNet` 不在该脚本范围内（用户自备 onnx）。`into_typed` 仅做类型推导不需要静态 shape，
 /// `into_runnable` 接受 typed model 直接出 `RunnableModel`。
 ///

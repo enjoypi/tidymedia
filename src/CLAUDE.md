@@ -27,7 +27,7 @@
 - URI 字段使用 percent-encoding，不引入 `url` crate；IPv6 host 使用方括号。
 - SMB 用户名可由 URI 或 `SMB_USER` 提供，密码只从 `SMB_PASSWORD` 读取；Kerberos 配置读入不代表已支持。
 - 新路径拼接使用 `Location::join_path(segment)`，远端目标内部也用 `/` 语义；纯本地计算才使用 OS 分隔符。
-- copy/move/cull/move-text-shot 的前缀规范化统一使用 `canonical_prefix`；entry 级 output 子树判断使用 `entry_under_prefix`。路径索引 key 使用 `file_info::full_path`，不要以 canonicalize 替代字面稳定路径。
+- copy/move/move-text-shot 的前缀规范化统一使用 `canonical_prefix`；entry 级 output 子树判断使用 `entry_under_prefix`。路径索引 key 使用 `file_info::full_path`，不要以 canonicalize 替代字面稳定路径。
 - source ⊆ output 必须拒绝；output ⊂ source 时必须剔除 output 子树。比较要考虑分隔符边界、symlink 和 Windows 大小写。
 - 新增 Backend 方法时同步所有真实与 fake 实现，并覆盖成功、client Err、非本 scheme `InvalidInput`。
 - Backend `walk` 必须递归产生所有文件；远端遍历使用 `visited` 防环。浅列表缺少 size 时，补充 stat 的错误必须上抛。
@@ -71,11 +71,10 @@
 - 含 `errors` 的 Report 使用统一软上限和截断标记，rayon merge 传播截断状态；`failed` 不受上限影响。
 - `scanned` 在 walk 循环中按触达数累计，不能用成功项数量代替。耗时统一使用 `elapsed_ms`；新增字段同步所有对应 Report、fixture 和 JSON 断言，不写死 Report 数量。
 - `ReportSink` 使用 `enum Report<'a>` 和单一 `write(&Report<'_>)` 方法保持对象安全；新增变体不应强制所有 sink 增加专用方法。copy/move 的部分失败文案按实际操作分流并双向测试。
-- cull 的 `culled[i].score` 与 best 综合 total 同口径；比较 f32 时把 NaN 视为负无穷。
-- tract 静态 face 图使用 `into_optimized().into_runnable()`；动态 H/W 的 OCR DBNet 使用 `into_typed().into_runnable()`；BERT symbolic 维先 `into_typed()`，绑定 batch=1、sequence=256，再优化。tokenizer 输出手动 pad/truncate 到 sequence。
-- tract runnable 已由 Arc 持有，不重复包装。MobileFaceNet embedding 为 128 维，FaceMesh 输入 192×192，EyeState 输入 640×640 letterbox，decode 使用其 `[1,6,8400]` 输出契约；SCRFD 是检测器，不输出身份 embedding。
+- 动态 H/W 的 OCR DBNet 使用 `into_typed().into_runnable()`；BERT symbolic 维先 `into_typed()`，绑定 batch=1、sequence=256，再优化。tokenizer 输出手动 pad/truncate 到 sequence。
+- tract runnable 已由 Arc 持有，不重复包装。
 - 老 QuickTime 使用现有 nom-exif patch，并只用 `BoxHeader::parse` 解析 header；M2TS/AVCHD 使用现有 video PID 与 H.264 EP strip 规则，不把 container body 一次性装入解析 buffer。
-- 推理 metadata 与输入按值透传；letterbox 不得 `.min(1.0)`。face embedding 以 `identity_cluster::EMBED_DIM` 为权威并严格检查长度；当前仍有独立常量或 `[f32; 128]` 字面类型，修改维度前必须先收敛为单点。
+- 推理 metadata 与输入按值透传。
 - tract 输出 tensor 的 cow、view、slice 必须保持有效生命周期；多输出分别持有 binding。
 
 ## 同步检查点
@@ -89,7 +88,6 @@
 - 新增媒体容器：实体解析、EXIF 路由、MIME、XMP fallback、fixture 生成和测试同步修改。
 - 新增 office 容器：parse/extract_text、MIME 与双路由、office fixtures、e2e 归档和扫描共用 helper 同步修改；stub 使用 `&mut dyn MediaReader`，便于 zip/cfb/read_to_end 复用。
 - 新增 factory：内层 trait、frameworks Default factory、dispatch 注入、lib re-export 及所有调用点同步修改。
-- 修改 FaceEmbedder 维度：trait、真实 impl、fake、单测、集成测试和 `EMBED_DIM` 使用点同步修改。
 - 修改 FindReport schema：领域 Report、report sink fixture 和 JSON 断言同步修改。
 
 ## Rust 与依赖陷阱

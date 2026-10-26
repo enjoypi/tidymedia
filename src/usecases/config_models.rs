@@ -32,6 +32,20 @@ impl Default for CopyConfig {
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(default)]
+pub struct VerifyConfig {
+    pub max_image_bytes: u64,
+}
+
+impl Default for VerifyConfig {
+    fn default() -> Self {
+        Self {
+            max_image_bytes: 50 * 1024 * 1024,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(default)]
 pub struct LogConfig {
     /// 默认日志级别（trace/debug/info/warn/error）；CLI `--log-level` 与
     /// `RUST_LOG` 均优先于此值。
@@ -149,82 +163,10 @@ impl Default for ClassifyConfig {
     }
 }
 
-/// `cull` 子命令的人脸质量评分参数：4 个 ONNX 模型路径 + pHash/清晰度/EAR
-/// 阈值 + 综合评分权重。模型不入 git，路径外置；阈值与权重暴露让用户按场景调优。
-#[derive(Clone, Debug, Deserialize)]
-#[serde(default)]
-pub struct FaceConfig {
-    /// SCRFD-10G-bn-kps（人脸 bbox + 5 点关键点；antelopev2 默认变体）ONNX 路径；
-    /// 空 = 调用时报 `InvalidInput`。
-    pub scrfd_model_path: String,
-    /// SCRFD 检测置信度阈值；低于此值的 anchor 丢弃。范围 `(0, 1)`。
-    /// 光线差 / 模型变体需调；合影密集脸场景可调低到 0.3。
-    pub scrfd_score_threshold: f32,
-    /// SCRFD 非极大值抑制 `IoU` 阈值；超此值的重叠 bbox 折叠为一个。范围 `(0, 1)`。
-    /// 密集脸场景调 0.3 增强去重；稀疏场景默认 0.4。
-    pub scrfd_nms_iou: f32,
-    /// `MobileFaceNet`（112×112 → 128 维 embedding；foamliu/MobileFaceNet 训练规格）ONNX 路径。
-    /// 切换 512 维变体需同步改 `EMBED_DIM` 与 `FaceEmbedder` trait 接口。
-    pub facenet_model_path: String,
-    /// `MediaPipe` `FaceMesh`（468 点 3D 关键点；`PINTO_model_zoo` 静态 192×192 版）ONNX 路径。
-    pub facemesh_model_path: String,
-    /// `YOLOv8` `EyeState`（640×640 letterbox → 检测头 max conf；
-    /// `MichalMlodawski/open-closed-eye-detection`）ONNX 路径。
-    pub eyestate_model_path: String,
-    /// pHash 汉明距离阈值；≤ 此值的两图视为相似入同组。范围 `[1, 64]`。
-    pub phash_hamming_max: u8,
-    /// 全图 Laplacian 方差下限；低于此值视整图模糊丢弃（单图组例外保留）。
-    pub sharpness_min: f32,
-    /// 跨图人脸 embedding 余弦相似度阈值；≥ 此值判同一身份。范围 `(0, 1)`。
-    /// 当前仅 `cluster_identities` 产 debug 日志消费，`pick_best_for_group` 不消费
-    /// cluster 结果；per-identity 策略尚未接入，接入后此值才影响 best 选择。
-    pub face_cosine_min: f32,
-    /// EAR（眼睑纵横比）阈值；低于此值视为闭眼。范围 `(0, 1)`。
-    pub ear_blink_max: f32,
-    /// `EyeState` 模型闭眼概率阈值。范围 `(0, 1)`。
-    pub eye_blink_score_max: f32,
-    /// 眼部 crop 半径相对人脸 bbox 高度的比例；左/右眼各按此半径方形 crop 喂 `EyeState`。
-    /// 范围 `(0, 1)`。儿童 / 老人脸型或宽距镜头可调 0.12~0.15 扩大感受野。
-    pub eye_crop_radius_ratio: f32,
-    /// 综合评分中清晰度权重。
-    pub w_sharpness: f32,
-    /// 综合评分中闭眼惩罚权重。
-    pub w_blink: f32,
-    /// 综合评分中微笑加分权重。
-    pub w_smile: f32,
-    /// 单文件字节上限；超过此值的图扫描阶段直接 skip 计入 `failed`（防 OOM）。
-    /// 默认 50 MiB，覆盖典型相机原始 JPEG/HEIC + 适度裕度；大 RAW 文件需自行调高。
-    pub max_image_bytes: u64,
-}
-
-impl Default for FaceConfig {
-    fn default() -> Self {
-        Self {
-            scrfd_model_path: String::new(),
-            scrfd_score_threshold: 0.5,
-            scrfd_nms_iou: 0.4,
-            facenet_model_path: String::new(),
-            facemesh_model_path: String::new(),
-            eyestate_model_path: String::new(),
-            phash_hamming_max: 10,
-            sharpness_min: 100.0,
-            face_cosine_min: 0.5,
-            ear_blink_max: 0.21,
-            eye_blink_score_max: 0.5,
-            eye_crop_radius_ratio: 0.10,
-            w_sharpness: 1.0,
-            w_blink: 2.0,
-            w_smile: 0.5,
-            max_image_bytes: 50 * 1024 * 1024,
-        }
-    }
-}
-
 #[derive(Clone, Debug, Default, Deserialize)]
 #[serde(default)]
 pub struct BackendConfig {
     pub smb: SmbBackendConfig,
     pub ocr: OcrConfig,
-    pub face: FaceConfig,
     pub classify: ClassifyConfig,
 }

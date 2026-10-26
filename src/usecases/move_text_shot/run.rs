@@ -12,7 +12,7 @@
 //! - Rayon 并行：source 内 walk 到 `Vec<Entry>` 后 `par_iter`，per-worker `SourceDelta`
 //!   累加 reduce（同 `copy/run.rs::run_copy_loop` 分桶并行套路）；`mkdir_cache` 用
 //!   `Arc<DashSet<Location>>` 跨 worker 共享 &self contains+insert 无锁
-//! - 单文件字节上限 `backend.ocr.max_image_bytes` 前置 skip（防 OOM，同 cull 套路）
+//! - 单文件字节上限 `backend.ocr.max_image_bytes` 前置 skip（防 OOM）
 //!
 //! 拆分为四个子模块，本文件只留入口编排与 overlap 校验：
 //! - `delta`：per-worker 累加器 + 失败记录

@@ -9,7 +9,7 @@
 
 ## 模型准备
 
-- ONNX 模型通过 git-lfs 管理，装配入口为 `scripts/download_models.sh` 和现有 simplify 脚本；模型路径为空时，调用方应立即返回 InvalidInput。
+- ONNX 模型通过 git-lfs 管理，装配入口为 `scripts/download_models.sh`；模型路径为空时，调用方应立即返回 InvalidInput。
 - HuggingFace 大文件不可达时，可将 `HF_ENDPOINT=https://hf-mirror.com` 作为可选故障排查手段，不把镜像写成固定依赖。
 - 修改模型后同步输入 shape、decode、配置路径、Fake 和真实模型 smoke test；模型规格与 tract 运行约束见 `src/CLAUDE.md`。
 
@@ -18,7 +18,7 @@
 采集前必须用 `just build-release` 重新构建 release opt=3 产物。脚本只检查二进制存在，不能识别先前的 `just OPT=0 build-release`；运行脚本时设置优化环境变量也不会改变已有二进制。
 
 ```bash
-bun scripts/perf-collect.ts --sub <copy|move|find|cull|move-text-shot|verify> --data <真实源目录> --output-dir <目录>
+bun scripts/perf-collect.ts --sub <copy|move|find|move-text-shot|verify> --data <真实源目录> --output-dir <目录>
 ```
 
 - `verify` 必须增加 `--output-target <目标库>`；需要额外 CLI 参数时使用脚本提供的 `--extra`。

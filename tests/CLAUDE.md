@@ -30,7 +30,6 @@
 - MP4 需要“无创建时间”语义时使用 MKV fixture；未显式写 creation_time 的 MP4 可能得到 1904 时间。
 - FakeBackend 默认 mtime 为 UNIX_EPOCH，会走 P4 并在默认时区落入 `1970/01`；测试需要其他桶时显式设置时间。
 - DCT pHash 使用至少 256×256 的随机噪声 JPEG；亮度变化断言 Hamming 在既定阈值内。纯色图和 gradient 不能替代随机噪声 fixture。
-- 清晰度阈值使用高方差图案；同色图不能提供有效 laplacian 方差。
 - 大文件内存 fixture 使用足够大的随机噪声 PNG，不使用高压缩纯色图。
 - FakeBackend 的 reader error 与 operation error 文案和触发阶段不同；测试 sniff 成功后 read 失败时，选择对应注入点。
 - FakeBackend.copy_file 按 src loc 注入错误；唯一名耗尽测试用 add_file 填满候选，不另写生产 wrapper。

@@ -1,15 +1,11 @@
 // 配置值 sanitize：非法字段值回退默认并告警。与「parse 失败回退 `Config::default`」
 // 同一哲学：配置错误不让 CLI panic 或静默全量失败，但必须可观测。
-// 拆自 `config.rs`（原 518 行 → 骨架 + sanitize + expand_env 三文件），FaceConfig
-// 校验族再拆 `config_sanitize_face.rs`。
 use tracing::warn;
 
 use crate::usecases::config::{
-    ClassifyConfig, Config, CopyConfig, LogConfig, OcrConfig, validate_archive_template,
+    ClassifyConfig, Config, CopyConfig, LogConfig, OcrConfig, VerifyConfig,
+    validate_archive_template,
 };
-
-#[path = "config_sanitize_face.rs"]
-mod face;
 
 /// 非法字段值回退默认并告警，与"parse 失败回退 `Config::default`"同一哲学：
 /// 配置错误不让 CLI panic 或静默全量失败，但必须可观测。
@@ -60,8 +56,13 @@ pub fn sanitize(mut cfg: Config) -> Config {
         "copy.doc_archive_template",
     );
     sanitize_ocr(&mut cfg.backend.ocr);
-    face::sanitize_face(&mut cfg.backend.face);
     sanitize_classify(&mut cfg.backend.classify);
+    let verify_defaults = VerifyConfig::default();
+    sanitize_max_image_bytes_field(
+        &mut cfg.verify.max_image_bytes,
+        verify_defaults.max_image_bytes,
+        "verify.max_image_bytes",
+    );
     // 0 让 smb2 每次请求立即超时，归档全量失败且报错指向超时而非配置。
     if cfg.backend.smb.timeout_secs == 0 {
         let fallback = crate::usecases::config::SmbBackendConfig::default().timeout_secs;
@@ -198,9 +199,23 @@ fn is_unit_open(v: f32) -> bool {
     v < 1.0
 }
 
-// max_image_bytes 太小会让所有图都被判超限跳过整个 pipeline；
+fn sanitize_unit_open_field(value: &mut f32, fallback: f32, field: &str) {
+    if !is_unit_open(*value) {
+        warn!(
+            feature = "config",
+            operation = "sanitize",
+            result = "invalid_value",
+            field,
+            value = *value,
+            fallback,
+            "value must be in (0, 1); falling back to default"
+        );
+        *value = fallback;
+    }
+}
+
 // 1 MiB 以下没有业务场景（JPEG 缩略图都 > 100 KiB），统一收紧到 ≥ 1 MiB。
-// ocr 与 face 共用同一门限：max_image_bytes 语义（防单文件 OOM）与业务无关。
+// max_image_bytes 语义（防单文件 OOM）与业务无关。
 fn sanitize_max_image_bytes_field(value: &mut u64, fallback: u64, field: &str) {
     const MIN_IMAGE_BYTES: u64 = 1024 * 1024;
     if *value < MIN_IMAGE_BYTES {
@@ -222,7 +237,7 @@ fn sanitize_max_image_bytes_field(value: &mut u64, fallback: u64, field: &str) {
 // - `max_text_bytes >= 1`：0 让所有文档提不出文本全落 uncategorized
 fn sanitize_classify(classify: &mut ClassifyConfig) {
     let defaults = ClassifyConfig::default();
-    face::sanitize_face_unit_open(
+    sanitize_unit_open_field(
         &mut classify.score_min,
         defaults.score_min,
         "backend.classify.score_min",

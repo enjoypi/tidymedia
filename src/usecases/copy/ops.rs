@@ -100,7 +100,6 @@ pub(super) fn do_copy_with_default_cache(
 
 /// 用源 Info 的 backend 读 + 输出 backend 写。经 `backend::stream_copy` 单点 helper
 /// 完成（跨 scheme / 不同 backend 实例都走 1 MiB buffered stream + 三阶段闭合 +
-/// 半截 dst 清理）。`cull/group_writer` 亦复用同 helper 消除重复实现。
 ///
 /// 传 `prefer_native_copy=false`：ops.rs 无法从 `src.backend()` (Arc) 与 `out_be`
 /// (`&dyn`) 判定是否同实例，保守走 stream 路径确保跨实例（Fake vs Local 同 scheme

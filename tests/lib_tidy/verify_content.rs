@@ -99,8 +99,10 @@ fn verify_name_only_when_candidates_do_not_match_content() {
 #[test]
 fn verify_name_only_when_max_bytes_guard_blocks_reads() {
     let _cfg = write_small_max_bytes_config();
-    let big_a = oversized_jpeg(0xAA);
-    let big_b = oversized_jpeg(0xBB);
+    let mut big_a = minimal_jpeg(b"meta-a", b"SHARED-PIXELS");
+    big_a.resize(1_200_000, 0);
+    let mut big_b = minimal_jpeg(b"meta-b", b"SHARED-PIXELS");
+    big_b.resize(1_200_000, 0);
     let big_c = oversized_jpeg(0xCC);
     let src = tempdir().unwrap();
     let src_dir = src.path().to_str().unwrap();

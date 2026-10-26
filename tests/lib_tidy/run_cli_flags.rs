@@ -1,8 +1,3 @@
-//! `run_cli` 字符串参数 e2e：补齐每个 flag 在 copy/move/find 路径上的 Some 侧
-//! 与 `dry_run=false` 真实执行（`dispatch_and_cli.rs` 的 `run_cli` 系列全是 --dry-run）。
-//! fixture 统一用 `sample-with-offset.jpg`（EXIF `DateTimeOriginal=2024-05-01 +08:00`，
-//! 不依赖 mtime；P2 文件名 fixture 不被 `Info::create_time` 消费）。
-
 use std::path::Path;
 
 use tempfile::tempdir;
@@ -12,7 +7,7 @@ use super::DATA_DIR;
 
 const EXIF_FIXTURE: &str = "sample-with-offset.jpg";
 
-fn seed_fixture(dir: &Path) -> std::path::PathBuf {
+pub(super) fn seed_fixture(dir: &Path) -> std::path::PathBuf {
     let dst = dir.join(EXIF_FIXTURE);
     std::fs::copy(format!("{DATA_DIR}/{EXIF_FIXTURE}"), &dst).expect("seed fixture into tempdir");
     dst
@@ -226,8 +221,6 @@ fn run_cli_find_with_output_dispatches() {
     .expect("find --output via run_cli should succeed");
 }
 
-/// 已知子命令但缺必填 `--output` → clap 解析失败走 `run_cli` 的 Err 分支
-/// （区别于既有的"未知子命令"用例）。
 #[test]
 fn run_cli_copy_missing_required_output_returns_err() {
     let err = run_cli(["tidymedia", "copy", DATA_DIR]).unwrap_err();
@@ -235,202 +228,6 @@ fn run_cli_copy_missing_required_output_returns_err() {
     assert!(msg.contains("--output"), "got: {msg}");
 }
 
-/// spawn 真实 binary 验证 `install_logging` 真装上了 subscriber：`--log-level debug`
-/// 时 `run_cli` 的 "cli parsed" debug 日志必须落在 stderr。in-process 测不了——
-/// 全局 subscriber 只能 `try_init` 一次；且变异 `install_logging → ()` 时唯一可观测
-/// 差异就是 stderr 没有日志输出。
-#[test]
-fn binary_emits_debug_log_to_stderr_when_log_level_debug() {
-    let src = tempdir().unwrap();
-    seed_fixture(src.path());
-    let out = std::process::Command::new(env!("CARGO_BIN_EXE_tidymedia"))
-        .args(["--log-level", "debug", "find", src.path().to_str().unwrap()])
-        .env_remove("RUST_LOG") // 不让外部 RUST_LOG 干扰 EnvFilter::try_from_default_env
-        .output()
-        .expect("spawn tidymedia binary");
-    let stderr = String::from_utf8_lossy(&out.stderr);
-    assert!(
-        out.status.success() && stderr.contains("cli parsed"),
-        "binary must log 'cli parsed' to stderr at debug level; status: {:?}, stderr: {stderr}",
-        out.status
-    );
-}
-
-/// spawn `tidymedia copy --include-non-media --dry-run` 跑各 office fixture 让 bin
-/// instance 走 `office::*` 业务路径，消除 LLVM multi-instance phantom miss
-/// （tests/CLAUDE.md「覆盖率处理」套路）。新增 office 解析模块
-/// 时把对应 fixture 加入 `OFFICE_FIXTURES` 即可，无需新增 subprocess fn。
-const OFFICE_FIXTURES: &[&str] = &[
-    "sample-pdf-dated.pdf",
-    "sample-docx-dated.docx",
-    "sample-pptx-dated.pptx",
-    "sample-xlsx-dated.xlsx",
-    "sample-doc-dated.doc",
-    "sample-xls-dated.xls",
-    "sample-ppt-dated.ppt",
-    "sample-odt-dated.odt",
-    "sample-ods-dated.ods",
-    "sample-odp-dated.odp",
-    "sample-rtf-dated.rtf",
-    "sample-epub-dated.epub",
-];
-
-#[test]
-fn binary_copy_with_office_fixtures_walks_office_paths() {
-    let src = tempdir().unwrap();
-    for name in OFFICE_FIXTURES {
-        std::fs::copy(format!("{DATA_DIR}/{name}"), src.path().join(name))
-            .unwrap_or_else(|e| panic!("seed {name}: {e}"));
-    }
-    let out = tempdir().unwrap();
-    let outp = std::process::Command::new(env!("CARGO_BIN_EXE_tidymedia"))
-        .args([
-            "copy",
-            "--include-non-media",
-            "--dry-run",
-            "--output",
-            out.path().to_str().unwrap(),
-            src.path().to_str().unwrap(),
-        ])
-        .env_remove("RUST_LOG")
-        .output()
-        .expect("spawn tidymedia binary");
-    assert!(
-        outp.status.success(),
-        "binary copy with office fixtures must succeed; stderr: {}",
-        String::from_utf8_lossy(&outp.stderr)
-    );
-}
-
-/// spawn `tidymedia copy-doc --dry-run` 遍历同一 fixture 矩阵：bin instance 走
-/// `doc_only` 过滤 + office 解析路径（消 multi-instance phantom miss，同上）。
-/// 显式模板避开 `{category}`——subprocess 不依赖分类模型文件。
-#[test]
-fn binary_copy_doc_with_office_fixtures_walks_doc_paths() {
-    let src = tempdir().unwrap();
-    for name in OFFICE_FIXTURES {
-        std::fs::copy(format!("{DATA_DIR}/{name}"), src.path().join(name))
-            .unwrap_or_else(|e| panic!("seed {name}: {e}"));
-    }
-    let out = tempdir().unwrap();
-    let outp = std::process::Command::new(env!("CARGO_BIN_EXE_tidymedia"))
-        .args([
-            "copy-doc",
-            "--dry-run",
-            "--archive-template",
-            "{year}/{month}",
-            "--output",
-            out.path().to_str().unwrap(),
-            src.path().to_str().unwrap(),
-        ])
-        .env_remove("RUST_LOG")
-        .output()
-        .expect("spawn tidymedia binary");
-    assert!(
-        outp.status.success(),
-        "binary copy-doc with office fixtures must succeed; stderr: {}",
-        String::from_utf8_lossy(&outp.stderr)
-    );
-}
-
-/// spawn `tidymedia cull --dry-run` 让 subprocess instance 也跑 cull pub fn 主流程，
-/// 消除 multi-binary LLVM region phantom miss（tests/CLAUDE.md「覆盖率处理」套路：subprocess 必须真跑到该业务路径，instance 才计入 covered）。
-#[test]
-fn binary_cull_dry_run_walks_main_flow() {
-    use image::ImageEncoder;
-    let src = tempdir().unwrap();
-    let out = tempdir().unwrap();
-    // seed 2 张同色 PNG → ahash 相同同组 → 走 pick_best 主路径；dry-run 不调真 detector
-    let pixels = vec![128_u8; 16 * 16 * 3];
-    for name in &["a.png", "b.png"] {
-        let mut buf = Vec::new();
-        image::codecs::png::PngEncoder::new(&mut buf)
-            .write_image(&pixels, 16, 16, image::ExtendedColorType::Rgb8)
-            .unwrap();
-        std::fs::write(src.path().join(name), buf).unwrap();
-    }
-    // 非空 face model path → build_* 返 Ok 懒加载；dry-run 真跑 pick_best 才需 detector
-    // → cull pub fn 走主路径；但调 detect_faces 时 ensure_raw 触发 load_runnable 失败
-    // → record_failure 计入 report.failed → tidy() 退非 0
-    let cfg_dir = tempdir().unwrap();
-    let cfg_path = cfg_dir.path().join("config.yaml");
-    std::fs::write(
-        &cfg_path,
-        "backend:\n  face:\n    scrfd_model_path: /none/s\n    facenet_model_path: /none/f\n    facemesh_model_path: /none/m\n    eyestate_model_path: /none/e\n",
-    )
-    .expect("write cull config");
-    let outp = std::process::Command::new(env!("CARGO_BIN_EXE_tidymedia"))
-        .args([
-            "cull",
-            "--dry-run",
-            "--output",
-            out.path().to_str().unwrap(),
-            src.path().to_str().unwrap(),
-        ])
-        .env_remove("RUST_LOG")
-        .env("TIDYMEDIA_CONFIG", cfg_path.to_str().unwrap())
-        .output()
-        .expect("spawn tidymedia binary");
-    // partial-failure 非 0 退出码也 OK：subprocess instance 实际跑过 cull 主流程
-    assert!(
-        outp.status.code().is_some(),
-        "binary cull spawned; stderr: {}",
-        String::from_utf8_lossy(&outp.stderr)
-    );
-}
-
-/// binary 启动时 config.yaml 含越界 `timezone_offset_hours` → sanitize 必须回退
-/// 默认 + warn，不让月末文件按错时区归错桶且无告警。本测试通过 subprocess 触发
-/// `frameworks::config::sanitize` 的 timezone 越界分支（`lib_tidy` binary instance
-/// 视角的 multi-binary instrumentation）。
-#[test]
-fn binary_sanitizes_out_of_range_timezone_offset() {
-    let src = tempdir().unwrap();
-    seed_fixture(src.path());
-    let cfg_dir = tempdir().unwrap();
-    let cfg_path = cfg_dir.path().join("config.yaml");
-    std::fs::write(&cfg_path, "copy:\n  timezone_offset_hours: 99\n").expect("write test config");
-    let out = std::process::Command::new(env!("CARGO_BIN_EXE_tidymedia"))
-        .args(["find", src.path().to_str().unwrap()])
-        .env_remove("RUST_LOG")
-        .env("TIDYMEDIA_CONFIG", cfg_path.to_str().unwrap())
-        .output()
-        .expect("spawn tidymedia binary");
-    assert!(
-        out.status.success(),
-        "binary must keep running with sanitized timezone; status: {:?}, stderr: {}",
-        out.status,
-        String::from_utf8_lossy(&out.stderr)
-    );
-}
-
-/// 不带 `--log-level` 时 binary 从 config.yaml `log.level` 取级别：配置 debug
-/// → "cli parsed" debug 日志必须落 stderr。杀 `install_logging` 中
-/// `unwrap_or_else(config_level)` None 侧接线类变异（默认 info 时该日志不输出）。
-#[test]
-fn binary_uses_config_log_level_when_flag_absent() {
-    let src = tempdir().unwrap();
-    seed_fixture(src.path());
-    let cfg_dir = tempdir().unwrap();
-    let cfg_path = cfg_dir.path().join("config.yaml");
-    std::fs::write(&cfg_path, "log:\n  level: debug\n").expect("write test config");
-    let out = std::process::Command::new(env!("CARGO_BIN_EXE_tidymedia"))
-        .args(["find", src.path().to_str().unwrap()])
-        .env_remove("RUST_LOG") // 不让外部 RUST_LOG 干扰 EnvFilter::try_from_default_env
-        .env("TIDYMEDIA_CONFIG", cfg_path.to_str().unwrap())
-        .output()
-        .expect("spawn tidymedia binary");
-    let stderr = String::from_utf8_lossy(&out.stderr);
-    assert!(
-        out.status.success() && stderr.contains("cli parsed"),
-        "binary must honor config log.level=debug; status: {:?}, stderr: {stderr}",
-        out.status
-    );
-}
-
-/// e2e 走真实 copy 路径验证 `Info::exif_ref` 接线：`{make}/{model}` 必须渲染出
-/// fixture 的真值目录。`exif_ref` 被变异成 `None` 或 `Some(默认 Exif)` 时
-/// 两个占位符都退化为 "unknown"，本断言即失败。
 #[test]
 fn run_cli_copy_archive_template_renders_make_model_from_exif() {
     let src = tempdir().unwrap();
@@ -456,9 +253,6 @@ fn run_cli_copy_archive_template_renders_make_model_from_exif() {
     );
 }
 
-/// AVI（RIFF strd 内嵌 EXIF）e2e：nom-exif 不支持 RIFF，`entities::riff` 自解析
-/// 提供 P0 候选——fixture 内嵌 "2005:04:26 20:10:00"（默认 +8 时区）必须归档到
-/// 2005/04，而非 mtime 年月（checkout 时间）。杀 `from_reader` AVI 分流接线变异。
 #[test]
 fn run_cli_copy_avi_archives_by_embedded_exif() {
     let src = tempdir().unwrap();
@@ -480,49 +274,5 @@ fn run_cli_copy_avi_archives_by_embedded_exif() {
             .join("sample-fuji-strd.avi")
             .exists(),
         "AVI must be archived by embedded EXIF time 2005/04"
-    );
-}
-
-/// spawn binary 断言 find -o 的脚本语义：output 目录外的重复文件出 `rm` 行、
-/// output 目录内的被注释保留。杀 `compute_output_prefix -> None`（变异后全部
-/// 被注释，stdout 无未注释 rm 行）及 `under_prefix` 边界类变异。
-#[test]
-fn binary_find_with_output_emits_rm_for_outside_and_comment_for_inside() {
-    let root = tempdir().unwrap();
-    let keep = root.path().join("keep");
-    std::fs::create_dir(&keep).unwrap();
-    std::fs::copy(
-        format!("{DATA_DIR}/sample-with-offset.jpg"),
-        keep.join("a.jpg"),
-    )
-    .expect("seed kept copy");
-    std::fs::copy(
-        format!("{DATA_DIR}/sample-with-offset.jpg"),
-        root.path().join("b.jpg"),
-    )
-    .expect("seed duplicate outside output");
-
-    let out = std::process::Command::new(env!("CARGO_BIN_EXE_tidymedia"))
-        .args([
-            "find",
-            root.path().to_str().unwrap(),
-            "-o",
-            keep.to_str().unwrap(),
-        ])
-        .output()
-        .expect("spawn tidymedia binary");
-    assert!(out.status.success());
-    let stdout = String::from_utf8_lossy(&out.stdout);
-    // Python 删除脚本统一格式：`os.remove("...")` 未注释 = 待删；`# os.remove("...")` 已注释保护
-    let rm_outside = stdout
-        .lines()
-        .any(|l| l.starts_with("os.remove(") && l.contains("b.jpg"));
-    let kept_commented = stdout
-        .lines()
-        .filter(|l| l.contains("a.jpg"))
-        .all(|l| !l.starts_with("os.remove("));
-    assert!(
-        rm_outside && kept_commented,
-        "outside dup must be rm'd, kept copy commented; stdout:\n{stdout}"
     );
 }

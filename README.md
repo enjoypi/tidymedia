@@ -7,7 +7,7 @@
 - 本地核心处理不启动外部进程；只有选择执行 `find` 生成的 Python 脚本时才需要 Python。
 - SMB 为内置能力，默认 `just build-release` 已包含 SMB 支持，无需额外编译选项。
 - 使用 SMB 时，通过 `SMB_USER`、`SMB_PASSWORD` 提供凭据；也可在 URI 的 `user@` 中指定用户名。密码不要写入配置文件。
-- `cull`、`move-text-shot` 和按内容分类的文档归档需要相应模型。模型路径及阈值见 `config.yaml`，也可用对应的 `TIDYMEDIA_*` 环境变量覆盖。
+- `move-text-shot` 和按内容分类的文档归档需要相应模型。模型路径及阈值见 `config.yaml`，也可用对应的 `TIDYMEDIA_*` 环境变量覆盖。
 
 ## 通用用法
 
@@ -17,7 +17,7 @@ tidymedia [--log-level <LEVEL>] <COMMAND> [OPTIONS] <SOURCES...>
 
 - `SOURCES` 可包含一个或多个文件、目录或 URI；含空格的路径要加引号。
 - 除 `find` 外，需要输出的命令都用 `-o <DIR>` 或 `--output <DIR>` 指定归档目录。
-- `copy`、`move`、`copy-doc`、`move-doc`、`move-text-shot`、`cull` 支持 `--dry-run`，不修改源或归档媒体；显式指定 `--report` 时仍会写报告。
+- `copy`、`move`、`copy-doc`、`move-doc`、`move-text-shot` 支持 `--dry-run`，不修改源或归档媒体；显式指定 `--report` 时仍会写报告。
 - 所有子命令都支持 `--report <PATH>`，将本次结果写为 JSON 报告。
 - 全局参数放在子命令前，例如 `tidymedia --log-level debug copy ...`；`--dry-run` 放在子命令后。
 - `find` 的脚本和 `verify` 的汇总写 stdout；普通 `copy`/`move` 的逐文件对应关系通过 debug 日志写 stderr，其他日志和错误也使用 stderr。
@@ -97,15 +97,6 @@ tidymedia move-text-shot -o <OUT> <SOURCES...>
 
 检测图片中的文字，将命中的图片按源目录相对路径移到输出目录；非图片和未命中文件不移动。此命令会改动源文件，正式执行前先预演。
 
-## 筛选相似照片
-
-```bash
-tidymedia cull -o <OUT> --dry-run <SOURCES...>
-tidymedia cull -o <OUT> [--phash-max <N>] [--report <REPORT>] <SOURCES...>
-```
-
-将相似或连拍照片分组，保留评分较高的一张，并把其余候选照片移到 `output/<最佳照片相对源目录>/group-NNN/`；同时放置 `BEST_` 前缀的最佳照片副本供对比。单图、被清晰度门槛剔除的照片，以及过滤后不足两张的组保留在源位置。正式执行会移动源文件。`--phash-max` 越大，分组条件越宽松。
-
 ## 归档前核对
 
 ```bash
@@ -135,7 +126,7 @@ copy:
 
 1. 先备份重要数据，选择一个确实较小且具有代表性的目录做预演；工具不会自动限制文件数量。
 2. 检查预演报告和归档年月，再正式执行。典型顺序为 `copy --dry-run`、`verify`、正式 `copy` 或 `move`、最后用 `find` 审查目标库重复。
-3. `move`、`move-doc`、`move-text-shot`、`cull` 都会移动或删除源文件，且不进入回收站；其中移动类归档在发现目标已有相同内容时也可能直接删除重复源。
+3. `move`、`move-doc`、`move-text-shot` 都会移动或删除源文件，且不进入回收站；其中移动类归档在发现目标已有相同内容时也可能直接删除重复源。
 4. `copy`、`copy-doc`、`find` 不修改源文件；`verify` 不修改源或归档媒体。
 5. 尽量不要让来源和输出目录重叠。来源位于输出目录内会被拒绝；输出位于来源内时，已归档子树会被排除。
 6. 跨卷或远端移动中断时，可能留下未完成副本。保留现场并结合报告核对源和目标，不要仅凭文件大小删除文件；排除故障后再重跑。同卷移动通常减少数据复制和额外空间，但完整过程仍需扫描和判重，不保证秒级完成。

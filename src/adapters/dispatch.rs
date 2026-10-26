@@ -3,7 +3,6 @@ use crate::adapters::cli::Commands;
 use crate::entities::backend::factory::BackendFactory;
 use crate::entities::common::{Error, Result};
 use crate::frameworks::detector::DefaultDetectorFactory;
-use crate::usecases::cull::CullReport;
 use crate::usecases::detector::DetectorFactory;
 use crate::usecases::move_text_shot::MoveTextShotReport;
 use crate::usecases::report::{CopyReport, FindReport};
@@ -14,11 +13,11 @@ use crate::usecases::verify::VerifyReport;
 mod commands;
 
 use self::commands::{
-    dispatch_copy_or_move, dispatch_cull, dispatch_find, dispatch_move_text_shot, dispatch_verify,
+    dispatch_copy_or_move, dispatch_find, dispatch_move_text_shot, dispatch_verify,
 };
 
 /// 子命令执行结果：Copy/Move 返回 [`CopyReport`]，Find 返回 [`FindReport`]，
-/// `MoveTextShot` 返回 [`MoveTextShotReport`]，`Cull` 返回 [`CullReport`]，
+/// `MoveTextShot` 返回 [`MoveTextShotReport`]，
 /// `Verify` 返回 [`VerifyReport`]。
 /// `tidy_with` 单一入口同时服务 CLI（丢弃返回）与 Android/mobile（消费 report）。
 #[derive(Debug)]
@@ -26,7 +25,6 @@ pub enum CommandResult {
     Copy(CopyReport),
     Find(FindReport),
     MoveTextShot(MoveTextShotReport),
-    Cull(CullReport),
     Verify(VerifyReport),
 }
 
@@ -64,12 +62,6 @@ pub fn tidy(command: Commands) -> Result<()> {
                 report.failed, report.moved, report.skipped_no_text, report.skipped_non_image
             ))))
         }
-        CommandResult::Cull(report) if report.failed > 0 => {
-            Err(Error::Io(std::io::Error::other(format!(
-                "cull partial failure: {} failed, {} moved, {} culled, {} grouped",
-                report.failed, report.moved, report.culled_count, report.grouped
-            ))))
-        }
         CommandResult::Verify(report) if report.mismatched > 0 || report.decision_failed > 0 => {
             Err(Error::Io(std::io::Error::other(format!(
                 "verify found {mismatched}/{compared} mismatched buckets, {unresolved} unresolved \
@@ -83,7 +75,6 @@ pub fn tidy(command: Commands) -> Result<()> {
         CommandResult::Copy(_)
         | CommandResult::Find(_)
         | CommandResult::MoveTextShot(_)
-        | CommandResult::Cull(_)
         | CommandResult::Verify(_) => Ok(()),
     }
 }
@@ -196,21 +187,6 @@ pub fn tidy_with(
             sources,
             output,
             dry_run,
-            report.as_deref(),
-        ),
-        Commands::Cull {
-            dry_run,
-            sources,
-            output,
-            phash_max,
-            report,
-        } => dispatch_cull(
-            factory,
-            detectors,
-            sources,
-            output,
-            dry_run,
-            phash_max,
             report.as_deref(),
         ),
         Commands::Verify {

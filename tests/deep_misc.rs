@@ -18,7 +18,7 @@ use tidymedia::{
 };
 
 // lib.rs re-export 观测口（`#[doc(hidden)]`）：
-use tidymedia::{best_effort_remove_partial_dst, partial_move_error, under_prefix};
+use tidymedia::{partial_move_error, under_prefix};
 
 #[test]
 fn under_prefix_matches_windows_backslash_rest() {
@@ -35,21 +35,6 @@ fn under_prefix_rejects_prefix_longer_than_path() {
 #[cfg(windows)]
 fn under_prefix_ignores_ascii_case_on_windows() {
     assert!(under_prefix(r"d:\user\Pictures\a.jpg", r"D:\User\pictures"));
-}
-
-#[test]
-fn best_effort_remove_partial_dst_covers_err_and_ok() {
-    let be = FakeBackend::new("local");
-    let missing = Location::Local(Utf8PathBuf::from("out/group-000/BEST_x.jpg"));
-    be.inject_error(
-        missing.clone(),
-        tidymedia::FakeOp::RemoveFile,
-        io::ErrorKind::PermissionDenied,
-    );
-    best_effort_remove_partial_dst(&be, &missing);
-    let present = Location::Local(Utf8PathBuf::from("out/group-000/BEST_y.jpg"));
-    be.add_file(present.clone(), vec![1]);
-    best_effort_remove_partial_dst(&be, &present);
 }
 
 struct PartialMoveRenameBackend {
