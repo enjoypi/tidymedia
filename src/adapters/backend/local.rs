@@ -18,7 +18,7 @@ use std::io;
 use std::path::Path;
 use std::sync::Arc;
 
-use camino::Utf8Path;
+use camino::{Utf8Path, Utf8PathBuf};
 use memmap2::Mmap;
 
 use crate::entities::backend::{
@@ -48,7 +48,7 @@ impl LocalBackend {
 fn local_path(loc: &Location) -> io::Result<&Utf8Path> {
     match loc {
         Location::Local(p) => Ok(p.as_path()),
-        other => Err(io::Error::new(
+        other @ Location::Smb { .. } => Err(io::Error::new(
             io::ErrorKind::InvalidInput,
             format!("LocalBackend cannot handle scheme {:?}", other.scheme()),
         )),
@@ -71,11 +71,6 @@ pub(super) fn real_remove(a: &std::path::Path) -> io::Result<()> {
     fs::remove_file(a)
 }
 
-/// 参数化版本：让单测可注入 mock rename 返 `CrossesDevices` 触发 fallback
-/// （Linux 容器内 cross-mount tmpfs 需 root 不可在 ecs-user 触发）。
-/// 跨设备 fallback 是 copy + remove 两步，非原子；copy 成功但 remove 失败时，
-/// 文件存在于 src 与 dst 两处，Err 包裹该半态以便上层（`do_copy` / failed 计数）
-/// 与 copy 也失败的场景区分，避免用户误判后再次执行致丢源。
 pub(super) fn rename_or_fallback_with(
     from: &std::path::Path,
     to: &std::path::Path,
@@ -126,15 +121,20 @@ pub(super) fn real_dir_entry_metadata(
     entry.metadata()
 }
 
-/// 参数化版本：让单测可注入 mock `get_meta` 返 Err 触发"metadata failed" `?` 路径
-/// （`ignore::DirEntry` 的 metadata 仅在文件被并发删除等罕见情况下失败，CI 不可稳定真触发）。
 pub(super) fn walk_entry_to_io_with(
     e: Result<ignore::DirEntry, ignore::Error>,
     get_meta: fn(&ignore::DirEntry) -> Result<std::fs::Metadata, ignore::Error>,
 ) -> io::Result<Entry> {
+    walk_entry_to_io_convert(e, get_meta, utf8_path_buf)
+}
+
+pub(super) fn walk_entry_to_io_convert(
+    e: Result<ignore::DirEntry, ignore::Error>,
+    get_meta: fn(&ignore::DirEntry) -> Result<std::fs::Metadata, ignore::Error>,
+    convert_path: fn(std::path::PathBuf) -> io::Result<Utf8PathBuf>,
+) -> io::Result<Entry> {
     let entry = e.map_err(|e| ignore_to_io(&e))?;
-    let path = entry.path().to_path_buf();
-    let utf8 = camino::Utf8PathBuf::from_path_buf(path).map_err(non_utf8_path_err)?;
+    let utf8 = convert_path(entry.path().to_path_buf())?;
     let size = get_meta(&entry)
         .map_err(|e| io::Error::other(format!("metadata failed for {utf8}: {e}")))?
         .len();
@@ -143,6 +143,10 @@ pub(super) fn walk_entry_to_io_with(
         size,
         kind: kind_from_file_type(entry.file_type()),
     })
+}
+
+fn utf8_path_buf(path: std::path::PathBuf) -> io::Result<Utf8PathBuf> {
+    Utf8PathBuf::from_path_buf(path).map_err(non_utf8_path_err)
 }
 
 /// 非 UTF-8 路径 → `InvalidData`。具名 fn 替代 `map_err` 内联 closure：macOS APFS
@@ -171,8 +175,6 @@ fn ignore_to_io(e: &ignore::Error) -> io::Error {
     }
 }
 
-/// 参数化版本：让单测可注入 mock `mmap_fn` 返 Err 触发 `?` Err arm
-/// （memmap2 在 Linux 上对 0 字节文件不返 Err，无法稳定真触发）。
 pub(super) fn open_read_inner_with(
     path: &Path,
     mmap_fn: fn(&fs::File) -> io::Result<Mmap>,

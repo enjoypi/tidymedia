@@ -64,12 +64,6 @@ pub(crate) fn write_group(
             &best_dst,
         )
     {
-        // 部分字节落盘后 Err 残留半截 dst 文件；重跑时 unique_name 跳到 BEST_x_1
-        // 致重复堆积。best-effort 清理；若 remove 也失败（远端会话断开等）走 warn
-        // 让用户能从日志发现残留累积，不静默吞 Err。清理动作抽 helper 让 Ok/Err
-        // 双分支收敛到 `coverage(off)` 内（stream_copy 已在内部 remove 过 → 二次
-        // remove 恒 NotFound Err，False arm 逻辑不可达；native fast-path 下 fake
-        // early-Err 也不 create dst 同样恒 NotFound）。
         best_effort_remove_partial_dst(output_backend.as_ref(), &best_dst);
         return Err(e);
     }
@@ -166,11 +160,6 @@ fn split_stem_ext(name: &str) -> (&str, &str) {
     }
 }
 
-/// 复用 `entities::backend::stream_copy` 单点 helper：同一 backend 实例（`Arc::ptr_eq`）
-/// 且同 scheme 时走 `copy_file` 原生 op（Local `fs::copy` sendfile / reflink；远端
-/// 未来可加 `SMB2` `SRV_COPYCHUNK`），否则走 1 MiB buffered stream + 三阶段闭合 +
-/// 半截 dst 清理。旧版走 stdlib 8 KiB buffer 让远端大视频 128× RTT，抽 helper 后与
-/// `copy/ops.rs::stream_copy` 同款高效骨架（src/CLAUDE.md「复制、移动、报告与推理」）。
 fn copy_file_cross_scheme(
     src_backend: &Arc<dyn Backend>,
     src: &Location,
@@ -187,11 +176,6 @@ fn copy_file_cross_scheme(
     )
 }
 
-/// best-effort partial dst 清理 + Err warn 抽独立 helper 加 `coverage(off)`：
-/// Ok/Err 双 arm 在 `write_group` 内 llvm 生成 2 sub-branch，其中 Ok arm 在 fake
-/// early-Err copy 场景下逻辑不可达（`stream_copy` 内部已 remove、native copy 早 Err
-/// 前也不 create dst），恒走 Err → False branch 恒 0-hit；集中此处 `coverage-off`
-/// 让 lcov 分支复合 100% 而不掩盖业务测试。
 #[doc(hidden)]
 pub fn best_effort_remove_partial_dst(be: &dyn Backend, loc: &Location) {
     if let Err(re) = be.remove_file(loc) {
@@ -212,9 +196,6 @@ fn move_file(
     output_backend: &Arc<dyn Backend>,
     target_loc: &Location,
 ) -> io::Result<()> {
-    // Backend capability query 替 scheme=="local" 硬门禁：LocalBackend 双端返 true
-    // 走 fs::rename；未来远端 backend 可 override 接入 SMB2 SET_INFO / adb shell mv
-    // 原生原子 rename 无需改本层。
     if src_backend.supports_native_rename_to(output_backend.as_ref()) {
         return src_backend.rename(src_loc, target_loc, false);
     }

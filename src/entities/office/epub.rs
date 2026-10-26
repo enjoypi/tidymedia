@@ -58,11 +58,6 @@ fn read_entry<R: Read + std::io::Seek>(
 /// 章节正文单文件读取上限；xhtml markup 膨胀系数低于 OOXML，128 KiB 足够。
 const CHAPTER_MAX_BYTES: u64 = 128 * 1024;
 
-/// 文本提取入口：按 entry 名后缀（`.xhtml`/`.html`/`.htm`）遍历章节文件，
-/// 剥 HTML 标签攒 best-effort 正文，达 `max_bytes` 停。
-///
-/// 整 fn `coverage(off)`：zip 打开/entry 缺失早返路径同 `parse`；剥标签业务由
-/// `scan::strip_markup_into` 单测真测。
 #[doc(hidden)]
 pub fn extract_text(reader: &mut dyn MediaReader, _mime: &str, max_bytes: usize) -> String {
     let Ok(mut archive) = zip::ZipArchive::new(reader) else {

@@ -3,40 +3,16 @@ name = "tidymedia"
 version = "1.1.4"
 edition = "2024"
 
-[features]
-default = []
-# 启用真实 SMB 后端（smb2 crate：纯 Rust SMB2/3 客户端，零 C 依赖，
-# Windows/macOS/Linux 均可构建；async API 经内嵌 tokio runtime block_on 桥接）。
-# 未启用时 SmbBackend::new() 返 Unsupported，但 SmbBackend::with_client(fake) 仍可用于测试。
-smb-backend = ["dep:smb2", "dep:tokio"]
-# 占位：真实 MTP 后端待 future PR 选定 crate（libmtp-rs / gphoto2 / 自接 rusb）。
-# 当前启用 feature 也仍是 stub，运行期返 Unsupported。
-mtp-backend = []
-# 启用真实 ADB 后端（adb_client crate，走 TCP 与本机 `adb` daemon 协议）。
-# 运行前需要在 host 上启动 `adb start-server`，目标 Android 设备开 USB 调试 + 文件传输。
-# 未启用时 AdbBackend::new() 返 Unsupported，但 AdbBackend::with_client(fake) 仍可用于测试。
-adb-backend = ["dep:adb_client"]
-# 启用 Android 应用层（uniffi 接口 + cdylib），交叉编译到 aarch64-linux-android 用。
-# 桌面 build 不应启用此 feature（cdylib 在 Linux 上会拉空 stub）。
-# 编译流程见 mobile/build-android.sh；之后用 uniffi-bindgen 从生成的库生成 Kotlin 绑定。
-android-app = ["dep:uniffi"]
-# 仅 rlib：cdylib 只在 Android 交叉编译时需要，由 build-android.sh 用
-# `cargo rustc --crate-type cdylib` 按需产出。若写死 cdylib，Windows 上
-# lib 与 bin 的 tidymedia.pdb 输出文件名冲突（cargo#6313）。
 [lib]
 crate-type = ["rlib"]
 
 # 业务关键 dep 使用 caret 主版本约束，规则见 src/CLAUDE.md「Rust 与依赖陷阱」。
 [dependencies]
-adb_client = { version = "3.2", optional = true }
-uniffi = { version = "0.31", optional = true }
 camino = { version = "1.2", features = ["serde1"] }
 cfb = "0.7"
 chrono = "0.4"
 clap = { version = "4.6", features = ["derive"] }
 dashmap = "6"
-generic-array = "0"
-hex = "0.4"
 ignore = "0.4"
 infer = "0.19"
 memmap2 = "0.9"
@@ -51,11 +27,11 @@ serde_derive = "1.0"
 serde_json = "1.0"
 serde_yaml = "0.9"
 sha2 = "0.11"
-smb2 = { version = "0.20", optional = true }
+smb2 = "0.20"
 tempfile = "3"
 thiserror = "2"
 time = "0.3"
-tokio = { version = "1", features = ["rt", "net", "time", "io-util"], optional = true }
+tokio = { version = "1", features = ["rt", "net", "time", "io-util"] }
 tract-onnx = "0.23"
 image = "0.25"
 tracing = "0.1"
@@ -71,6 +47,7 @@ assert_cmd = "2"
 chrono = "0.4"
 ctor = "1.0.13"
 filetime = "0.2"
+hex = "0.4"
 image = "0.25"
 predicates = "3"
 pretty_assertions = "1"
@@ -79,11 +56,9 @@ tract-onnx = "0.23"
 uuid = "1.24.0"
 
 [lints.rust]
-future-incompatible = { level = "warn", priority = -2 }
+future_incompatible = { level = "warn", priority = -2 }
 nonstandard_style = { level = "deny", priority = -1 }
-# 严格覆盖率 nightly 口径用 `--cfg=coverage_nightly` 启用 `feature(coverage_attribute)`
-# + `#[coverage(off)]`；非 coverage 编译时该 cfg 缺失 → 注册为已知避免 unexpected_cfgs。
-unexpected_cfgs = { level = "deny", check-cfg = ['cfg(coverage_nightly)'] }
+unexpected_cfgs = { level = "deny" }
 
 [lints.clippy]
 all = { level = "deny", priority = -2 }

@@ -295,8 +295,8 @@ fn fake_copy_file_persists_and_errors() {
 
 #[test]
 fn fake_scheme_returns_init_value() {
-    let b = FakeBackend::new("mtp");
-    assert_eq!(b.scheme(), "mtp");
+    let b = FakeBackend::new("archive");
+    assert_eq!(b.scheme(), "archive");
 }
 
 #[test]

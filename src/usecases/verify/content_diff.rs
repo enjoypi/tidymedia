@@ -29,7 +29,7 @@ pub(crate) fn verdict_for(
     if matches!(out.exists(info, true), Ok(Some(_))) {
         return "exact_dup".to_owned();
     }
-    let base = info.full_path.file_name().map_or_default(str::to_owned);
+    let base = basename(info.full_path.as_str()).to_owned();
     let cands = lib.cands.find(&base);
     if cands.is_empty() {
         return "absent".to_owned();

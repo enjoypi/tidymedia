@@ -173,7 +173,7 @@ fn inject_error_on_unlink() {
     assert_eq!(e.kind(), io::ErrorKind::PermissionDenied);
 }
 
-// unlink 不存在路径返 NotFound：与真实 SMB/ADB 行为对齐；
+// unlink 不存在路径返 NotFound：与真实 SMB 行为对齐；
 // 覆盖 fake_remote.rs::unlink 的 is_none() True arm。
 #[test]
 fn unlink_returns_not_found_when_missing() {
@@ -212,7 +212,7 @@ fn list_with_empty_parent_path_includes_all_files() {
 
 #[test]
 fn list_excludes_entry_when_child_equals_parent() {
-    // 新语义：list 只返直属子项，不含 parent 自身（真实 SMB/ADB 行为对齐）。
+    // 新语义：list 只返直属子项，不含 parent 自身（真实 SMB 行为对齐）。
     let c = client();
     c.add_file("/self", b"x".to_vec());
     let t = TestTarget {

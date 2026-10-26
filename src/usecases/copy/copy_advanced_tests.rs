@@ -1,574 +1,183 @@
-//! `copy` use case 进阶路径测试：`do_copy_propagates_*` / `include_non_media` / `archive_template` / report。
-//! 从 `copy_tests.rs` 拆出避免单文件 > 512 行。
-
-#[cfg(test)]
-mod test_advanced {
-    use std::fs;
-    use std::path::Path;
-    use std::sync::Arc;
-
-    use camino::Utf8PathBuf;
-    use tempfile::tempdir;
-
-    use super::super::*;
-    use crate::adapters::backend::local::LocalBackend;
-    use crate::adapters::report_sink::JsonFileReportSink;
-    use crate::entities::backend::Backend;
-    use crate::entities::test_common as tc;
-    use crate::entities::uri::Location;
-    use crate::usecases::report::ReportSink;
-
-    const DEFAULT_TMPL: &str = "{year}/{month}/{valuable_name}";
-
-    fn utf8(p: &Path) -> Utf8PathBuf {
-        Utf8PathBuf::from(p.to_str().unwrap())
-    }
-
-    fn local_loc(p: &Path) -> Location {
-        Location::Local(utf8(p))
-    }
-
-    fn local_arc() -> Arc<dyn Backend> {
-        LocalBackend::arc()
-    }
-
-    fn local_source(p: &Path) -> (Location, Arc<dyn Backend>) {
-        (local_loc(p), local_arc())
-    }
-
-    fn make_media_info(dir: &Path, name: &str) -> Info {
-        let png = tc::copy_png_to(dir, name).unwrap();
-        let mut info = Info::from(png.to_str().unwrap()).unwrap();
-        info.set_exif(crate::entities::exif::Exif::with_mime("image/png"));
-        info
-    }
-
-    fn default_opts(template: &str) -> CopyOpts<'_> {
-        CopyOpts {
-            dry_run: false,
-            remove: false,
-            include_non_media: false,
-            doc_only: false,
-            template,
-        }
-    }
-
-    #[test]
-    fn do_copy_propagates_exists_error_when_indexed_file_deleted() {
-        let dir = tempdir().unwrap();
-        let prefix = vec![0u8; 4096];
-
-        let indexed_path = dir.path().join("indexed.bin");
-        let mut a = prefix.clone();
-        a.push(b'A');
-        fs::write(&indexed_path, &a).unwrap();
-
-        let src_path = dir.path().join("source.bin");
-        let mut b = prefix;
-        b.push(b'B');
-        fs::write(&src_path, &b).unwrap();
-
-        let mut info_src = Info::from(src_path.to_str().unwrap()).unwrap();
-        info_src.set_exif(crate::entities::exif::Exif::with_mime("image/png"));
-
-        let idx = crate::entities::file_index::Index::new();
-        idx.insert(indexed_path.to_str().unwrap()).unwrap();
-        fs::remove_file(&indexed_path).unwrap();
-
-        let out_dir = local_loc(dir.path());
-        let err = do_copy(
-            &info_src,
-            &out_dir,
-            &local_arc(),
-            &idx,
-            &default_opts(DEFAULT_TMPL),
-        )
-        .unwrap_err();
-        let _ = err;
-    }
-
-    // remove=true + dry_run=false + dup 存在 + 源文件父目录 read-only → remove 失败。
-    #[test]
-    #[cfg(unix)]
-    fn do_copy_remove_source_propagates_error() {
-        use std::os::unix::fs::PermissionsExt;
-        let src_dir = tempdir().unwrap();
-        let src_parent = src_dir.path().join("locked");
-        fs::create_dir(&src_parent).unwrap();
-        let png_path = tc::copy_png_to(&src_parent, "photo.png").unwrap();
-        let info = Info::from(png_path.to_str().unwrap()).unwrap();
-
-        let idx = crate::entities::file_index::Index::new();
-        idx.insert(png_path.to_str().unwrap()).unwrap();
-
-        let mut perms = fs::metadata(&src_parent).unwrap().permissions();
-        let original_mode = perms.mode();
-        perms.set_mode(0o555);
-        fs::set_permissions(&src_parent, perms.clone()).unwrap();
-
-        let out_dir = local_loc(src_dir.path());
-        let opts = CopyOpts {
-            dry_run: false,
-            remove: true,
-            include_non_media: false,
-            doc_only: false,
-            template: DEFAULT_TMPL,
-        };
-        let res = do_copy(&info, &out_dir, &local_arc(), &idx, &opts);
-
-        perms.set_mode(original_mode);
-        fs::set_permissions(&src_parent, perms).unwrap();
-
-        assert!(res.is_err(), "expected remove failure but got {res:?}");
-    }
-
-    // 在 target 的预期子目录路径上放一个**文件**，让 create_all 失败。
-    #[test]
-    fn do_copy_create_dir_all_fails_when_path_blocked_by_file() {
-        let src = tempdir().unwrap();
-        let info = make_media_info(src.path(), "photo.png");
-        let out = tempdir().unwrap();
-        fs::write(out.path().join("2024"), b"i am a file").unwrap();
-        let idx = crate::entities::file_index::Index::new();
-        let err = do_copy(
-            &info,
-            &local_loc(out.path()),
-            &local_arc(),
-            &idx,
-            &default_opts(DEFAULT_TMPL),
-        )
-        .unwrap_err();
-        let _ = err;
-    }
-
-    // 源文件 chmod 000 + remove=false → copy 失败。
-    #[test]
-    #[cfg(unix)]
-    fn do_copy_file_copy_fails_when_source_unreadable() {
-        use std::os::unix::fs::PermissionsExt;
-        let src = tempdir().unwrap();
-        let info = make_media_info(src.path(), "photo.png");
-
-        let mut perms = fs::metadata(info.full_path.as_str()).unwrap().permissions();
-        let original_mode = perms.mode();
-        perms.set_mode(0o000);
-        fs::set_permissions(info.full_path.as_str(), perms.clone()).unwrap();
-
-        let out = tempdir().unwrap();
-        let idx = crate::entities::file_index::Index::new();
-        let res = do_copy(
-            &info,
-            &local_loc(out.path()),
-            &local_arc(),
-            &idx,
-            &default_opts(DEFAULT_TMPL),
-        );
-
-        perms.set_mode(original_mode);
-        fs::set_permissions(info.full_path.as_str(), perms).unwrap();
-
-        assert!(res.is_err(), "expected copy failure but got {res:?}");
-    }
-
-    // local→local + remove=true 命中 fast-path 走 fs::rename：src 父目录 chmod 555 后
-    // fs::rename 失去 dentry write 权限直接失败，Err 传播。覆盖 fast-path if-branch 的
-    // rename Err 路径（替代原"stream_copy 后 remove fail"语义——fast-path 下 rename 是
-    // 单步原子操作，没有"copy 成功但 remove 失败"中间态）。
-    #[test]
-    #[cfg(unix)]
-    fn do_copy_move_fails_when_src_parent_locked() {
-        use std::os::unix::fs::PermissionsExt;
-        let root = tempdir().unwrap();
-        let src_parent = root.path().join("locked_src");
-        fs::create_dir(&src_parent).unwrap();
-        let info = make_media_info(&src_parent, "photo.png");
-
-        let out = root.path().join("out");
-        fs::create_dir(&out).unwrap();
-        let idx = crate::entities::file_index::Index::new();
-
-        let mut perms = fs::metadata(&src_parent).unwrap().permissions();
-        let original_mode = perms.mode();
-        perms.set_mode(0o555);
-        fs::set_permissions(&src_parent, perms.clone()).unwrap();
-
-        let opts = CopyOpts {
-            dry_run: false,
-            remove: true,
-            include_non_media: false,
-            doc_only: false,
-            template: DEFAULT_TMPL,
-        };
-        let res = do_copy(&info, &local_loc(&out), &local_arc(), &idx, &opts);
-
-        perms.set_mode(original_mode);
-        fs::set_permissions(&src_parent, perms).unwrap();
-
-        assert!(res.is_err(), "expected rename failure but got {res:?}");
-    }
-
-    fn walk_files(root: &Path) -> Vec<std::path::PathBuf> {
-        let mut out = Vec::new();
-        let mut stack = vec![root.to_path_buf()];
-        while let Some(p) = stack.pop() {
-            if let Ok(entries) = fs::read_dir(&p) {
-                for e in entries.flatten() {
-                    let path = e.path();
-                    if path.is_dir() {
-                        stack.push(path);
-                    } else {
-                        out.push(path);
-                    }
-                }
-            }
-        }
-        out
-    }
-
-    // include_non_media=true → 非媒体（.txt 等 magic-bytes MIME 未识别为 image/video 的）也被搬运
-    #[test]
-    fn copy_include_non_media_copies_plain_files() {
-        let src = tempdir().unwrap();
-        fs::write(src.path().join("readme.txt"), b"hello world").unwrap();
-        let out = tempdir().unwrap();
-        copy(
-            &[local_source(src.path())],
-            local_source(out.path()),
-            false,
-            false,
-            true,
-            None,
-            None,
-        )
-        .unwrap();
-        let copied = walk_files(out.path());
-        assert!(
-            !copied.is_empty(),
-            "include_non_media must copy non-media files"
-        );
-    }
-
-    // do_copy 级别覆盖 include_non_media=true 写出路径
-    #[test]
-    fn do_copy_include_non_media_writes_non_media() {
-        let src = tempdir().unwrap();
-        fs::write(src.path().join("doc.txt"), b"plain document").unwrap();
-        let out = tempdir().unwrap();
-        let info = Info::from(src.path().join("doc.txt").to_str().unwrap()).unwrap();
-        assert!(!info.is_media());
-        let idx = crate::entities::file_index::Index::new();
-        let opts = CopyOpts {
-            dry_run: false,
-            remove: false,
-            include_non_media: true,
-            doc_only: false,
-            template: DEFAULT_TMPL,
-        };
-        let did = do_copy(&info, &local_loc(out.path()), &local_arc(), &idx, &opts).unwrap();
-        assert!(did, "non-media must be copied when include_non_media=true");
-    }
-
-    // include_non_media=false（默认）+ 非媒体 → 跳过，行为对照
-    #[test]
-    fn do_copy_default_skips_non_media() {
-        let src = tempdir().unwrap();
-        fs::write(src.path().join("doc.txt"), b"plain document").unwrap();
-        let out = tempdir().unwrap();
-        let info = Info::from(src.path().join("doc.txt").to_str().unwrap()).unwrap();
-        let idx = crate::entities::file_index::Index::new();
-        let did = do_copy(
-            &info,
-            &local_loc(out.path()),
-            &local_arc(),
-            &idx,
-            &default_opts(DEFAULT_TMPL),
-        )
-        .unwrap();
-        assert!(!did);
-        assert_eq!(walk_files(out.path()).len(), 0);
-    }
-
-    // generate_unique_name 的 empty-render 路径：template 只含 {valuable_name} 且路径无非 ASCII
-    // → sub_dir_rel 为空串 → 直接用 output_dir 作 sub_dir_path（L343 True 分支）。
-    #[test]
-    fn generate_unique_name_empty_template_result_uses_output_dir() {
-        let src = tempdir().unwrap();
-        let info = make_media_info(src.path(), "photo.png");
-        // 路径无非 ASCII → valuable_name 为空 → "{valuable_name}" 渲染为 ""
-        let out = tempdir().unwrap();
-        let (_, target) = generate_unique_name(
-            &info,
-            &local_loc(out.path()),
-            &local_arc(),
-            "{valuable_name}",
-            &crate::entities::file_index::Index::new(),
-            false,
-        )
-        .unwrap()
-        .expect("should generate even with empty subdir");
-        // 目标直接在 output_dir 下（无子目录层）
-        assert!(
-            target.display().ends_with("photo.png"),
-            "got: {}",
-            target.display()
-        );
-    }
-
-    #[test]
-    fn copy_with_custom_archive_template_uses_day() {
-        let src = tempdir().unwrap();
-        let nested = src.path().join("test_album");
-        fs::create_dir_all(&nested).unwrap();
-        tc::copy_png_to(&nested, "photo.png").unwrap();
-        let out = tempdir().unwrap();
-        copy(
-            &[local_source(src.path())],
-            local_source(out.path()),
-            false,
-            false,
-            false,
-            Some("{year}/{month}/{day}"),
-            None,
-        )
-        .unwrap();
-        // mtime 固定为 2024-01-01，所以 day = "01"
-        let expected = out
-            .path()
-            .join("2024")
-            .join("01")
-            .join("01")
-            .join("photo.png");
-        assert!(expected.exists(), "expected file at {expected:?}");
-    }
-
-    #[test]
-    fn copy_with_report_path_creates_valid_json() {
-        let src = tempdir().unwrap();
-        tc::copy_png_to(src.path(), "photo.png").unwrap();
-        let out = tempdir().unwrap();
-        let report_dir = tempdir().unwrap();
-        let report_path = report_dir.path().join("report.json");
-        let sink = JsonFileReportSink::new(report_path.to_str().unwrap());
-        copy(
-            &[local_source(src.path())],
-            local_source(out.path()),
-            true,
-            false,
-            false,
-            None,
-            Some(&sink as &dyn ReportSink),
-        )
-        .unwrap();
-        let content = fs::read_to_string(&report_path).unwrap();
-        let parsed: serde_json::Value = serde_json::from_str(&content).unwrap();
-        assert_eq!(parsed["dry_run"], true);
-        assert!(parsed["scanned"].as_u64().unwrap() >= 1);
-    }
-
-    // 触发 ops.rs:71 `output_backend.mkdir_p(&target_dir_loc)?` Err arm：
-    // out_dir 可读但 chmod 555 → generate_unique_name 的 exists(out/2024/01/photo.png)
-    // 在不存在路径上返 Ok(false)（try_exists 沿路径 stat 找不到即返 false 而非 Err），
-    // 进入 line 71 mkdir_p out/2024/01；out_dir 无写权限 → mkdir_p Err。
-    #[test]
-    #[cfg(unix)]
-    fn do_copy_propagates_mkdir_error_when_archive_year_is_blocked() {
-        use std::os::unix::fs::PermissionsExt;
-        let out_dir = tempdir().unwrap();
-        // chmod 555：read+execute 但不能写入 → mkdir 2024/01 fail
-        let mut perm = fs::metadata(out_dir.path()).unwrap().permissions();
-        perm.set_mode(0o555);
-        fs::set_permissions(out_dir.path(), perm).unwrap();
-
-        let src_dir = tempdir().unwrap();
-        let info = make_media_info(src_dir.path(), "photo.png");
-        let idx = crate::entities::file_index::Index::new();
-
-        let err = do_copy(
-            &info,
-            &local_loc(out_dir.path()),
-            &local_arc(),
-            &idx,
-            &default_opts(DEFAULT_TMPL),
-        )
-        .unwrap_err();
-        let _ = err;
-
-        // 还原权限便于 tempdir 清理
-        let mut perm = fs::metadata(out_dir.path()).unwrap().permissions();
-        perm.set_mode(0o755);
-        fs::set_permissions(out_dir.path(), perm).unwrap();
-    }
-
-    // 触发 ops.rs:122 stream_copy 内 `if let Err(e) = result` 的 Err arm：
-    // FakeBackend output_backend 注入 OpenWrite Err 让 stream_copy 写阶段失败。
-    #[test]
-    fn do_copy_propagates_stream_copy_error_when_open_write_fails() {
-        use crate::adapters::backend::fake::{FakeBackend, Op};
-        use std::io::ErrorKind;
-
-        let src_dir = tempdir().unwrap();
-        let info = make_media_info(src_dir.path(), "photo.png");
-
-        let fake_out = std::sync::Arc::new(FakeBackend::new("local"));
-        let out_loc = Location::Local(Utf8PathBuf::from("/fake_out"));
-        fake_out.add_file(out_loc.clone(), vec![]);
-        let target_loc = Location::Local(Utf8PathBuf::from("/fake_out/2024/01/photo.png"));
-        // 让 open_write target 失败 → stream_copy 内 `if let Err(e) = result` 触发
-        fake_out.inject_error(target_loc, Op::OpenWrite, ErrorKind::PermissionDenied);
-
-        let idx = crate::entities::file_index::Index::new();
-        let backend_arc: std::sync::Arc<dyn Backend> = fake_out;
-        let err = do_copy(
-            &info,
-            &out_loc,
-            &backend_arc,
-            &idx,
-            &default_opts(DEFAULT_TMPL),
-        )
-        .unwrap_err();
-        let _ = err;
-    }
-
-    // ops.rs:107 修复后：dst 入 output_index 改用 src.cloned_at 复用 src 已算好的
-    // hash / size / EXIF，不再对 dst 调 backend.open_read。本测试钉新不变量：
-    // 即使注入 OpenRead Err 在 target_loc 上（race 删除 / NFS ESTALE / 反病毒抢占），
-    // do_copy 也应成功，dst 仍入索引。
-    #[test]
-    fn do_copy_succeeds_when_dst_open_read_would_fail() {
-        use crate::adapters::backend::fake::{FakeBackend, Op};
-        use std::io::ErrorKind;
-
-        let src_dir = tempdir().unwrap();
-        let info = make_media_info(src_dir.path(), "photo.png");
-
-        let fake_out = std::sync::Arc::new(FakeBackend::new("local"));
-        let out_loc = Location::Local(Utf8PathBuf::from("/fake_out"));
-        fake_out.add_file(out_loc.clone(), vec![]);
-
-        let target_loc = Location::Local(Utf8PathBuf::from("/fake_out/2024/01/photo.png"));
-        fake_out.inject_error(target_loc, Op::OpenRead, ErrorKind::Interrupted);
-
-        let idx = crate::entities::file_index::Index::new();
-        let backend_arc: std::sync::Arc<dyn Backend> = fake_out;
-        let ok = do_copy(
-            &info,
-            &out_loc,
-            &backend_arc,
-            &idx,
-            &default_opts(DEFAULT_TMPL),
-        )
-        .expect("dst OpenRead Err 不再阻断 copy（cloned_at 路径零 IO）");
-        assert!(ok, "do_copy 应报告 copy 成功");
-    }
-
-    // 跨 backend + remove=true：local src → FakeBackend(scheme!=local) dst。
-    // 走 stream_copy 路径（line 74 三 condition 不全 True，绕过 rename fast-path）
-    // 后 line 85 `if opts.remove` True arm 触发 → line 86 调 `src.backend().remove_file`
-    // 删 src。本测试钉 lib unit binary 的 do_copy instance 覆盖该 True arm。
-    #[test]
-    fn do_copy_cross_backend_move_removes_src_after_stream_copy() {
-        use crate::adapters::backend::fake::FakeBackend;
-        use std::sync::Arc;
-
-        let src_dir = tempdir().unwrap();
-        let info = make_media_info(src_dir.path(), "photo.png");
-        let src_path = src_dir.path().join("photo.png");
-
-        // scheme="smb" 让 output_backend.scheme() != "local" → 绕开 rename fast-path
-        // 走 stream_copy。FakeBackend 接收 mkdir_p / open_write / FakeWriter.finish 全 OK。
-        let fake_out = Arc::new(FakeBackend::new("smb"));
-        let out_loc = Location::Smb {
-            user: None,
-            host: "nas".into(),
-            port: None,
-            share: "photos".into(),
-            path: Utf8PathBuf::from("out"),
-        };
-        fake_out.add_dir(out_loc.clone());
-
-        let idx = crate::entities::file_index::Index::new();
-        let backend_arc: Arc<dyn Backend> = fake_out;
-        let opts = CopyOpts {
-            dry_run: false,
-            remove: true,
-            include_non_media: false,
-            doc_only: false,
-            template: DEFAULT_TMPL,
-        };
-        let ok = do_copy(&info, &out_loc, &backend_arc, &idx, &opts).unwrap();
-        assert!(ok, "stream_copy should succeed");
-        assert!(
-            !src_path.exists(),
-            "src must be removed after cross-backend move"
-        );
-    }
-
-    /// F4 mkdir 缓存命中分支：2 个源文件同月份归档 → `output_backend.mkdir_p`
-    /// 应只调一次同 `target_dir`，而非每文件一次。计入 `output_loc` 顶层 `mkdir_p`
-    /// （`copy_with_sidecar:142`），总共 = 2 次（顶层 + 同 `target_dir` 一次），
-    /// 而非 3 次（顶层 + 每文件各一次）。验证 `ops.rs::do_copy` 内 `HashSet` 命中跳过。
-    #[test]
-    fn mkdir_cache_skips_repeated_mkdir_for_same_target_dir() {
-        use crate::adapters::backend::fake::FakeBackend;
-        use std::sync::Arc;
-
-        let src_dir = tempdir().unwrap();
-        // 两个媒体文件，归档时按 mtime 固定到同一 {year}/{month} 桶。
-        tc::copy_png_to(src_dir.path(), "a.png").unwrap();
-        tc::copy_png_to(src_dir.path(), "b.png").unwrap();
-
-        // output 用 FakeBackend("smb")：scheme != "local" 强制走 stream_copy +
-        // mkdir_p 路径，避开 rename fast-path（fast-path 不调 mkdir_p）。
-        let fake_out = Arc::new(FakeBackend::new("smb"));
-        let out_loc = Location::Smb {
-            user: None,
-            host: "nas".into(),
-            port: None,
-            share: "photos".into(),
-            path: Utf8PathBuf::from("out"),
-        };
-        fake_out.add_dir(out_loc.clone());
-        let fake_out_handle = Arc::clone(&fake_out);
-        let backend_arc: Arc<dyn Backend> = fake_out;
-
-        copy(
-            &[local_source(src_dir.path())],
-            (out_loc, backend_arc),
-            false,
-            false,
-            false,
-            None,
-            None,
-        )
-        .unwrap();
-
-        let calls = fake_out_handle.mkdir_p_calls();
-        assert_eq!(
-            calls, 2,
-            "expected 2 mkdir_p calls (1 output root + 1 target dir, cache reuses target); got {calls}"
-        );
-    }
-
-    #[test]
-    fn copy_empty_source_with_report_writes_zero_counts() {
-        let src = tempdir().unwrap();
-        let out = tempdir().unwrap();
-        let report_dir = tempdir().unwrap();
-        let report_path = report_dir.path().join("empty_report.json");
-        let sink = JsonFileReportSink::new(report_path.to_str().unwrap());
-        copy(
-            &[local_source(src.path())],
-            local_source(out.path()),
-            false,
-            false,
-            false,
-            None,
-            Some(&sink as &dyn ReportSink),
-        )
-        .unwrap();
-        let content = fs::read_to_string(&report_path).unwrap();
-        let parsed: serde_json::Value = serde_json::from_str(&content).unwrap();
-        assert_eq!(parsed["scanned"], 0);
-        assert_eq!(parsed["copied"], 0);
-    }
+use std::fs;
+
+use tempfile::tempdir;
+
+use super::advanced_test_common::*;
+use super::*;
+use crate::adapters::report_sink::JsonFileReportSink;
+use crate::entities::test_common as tc;
+use crate::usecases::report::ReportSink;
+
+// include_non_media=true → 非媒体（.txt 等 magic-bytes MIME 未识别为 image/video 的）也被搬运
+#[test]
+fn copy_include_non_media_copies_plain_files() {
+    let src = tempdir().unwrap();
+    fs::write(src.path().join("readme.txt"), b"hello world").unwrap();
+    let out = tempdir().unwrap();
+    copy(
+        &[local_source(src.path())],
+        local_source(out.path()),
+        false,
+        false,
+        true,
+        None,
+        None,
+    )
+    .unwrap();
+    let copied = walk_files(out.path());
+    assert!(
+        !copied.is_empty(),
+        "include_non_media must copy non-media files"
+    );
+}
+
+// do_copy 级别覆盖 include_non_media=true 写出路径
+#[test]
+fn do_copy_include_non_media_writes_non_media() {
+    let src = tempdir().unwrap();
+    fs::write(src.path().join("doc.txt"), b"plain document").unwrap();
+    let out = tempdir().unwrap();
+    let info = Info::from(src.path().join("doc.txt").to_str().unwrap()).unwrap();
+    assert!(!info.is_media());
+    let idx = crate::entities::file_index::Index::new();
+    let opts = CopyOpts {
+        dry_run: false,
+        remove: false,
+        include_non_media: true,
+        doc_only: false,
+        template: DEFAULT_TMPL,
+    };
+    let did = do_copy(&info, &local_loc(out.path()), &local_arc(), &idx, &opts).unwrap();
+    assert!(did, "non-media must be copied when include_non_media=true");
+}
+
+// include_non_media=false（默认）+ 非媒体 → 跳过，行为对照
+#[test]
+fn do_copy_default_skips_non_media() {
+    let src = tempdir().unwrap();
+    fs::write(src.path().join("doc.txt"), b"plain document").unwrap();
+    let out = tempdir().unwrap();
+    let info = Info::from(src.path().join("doc.txt").to_str().unwrap()).unwrap();
+    let idx = crate::entities::file_index::Index::new();
+    let did = do_copy(
+        &info,
+        &local_loc(out.path()),
+        &local_arc(),
+        &idx,
+        &default_opts(DEFAULT_TMPL),
+    )
+    .unwrap();
+    assert!(!did);
+    assert_eq!(walk_files(out.path()).len(), 0);
+}
+
+// generate_unique_name 的 empty-render 路径：template 只含 {valuable_name} 且路径无非 ASCII
+// → sub_dir_rel 为空串 → 直接用 output_dir 作 sub_dir_path（L343 True 分支）。
+#[test]
+fn generate_unique_name_empty_template_result_uses_output_dir() {
+    let src = tempdir().unwrap();
+    let info = make_media_info(src.path(), "photo.png");
+    // 路径无非 ASCII → valuable_name 为空 → "{valuable_name}" 渲染为 ""
+    let out = tempdir().unwrap();
+    let (_, target) = generate_unique_name(
+        &info,
+        &local_loc(out.path()),
+        &local_arc(),
+        "{valuable_name}",
+        &crate::entities::file_index::Index::new(),
+        false,
+    )
+    .unwrap()
+    .expect("should generate even with empty subdir");
+    // 目标直接在 output_dir 下（无子目录层）
+    assert!(
+        target.display().ends_with("photo.png"),
+        "got: {}",
+        target.display()
+    );
+}
+
+#[test]
+fn copy_with_custom_archive_template_uses_day() {
+    let src = tempdir().unwrap();
+    let nested = src.path().join("test_album");
+    fs::create_dir_all(&nested).unwrap();
+    tc::copy_png_to(&nested, "photo.png").unwrap();
+    let out = tempdir().unwrap();
+    copy(
+        &[local_source(src.path())],
+        local_source(out.path()),
+        false,
+        false,
+        false,
+        Some("{year}/{month}/{day}"),
+        None,
+    )
+    .unwrap();
+    // mtime 固定为 2024-01-01，所以 day = "01"
+    let expected = out
+        .path()
+        .join("2024")
+        .join("01")
+        .join("01")
+        .join("photo.png");
+    assert!(expected.exists(), "expected file at {expected:?}");
+}
+
+#[test]
+fn copy_with_report_path_creates_valid_json() {
+    let src = tempdir().unwrap();
+    tc::copy_png_to(src.path(), "photo.png").unwrap();
+    let out = tempdir().unwrap();
+    let report_dir = tempdir().unwrap();
+    let report_path = report_dir.path().join("report.json");
+    let sink = JsonFileReportSink::new(report_path.to_str().unwrap());
+    copy(
+        &[local_source(src.path())],
+        local_source(out.path()),
+        true,
+        false,
+        false,
+        None,
+        Some(&sink as &dyn ReportSink),
+    )
+    .unwrap();
+    let content = fs::read_to_string(&report_path).unwrap();
+    let parsed: serde_json::Value = serde_json::from_str(&content).unwrap();
+    assert_eq!(parsed["dry_run"], true);
+    assert!(parsed["scanned"].as_u64().unwrap() >= 1);
+}
+
+// 触发 ops.rs:71 `output_backend.mkdir_p(&target_dir_loc)?` Err arm：
+// out_dir 可读但 chmod 555 → generate_unique_name 的 exists(out/2024/01/photo.png)
+// 在不存在路径上返 Ok(false)（try_exists 沿路径 stat 找不到即返 false 而非 Err），
+// 进入 line 71 mkdir_p out/2024/01；out_dir 无写权限 → mkdir_p Err。
+#[test]
+#[cfg(unix)]
+fn do_copy_propagates_mkdir_error_when_archive_year_is_blocked() {
+    use std::os::unix::fs::PermissionsExt;
+    let out_dir = tempdir().unwrap();
+    // chmod 555：read+execute 但不能写入 → mkdir 2024/01 fail
+    let mut perm = fs::metadata(out_dir.path()).unwrap().permissions();
+    perm.set_mode(0o555);
+    fs::set_permissions(out_dir.path(), perm).unwrap();
+
+    let src_dir = tempdir().unwrap();
+    let info = make_media_info(src_dir.path(), "photo.png");
+    let idx = crate::entities::file_index::Index::new();
+
+    let err = do_copy(
+        &info,
+        &local_loc(out_dir.path()),
+        &local_arc(),
+        &idx,
+        &default_opts(DEFAULT_TMPL),
+    )
+    .unwrap_err();
+    let _ = err;
+
+    // 还原权限便于 tempdir 清理
+    let mut perm = fs::metadata(out_dir.path()).unwrap().permissions();
+    perm.set_mode(0o755);
+    fs::set_permissions(out_dir.path(), perm).unwrap();
 }

@@ -41,13 +41,6 @@ pub(crate) fn make_classify_provider(
     })
 }
 
-/// 单文件分类：读源（MIME 复用 `parse_exif` 已 sniff 的值）→ 提取正文片段 →
-/// 推理 → 阈值裁决。全程 best-effort：任何失败返 `None` 落 uncategorized，
-/// 不中断归档。
-///
-/// 整 fn `coverage(off)`：IO 编排（`open_read` Err arm）需注入 reader 错误，
-/// multi-instance 下 phantom miss 难闭合；分类语义由 `classify_tests.rs`
-/// 用 `FakeBackend` + `FakeDocumentClassifier` 全分支断言。
 fn classify_one(
     loc: &Location,
     backend: &Arc<dyn Backend>,

@@ -1,5 +1,3 @@
-#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
-
 mod adapters;
 mod entities;
 mod frameworks;
@@ -8,10 +6,8 @@ mod usecases;
 // ── Interface Adapters re-exports ──
 // Backend Gateway 具体实现（LocalBackend/SmbBackend/...）位于 adapters；trait 定义
 // 与值类型（Backend/Entry/...）保留在 entities。源代码依赖方向严格内向。
-pub use adapters::backend::adb::{AdbBackend, AdbClient, AdbTarget};
 pub use adapters::backend::factory::DefaultBackendFactory;
 pub use adapters::backend::local::LocalBackend;
-pub use adapters::backend::mtp::{MtpBackend, MtpClient, MtpMatch, MtpTarget};
 pub use adapters::backend::smb::{SmbBackend, SmbClient, SmbTarget};
 pub use adapters::cli::{Cli, Commands, run_cli};
 pub use adapters::dispatch::{CommandResult, tidy, tidy_with};
@@ -148,15 +144,6 @@ pub use usecases::face::{
     EyeStateClassifier, FaceDetection, FaceDetector, FaceEmbedder, FaceMeshDetector,
 };
 
-// uniffi 0.31 proc-macro 模式要求 setup_scaffolding! 出现在 crate 根；FFI 入口
-// 与 DI 组装本体位于 frameworks/mobile（Clean Architecture Frameworks 层）。
-#[cfg(feature = "android-app")]
-uniffi::setup_scaffolding!();
-
-/// CLI / FFI 启动钩子：把 frameworks 的 yaml/env loader 装到 `usecases::config`。
-/// `bin/tidymedia.rs::main`、`frameworks/mobile.rs::*` 等入口 MUST 调一次；
-/// 不调用则 [`usecases::config::config`] 取 [`usecases::config::Config::default`]。
-/// 多次调用静默忽略后续（一次性 fn pointer）。
 pub fn install_config_loader() {
     frameworks::config::install_global_loader();
 }

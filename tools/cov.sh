@@ -18,15 +18,12 @@ else
   COV_ROOT="$(pwd)"
 fi
 
-# 保留调用方及 Windows MSVC 的 /LIBPATH，再追加 coverage 专用 cfg。
-export RUSTFLAGS="${RUSTFLAGS:+$RUSTFLAGS }--cfg=coverage_nightly"
-
 # 只清覆盖率原始数据，保留 instrumented 编译产物（重跑免全量重编）。
 cargo +nightly llvm-cov clean --profraw-only
 
 # nextest 必须：进程级单例 + env 覆盖测试在 cargo test 单进程多线程下争用必 fail。
 cargo +nightly llvm-cov "${COV_PLATFORM_ARGS[@]}" nextest \
-  --all-features --locked \
+  --locked \
   --branch --cargo-quiet --failure-output immediate-final --no-fail-fast \
   --no-report --show-progress none --status-level fail --success-output never
 
@@ -55,7 +52,7 @@ line_miss=$(awk '/^SF:/{sf=$0} /^DA:.*,0$/{print sf": "$0}' "$LCOV_OUT")
 # 完整性自检：ignore 之外含 impl/fn 的 .rs 必须出现在 lcov SF（防漏 instrument 的虚假全绿）。
 # 两侧统一为相对正斜杠路径，兼容 Windows lcov 的盘符和反斜杠。
 missing=$(comm -23 \
-    <(fd -e rs -c never -E '*_tests.rs' -E '*_test_helpers.rs' . src/entities src/usecases src/adapters src/frameworks | sed 's|\\|/|g' | sort) \
+    <(fd -e rs -c never -E '*_tests.rs' -E '*_test_helpers.rs' . src/entities src/usecases src/adapters src/frameworks | sed 's|\\|/|g' | sort | rg -v "$COV_IGNORE" || true) \
     <(grep '^SF:' "$LCOV_OUT" | sed -e 's|\\|/|g' -e "s|^SF:${COV_ROOT}/||" -e 's|^SF:||' | sort) \
   | xargs -I{} rg -l '^impl |^pub impl |^fn |^pub fn |^pub\(crate\) fn ' {} 2>/dev/null) || true
 [[ -z "$missing" ]] || { echo "coverage gate failed: production source not in lcov:" >&2; printf '%s\n' "$missing"; exit 1; }

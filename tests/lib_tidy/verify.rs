@@ -5,12 +5,13 @@ use std::fs::{read_to_string, write};
 use std::io::Cursor;
 use std::path::PathBuf;
 
-use camino::Utf8PathBuf;
 use image::RgbImage;
 use tempfile::tempdir;
-use tidymedia::{Commands, Location, reset_config_loader, run_cli, tidy};
+use tidymedia::{
+    Commands, DefaultDetectorFactory, Location, reset_config_loader, run_cli, tidy, tidy_with,
+};
 
-use super::{DATA_DIR, local};
+use super::{DATA_DIR, FakeBackendFactory, local, smb_loc};
 
 #[test]
 fn tidy_dispatches_verify_on_data_dir() {
@@ -441,14 +442,6 @@ pub(super) fn write_small_max_bytes_config() -> tempfile::TempDir {
     dir
 }
 
-fn mtp_loc() -> Location {
-    Location::Mtp {
-        device: "Pixel 8".into(),
-        storage: "Internal".into(),
-        path: Utf8PathBuf::new(),
-    }
-}
-
 fn verify_command(sources: Vec<Location>, output: Location) -> Commands {
     Commands::Verify {
         sources,
@@ -463,15 +456,20 @@ fn verify_command(sources: Vec<Location>, output: Location) -> Commands {
 #[test]
 fn tidy_verify_rejects_unbuildable_source() {
     let out = tempdir().unwrap();
-    let res = tidy(verify_command(
-        vec![mtp_loc()],
-        local(out.path().to_str().unwrap()),
-    ));
+    let res = tidy_with(
+        &FakeBackendFactory::new(),
+        &DefaultDetectorFactory,
+        verify_command(vec![smb_loc("")], local(out.path().to_str().unwrap())),
+    );
     assert!(res.is_err());
 }
 
 #[test]
 fn tidy_verify_rejects_unbuildable_output() {
-    let res = tidy(verify_command(vec![local(DATA_DIR)], mtp_loc()));
+    let res = tidy_with(
+        &FakeBackendFactory::new(),
+        &DefaultDetectorFactory,
+        verify_command(vec![local(DATA_DIR)], smb_loc("")),
+    );
     assert!(res.is_err());
 }

@@ -50,11 +50,6 @@ impl<A: RemoteAdapter> Backend for RemoteBackend<A> {
             Ok(t) => t,
             Err(e) => return Box::new(std::iter::once(Err(e))),
         };
-        // 与 LocalBackend WalkBuilder 同口径递归扫描子目录：单层 list 会让
-        // SMB/ADB/MTP source 下子目录的全部媒体文件被 visit_location 静默丢失
-        //（visit 仅消费 EntryKind::File，Dir entry 不会被递归驱动）。
-        // 远端 list 是同步 IO，eager 收集所有 entry 后一次性返回——sources 实测
-        // ≤ 数万文件，远小于 hash/EXIF 阶段的内存峰值，无需引入懒迭代复杂度。
         let mut out: Vec<io::Result<Entry>> = Vec::new();
         walk_recursive::<A>(&self.adapter, &target, &mut out);
         Box::new(out.into_iter())

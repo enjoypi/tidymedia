@@ -20,11 +20,8 @@ fn smb_loc(path: &str) -> Location {
     }
 }
 
-fn adb_loc(path: &str) -> Location {
-    Location::Adb {
-        serial: None,
-        path: Utf8PathBuf::from(path),
-    }
+fn local_loc(path: &str) -> Location {
+    Location::Local(Utf8PathBuf::from(path))
 }
 
 #[test]
@@ -32,10 +29,10 @@ fn stream_copy_prefer_native_but_scheme_mismatch_falls_through_to_stream() {
     let src_be = FakeBackend::new("smb");
     let src_loc = smb_loc("/a.bin");
     src_be.add_file(src_loc.clone(), b"payload".to_vec());
-    let dst_be = FakeBackend::new("adb");
-    let dst_loc = adb_loc("/b.bin");
+    let dst_be = FakeBackend::new("local");
+    let dst_loc = local_loc("/b.bin");
 
-    // prefer_native_copy=true 但 src.scheme()="smb" != dst.scheme()="adb"
+    // prefer_native_copy=true 但 src.scheme()="smb" != dst.scheme()="local"
     // → && 短路 False → 走 stream 路径（open_read / open_write / io::copy）
     let n = stream_copy(&src_be, &src_loc, &dst_be, &dst_loc, true).unwrap();
     assert_eq!(n, b"payload".len() as u64);

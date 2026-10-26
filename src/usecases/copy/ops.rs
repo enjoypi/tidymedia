@@ -22,11 +22,6 @@ mod phantom;
 #[doc(hidden)]
 pub(crate) use self::phantom::do_copy;
 
-// 落盘类型过滤，与 Exif::open_filtered 的解析短路同口径（三态）：doc_only 只留
-// 文档族；否则 include_non_media 放行一切、默认只留媒体。从 do_copy 抽出
-// （clippy too_many_lines）；`coverage(off)` 理由与 do_copy 相同（multi-binary
-// instance 下 `warn!` micro-region 虚假 miss），业务由 `copy_doc_only_tests` /
-// `copy_advanced_tests::include_non_media` 系列真测。
 pub(super) fn type_allowed(src: &Info, include_non_media: bool, doc_only: bool) -> bool {
     if doc_only {
         return src.is_office();
@@ -58,13 +53,6 @@ fn passes_type_filter(src: &Info, opts: &CopyOpts<'_>, feature: &'static str, di
     false
 }
 
-// stream_copy + remove(=move) 路径下的 src 删除步骤。抽出独立 fn 是为了用
-// `#[cfg_attr(coverage_nightly, coverage(off))]` 把内部 wrap 错误的 closure 从严格
-// 100% region 分母剔除——该 closure 仅在 stream_copy 成功后 remove_file Err 时触发，
-// 是 `tidymedia` bin instance（subprocess 全跑 find）不可达的真实 multi-binary
-// instance 盲区。功能上 lib unit 已由 `copy_advanced_tests::do_copy_cross_backend_...`
-// 与 lib_tidy `move_keeps_src_and_dst_when_remove_file_fails` 双重断言覆盖；wrap
-// 错误文案契约由 `local_tests::cross_device_rename_*` 钉死。
 fn remove_src_after_stream_copy(
     src: &Info,
     src_loc: &Location,

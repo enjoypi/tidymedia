@@ -6,7 +6,7 @@ use std::sync::Arc;
 use tempfile::tempdir;
 use tidymedia::{Backend, Commands, DefaultDetectorFactory, FakeBackend, tidy, tidy_with};
 
-use super::{DATA_DIR, FakeBackendFactory, adb_loc, local, smb_loc};
+use super::{DATA_DIR, FakeBackendFactory, local, smb_loc};
 
 // Find + report：触发 dispatch.rs L56 `if let Some(path)` True 分支（find report 写盘）。
 #[test]
@@ -190,22 +190,21 @@ fn tidy_copy_uses_takeout_sidecar_time_for_undated_media() {
     );
 }
 
-/// ADB source → SMB output：手机照片直接归档到 NAS，全程走 `FakeBackend` 不需真实设备/服务器。
+/// Local source → SMB output：本地照片归档到 NAS，跨 scheme 流式写远端输出。
 #[test]
-fn tidy_with_copy_adb_source_to_smb_output() {
-    let adb_root = adb_loc("/sdcard/DCIM");
-    let adb_file = adb_loc("/sdcard/DCIM/shot.jpg");
-
-    let fake_adb = Arc::new(FakeBackend::new("adb"));
-    fake_adb.add_dir(adb_root.clone());
-    fake_adb.add_file(adb_file, b"RAW-PHOTO-ADB".to_vec());
+fn tidy_with_copy_local_source_to_smb_output() {
+    let src_dir = tempdir().unwrap();
+    let src_file = src_dir.path().join("photo.bin");
+    std::fs::write(&src_file, b"LOCAL-PHOTO-BYTES").unwrap();
+    // 固定 mtime 让归档桶稳定（2024-01-01 UTC → 默认时区 2024/01）。
+    let mtime = filetime::FileTime::from_unix_time(1_704_067_200, 0);
+    filetime::set_file_mtime(&src_file, mtime).unwrap();
 
     let smb_root = smb_loc("Inbox");
     let fake_smb = Arc::new(FakeBackend::new("smb"));
     fake_smb.add_dir(smb_root.clone());
 
     let mut factory = FakeBackendFactory::new();
-    factory.insert("adb", Arc::clone(&fake_adb) as Arc<dyn Backend>);
     factory.insert("smb", Arc::clone(&fake_smb) as Arc<dyn Backend>);
 
     tidy_with(
@@ -214,18 +213,17 @@ fn tidy_with_copy_adb_source_to_smb_output() {
         Commands::Copy {
             dry_run: false,
             include_non_media: true,
-            sources: vec![adb_root],
+            sources: vec![local(src_dir.path().to_str().unwrap())],
             output: smb_root,
             archive_template: None,
             report: None,
         },
     )
-    .expect("adb -> smb copy should succeed");
+    .expect("local -> smb copy should succeed");
 
-    // FakeBackend metadata 给 UNIX_EPOCH → 1970/01 桶。
-    let dst_loc = smb_loc("Inbox/1970/01/shot.jpg");
+    let dst_loc = smb_loc("Inbox/2024/01/photo.bin");
     assert!(
         fake_smb.read_bytes(&dst_loc).is_some(),
-        "expected smb to hold copied file at Inbox/1970/01/shot.jpg"
+        "expected smb to hold copied file at Inbox/2024/01/photo.bin"
     );
 }

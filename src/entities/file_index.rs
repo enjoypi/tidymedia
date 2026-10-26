@@ -47,7 +47,7 @@ pub struct Index {
 fn target_key(loc: &Location) -> Utf8PathBuf {
     match loc {
         Location::Local(p) => p.clone(),
-        other => other.display().into(),
+        other @ Location::Smb { .. } => other.display().into(),
     }
 }
 

@@ -18,10 +18,9 @@ use time::UtcOffset;
 #[path = "config_models.rs"]
 mod config_models;
 #[allow(unused_imports)]
-// Adb/Smb 结构体仅经 `BackendConfig` 字段被消费，仓内无 `usecases::config::<Type>` 命名引用
 pub use config_models::{
-    AdbBackendConfig, BackendConfig, CategoryDef, ClassifyConfig, CopyConfig, ExifConfig,
-    FaceConfig, LogConfig, OcrConfig, SmbBackendConfig,
+    BackendConfig, CategoryDef, ClassifyConfig, CopyConfig, ExifConfig, FaceConfig, LogConfig,
+    OcrConfig, SmbBackendConfig,
 };
 
 // `Mutex<Option<&'static Config>>` + `Box::leak`：config()` 永远返回可被安全解引用的

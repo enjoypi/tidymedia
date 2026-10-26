@@ -1,10 +1,3 @@
-//! CFB 字节扫描单测：合成 `PropertySet` 字节缓冲覆盖 `extract_dates` /
-//! `find_property_filetime` / `filetime_to_epoch` / `read_u32_le` 各分支。
-//! 整 fn `parse(reader, mime)` `coverage(off)`，e2e 由 fixture 集成测试覆盖
-//! （静态 fixture `tests/data/sample-{doc,xls,ppt}-dated.*` 由
-//! `tests/gen_cfb_fixtures.rs` 用 cfb crate writer 生成——Python
-//! `compoundfiles`/`olefile` 只读写不了 CFB）。
-
 use std::io::{Cursor, Write};
 
 use super::*;

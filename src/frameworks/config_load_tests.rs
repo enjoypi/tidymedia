@@ -3,23 +3,19 @@ use super::test_common::remove_env_var;
 use super::test_common::set_env_var;
 use crate::usecases::config::config;
 
-// yaml 故意保留已删除的 timeout_secs / mtp 节：serde 默认忽略未知字段，
-// 旧 config.yaml 必须保持向后兼容不报错。
 #[test]
 fn backend_config_yaml_overrides_defaults_and_ignores_removed_fields() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("backend.yaml");
     std::fs::write(
         &path,
-        "backend:\n  smb:\n    default_user: alice\n    workgroup: HOME\n    timeout_secs: 60\n  mtp:\n    device_match: exact\n    storage_match: exact\n  adb:\n    server_host: 10.0.0.5\n    server_port: 15037\n    timeout_secs: 90\n",
+        "backend:\n  smb:\n    default_user: alice\n    workgroup: HOME\n    timeout_secs: 60\n  legacy:\n    enabled: false\n",
     )
     .unwrap();
     set_env_var("TIDYMEDIA_CONFIG", path.to_str().unwrap());
     let cfg = load();
     assert_eq!(cfg.backend.smb.default_user, "alice");
     assert_eq!(cfg.backend.smb.workgroup, "HOME");
-    assert_eq!(cfg.backend.adb.server_host, "10.0.0.5");
-    assert_eq!(cfg.backend.adb.server_port, 15037);
     remove_env_var("TIDYMEDIA_CONFIG");
 }
 

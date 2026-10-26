@@ -60,13 +60,6 @@ impl Default for ExifConfig {
     }
 }
 
-// 哑配置治理（杜绝声明了却无消费点的字段）：
-// - `smb.timeout_secs` 已随 smb2 加回（smb2 `ClientConfig.timeout` 有真实消费点）；
-//   `adb.timeout_secs` 仍删——adb_client 无 timeout API，字段只会制造
-//   "配置了却无效"的幻觉；库支持后再加回
-// - `MtpBackendConfig`（device_match / storage_match）已删——MTP real client 是
-//   stub，factory 不读这两个字段；real 接入时随 `MtpMatch` 消费链一起加回
-// serde 默认忽略未知字段，旧 config.yaml 含这些键不会报错。
 #[derive(Clone, Debug, Deserialize)]
 #[serde(default)]
 pub struct SmbBackendConfig {
@@ -83,22 +76,6 @@ impl Default for SmbBackendConfig {
             default_user: String::new(),
             workgroup: "WORKGROUP".into(),
             timeout_secs: 30,
-        }
-    }
-}
-
-#[derive(Clone, Debug, Deserialize)]
-#[serde(default)]
-pub struct AdbBackendConfig {
-    pub server_host: String,
-    pub server_port: u16,
-}
-
-impl Default for AdbBackendConfig {
-    fn default() -> Self {
-        Self {
-            server_host: "127.0.0.1".into(),
-            server_port: 5037,
         }
     }
 }
@@ -247,7 +224,6 @@ impl Default for FaceConfig {
 #[serde(default)]
 pub struct BackendConfig {
     pub smb: SmbBackendConfig,
-    pub adb: AdbBackendConfig,
     pub ocr: OcrConfig,
     pub face: FaceConfig,
     pub classify: ClassifyConfig,

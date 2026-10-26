@@ -1,7 +1,3 @@
-//! `tidy` / `tidy_with` / `run_cli` 端到端集成测试。
-//! root：use + helpers + `FakeBackendFactory` + smb/mtp/adb Location 构造器。
-//! 业务测试拆到 `lib_tidy/*.rs` 三个子文件以保持单文件 < 512 行。
-
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -57,29 +53,14 @@ fn smb_loc(path: &str) -> Location {
     }
 }
 
-fn mtp_loc(path: &str) -> Location {
-    Location::Mtp {
-        device: "Pixel".into(),
-        storage: "Internal".into(),
-        path: Utf8PathBuf::from(path),
-    }
-}
-
-fn adb_loc(path: &str) -> Location {
-    Location::Adb {
-        serial: Some("EMULATOR5554".into()),
-        path: Utf8PathBuf::from(path),
-    }
-}
-
 #[path = "lib_tidy/dispatch_and_cli.rs"]
 mod dispatch_and_cli;
 
 #[path = "lib_tidy/run_cli_flags.rs"]
 mod run_cli_flags;
 
-#[path = "lib_tidy/real_factory.rs"]
-mod real_factory;
+#[path = "lib_tidy/factory_errors.rs"]
+mod factory_errors;
 
 #[path = "lib_tidy/backends.rs"]
 mod backends;
@@ -93,8 +74,8 @@ mod move_idempotency;
 #[path = "lib_tidy/move_failure_recovery.rs"]
 mod move_failure_recovery;
 
-#[path = "lib_tidy/adb_fake_errors.rs"]
-mod adb_fake_errors;
+#[path = "lib_tidy/remote_fake_errors.rs"]
+mod remote_fake_errors;
 
 #[path = "lib_tidy/windows_path.rs"]
 mod windows_path;

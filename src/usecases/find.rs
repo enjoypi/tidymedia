@@ -140,7 +140,7 @@ pub fn compute_output_prefix(output: Option<&Source>) -> Option<String> {
             Ok(fp) => fp.as_str().to_string(),
             Err(_) => p.as_str().to_string(),
         },
-        other => other.display(),
+        other @ Location::Smb { .. } => other.display(),
     })
 }
 
@@ -209,10 +209,6 @@ fn decide_protect(
     }
 }
 
-/// Python 字符串字面量转义：`\` → `\\`、`"` → `\"`；控制字符 `\n` / `\r` / `\t`
-/// / NUL / 其他 ASCII 控制字符转 `\xNN`。Linux/macOS 允许文件名含 `\n`，未转义会
-/// 让生成的 `os.remove("...")` 脚本行被拆到下一行致 Python SyntaxError（用户输入不得 panic 的原则同样适用于脚本生成）。非 ASCII UTF-8 字符按原样输出
-/// （Python 3 源文件默认 UTF-8）。
 fn escape_py_string(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for ch in s.chars() {

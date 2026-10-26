@@ -18,11 +18,6 @@ const KEY_MODIFIED: &str = "modifiedDate";
 /// plist 最大读入字节数。Properties.plist 通常 < 4 KiB，64 KiB 留余量。
 const PLIST_MAX_BYTES: usize = 64 * 1024;
 
-/// 入口：把 reader 当 zip 容器打开，读 `Metadata/Properties.plist` 后调 `extract_dates`。
-///
-/// 整 fn `coverage(off)`：fn 内多 let-else 早返路径在 lib unit fixture 各分支命中，
-/// 但 subprocess (bin instance) iWork 文件不入 default fixture 集；业务由
-/// `extract_dates_from_plist` 单测真测。
 #[doc(hidden)]
 pub fn parse(reader: &mut dyn MediaReader, _mime: &str) -> (u64, u64) {
     let Ok(mut archive) = zip::ZipArchive::new(reader) else {

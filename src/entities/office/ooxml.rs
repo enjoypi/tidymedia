@@ -20,11 +20,6 @@ const TAG_MODIFIED_CLOSE: &[u8] = b"</dcterms:modified>";
 /// `core.xml` 最大读入字节数 —— Office 文件 core.xml 体量级 < 4 KiB，64 KiB 留余量。
 const CORE_XML_MAX_BYTES: usize = 64 * 1024;
 
-/// 入口：把 reader 当 ZIP 容器打开，读 `docProps/core.xml` 后调 `extract_dates`。
-///
-/// 整 fn `coverage(off)`：fn 内多 `let Ok(..) else { return (0, 0); }` 早返路径
-/// 由 lib unit fixture 各分支命中，但 subprocess (bin instance) 仅跑 happy；
-/// 多 instance 累加让 phantom region miss 难闭合 —— 业务由 `extract_dates` 单测真测。
 #[doc(hidden)]
 pub fn parse(reader: &mut dyn MediaReader, _mime: &str) -> (u64, u64) {
     let Ok(mut archive) = zip::ZipArchive::new(reader) else {
@@ -53,11 +48,6 @@ const PPTX_SLIDES_PREFIX: &str = "ppt/slides/slide";
 /// 输出 `max_bytes` 文本需要读入的 XML 远大于之；256 KiB 覆盖常见文档前几页。
 const BODY_XML_MAX_BYTES: u64 = 256 * 1024;
 
-/// 文本提取入口：按 mime 分流正文 entry（docx `document.xml` / xlsx
-/// `sharedStrings.xml` / pptx 逐 slide），剥 XML 标签攒 best-effort 正文。
-///
-/// 整 fn `coverage(off)`：zip 打开/entry 缺失早返路径同 `parse`；剥标签业务由
-/// `scan::strip_markup_into` 单测真测。
 #[doc(hidden)]
 pub fn extract_text(reader: &mut dyn MediaReader, mime: &str, max_bytes: usize) -> String {
     let Ok(mut archive) = zip::ZipArchive::new(reader) else {
@@ -90,8 +80,6 @@ pub fn extract_text(reader: &mut dyn MediaReader, mime: &str, max_bytes: usize) 
     out
 }
 
-/// 读单个 zip entry 前 [`BODY_XML_MAX_BYTES`] 字节剥标签入 `out`；entry 缺失 /
-/// 读失败静默跳过（best-effort）。`coverage(off)` 理由同 `extract_text`。
 fn append_entry_text<R: std::io::Read + std::io::Seek>(
     archive: &mut zip::ZipArchive<R>,
     name: &str,

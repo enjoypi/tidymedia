@@ -24,11 +24,6 @@ const FILETIME_TICKS_PER_SEC: u64 = 10_000_000;
 /// Unix epoch (1970-01-01) - FILETIME epoch (1601-01-01) 秒差。
 const EPOCH_DELTA_SECS: u64 = 11_644_473_600;
 
-/// 入口：把 reader 当 `CFB` 容器打开，读 `SummaryInformation` stream 后解析 `PropertySet`。
-///
-/// 整 fn `coverage(off)`：fn 内多 let-else 早返路径在 lib unit fixture 各分支命中，
-/// 但 subprocess (bin instance) 仅跑 happy；多 instance 累加让 phantom region miss
-/// 难闭合 —— 业务由 `extract_dates` / `find_property_filetime` 单测真测。
 #[doc(hidden)]
 pub fn parse(reader: &mut dyn MediaReader, _mime: &str) -> (u64, u64) {
     let Ok(mut comp) = cfb::CompoundFile::open(reader) else {
@@ -51,13 +46,6 @@ const STREAM_TEXT_INPUT_CAP: u64 = 1024 * 1024;
 /// printable run 最小长度（字符数）：低于此长度的碎片多为二进制噪声。
 const MIN_RUN_CHARS: usize = 8;
 
-/// 文本提取入口：`CompoundFile::walk` 枚举正文 stream（跳过 `\x05` 开头的
-/// metadata stream），对每个 stream 做「可打印字符 run」扫描（UTF-16LE +
-/// ASCII 双遍）。不解 Word piece table / xls SST / ppt `TextAtom` 结构
-/// （best-effort，用户已确认）。
-///
-/// 整 fn `coverage(off)`：CFB 打开/walk/read 早返路径同 `parse`；run 扫描业务由
-/// `extract_printable_runs` 单测真测。
 #[doc(hidden)]
 pub fn extract_text(reader: &mut dyn MediaReader, _mime: &str, max_bytes: usize) -> String {
     let Ok(mut comp) = cfb::CompoundFile::open(reader) else {

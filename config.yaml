@@ -21,9 +21,6 @@ log:
   level: ${TIDYMEDIA_LOG_LEVEL:-info}
 # Backend Gateway 全局开关：仅放非凭据可调项；
 # SMB 密码经 SMB_PASSWORD env、Kerberos 走 KRB5CCNAME，均不入 yaml
-# 注：timeout_secs（smb/adb）与 mtp.{device_match,storage_match} 已删——依赖库无
-# timeout API、MTP real client 是 stub，占位字段只制造"配置了却无效"的幻觉；
-# 旧 yaml 含这些键不会报错（serde 忽略未知字段）
 backend:
   smb:
     # URI 未写 `user@` 时兜底用户名；真实 client 接入后由 SmbBackend 读取
@@ -32,11 +29,6 @@ backend:
     workgroup: ${SMB_WORKGROUP:-WORKGROUP}
     # smb2 连接/请求超时秒数；0 非法由 sanitize 回退 30
     timeout_secs: ${SMB_TIMEOUT_SECS:-30}
-  adb:
-    # 本机 adb daemon 监听地址；adb_client 通过 TCP 连接此端口
-    server_host: ${TIDYMEDIA_ADB_SERVER_HOST:-127.0.0.1}
-    # adb daemon 默认端口；多个 adb 实例并存时按需调整
-    server_port: ${TIDYMEDIA_ADB_SERVER_PORT:-5037}
   # move-text-shot 子命令的文本检测后端
   # 仅在使用该子命令时读取；其余路径不消费这些字段
   ocr:

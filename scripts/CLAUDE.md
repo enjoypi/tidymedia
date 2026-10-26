@@ -29,13 +29,12 @@ bun scripts/perf-collect.ts --sub <copy|move|find|cull|move-text-shot|verify> --
 ## 指标与分析
 
 - `duration_ms` 是 use case 内耗时，不包含进程启动和模型加载；整进程 wall clock 才包含固定开销。
-- Linux/macOS 使用 `/usr/bin/time -v` 或对应 GNU time；macOS 需要时安装 `gtime`。
+- macOS 使用 `gtime -v`（GNU time）采集 wall clock 与内存指标；未安装时先执行 `brew install gnu-time`。
 - Windows 使用 PowerShell 采样，提供 wall clock、CPU、峰值工作集和峰值私有内存；没有 Unix page fault、上下文切换和 fs IO 字段时不得编造。
 - Windows 工作集包含本地映射文件页，不等于堆占用；判断内存压力优先看峰值私有内存，并结合文件大小和读取方式。
 - CPU 空闲且吞吐低时先排查 IO 和重复读取；CPU 饱和时再检查内容判重或推理。system CPU 偏高时检查频繁 metadata/open/close。
 - wall clock 明显大于 `duration_ms` 时检查启动和模型加载；只有实际使用模型的命令才归因模型开销。
 - major page fault 或私有内存异常增长时检查并发、整文件读取和缓冲；不得通过削弱内容判等换取表面性能。
 - 逐文件日志造成的瓶颈先核对日志级别和汇总策略，不把一次实测秒数写成通用阈值。
-- 需要函数级热点时可补充 samply，但采样结果仍需与报告和资源指标交叉验证。
 
 向 AI 提供 `perf-report.md`、`report.json` 和 `time-v.txt`，并注明命令、数据规模、文件类型、dry-run/真跑、操作系统及发布构建方式；要求结论引用具体指标，不只凭总耗时判断。

@@ -94,7 +94,7 @@ impl Info {
         let (bytes_read, first_hash, second_hash) = fast_hash_stream(reader.as_mut())?;
         let full_path: Utf8PathBuf = match loc {
             Location::Local(p) => p.clone(),
-            other => other.display().into(),
+            other @ Location::Smb { .. } => other.display().into(),
         };
         Ok(Self {
             fast_hash: first_hash,
@@ -186,7 +186,7 @@ impl Info {
     pub fn cloned_at(&self, new_loc: Location, new_backend: Arc<dyn Backend>) -> Self {
         let new_full_path: Utf8PathBuf = match &new_loc {
             Location::Local(p) => p.clone(),
-            other => other.display().into(),
+            other @ Location::Smb { .. } => other.display().into(),
         };
         let lazy_snapshot = *self.lazy.lock();
         Self {
@@ -203,13 +203,6 @@ impl Info {
         }
     }
 
-    /// 计算创建时间。走 src/CLAUDE.md「media_time 与容器解析」 的 P0→P4 优先级判定：
-    /// 把 EXIF/视频容器字段（P0/P1）、文件名启发式（P2）、外部注入的 sidecar
-    /// 候选（P3，见 [`Self::add_candidates`]）、文件 mtime（P4）一起喂给
-    /// `media_time::resolve`，decision 时间若小于 `valid_threshold_secs`
-    ///（配置层的"软阈值"）则回退到 fs 兜底。
-    /// `valid_threshold_secs` 与 `default_offset`（naive 时间的解释时区）由
-    /// Use Case 层从配置读入；Entity 不直接依赖配置加载。
     pub fn create_time(
         &self,
         valid_threshold_secs: u64,

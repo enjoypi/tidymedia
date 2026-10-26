@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { buildCli, parseTimeV, psSampleScript, renderReport } from "../../scripts/perf-collect.ts";
+import { buildCli, findGnuTime, parseTimeV, psSampleScript, renderReport } from "../../scripts/perf-collect.ts";
 
 test("buildCli verify 不加 --dry-run 且带 -o", () => {
   expect(buildCli("verify", "S", [], "R.json", "O")).toEqual(["verify", "S", "-o", "O", "--report", "R.json"]);
@@ -49,4 +49,41 @@ test("renderReport 输出峰值私有内存，缺失时 n/a", () => {
   const withPrivate = renderReport("verify", "S", {}, { peak_private_kb: 2048 }, 0, "O");
   expect(withPrivate).toContain("| 峰值私有内存 | 2.0 MiB |");
   expect(renderReport("verify", "S", {}, {}, 0, "O")).toContain("| 峰值私有内存 | n/a |");
+});
+
+test("findGnuTime 按序探测 gtime 且命中即返回", () => {
+  const probed: string[] = [];
+  const hit = findGnuTime((p) => {
+    probed.push(p);
+    return p === "/usr/local/bin/gtime";
+  });
+  expect(hit).toBe("/usr/local/bin/gtime");
+  expect(probed).toEqual(["/usr/local/bin/gtime"]);
+});
+
+test("findGnuTime /usr/local 缺失时回退 /opt/homebrew", () => {
+  const probed: string[] = [];
+  const hit = findGnuTime((p) => {
+    probed.push(p);
+    return p === "/opt/homebrew/bin/gtime";
+  });
+  expect(hit).toBe("/opt/homebrew/bin/gtime");
+  expect(probed).toEqual(["/usr/local/bin/gtime", "/opt/homebrew/bin/gtime"]);
+});
+
+test("findGnuTime 候选不含 /usr/bin/time 且全缺返回 null", () => {
+  const probed: string[] = [];
+  expect(
+    findGnuTime((p) => {
+      probed.push(p);
+      return false;
+    }),
+  ).toBeNull();
+  expect(probed).toEqual(["/usr/local/bin/gtime", "/opt/homebrew/bin/gtime"]);
+});
+
+test("renderReport 系统资源标题只引用 gtime", () => {
+  const md = renderReport("verify", "S", {}, {}, 0, "O");
+  expect(md).toContain("（gtime -v；Windows 为 PowerShell 采样）");
+  expect(md).not.toContain("/usr/bin/time");
 });

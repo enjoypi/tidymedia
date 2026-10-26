@@ -1,11 +1,3 @@
-//! 真实 `PaddleOCR` `DBNet` `det.onnx` 加载（tract-onnx 默认编译，需用户备真模型文件）。
-//!
-//! **覆盖率**：本文件走 `--ignore-filename-regex='_real\.rs$'` 排除整文件——
-//! 加载真实 ONNX 文件在 CI 不可触发（模型不入 git），fake 测试在 `tract_dbnet::tests`
-//! 通过 `RawDetector` trait 注入 stub model 覆盖前/后处理。
-//!
-//! 文件名 `_real.rs` 是项目约定，与 `*_real.rs` SMB/ADB/MTP 真实 client 同套路。
-
 use std::io;
 use std::path::Path;
 

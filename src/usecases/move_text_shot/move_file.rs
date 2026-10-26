@@ -51,9 +51,6 @@ pub(super) fn do_move_or_dry_run(
     log_move_ok(&src_loc.display(), &target_loc.display());
 }
 
-/// `debug!` closure micro-region 在 release + 默认无 subscriber 时 0-hit 让整 fn 掉
-/// region 覆盖率；抽 helper 加 `coverage(off)` 集中排除，业务 fn 保持可测（CLAUDE.md
-/// 「tracing macro micro-region release subscriber 不订阅 debug 时 0-hit」套路）。
 fn log_move_ok(src: &str, dst: &str) {
     debug!(
         feature = crate::usecases::report::FEATURE_MOVE_TEXT_SHOT,
@@ -126,8 +123,6 @@ pub(super) fn do_move_file(
     })
 }
 
-/// 拼接 `output / rel_dir`：`rel_dir` 为 `None` 或空 → 直接返 output。Local/远端 backend
-/// 都通过 `Location::join_path` 单点扩展（src/CLAUDE.md「URI、路径与 Backend」）。
 pub(super) fn target_dir(output: &Location, rel_dir: Option<&Utf8Path>) -> Location {
     match rel_dir {
         None => output.clone(),

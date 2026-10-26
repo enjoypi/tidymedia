@@ -3,7 +3,7 @@
 
 use percent_encoding::{AsciiSet, CONTROLS, percent_decode_str, utf8_percent_encode};
 
-use super::{ParseError, SCHEME_ADB, SCHEME_MTP, SCHEME_SMB, SEP};
+use super::{ParseError, SCHEME_SMB, SEP};
 
 pub(super) fn split_user(auth: &str) -> Result<(Option<String>, &str), ParseError> {
     match auth.split_once('@') {
@@ -114,29 +114,5 @@ pub(super) fn render_smb(
         out.push('/');
         out.push_str(&encode_path(path));
     }
-    out
-}
-
-pub(super) fn render_mtp(device: &str, storage: &str, path: &str) -> String {
-    let mut out = format!("{SCHEME_MTP}{SEP}");
-    out.push_str(&encode(device));
-    out.push('/');
-    out.push_str(&encode(storage));
-    if !path.is_empty() {
-        out.push('/');
-        out.push_str(&encode_path(path));
-    }
-    out
-}
-
-pub(super) fn render_adb(serial: Option<&str>, path: &str) -> String {
-    let mut out = format!("{SCHEME_ADB}{SEP}");
-    if let Some(s) = serial {
-        out.push_str(&encode(s));
-    }
-    // path 已是 `/abs`，直接编码各段后拼接；前导 '/' 让 `adb:///abs` 形态自然出现
-    let trimmed = path.strip_prefix('/').unwrap_or(path);
-    out.push('/');
-    out.push_str(&encode_path(trimmed));
     out
 }

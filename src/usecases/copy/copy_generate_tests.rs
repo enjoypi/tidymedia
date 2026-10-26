@@ -105,8 +105,6 @@ fn generate_unique_name_none_after_max_collisions() {
     );
 }
 
-// 无扩展名文件冲突重命名不得产生尾点（"photo_1." 在 Windows 会被 CreateFile 剥点、
-// Linux 下是不可见怪文件）。
 #[test]
 fn generate_unique_name_no_extension_omits_trailing_dot() {
     let src = tempdir().unwrap();
@@ -308,8 +306,6 @@ fn generate_unique_name_authoritative_skips_backend_exists() {
     )
     .unwrap()
     .expect("authoritative index miss should yield target without probing");
-    // Windows 上 join_path 产 `\` 分隔符（混合 `/out` 字面 + `\1970/01`），
-    // 归一后比较（Linux 行为不变）。
     assert_eq!(got.display().replace('\\', "/"), target.display());
 }
 

@@ -3,7 +3,7 @@
 ## 架构与文件组织
 
 - 依赖方向为 `frameworks/` → `adapters/` → `usecases/` → `entities/`；内层不得依赖外层。验证：`rg "use crate::adapters|use crate::frameworks" src/entities/ src/usecases/` 不得出现实现依赖。
-- 入口保持薄：`bin/tidymedia.rs` 只安装 config loader 并调用 `run_cli(env::args_os())`；`lib.rs` 只包含模块声明、re-export、loader 安装和 uniffi setup。
+- 入口保持薄：`bin/tidymedia.rs` 只安装 config loader 并调用 `run_cli(env::args_os())`；`lib.rs` 只包含模块声明、re-export 和 loader 安装。
 - `usecases/` 只依赖 `entities/`。跨层服务通过内层 `OnceLock` loader、fn pointer 或 trait 注入，不用 re-export 桥接。
 - 推理 Output Port 放在对应 `usecases/<feature>/`，基础设施 Port 放在 `entities/backend/`；具体 impl 放 `adapters/`，选择 impl 的 factory 放 `frameworks/`。
 - `tidy()` 在部分失败时返回 Err 以提供非零退出码；`tidy_with()` 直接返回 `CommandResult`，不重复检查。
@@ -14,7 +14,7 @@
 ## 配置与日志
 
 - 配置结构在 `usecases/config.rs`，加载与 sanitize 在 `frameworks/config.rs`，示例和默认值以 `config.yaml` 为准，不在文档复制配置清单。
-- `install_config_loader()` 必须在 bin 入口、每个 FFI export 和需要切换配置的集成测试中最先调用；lib 单元测试使用 crate 入口安装。
+- `install_config_loader()` 必须在 bin 入口和需要切换配置的集成测试中最先调用；lib 单元测试使用 crate 入口安装。
 - `TIDYMEDIA_CONFIG` 指定配置文件；`RUST_LOG` > `--log-level` > `log.level`。
 - `expand_env` 必须限制递归深度；环境值拼回 YAML 前使用 `sanitize_env_value`。展开后以 `{` 开头的 YAML 值必须加引号。
 - 非法配置经 sanitize 回退默认；日志安装前发生的关键回退同时用 stderr 提示。
@@ -23,8 +23,8 @@
 
 ## URI、路径与 Backend
 
-- URI 支持本地路径、`local://`、`smb://[user@]host[:port]/share/path`、`adb://[serial]/abs/path` 和保留的 `mtp://device/storage/path`；MTP 当前返回 Unsupported。
-- URI 字段使用 percent-encoding，不引入 `url` crate；IPv6 host 使用方括号。ADB 多设备必须提供 serial。
+- URI 支持本地路径、`local://` 和 `smb://[user@]host[:port]/share/path`。
+- URI 字段使用 percent-encoding，不引入 `url` crate；IPv6 host 使用方括号。
 - SMB 用户名可由 URI 或 `SMB_USER` 提供，密码只从 `SMB_PASSWORD` 读取；Kerberos 配置读入不代表已支持。
 - 新路径拼接使用 `Location::join_path(segment)`，远端目标内部也用 `/` 语义；纯本地计算才使用 OS 分隔符。
 - copy/move/cull/move-text-shot 的前缀规范化统一使用 `canonical_prefix`；entry 级 output 子树判断使用 `entry_under_prefix`。路径索引 key 使用 `file_info::full_path`，不要以 canonicalize 替代字面稳定路径。
@@ -34,11 +34,9 @@
 - `copy_file` 拒绝跨 scheme；跨 scheme 使用 `open_read`、`open_write`、流式复制和 `writer.finish`。判断同一存储实例用 `Arc::ptr_eq`，不能只比 scheme 字符串。
 - Backend 能力通过 trait method 查询，不在调用方硬编码 scheme。同盘 move 由 OS rename 是否成功判定，不在 Rust 层按盘符猜测。
 - 本地 `exists` 使用 `try_exists()?`；本地 `rename`、`copy_file`、`open_write` 必须不覆盖已有目标，冲突返回 `AlreadyExists`。远端没有统一的原子 no-replace 保证，调用方必须通过索引、命名和冲突错误保护目标，不得宣称与本地同等保证。
-- feature 未启用时，backend `new()` 统一通过 `remote::unsupported_backend(feature)` 返回 Unsupported，不复制错误文案。
 - mkdir/exists best-effort 缓存使用 `contains + insert`，避免失败操作污染缓存。
 - 远端 mkdir 使用真递归；client 原始调用统一经对应 `map_error`，操作日志统一经 `map_and_log`。NotFound/AlreadyExists 用 debug，其余错误用 warn。
 - 错误文案重映射先保留已正确分类的 kind，再以 ASCII 小写匹配 NotFound 和 PermissionDenied；不得吞掉其他错误。
-- ADB 删除使用不带 `-f` 的 `rm`，shell exit 为 None 必须视为失败。
 - 远端 `RemoteClient::read` 当前可能整文件入堆；修改读取、EXIF 或图像路径时必须考虑大文件内存，不得把拆目录当作根本修复。
 - 远端整文件写入必须设上限并使错误可见；flush/finish 错误必须传播。
 
@@ -71,7 +69,7 @@
 - OCR/图像等 bytes 用例先读取 sniff 窗口，命中目标类型后再读完整内容；预分配容量必须处理 `u64` 到 `usize` 的转换。
 - copy-doc/move-doc 仅在文档模式且模板含 `{category}` 时装配分类器；分类在 EXIF/MIME 解析后进行，并经 `Info.category` 传入模板。分类阈值以下使用 `uncategorized`，路径段必须 sanitize。
 - 含 `errors` 的 Report 使用统一软上限和截断标记，rayon merge 传播截断状态；`failed` 不受上限影响。
-- `scanned` 在 walk 循环中按触达数累计，不能用成功项数量代替。耗时统一使用 `elapsed_ms`；新增字段同步所有对应 Report、FFI 镜像、fixture 和 JSON 断言，不写死 Report 数量。
+- `scanned` 在 walk 循环中按触达数累计，不能用成功项数量代替。耗时统一使用 `elapsed_ms`；新增字段同步所有对应 Report、fixture 和 JSON 断言，不写死 Report 数量。
 - `ReportSink` 使用 `enum Report<'a>` 和单一 `write(&Report<'_>)` 方法保持对象安全；新增变体不应强制所有 sink 增加专用方法。copy/move 的部分失败文案按实际操作分流并双向测试。
 - cull 的 `culled[i].score` 与 best 综合 total 同口径；比较 f32 时把 NaN 视为负无穷。
 - tract 静态 face 图使用 `into_optimized().into_runnable()`；动态 H/W 的 OCR DBNet 使用 `into_typed().into_runnable()`；BERT symbolic 维先 `into_typed()`，绑定 batch=1、sequence=256，再优化。tokenizer 输出手动 pad/truncate 到 sequence。
@@ -79,7 +77,6 @@
 - 老 QuickTime 使用现有 nom-exif patch，并只用 `BoxHeader::parse` 解析 header；M2TS/AVCHD 使用现有 video PID 与 H.264 EP strip 规则，不把 container body 一次性装入解析 buffer。
 - 推理 metadata 与输入按值透传；letterbox 不得 `.min(1.0)`。face embedding 以 `identity_cluster::EMBED_DIM` 为权威并严格检查长度；当前仍有独立常量或 `[f32; 128]` 字面类型，修改维度前必须先收敛为单点。
 - tract 输出 tensor 的 cow、view、slice 必须保持有效生命周期；多输出分别持有 binding。
-- uniffi Error 字段使用 `text` 或 `detail`，不得使用 `message`；mobile 嵌套集合使用 `Vec<Record>`。FFI 统一消费 `tidy_with` 的 `CommandResult` 并单向映射为 FFI Record，不新增绕过该入口的并行结果通道。
 
 ## 同步检查点
 
@@ -93,7 +90,7 @@
 - 新增 office 容器：parse/extract_text、MIME 与双路由、office fixtures、e2e 归档和扫描共用 helper 同步修改；stub 使用 `&mut dyn MediaReader`，便于 zip/cfb/read_to_end 复用。
 - 新增 factory：内层 trait、frameworks Default factory、dispatch 注入、lib re-export 及所有调用点同步修改。
 - 修改 FaceEmbedder 维度：trait、真实 impl、fake、单测、集成测试和 `EMBED_DIM` 使用点同步修改。
-- 修改 FindReport 或其他 FFI 镜像 schema：领域 Report、mobile Record、report sink fixture 和 JSON 断言同步修改。
+- 修改 FindReport schema：领域 Report、report sink fixture 和 JSON 断言同步修改。
 
 ## Rust 与依赖陷阱
 

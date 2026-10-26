@@ -175,3 +175,27 @@ use super::score::analyze_image;
 #[cfg(test)]
 #[path = "run_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "run_tests_common.rs"]
+mod test_common;
+
+#[cfg(test)]
+#[path = "run_scan_tests.rs"]
+mod scan_tests;
+
+#[cfg(test)]
+#[path = "run_score_tests.rs"]
+mod score_tests;
+
+#[cfg(test)]
+#[path = "run_filter_tests.rs"]
+mod filter_tests;
+
+#[cfg(test)]
+#[path = "run_analyze_tests.rs"]
+mod analyze_tests;
+
+#[cfg(test)]
+#[path = "run_crop_tests.rs"]
+mod crop_tests;

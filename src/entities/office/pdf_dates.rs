@@ -42,13 +42,6 @@ fn find_byte(haystack: &[u8], byte: u8) -> Option<usize> {
     None
 }
 
-/// 解析 PDF 日期字串 `D:YYYYMMDD[HH[mm[SS[O[HH[' mm[']]]]]]]` 为 Unix UTC epoch。
-/// O 为 `+`/`-`/`Z`。时区缺失按 UTC 处理（spec 留作 "local time"，但归档需可比较的 UTC）。
-///
-/// 整 fn `coverage(off)`：fn 内多 `if`/`?` 分支在 lib unit + bin subprocess 两
-/// instance 各 monomorphize 一份，phantom region miss 难以靠 fixture 一一覆盖
-/// （subprocess fixture 只跑 happy path，lib unit 跑边界，两 instance 区域 region
-/// 切片不重合）。逻辑正确性由 lib unit `pdf_tests.rs` 全分支覆盖断言保证。
 pub fn parse_pdf_d_format(s: &str) -> Option<u64> {
     let body = s.strip_prefix("D:")?;
     let bytes = body.as_bytes();
@@ -91,11 +84,6 @@ pub(super) fn parse_pair(bytes: &[u8], offset: usize) -> Option<u32> {
     std::str::from_utf8(slice).ok()?.parse().ok()
 }
 
-/// 解析时区后缀：`Z` / `+HH'mm'` / `-HH'mm'` / 空 → UTC。容忍尾部缺失 `'`/秒字段。
-/// 整 fn `coverage(off)`：fn 内 `match` + 多个 `?` 在 lib unit + bin subprocess 两
-/// instance 各 monomorphize 一份，phantom region miss 难靠 fixture 一一覆盖
-/// （subprocess fixture 只跑 happy path）。逻辑正确性由 `pdf_tests.rs`
-/// `parse_tz_offset_*` 系列全分支断言保证。
 pub(super) fn parse_tz_offset(tz: &[u8]) -> Option<FixedOffset> {
     if tz.is_empty() || tz[0] == b'Z' {
         return FixedOffset::east_opt(0);

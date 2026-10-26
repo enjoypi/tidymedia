@@ -1,7 +1,3 @@
-//! iWork plist 字节扫描单测。用 plist crate write 在测试中合成 binary plist 字典，
-//! 覆盖 `extract_dates_from_plist` / `systemtime_to_epoch` 分支。
-//! 整 fn `parse(reader, mime)` `coverage(off)`，e2e 由 fixture 集成测试不覆盖
-//! （iWork 文件结构因版本而异，单测 plist 二进制即足够）。
 #![allow(
     clippy::duration_suboptimal_units,
     reason = "Unix epoch 秒数语义直观，from_secs 是测试约定"

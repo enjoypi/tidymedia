@@ -5,11 +5,9 @@
 ## 准备
 
 - 本地核心处理不启动外部进程；只有选择执行 `find` 生成的 Python 脚本时才需要 Python。
-- SMB 和 ADB 需要所用二进制在编译时启用 `smb-backend`、`adb-backend` 支持；默认 `just build-release` 不包含这些后端，未启用时会返回 Unsupported。
-- 从 Android 设备读取前，安装 Android Platform Tools，开启 USB 调试，并执行 `adb start-server` 与 `adb devices` 确认设备已授权。多设备必须在 URI 中指定 serial。
+- SMB 为内置能力，默认 `just build-release` 已包含 SMB 支持，无需额外编译选项。
 - 使用 SMB 时，通过 `SMB_USER`、`SMB_PASSWORD` 提供凭据；也可在 URI 的 `user@` 中指定用户名。密码不要写入配置文件。
 - `cull`、`move-text-shot` 和按内容分类的文档归档需要相应模型。模型路径及阈值见 `config.yaml`，也可用对应的 `TIDYMEDIA_*` 环境变量覆盖。
-- MTP 来源目前不可用；Android 设备请使用 ADB URI。
 
 ## 通用用法
 
@@ -29,13 +27,12 @@ tidymedia [--log-level <LEVEL>] <COMMAND> [OPTIONS] <SOURCES...>
 
 ```text
 C:\Photos
-/home/user/Photos
-local:///home/user/Photos
+~/Photos
+local:///Users/<name>/Photos
 smb://[user@]host[:port]/share/path
-adb://[serial]/absolute/path
 ```
 
-URI 字段中的空格、中文等字符使用 percent-encoding；IPv6 地址用方括号，例如 `smb://[::1]/share/photos`。单设备 ADB 可写 `adb:///sdcard/DCIM`，多设备则写 `adb://SERIAL/sdcard/DCIM`。
+URI 字段中的空格、中文等字符使用 percent-encoding；IPv6 地址用方括号，例如 `smb://[::1]/share/photos`。
 
 ## 复制或移动媒体
 
@@ -149,4 +146,4 @@ copy:
 - 本地隐藏文件可能未被扫描；不要据此假定目录已全量处理，应检查报告和源目录。
 - 空文件、不可读文件及被配置排除的文件会跳过，相关计数或错误以报告和日志为准。
 - 远端大文件读写目前可能把单个文件整体装入内存，部分远端写入路径还有单文件 2 GiB 上限，超限会报错。单个文件过大时，拆分目录也不能保证安全，应先改用其他方式导入或转存。
-- 手机内容确认已完整导入并抽样验收后，再自行决定是否清理手机；不要在 ADB 来源上使用移动类命令。
+- 来源内容确认已完整导入并抽样验收后，再自行决定是否清理来源；不要在远端来源上使用移动类命令。

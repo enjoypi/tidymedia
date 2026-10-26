@@ -123,9 +123,6 @@ fn sink_find_invalid_path_only_warns() {
     sink.write(&Report::Find(&r));
 }
 
-// `new_in(parent)` 在父目录可写时成功 → 命中 line 68 `persist(...)` 路径。
-// target 指向已存在的非空目录时 Linux `rename(file, dir)` 返 EISDIR，触发 `map_err` 闭包。
-// 必须 Copy 与 Find 各一份：write_report_json::<CopyReport> 与 ::<FindReport> 是独立 monomorphization。
 #[test]
 fn sink_copy_persist_fails_when_target_is_directory() {
     let dir = tempdir().unwrap();

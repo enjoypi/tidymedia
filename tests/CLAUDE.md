@@ -3,11 +3,9 @@
 ## 门禁与组织
 
 - 测试先行，先确认新测试失败，再实现使其通过。日常命令使用根 `CLAUDE.md` 的 just 入口；跨平台调试 nextest 使用 `--no-fail-fast`。
-- 覆盖率权威口径为 Linux、nightly、dev、all-features、branch；region、function、line、branch 均为 100%。先消除 branch miss，再处理 region。
-- `lib.rs` 保留 `coverage_nightly` 的 `coverage_attribute` 配置，`[lints.rust] unexpected_cfgs` 同步注册；修改覆盖率属性时同步工具清理策略。
+- 覆盖率在 Windows 与 macOS 双平台各自运行 `just cov` 或 `just gate` 验证，均为 nightly、dev，branch、region、function、line 均为 100%。先消除 branch miss，再处理 region。
 - `tools/cov.sh` 是覆盖率门禁唯一实现；工具维护规则见 `tools/CLAUDE.md`，不要在测试文档复制脚本参数。
 - 判断存量 miss 归属时，用相同 filter 对照未修改基线；平台固有缺口不得通过降低门禁掩盖。
-- macOS 本地非 UTF-8 文件名和泛型 instance micro-region 是已知平台缺口，Linux CI 结果才是验收依据。
 - 单元测试外置为 `#[cfg(test)] #[path = "X_yyy_tests.rs"] mod yyy_tests;`。多份测试共享 helper 放 `<mod>_tests_common.rs`，在主模块顶层挂载，不嵌套 `mod tests {}` 后误用相对 `#[path]`。
 - 集成测试的 `tests/<name>.rs` 是 root binary，子目录文件用 root 的 `#[path]` 装配，不作为独立 binary。
 - 测试 shim 必须 `#[cfg(test)]` gate；新增集成测试根同步挂载 tracing fixture。
@@ -15,7 +13,7 @@
 ## 覆盖率处理
 
 - tracing fixture 通过 ctor 安装全局 subscriber，只开启 `tidymedia*` target，让宏字段在覆盖运行中真实求值。新增测试根必须挂载。
-- 覆盖率排除的完整分类以 `tools/CLAUDE.md` 为准，包含全仓 `_phantom.rs`，并不限于模型。不得为掩盖新 miss 扩大 ignore-regex 或 `coverage(off)`。
+- 覆盖率排除的完整分类以 `tools/CLAUDE.md` 为准，包含全仓 `_phantom.rs`，并不限于模型。不得为掩盖新 miss 扩大 ignore-regex，禁止使用 `coverage(off)` 或其 `cfg_attr` 形式。
 - `_phantom.rs` 只承接 per-instance phantom branch；独立文件前必须确认函数本身已被测试覆盖。
 - 子行 region 用复用 profdata 的 `llvm-cov report --text` 定位；branch 查 BRDA 未执行记录，function 用 lcov FNDA，跨 instance 全零才视为真 miss。
 - 定长转换、整数上限等结构不可达的 `?` 改为无 Err 分支的 map、unwrap_or 或索引 helper；能由 helper 直接返回最终 Result 时，不在 caller 留下不可达 `?`。
@@ -23,7 +21,6 @@
 - 难触发的 Err arm 优先使用 fn pointer 或 `#[cfg(test)]` shim 注入，不为覆盖率改变生产语义。
 - 多个调用点共享的短路条件抽成 helper；私有纯函数用微测试覆盖每个短路分支和 NaN/边界输入。
 - 平台分支使用 `#[cfg(target_os = "...")]` 常量，避免 `cfg!()` 让当前平台产生不可达 instrument 分支。
-- 测试自身只在特定平台可达的 skip 分支可标 `coverage(off)`；除本文件列明的生产排除策略外，不得新增 `coverage(off)` 掩盖生产分支。
 - office 入口和复杂业务函数按现有约定排除 subprocess 覆盖，但 lib 单元测试必须覆盖全部业务分支；office fixtures 集中在 `OFFICE_FIXTURES` 驱动 bin instance。
 - 超大常量守卫通过纯 helper 接受测试值，不在测试中构造巨型资源。
 
@@ -51,4 +48,3 @@
 - 配置 OnceLock 测试使用独立 YAML 和 `TIDYMEDIA_CONFIG`，不依赖全局加载顺序。
 - fast-path 测试固定 src mtime 并断言 dst mtime；rename/copy 与流式复制的 mtime 语义不得混淆。
 - `epoch_to_candidate(0)` 与合法 fs UNIX_EPOCH 是不同语义，分别测试，不合并断言。
-- feature 未启用的集成测试必须显式 cfg gate；all-features 路径用镜像测试覆盖启用侧。

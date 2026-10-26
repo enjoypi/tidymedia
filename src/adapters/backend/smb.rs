@@ -1,15 +1,3 @@
-//! SMB Backend：把 `smb://[user@]host[:port]/share/path` 形态的 [`Location`]
-//! 转成 [`SmbClient`] trait 上的调用，client 自身可注入。
-//!
-//! 本模块已迁到 [`RemoteBackend`] 泛型骨架：`SmbBackend` 是
-//! `RemoteBackend<SmbAdapter>` 的类型别名，Backend trait 实现由 generic 层提供。
-//!
-//! ## 环境变量
-//! - `SMB_PASSWORD`：URI 中没有 `user@` 时由 `default_user` 兜底；密码总是经环境变量
-//! - `KRB5CCNAME`：读入 `SmbTarget` 但 Kerberos 未接入（smb2 首期 NTLM only）
-//!
-//! 详见 src/CLAUDE.md「URI、路径与 Backend」段。
-
 use std::io;
 use std::sync::Arc;
 
@@ -80,8 +68,6 @@ impl RemoteTarget for SmbTarget {
 
     fn parent(&self) -> Option<Self> {
         let parent = self.path.parent()?;
-        // share 内根（"/"）或空路径不应被 mkdir：服务器对 mkdir('/') 反应未定义，
-        // 与 AdbTarget::parent 哨兵对齐。
         if parent.as_str().is_empty() || parent.as_str() == "/" {
             return None;
         }
@@ -129,7 +115,7 @@ impl RemoteAdapter for SmbAdapter {
     /// 特有的 `NotFound` 触发文案，沿用 `map_remote_error` 的通用 ENOENT / no such
     /// file / does not exist 集合即可。
     fn map_error(e: io::Error) -> io::Error {
-        super::remote::map_remote_error(e, &[])
+        super::remote::map_remote_error(e)
     }
 
     fn ctx(&self) -> &() {
@@ -145,11 +131,6 @@ impl RemoteAdapter for SmbAdapter {
 pub type SmbBackend = RemoteBackend<SmbAdapter>;
 
 impl SmbBackend {
-    /// 真实库适配器未启用时的入口：返回 `Unsupported` 让上层报错。
-    pub fn new() -> io::Result<Self> {
-        Err(super::remote::unsupported_backend("smb-backend"))
-    }
-
     /// 注入自定义 client。测试用 fake，生产路径注入 `RealSmbClient`。
     pub fn with_client(client: Arc<dyn SmbClient>) -> Self {
         let remote: Arc<dyn RemoteClient<SmbTarget>> = client;
@@ -172,6 +153,5 @@ mod tests;
 #[path = "smb_internals_tests.rs"]
 mod internals_tests;
 
-#[cfg(feature = "smb-backend")]
 #[path = "smb_real.rs"]
 pub mod real;

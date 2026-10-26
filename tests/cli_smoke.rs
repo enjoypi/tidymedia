@@ -1,10 +1,15 @@
 use assert_cmd::Command;
+use assert_cmd::cargo::cargo_bin_cmd;
+use predicates::prelude::PredicateBooleanExt;
 use predicates::str::contains;
+
+fn tidymedia() -> Command {
+    cargo_bin_cmd!("tidymedia")
+}
 
 #[test]
 fn cli_help_exits_zero() {
-    Command::cargo_bin("tidymedia")
-        .unwrap()
+    tidymedia()
         .arg("--help")
         .assert()
         .success()
@@ -13,26 +18,28 @@ fn cli_help_exits_zero() {
 
 #[test]
 fn cli_version_exits_zero() {
-    Command::cargo_bin("tidymedia")
-        .unwrap()
-        .arg("--version")
-        .assert()
-        .success();
+    tidymedia().arg("--version").assert().success();
 }
 
 #[test]
 fn cli_find_on_tests_data_succeeds() {
-    Command::cargo_bin("tidymedia")
-        .unwrap()
-        .args(["find", "tests/data"])
+    tidymedia().args(["find", "tests/data"]).assert().success();
+}
+
+#[test]
+fn cli_copy_help_only_lists_local_and_smb_sources() {
+    tidymedia()
+        .args(["copy", "--help"])
         .assert()
-        .success();
+        .success()
+        .stdout(contains("smb://"))
+        .stdout(contains("adb://").not())
+        .stdout(contains("mtp://").not());
 }
 
 #[test]
 fn cli_unknown_subcommand_fails() {
-    Command::cargo_bin("tidymedia")
-        .unwrap()
+    tidymedia()
         .arg("definitely-not-a-subcommand")
         .assert()
         .failure();

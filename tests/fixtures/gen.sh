@@ -133,8 +133,8 @@ bun "$SCRIPT_DIR/gen_rtf.ts"
 bun "$SCRIPT_DIR/gen_epub.ts"
 
 # CFB（doc/xls/ppt）不是 gen_*.ts：Python olefile/compoundfiles 只读无法写 CFB，
-# 走生产依赖 cfb crate 的 writer（tests/gen_cfb_fixtures.rs，#[ignore] 生成器）：
-#   cargo test --release --test gen_cfb_fixtures -- --ignored
-echo "NOTE: regenerate doc/xls/ppt via: cargo test --release --test gen_cfb_fixtures -- --ignored"
+# 走生产依赖 cfb crate 的 writer，生成到 target/cfb-fixtures 后再复制：
+#   cargo test --release --test gen_cfb_fixtures && cp target/cfb-fixtures/sample-* tests/data/
+echo "NOTE: regenerate doc/xls/ppt via: cargo test --release --test gen_cfb_fixtures && cp target/cfb-fixtures/sample-* tests/data/"
 
 echo "Generated $(ls -1 "$DATA_DIR" | wc -l) files in $DATA_DIR"

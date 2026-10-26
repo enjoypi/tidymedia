@@ -41,8 +41,20 @@ use time::UtcOffset;
 mod tests;
 
 #[cfg(test)]
+#[path = "copy_advanced_tests_common.rs"]
+mod advanced_test_common;
+
+#[cfg(test)]
+#[path = "copy_io_error_tests.rs"]
+mod io_error_tests;
+
+#[cfg(test)]
 #[path = "copy_advanced_tests.rs"]
 mod advanced_tests;
+
+#[cfg(test)]
+#[path = "copy_output_tests.rs"]
+mod output_tests;
 
 #[cfg(test)]
 #[path = "copy_doc_only_tests.rs"]

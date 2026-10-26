@@ -1,28 +1,3 @@
-//! `RealSmbClient`：smb2（纯 Rust SMB2/3 客户端）适配器。
-//!
-//! 仅在 `--features smb-backend` 启用时编译。真实 SMB 调用需要 share 服务器，CI 不验证；
-//! 调度层的 OK / Err 分支由 [`super::SmbBackend::with_client`] + `FakeSmbClient` 覆盖。
-//!
-//! ## async → sync 桥接
-//!
-//! smb2 全 async API（tokio）。本类型内嵌 `current_thread` runtime，6 个
-//! `RemoteClient` 方法逐个 `runtime.block_on(...)` 桥接。`current_thread` 仅在
-//! `block_on` 期间驱动内部任务，故 `auto_reconnect` 关闭——后台 reviver 任务在
-//! 调用间隙停摆反而不可靠；断连让调用方拿到错误重跑。
-//!
-//! ## 线程安全
-//!
-//! `smb2::SmbClient` 方法全是 `&mut self`（连接内 credit/pipeline 状态），
-//! [`parking_lot::Mutex`] 串行化。SmbClient/Tree 是纯 Rust async 类型（auto
-//! `Send`），Mutex 包装后天然 `Send + Sync`——对比 pavao 时代的 raw `SMBCCTX`
-//! 指针，无需 `unsafe impl`。
-//!
-//! ## 未覆盖的能力
-//!
-//! - Kerberos：`SmbTarget.krb5_ccname` 首期不消费（smb2 的 `KerberosAuthenticator`
-//!   走独立 session 装配路径，未接入）；当前 NTLM username/password only。
-//! - guest：`ClientConfig` 空 username/password 即 guest（库注释明示），未实测。
-
 use std::io;
 use std::time::Duration;
 
@@ -105,9 +80,6 @@ impl RealSmbClient {
     }
 
     fn child_target(&self, parent: &SmbTarget, name: &str) -> SmbTarget {
-        // 直接 forward-slash 拼字符串，避免 Windows host 上 Utf8PathBuf::join 注入
-        // `\` 进 SMB 路径（smb2 路径只认 `/`，反斜杠会被映射为 U+F026 普通字符
-        // 致子路径查无此项）。对齐 adb_real::join_abs 单点 helper。
         let child_path = if parent.path.as_str().is_empty() {
             Utf8PathBuf::from(name)
         } else {

@@ -1,15 +1,3 @@
-//! 一次性 CFB fixture 生成器（`#[ignore]`，不进 nextest/覆盖率门槛）。
-//!
-//! Python `olefile`/`compoundfiles` 只读无法写 CFB，用生产依赖 `cfb` crate 的
-//! writer 生成 `tests/data/sample-{doc,xls,ppt}-dated.{doc,xls,ppt}`：
-//! 根 storage CLSID 设为各格式官方 GUID（infer crate 靠它 sniff 出
-//! msword/ms-excel/ms-powerpoint MIME）+ `\x05SummaryInformation` `PropertySet`
-//! （PID_CREATE_DTM=2017-02-14T10:30:00Z → 桶 2017/02）+ 正文 stream
-//! （UTF-16LE 中文，供 copy-doc 内容分类的 printable-run 提取）。
-//!
-//! 手动重生成：`cargo test --release --test gen_cfb_fixtures -- --ignored`
-//! （gen.sh 尾注同款命令）。
-
 use std::io::Write;
 use std::path::Path;
 
@@ -88,9 +76,9 @@ fn write_cfb_fixture(
 }
 
 #[test]
-#[ignore = "one-off fixture generator; run manually to (re)generate tests/data/sample-{doc,xls,ppt}-dated.*"]
 fn generate_cfb_fixtures() {
-    let data_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/data");
+    let data_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("target/cfb-fixtures");
+    std::fs::create_dir_all(&data_dir).unwrap();
     // (文件名, 根 CLSID, 正文 stream 名, 正文文本——供 copy-doc 分类提取)
     let fixtures = [
         (
@@ -115,7 +103,8 @@ fn generate_cfb_fixtures() {
     for (name, clsid, stream, body) in fixtures {
         let path = data_dir.join(name);
         write_cfb_fixture(&path, clsid, stream, body).expect("write CFB fixture");
-        println!("wrote {}", path.display());
+        assert!(path.is_file());
+        assert!(std::fs::metadata(&path).unwrap().len() > 0);
     }
 }
 

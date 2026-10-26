@@ -9,7 +9,7 @@ use crate::entities::uri::Location;
 
 #[derive(Debug, Subcommand)]
 pub enum Commands {
-    /// Copy non-duplicate media files (images / videos recognized via magic-bytes MIME) from sources to the output directory. Pass --include-non-media to also copy everything else. Duplicate detection uses SHA-512. No source files are modified. Sources / output accept URI form: `smb://[user@]host[:port]/share/path`, `mtp://device/storage/path` or plain local path.
+    /// Copy non-duplicate media files (images / videos recognized via magic-bytes MIME) from sources to the output directory. Pass --include-non-media to also copy everything else. Duplicate detection uses SHA-512. No source files are modified. Sources / output accept URI form: `smb://[user@]host[:port]/share/path` or plain local path.
     Copy {
         /// Dry run, do not copy files
         #[arg(short, long)]

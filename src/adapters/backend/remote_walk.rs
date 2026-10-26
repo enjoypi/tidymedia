@@ -86,8 +86,6 @@ pub(super) fn mkdir_recursive<A: RemoteAdapter>(
     let mut missing: Vec<A::Target> = Vec::new();
     let mut cur = Some(target.clone());
     while let Some(t) = cur {
-        // pavao/adb_client 可能把"路径不存在"包成 Other("no such file")，必须经
-        // A::map_error 归一成 NotFound 才能正确驱动自底向上的祖先扫描。
         match client.stat(&t).map_err(A::map_error) {
             Ok(_) => break,
             Err(e) if e.kind() == io::ErrorKind::NotFound => {

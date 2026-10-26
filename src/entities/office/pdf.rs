@@ -39,13 +39,6 @@ use dates::{parse_pair, parse_tz_offset, scan_d_date_after_key};
 /// PDF 字节扫描单窗口大小；头尾各一个窗口。
 const PDF_SCAN_BYTES: u64 = 64 * 1024;
 
-/// 入口：按 [`scan_windows`] 读头（+尾）窗口拼 buffer 后委托 `extract_dates`。
-/// 头窗口字节在 buffer 前部，`find_subslice` 取首个匹配天然实现「头优先」；
-/// 两窗口不相交，拼接只可能边界撕裂漏检（与旧单窗口同类可接受限制）不会假阳性。
-///
-/// 整 fn `coverage(off)`：seek/read Err arm 只能用 lib unit `FailRead` 注入触发，
-/// subprocess bin instance 永远走 OK arm，多 instance 累加 phantom miss。
-/// 窗口划分由纯 fn `scan_windows` 单测真测。
 #[doc(hidden)]
 pub fn parse(reader: &mut dyn MediaReader, _mime: &str) -> (u64, u64) {
     let Some(buf) = read_windows(reader) else {
@@ -66,7 +59,6 @@ pub fn scan_windows(size: u64) -> (Range<u64>, Option<Range<u64>>) {
     }
 }
 
-/// IO 胶水：seek End 取 size → 按窗口读拼 buffer。`coverage(off)` 理由同 `parse`。
 fn read_windows(reader: &mut dyn MediaReader) -> Option<Vec<u8>> {
     let size = reader.seek(SeekFrom::End(0)).ok()?;
     let (head, tail) = scan_windows(size);
@@ -90,12 +82,6 @@ fn read_windows(reader: &mut dyn MediaReader) -> Option<Vec<u8>> {
 /// 常见文档前几十页（远端 backend 已整文件入堆，本 cap 只防超大 PDF 吃内存）。
 const PDF_TEXT_INPUT_CAP: usize = 4 * 1024 * 1024;
 
-/// 文本提取入口：扫 `stream…endstream` 块，`/FlateDecode` 的 flate2 解压后抓
-/// 文本运算符的 `(...)` 字符串字面量。CID 字体（中文常见）输出 hex 串提不出
-/// 可读文本、加密/扫描版无文本层——返空走 `uncategorized`（已知限制）。
-///
-/// 整 fn `coverage(off)`：read 入口 Err arm 同 `parse`；扫描业务由
-/// `extract_text_from_buf` 单测真测。
 #[doc(hidden)]
 pub fn extract_text(reader: &mut dyn MediaReader, _mime: &str, max_bytes: usize) -> String {
     let mut buf = Vec::new();

@@ -37,14 +37,6 @@ fn backend_with(client: Arc<FakeClient>) -> SmbBackend {
 }
 
 #[test]
-fn new_returns_unsupported_when_feature_disabled() {
-    let err = SmbBackend::new().unwrap_err();
-    assert_eq!(err.kind(), io::ErrorKind::Unsupported);
-    let msg = format!("{err}");
-    assert!(msg.contains("smb-backend"), "got: {msg}");
-}
-
-#[test]
 fn scheme_is_smb() {
     let backend = backend_with(fake_client());
     assert_eq!(backend.scheme(), "smb");

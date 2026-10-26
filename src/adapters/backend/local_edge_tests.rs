@@ -137,11 +137,6 @@ fn walk_socket_entry_kind_other() {
     assert!(any_other);
 }
 
-// 把 parent dir chmod 0 让 try_exists 报 PermissionDenied：旧实现用 path.exists()
-// 把 IO 错吞成 Ok(false)，naming::generate_unique_name 接 ?，误判目标不存在 →
-// move 模式下覆盖现有归档文件 + 源被删 = 永久数据丢失（src/CLAUDE.md「URI、路径与 Backend」）。
-// 修复后必须把 Err 直接传播给调用方。root 用户因 DAC override 仍能 stat，与
-// 同文件 `open_read_chmod_000_permission_denied` 同假设：CI 跑非 root。
 #[cfg(unix)]
 #[test]
 fn exists_propagates_permission_denied_from_unreadable_parent() {
@@ -295,4 +290,24 @@ fn non_utf8_path_err_is_invalid_data() {
     let err = super::non_utf8_path_err(std::path::PathBuf::from("whatever"));
     assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
     assert!(err.to_string().contains("non-UTF8"), "got: {err}");
+}
+
+#[test]
+fn walk_entry_to_io_propagates_injected_path_conversion_error() {
+    fn reject_path(_: std::path::PathBuf) -> io::Result<Utf8PathBuf> {
+        Err(io::Error::new(io::ErrorKind::InvalidData, "injected"))
+    }
+
+    let dir = tempdir().unwrap();
+    fs::write(dir.path().join("a.bin"), b"x").unwrap();
+    let entry = ignore::WalkBuilder::new(dir.path())
+        .build()
+        .filter_map(Result::ok)
+        .find(|entry| entry.file_type().is_some_and(|kind| kind.is_file()))
+        .expect("real DirEntry");
+    let err =
+        super::walk_entry_to_io_convert(Ok(entry), super::real_dir_entry_metadata, reject_path)
+            .unwrap_err();
+    assert_eq!(err.kind(), io::ErrorKind::InvalidData);
+    assert_eq!(err.to_string(), "injected");
 }

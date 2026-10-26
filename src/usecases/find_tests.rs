@@ -183,9 +183,6 @@ fn render_script_escapes_double_quote_in_path() {
     );
 }
 
-/// 路径含 `\n` 换行符必须转义成 `\n` 字面量而非真换行——真换行会让 Python
-/// `os.remove("a` 行未终结字符串致 SyntaxError，用户执行删除脚本首行即中断。
-/// Linux/macOS 允许文件名含 `\n`（罕见但真实），Windows 拒绝。
 #[test]
 fn render_script_escapes_newline_in_path() {
     let groups = vec![DuplicateGroup {

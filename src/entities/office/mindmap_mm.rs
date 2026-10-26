@@ -47,10 +47,6 @@ pub fn extract_dates(buf: &[u8]) -> (u64, u64) {
 const MM_TEXT_INPUT_CAP: usize = 256 * 1024;
 const ATTR_TEXT: &[u8] = b"TEXT=\"";
 
-/// 文本提取入口：读前 256 KiB 收集所有 `TEXT="..."` 属性值。
-///
-/// 整 fn `coverage(off)`：read 入口 Err arm 同 `parse`；业务由
-/// `collect_text_attrs` 单测真测。
 #[doc(hidden)]
 pub fn extract_text(reader: &mut dyn MediaReader, _mime: &str, max_bytes: usize) -> String {
     let mut buf = Vec::with_capacity(MM_TEXT_INPUT_CAP);

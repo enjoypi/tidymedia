@@ -13,11 +13,6 @@ pub fn parse(reader: &mut dyn MediaReader, mime: &str) -> (u64, u64) {
     (0, 0)
 }
 
-/// 直读前 `max_bytes` 字节按 UTF-8 lossy 转文本。多读一小段再 lossy：
-/// 截断点可能落在多字节字符中间，lossy 会以 U+FFFD 替换，对分类无影响。
-///
-/// 整 fn `coverage(off)`：read 入口 Err arm 需注入 reader 错误，multi-instance
-/// 下 phantom miss 难闭合；截断语义由 `truncate_to_char_boundary` 类单测保证。
 #[doc(hidden)]
 pub fn extract_text(reader: &mut dyn MediaReader, _mime: &str, max_bytes: usize) -> String {
     let mut buf = Vec::with_capacity(max_bytes);

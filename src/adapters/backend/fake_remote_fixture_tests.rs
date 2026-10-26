@@ -1,6 +1,6 @@
 //! 统一远端 Fake Client：`FakeRemoteClient<T>` 为一个 [`RemoteTarget`] 提供
-//! 内存内文件存储、per-op per-path 错误注入、和 spy 机制。
-//! SMB / ADB / MTP 三套测试 fake 收敛到此单一泛型，消除 ~450 行重复。
+//! 内存内文件存储、per-op per-path 错误注入、和 spy 机制。SMB 测试 fake 经此
+//! 泛型与远端 Backend 骨架对接。
 
 use std::collections::HashMap;
 use std::io;
@@ -15,7 +15,7 @@ use crate::entities::backend::{Entry, EntryKind, Metadata};
 
 /// `child` 是否为 `parent` 目录的直属项（parent/<name>，<name> 不含分隔符）。
 /// 不复用 `under_prefix`：那个函数把 path == prefix 也算 true，且不剥分隔符之后的
-/// 多级嵌套——对模拟 SMB/ADB list 语义需更严格的「正好一级」判定。
+/// 多级嵌套——对模拟 SMB list 语义需更严格的「正好一级」判定。
 fn is_direct_child(child: &str, parent: &str) -> bool {
     let parent_trim = parent.strip_suffix(['/', '\\']).unwrap_or(parent);
     let Some(rest) = child.strip_prefix(parent_trim) else {
@@ -74,7 +74,7 @@ fn file_meta(size: u64) -> Metadata {
 }
 
 /// 统一远端 Fake Client。`error_factory` 允许 SMB 注入 EACCES 文案让
-/// `map_error` 识别；ADB / MTP 直接用默认 `|k| k.into()`。
+/// `map_error` 识别；默认 `|k| k.into()` 直接按 kind 构造。
 pub(crate) struct FakeRemoteClient<T: RemoteTarget> {
     files: Mutex<HashMap<Utf8PathBuf, FileEntry>>,
     op_errors: Mutex<HashMap<(RemoteFakeOp, Utf8PathBuf), io::ErrorKind>>,
@@ -188,7 +188,7 @@ impl<T: RemoteTarget> RemoteClient<T> for FakeRemoteClient<T> {
         self.check(RemoteFakeOp::List, target.path())?;
         let s = self.files.lock().unwrap();
         let parent = target.path().as_str();
-        // 空 parent 是 "list 全部" 的快捷（测试便利）；非空 parent 按真实 SMB/ADB
+        // 空 parent 是 "list 全部" 的快捷（测试便利）；非空 parent 按真实 SMB
         // list 语义只返**直属子项**（child 是 parent/<name>，<name> 不含分隔符），
         // 让 `walk_recursive` 的 Dir 递归分支可在 fake 中正确驱动多层目录树而不重复。
         Ok(s.keys()
@@ -239,7 +239,7 @@ impl<T: RemoteTarget> RemoteClient<T> for FakeRemoteClient<T> {
         self.check(RemoteFakeOp::Unlink, target.path())?;
         let mut s = self.files.lock().unwrap();
         if s.remove(target.path()).is_none() {
-            // 真实 SMB/ADB unlink 缺失文件返 ENOENT；fake 静默 Ok 会掩盖
+            // 真实 SMB unlink 缺失文件返 ENOENT；fake 静默 Ok 会掩盖
             // best-effort cleanup（`let _ = remove_file(..)`）与真错 `?` 上抛
             // 之间的语义差。`error_factory` 让 SMB 测试可注入文案变体。
             return Err((self.error_factory)(io::ErrorKind::NotFound));

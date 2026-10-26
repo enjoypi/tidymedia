@@ -1,9 +1,3 @@
-//! Windows 路径专项测试：中文目录、中文文件名、长根路径。
-//!
-//! 整文件 `#![cfg(windows)]` gated — Linux 不参与编译（`camino::Utf8Path` 在 Linux
-//! 不把 `\` 当分隔符，相关 invariants 仅在 Windows 上成立）。
-//! 对应验收手册 §异常应对表 「中文路径乱码」「路径超过 260 字符」两行的契约。
-
 #![cfg(windows)]
 
 use tempfile::tempdir;

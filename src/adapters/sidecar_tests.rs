@@ -170,11 +170,6 @@ fn try_takeout_unparseable_returns_none() {
     assert!(try_takeout(&Location::Local(mp), backend.as_ref()).is_none());
 }
 
-/// 非 Local backend：`LocalBackend::read_to_string` 对 non-local scheme 返
-/// `InvalidInput`，`read_sidecar` 把 Err 转 None，`discover_with_backend` 返空 Vec。
-/// 注意 `should_log_read_error(InvalidInput) == true`，此路径会 debug! 日志而非静默；
-/// 未来若新增真实 SMB/MTP/ADB sidecar 支持，需在 adapter 层各自实现 `read_to_string`，
-/// 不能依赖此处「scheme 守卫」错觉（见 src/CLAUDE.md「media_time 与容器解析」）。
 #[test]
 fn discover_with_backend_smb_returns_empty() {
     let smb_loc = Location::Smb {
@@ -186,29 +181,6 @@ fn discover_with_backend_smb_returns_empty() {
     };
     let backend = LocalBackend::arc();
     assert_eq!(discover_with_backend(&smb_loc, &backend), []);
-}
-
-/// ADB Location 走同一非 Local guard，应直接返回空 Vec。
-#[test]
-fn discover_with_backend_adb_returns_empty() {
-    let adb_loc = Location::Adb {
-        serial: None,
-        path: Utf8PathBuf::from("/sdcard/DCIM/x.jpg"),
-    };
-    let backend = LocalBackend::arc();
-    assert_eq!(discover_with_backend(&adb_loc, &backend), []);
-}
-
-/// MTP Location 同样走非 Local guard。
-#[test]
-fn discover_with_backend_mtp_returns_empty() {
-    let mtp_loc = Location::Mtp {
-        device: "phone".into(),
-        storage: "internal".into(),
-        path: Utf8PathBuf::from("DCIM/Camera/x.jpg"),
-    };
-    let backend = LocalBackend::arc();
-    assert_eq!(discover_with_backend(&mtp_loc, &backend), []);
 }
 
 /// `NotFound` 是 sidecar 缺失常态，不值得记日志；其余 IO 错误（超时/权限）才需诊断。

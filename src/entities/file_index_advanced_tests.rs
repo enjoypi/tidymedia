@@ -217,8 +217,8 @@ fn default_constructs_zero_state_index() {
 }
 
 // 同一 Index 承载两个不同 backend 的 visit_location 调用：
-// - FakeBackend(smb)：放 1 个 1KiB 文件
-// - FakeBackend(mtp)：放 1 个不同字节序列的 1KiB 文件
+// - FakeBackend(smb nas)：放 1 个 1KiB 文件
+// - FakeBackend(smb other host)：放 1 个不同字节序列的 1KiB 文件
 // 期望：files() 含两条记录，fast_hash 不同；Info 内部 backend 句柄各自归属。
 #[test]
 fn visit_location_accepts_multiple_backends_in_one_index() {
@@ -244,14 +244,18 @@ fn visit_location_accepts_multiple_backends_in_one_index() {
         share: "photos".into(),
         path: Utf8PathBuf::from("a.jpg"),
     };
-    let mtp_root = Location::Mtp {
-        device: "Pixel".into(),
-        storage: "Internal".into(),
+    let other_root = Location::Smb {
+        user: None,
+        host: "other".into(),
+        port: None,
+        share: "photos".into(),
         path: Utf8PathBuf::new(),
     };
-    let mtp_file = Location::Mtp {
-        device: "Pixel".into(),
-        storage: "Internal".into(),
+    let other_file = Location::Smb {
+        user: None,
+        host: "other".into(),
+        port: None,
+        share: "photos".into(),
         path: Utf8PathBuf::from("b.jpg"),
     };
 
@@ -259,39 +263,36 @@ fn visit_location_accepts_multiple_backends_in_one_index() {
     smb.add_dir(smb_root.clone());
     smb.add_file(smb_file.clone(), vec![0xAA; 1024]);
 
-    let mtp = Arc::new(FakeBackend::new("mtp"));
-    mtp.add_dir(mtp_root.clone());
-    mtp.add_file(mtp_file.clone(), vec![0x55; 1024]);
+    let other = Arc::new(FakeBackend::new("smb"));
+    other.add_dir(other_root.clone());
+    other.add_file(other_file.clone(), vec![0x55; 1024]);
 
     let mut index = Index::new();
     let smb_backend = Arc::clone(&smb) as Arc<dyn Backend>;
-    let mtp_backend = Arc::clone(&mtp) as Arc<dyn Backend>;
+    let other_backend = Arc::clone(&other) as Arc<dyn Backend>;
     index.visit_location(&smb_root, &smb_backend);
-    index.visit_location(&mtp_root, &mtp_backend);
+    index.visit_location(&other_root, &other_backend);
 
     assert_eq!(index.len(), 2, "both backends contributed one file each");
 
     let smb_key = Utf8PathBuf::from(smb_file.display());
-    let mtp_key = Utf8PathBuf::from(mtp_file.display());
+    let other_key = Utf8PathBuf::from(other_file.display());
     assert!(index.contains_key(smb_key.as_path()));
-    assert!(index.contains_key(mtp_key.as_path()));
+    assert!(index.contains_key(other_key.as_path()));
     let smb_entry = index.get(smb_key.as_path()).unwrap();
-    let mtp_entry = index.get(mtp_key.as_path()).unwrap();
+    let other_entry = index.get(other_key.as_path()).unwrap();
     assert_ne!(
         smb_entry.value().fast_hash,
-        mtp_entry.value().fast_hash,
+        other_entry.value().fast_hash,
         "distinct byte content should hash differently"
     );
 
     // 重新算 full_hash 必须走各自 Info 内部的 Arc<dyn Backend>——
     // 若实现退化为单 backend 共享，跨 scheme 的 open_read 会失败。
     assert!(smb_entry.value().calc_full_hash().is_ok());
-    assert!(mtp_entry.value().calc_full_hash().is_ok());
+    assert!(other_entry.value().calc_full_hash().is_ok());
 }
 
-// 文件名含非 UTF-8 字节时，Utf8PathBuf::from_path_buf 失败 → 计 walker_errors。
-// macOS APFS 强制文件名 UTF-8（create 返 EILSEQ）无法构造 fixture → 运行期 skip；
-// 测试 fn 标 coverage(off) 让 skip 分支从分母剔除（tests/CLAUDE.md「覆盖率处理」套路），Linux 上完整断言照跑。
 #[test]
 #[cfg(unix)]
 fn visit_dir_counts_non_utf8_path() {

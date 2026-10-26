@@ -1,9 +1,3 @@
-//! Backend Gateway 抽象：把"按 [`Location`] 做文件 IO"的差异封进单一 trait，
-//! 让 entities / usecases 层不再硬绑 `std::fs`。具体实现（Local/SMB/MTP/ADB/Fake）
-//! 落在 `adapters::backend::*`；entities 只持 trait 与值类型，编译期对 adapters
-//! 零依赖（Clean Architecture 依赖方向规则）。src/CLAUDE.md「URI、路径与 Backend」段记录
-//! 使用约定。
-
 use std::io::{self, BufReader, BufWriter, Read, Seek, Write};
 use std::time::SystemTime;
 
@@ -129,18 +123,7 @@ pub trait Backend: Send + Sync {
     /// 当 scheme 不匹配、源不存在、父目录创建失败或底层复制失败时返回 `Err`。
     fn copy_file(&self, src: &Location, dst: &Location, mkparents: bool) -> io::Result<u64>;
 
-    /// 在同一 backend 内原子重命名/移动文件；`mkparents` 为 `true` 时自动创建目标父目录。
-    ///
-    /// Local 实现用 `std::fs::rename`（同一文件系统时原子，跨设备 fallback 到 copy + remove）。
-    /// 远端 backend（SMB / ADB / MTP）当前吃 default 实现：`copy_file` + `remove_file`
-    /// **非原子 fallback**。`SMB2` `SET_INFO` `FileRenameInformation` / ADB `shell mv` /
-    /// libmtp `SendObjectPropList` Rename 均是协议原生原子 op，理想上远端 backend 应
-    /// override 走原生路径（减 2 RTT + 断电原子性）；未 override 前 use case 通过
-    /// [`Self::supports_native_rename_to`] 判定能力，避免误踩非原子 fallback。
-    ///
-    /// # Errors
-    ///
-    /// 当 scheme 不匹配、源不存在、父目录创建失败或底层操作失败时返回 `Err`。
+    #[expect(clippy::missing_errors_doc)]
     fn rename(&self, from: &Location, to: &Location, mkparents: bool) -> io::Result<()> {
         // 跨设备 fallback：先 copy 再 remove；copy 返字节数，统一丢弃。
         // copy 成功但 remove 失败的半态必须显式标记 "copied … but cannot remove
@@ -159,43 +142,12 @@ pub trait Backend: Send + Sync {
         })
     }
 
-    /// 声明本 backend 是否能与 `other` 之间做原生原子 rename（无需 copy+remove
-    /// fallback）。use case 层（`copy/ops.rs::do_copy`）经此判定决定 move 走
-    /// [`Self::rename`] 快路径 还是 [`stream_copy`] + `remove_file` 慢路径，避免
-    /// 硬编码 `scheme() == "local"` 阻塞未来 `SMB2` / ADB / MTP 原生 rename 接入。
-    ///
-    /// Default 保守返 `false`，`LocalBackend` override 为 `other.scheme() == "local"`
-    /// （`Local::rename` 走 `fs::rename` + `CrossesDevices` fallback，OS 内核识别
-    /// `subst` / junction / mount 等所有同卷边界）。
     fn supports_native_rename_to(&self, other: &dyn Backend) -> bool {
         let _ = other;
         false
     }
 }
 
-/// 跨 backend 流式 copy 单点 helper：`copy/ops.rs::do_copy` 与
-/// `cull/group_writer.rs::write_group` 共用此实现，消除双份维护成本 + 同步
-/// 1 MiB `BufReader`/`BufWriter` 缓冲（cull 旧版走 stdlib 8 KiB 让远端大视频 128×
-/// RTT）与失败清理逻辑。
-///
-/// `prefer_native_copy` = true 且同 scheme 时走 `src_be.copy_file` 让 backend 享受
-/// 原生 copy（`LocalBackend` = `fs::copy` sendfile / reflink；远端未来可加 `SMB2`
-/// `FSCTL_SRV_COPYCHUNK` / ADB `shell cp` 服务端复制）。**仅 caller 确认 `src_be` 与
-/// `dst_be` 是同一 backend 实例时**才应传 true（用 `Arc::ptr_eq` 判定），否则同 scheme
-/// 不同实例（如 Fake vs Local 均声明 `scheme=="local"`）会让 `src_be.copy_file(src, dst)`
-/// 访问 `dst_be` 独立存储致 `NotFound`。false 时无论 scheme 一律走 stream 路径
-/// 逐 buf 泵：`open_read` → `BufReader` → `BufWriter` → `open_write` → `io::copy`
-/// → finish 三阶段闭合（`copy` 字节 / `flush` 缓冲 / `finish` 提交）确保 disk-full
-/// 与远端 commit 失败不静默吞。
-///
-/// 中途失败清理半截 dst：`open_write` 已 create/truncate 目标，Err 时必须
-/// `dst_be.remove_file(dst)` 否则占据路径槽位让下轮 unique-name 走 `_N` 后缀
-/// 堆积残留。best-effort：清理失败不掩盖原始传输错误。
-///
-/// # Errors
-///
-/// - 源不可读 / 目标不可写 / `io::copy` 失败 / `writer.finish` 失败：返 `Err`
-/// - 同 scheme + `prefer_native_copy` 时 `src_be.copy_file` 的 Err 直接传播（不做半截清理）
 pub fn stream_copy(
     src_be: &dyn Backend,
     src: &Location,

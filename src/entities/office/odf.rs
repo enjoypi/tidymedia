@@ -43,10 +43,6 @@ pub fn parse(reader: &mut dyn MediaReader, _mime: &str) -> (u64, u64) {
 const CONTENT_XML: &str = "content.xml";
 const CONTENT_XML_MAX_BYTES: u64 = 256 * 1024;
 
-/// 文本提取入口：读 `content.xml` 剥 XML 标签攒 best-effort 正文。
-///
-/// 整 fn `coverage(off)`：zip 打开/entry 缺失早返路径同 `parse`；剥标签业务由
-/// `scan::strip_markup_into` 单测真测。
 #[doc(hidden)]
 pub fn extract_text(reader: &mut dyn MediaReader, _mime: &str, max_bytes: usize) -> String {
     let Ok(mut archive) = zip::ZipArchive::new(reader) else {

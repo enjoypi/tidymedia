@@ -39,7 +39,7 @@ pub fn canonical_prefix(loc: &Location) -> String {
             }
             Err(_) => p.as_str().to_string(),
         },
-        other => other.display(),
+        other @ Location::Smb { .. } => other.display(),
     }
 }
 

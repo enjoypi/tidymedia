@@ -73,8 +73,6 @@ pub(super) fn generate_unique_name(
         let candidate_name = if i == 0 {
             file_name.to_string()
         } else if ext.is_empty() {
-            // 无扩展名文件不拼 '.'：尾点文件名在 Linux 是怪文件，Windows 下
-            // CreateFile 会剥掉尾点，使 exists 判定与实际创建路径不一致。
             format!("{file_stem}_{i}")
         } else {
             format!("{file_stem}_{i}.{ext}")
@@ -104,14 +102,6 @@ pub(super) fn generate_unique_name(
     Ok(None)
 }
 
-/// 把模板渲染出的相对路径挂到 `output_dir` 下。`Location::join_path` 按 scheme
-/// 分流分隔符（Local 走 OS 原生、Smb/Mtp/Adb 强制 `/`）——旧实现 `Utf8PathBuf::join`
-/// 在 Windows host + 远端 output 时注入 `\` 让 smb2/adb shell/libmtp 找不到路径
-/// （CLAUDE.md 「`Location::join_path`」单点规则）。防御 `..` / `.` 段：
-/// `archive_template::sanitize_path_segment` 已洗 EXIF make/model，此为覆盖
-/// `valuable_name` 等其它渠道的第二道防线。清洗后的相对路径一次 `join_path`
-/// （多段拼接是其文档化行为）：旧 fold 逐段 join 让远端 [`Location`] 的
-/// host/share 等 String 字段每段各 clone 一次。
 fn build_sub_dir(output_dir: &Location, sub_dir_rel: &str) -> Location {
     let clean_rel = sub_dir_rel
         .split('/')
@@ -134,10 +124,6 @@ fn system_time_to_offsetdatetime(t: SystemTime) -> Option<OffsetDateTime> {
     convert_dur_secs_to_offsetdatetime(dur.as_secs())
 }
 
-/// `i64::try_from` + `OffsetDateTime::from_unix_timestamp` 两段兜底走 `coverage(off)`：
-/// Linux/macOS 平台 `Duration::as_secs()` 由 `timespec.tv_sec: i64` 转 u64，最大值不
-/// 超过 `i64::MAX`，`try_from` Err arm 逻辑不可达；`from_unix_timestamp` 越界仅在
-/// 探测超远未来（≈ ±5×10¹⁴ 年）才失败。两条 Err arm 都无法从测试稳定触发。
 fn convert_dur_secs_to_offsetdatetime(secs: u64) -> Option<OffsetDateTime> {
     let secs = i64::try_from(secs).ok()?;
     OffsetDateTime::from_unix_timestamp(secs).ok()

@@ -96,7 +96,7 @@ fn walk_finds_files_under_root() {
         .iter()
         .map(|e| match &e.location {
             Location::Local(p) => p.file_name().unwrap_or("").to_string(),
-            _ => String::new(),
+            Location::Smb { .. } => String::new(),
         })
         .collect();
     assert!(names.contains(&"a.bin".to_string()));

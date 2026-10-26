@@ -161,7 +161,7 @@ fn map_smb_error_other_with_permission_text_to_permission_denied() {
 }
 
 // 已正确分类的 kind 必须直接放行；防 future pavao 版本提前归一时被文案重映射
-// 误覆盖（与 AdbAdapter::map_error 同一守门策略）。
+// 误覆盖。
 #[test]
 fn map_smb_error_already_notfound_passthrough() {
     let e = io::Error::from(io::ErrorKind::NotFound);
@@ -265,8 +265,8 @@ fn parent_target_returns_none_when_parent_empty() {
 
 #[test]
 fn parent_target_returns_none_when_parent_is_root_slash() {
-    // Utf8PathBuf::from("/foo").parent() == Some("/")：与 AdbTarget::parent 对齐
-    // 加 `"/"` 哨兵让 mkdir_recursive 不会对 share 根发出 mkdir('/') 调用。
+    // Utf8PathBuf::from("/foo").parent() == Some("/")：`"/"` 哨兵让 mkdir_recursive
+    // 不会对 share 根发出 mkdir('/') 调用。
     let t = SmbTarget {
         user: None,
         host: "h".into(),

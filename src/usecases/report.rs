@@ -5,9 +5,6 @@ use std::time::Instant;
 
 use serde_derive::Serialize;
 
-/// wall-clock 毫秒；`u128 → u64` overflow（~5 亿年不可能触发）走饱和 `u64::MAX`。
-/// 各 usecase 入口共用：`let start = Instant::now();` ... `duration_ms: elapsed_ms(start)`。
-/// `coverage(off)`：耗时随宿主时钟波动，无法稳定断言。
 #[must_use]
 pub fn elapsed_ms(start: Instant) -> u64 {
     u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX)

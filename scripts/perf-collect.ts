@@ -1,13 +1,3 @@
-// tidymedia 真实数据性能采集：一次跑产 AI 可读性能报告。
-//
-// 用法：
-//   bun scripts/perf-collect.ts --sub copy --data /path/to/photos --output-dir /tmp/perf-run
-//
-// 产物（--output-dir 下）：
-//   report.json     tidymedia --report 落地的 Report JSON（含 duration_ms）
-//   time-v.txt      /usr/bin/time -v 抓的 RSS/CPU/IO 统计原文
-//   perf-report.md  单一汇总 markdown，直接扔给 LLM 分析
-
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { resolve } from "node:path";
@@ -68,9 +58,9 @@ function findBinary(projectRoot: string): string {
   process.exit(1);
 }
 
-function findGnuTime(): string | null {
-  for (const path of ["/usr/bin/time", "/usr/local/bin/gtime", "/opt/homebrew/bin/gtime"]) {
-    if (existsSync(path)) return path;
+export function findGnuTime(exists: (path: string) => boolean = existsSync): string | null {
+  for (const path of ["/usr/local/bin/gtime", "/opt/homebrew/bin/gtime"]) {
+    if (exists(path)) return path;
   }
   return null;
 }
@@ -185,7 +175,7 @@ export function renderReport(
     `| 累计读字节 | ${fmt(bytesRead)} |`,
     `| 吞吐 | ${throughputMiB ? fmt(throughputMiB, ".2f") : "n/a"} MiB/s |`,
     "",
-    "## L4 - 系统资源（/usr/bin/time -v；Windows 为 PowerShell 采样）",
+    "## L4 - 系统资源（gtime -v；Windows 为 PowerShell 采样）",
     "",
     "| 指标 | 值 |",
     "|---|---|",
@@ -255,9 +245,7 @@ function main(): void {
   const tidyBin = findBinary(projectRoot);
   const timeBin = findGnuTime();
   if (timeBin === null && !IS_WINDOWS) {
-    console.error(
-      "error: /usr/bin/time not found (Linux) or gtime not installed (macOS)",
-    );
+    console.error("error: gtime not installed (macOS); install with: brew install gnu-time");
     process.exit(1);
   }
 

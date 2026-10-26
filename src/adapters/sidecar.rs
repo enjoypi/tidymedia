@@ -1,12 +1,3 @@
-//! Sidecar Gateway：识别 P3 旁路文件并把它们转成 [`Candidate`]（entities 时间候选）。
-//! 仅识别两种常见格式，避免引入 XML 库：
-//!   - `<media>.xmp` 中的 `photoshop:DateCreated="<RFC3339>"`（纯文本搜索）
-//!   - Google Takeout `<media>.<ext>.json` 中的 `photoTakenTime.timestamp`（`serde_json`）
-//!
-//! `src/CLAUDE.md「media_time 与容器解析」`。本模块属 Interface Adapters：把外部
-//! sidecar 协议解析成内层 [`Candidate`]，protocol 细节（XMP 字面量 / Takeout schema /
-//! `serde_json`）不泄漏到 entities / usecases。
-
 use std::io;
 use std::sync::Arc;
 
@@ -34,9 +25,6 @@ pub fn discover(media_path: &Utf8Path) -> Vec<Candidate> {
     discover_with_backend(&Location::Local(media_path.to_path_buf()), &backend)
 }
 
-/// Backend Gateway 入口：以 [`Location`] + [`Backend`] 在 backend 上读 sibling sidecar。
-/// 跨 scheme（Local/SMB/ADB/MTP）走 [`Location::with_path`] 同口径构造 sibling URI，
-/// 远端 backend 读 sidecar 与本地等价（路径相对算法与 backend 无关）。
 pub fn discover_with_backend(media_loc: &Location, backend: &Arc<dyn Backend>) -> Vec<Candidate> {
     let mut out = Vec::new();
     if let Some(c) = try_xmp(media_loc, backend.as_ref()) {
@@ -80,15 +68,12 @@ fn try_takeout(media_loc: &Location, backend: &dyn Backend) -> Option<Candidate>
     })
 }
 
-/// 同 stem 替换扩展名。复用 [`Location::with_path`]，跨 Local/SMB/ADB/MTP 等价。
 fn with_extension(loc: &Location, ext: &str) -> Location {
     let mut pp = loc.path().to_path_buf();
     pp.set_extension(ext);
     loc.with_path(pp)
 }
 
-/// 在原 path 末尾追加后缀，等价于 Takeout 的 `<media-full>.json`。
-/// 复用 [`Location::with_path`]，跨 Local/SMB/ADB/MTP 等价。
 fn append_suffix(loc: &Location, sfx: &str) -> Location {
     let p = loc.path();
     loc.with_path(Utf8PathBuf::from(format!("{p}{sfx}")))

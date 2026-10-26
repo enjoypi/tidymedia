@@ -9,11 +9,6 @@ use super::Backend;
 use crate::entities::common::Result;
 use crate::entities::uri::Location;
 
-/// Backend 装配抽象：按 [`Location`] 构造对应的 [`Backend`] 句柄。
-///
-/// 生产路径走 `DefaultBackendFactory`：Local 直接给 `LocalBackend`，SMB / MTP
-/// 在未启用对应 feature 时报 `Unsupported`。测试用 fake 实现注入
-/// 覆盖跨 scheme 调度（见 `tests/lib_tidy.rs`）。
 pub trait BackendFactory: Send + Sync {
     /// 根据 `loc` 的 scheme 构造并返回对应的 [`Backend`] 实现。
     ///
