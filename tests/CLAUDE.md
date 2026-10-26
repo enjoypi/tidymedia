@@ -13,8 +13,8 @@
 ## 覆盖率处理
 
 - tracing fixture 通过 ctor 安装全局 subscriber，只开启 `tidymedia*` target，让宏字段在覆盖运行中真实求值。新增测试根必须挂载。
-- 覆盖率排除的完整分类以 `tools/CLAUDE.md` 为准，包含全仓 `_phantom.rs`，并不限于模型。不得为掩盖新 miss 扩大 ignore-regex，禁止使用 `coverage(off)` 或其 `cfg_attr` 形式。
-- `_phantom.rs` 只承接 per-instance phantom branch；独立文件前必须确认函数本身已被测试覆盖。
+- 覆盖率排除以 `tools/cov.sh` 的逐文件精确清单为准，只包含独立非业务边界与测试支持；禁止按目录、`tract_*`、`_real`、`_io` 等后缀宽泛排除，禁止使用 `coverage(off)` 或其 `cfg_attr` 形式。
+- 历史 `_phantom.rs` 均为业务代码，必须恢复语义化命名并纳入覆盖；多实例缺口用 FNDA、BRDA 和复用 profdata 的 `llvm-cov report --text` 定位，不能作为排除理由。
 - 子行 region 用复用 profdata 的 `llvm-cov report --text` 定位；branch 查 BRDA 未执行记录，function 用 lcov FNDA，跨 instance 全零才视为真 miss。
 - 定长转换、整数上限等结构不可达的 `?` 改为无 Err 分支的 map、unwrap_or 或索引 helper；能由 helper 直接返回最终 Result 时，不在 caller 留下不可达 `?`。
 - 拆分联合 assert，并先计算 panic 文案中的表达式，避免失败路径产生未覆盖子表达式。

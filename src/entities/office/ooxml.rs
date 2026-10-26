@@ -1,69 +1,48 @@
-//! OOXML (docx/pptx/xlsx) `docProps/core.xml` 解析。
-//!
-//! 容器结构：zip 压缩包，内含 `docProps/core.xml`（XML 文件，
-//! 含 `<dcterms:created xsi:type="dcterms:W3CDTF">2024-01-15T10:30:00Z</dcterms:created>`
-//! 与 `<dcterms:modified>`）。本模块仅字节搜索 element 内容，不引 XML 解析 lib
-//! （与 entities/xmp.rs / png.rs 同风格）。
-
-use std::io::Read;
-
 use chrono::DateTime;
 
 use crate::entities::backend::MediaReader;
+
+use super::zip_io;
 
 const CORE_XML: &str = "docProps/core.xml";
 const TAG_CREATED_OPEN: &[u8] = b"<dcterms:created";
 const TAG_CREATED_CLOSE: &[u8] = b"</dcterms:created>";
 const TAG_MODIFIED_OPEN: &[u8] = b"<dcterms:modified";
 const TAG_MODIFIED_CLOSE: &[u8] = b"</dcterms:modified>";
-
-/// `core.xml` 最大读入字节数 —— Office 文件 core.xml 体量级 < 4 KiB，64 KiB 留余量。
 const CORE_XML_MAX_BYTES: usize = 64 * 1024;
 
 #[doc(hidden)]
 pub fn parse(reader: &mut dyn MediaReader, _mime: &str) -> (u64, u64) {
-    let Ok(mut archive) = zip::ZipArchive::new(reader) else {
+    let Some(mut archive) = zip_io::open_zip(reader) else {
         return (0, 0);
     };
-    let Ok(entry) = archive.by_name(CORE_XML) else {
+    let Some(content) = zip_io::read_entry(&mut archive, CORE_XML, CORE_XML_MAX_BYTES as u64)
+    else {
         return (0, 0);
     };
-    let mut content = Vec::with_capacity(CORE_XML_MAX_BYTES);
-    if entry
-        .take(CORE_XML_MAX_BYTES as u64)
-        .read_to_end(&mut content)
-        .is_err()
-    {
-        return (0, 0);
-    }
     extract_dates(&content)
 }
 
-/// 正文所在 zip entry：docx 单文件、xlsx 共享字符串表、pptx 按 slide 分片。
 const DOCX_DOCUMENT_XML: &str = "word/document.xml";
 const XLSX_SHARED_STRINGS: &str = "xl/sharedStrings.xml";
 const PPTX_SLIDES_PREFIX: &str = "ppt/slides/slide";
-
-/// 正文 XML 输入读取上限：markup 膨胀系数高（docx `w:r`/`w:rPr` 包裹），
-/// 输出 `max_bytes` 文本需要读入的 XML 远大于之；256 KiB 覆盖常见文档前几页。
 const BODY_XML_MAX_BYTES: u64 = 256 * 1024;
 
 #[doc(hidden)]
 pub fn extract_text(reader: &mut dyn MediaReader, mime: &str, max_bytes: usize) -> String {
-    let Ok(mut archive) = zip::ZipArchive::new(reader) else {
+    let Some(mut archive) = zip_io::open_zip(reader) else {
         return String::new();
     };
     let mut out = String::new();
     if mime == super::MIME_PPTX {
-        let mut names: Vec<String> = archive
-            .file_names()
+        let mut names: Vec<String> = zip_io::entry_names(&archive)
+            .into_iter()
             .filter(|n| {
                 n.starts_with(PPTX_SLIDES_PREFIX)
                     && std::path::Path::new(n)
                         .extension()
                         .is_some_and(|e| e.eq_ignore_ascii_case("xml"))
             })
-            .map(str::to_string)
             .collect();
         names.sort();
         for name in names {
@@ -86,22 +65,12 @@ fn append_entry_text<R: std::io::Read + std::io::Seek>(
     out: &mut String,
     max_bytes: usize,
 ) {
-    let Ok(entry) = archive.by_name(name) else {
+    let Some(content) = zip_io::read_entry(archive, name, BODY_XML_MAX_BYTES) else {
         return;
     };
-    let mut content = Vec::new();
-    if entry
-        .take(BODY_XML_MAX_BYTES)
-        .read_to_end(&mut content)
-        .is_err()
-    {
-        return;
-    }
     super::scan::strip_markup_into(&content, out, max_bytes);
 }
 
-/// 纯字节扫描业务：在 `core.xml` 内容查 dcterms:created/modified 元素文本，
-/// 调 `parse_iso8601_to_epoch` 转 Unix UTC epoch。
 #[doc(hidden)]
 pub fn extract_dates(buf: &[u8]) -> (u64, u64) {
     let created = scan_element_text(buf, TAG_CREATED_OPEN, TAG_CREATED_CLOSE)
@@ -113,26 +82,19 @@ pub fn extract_dates(buf: &[u8]) -> (u64, u64) {
     (created, modified)
 }
 
-/// 在 `buf` 内找 `<open_tag` element：跳到首 `>` 后取至 `</close_tag>` 之间内容。
-/// 支持 `<dcterms:created xsi:type="...">text</dcterms:created>` 的属性形式。
 #[doc(hidden)]
 #[must_use]
 pub fn scan_element_text<'a>(buf: &'a [u8], open_tag: &[u8], close_tag: &[u8]) -> Option<&'a str> {
-    // start 来自 find_subslice 返回值 → start + open_tag.len() ≤ buf.len() 必成立
-    // → `&buf[after_open..]` 永不越界（tests/CLAUDE.md「覆盖率处理」套路）。
     let start = find_subslice(buf, open_tag)?;
     let after_open = start + open_tag.len();
     let rest = &buf[after_open..];
     let gt = find_byte(rest, b'>')?;
-    // gt < rest.len() → text_start = after_open + gt + 1 ≤ buf.len()，`&buf[..]` 合法。
     let text_start = after_open + gt + 1;
     let text = &buf[text_start..];
     let end = find_subslice(text, close_tag)?;
     std::str::from_utf8(&text[..end]).ok()
 }
 
-/// 解析 ISO 8601 时间（RFC 3339 子集，dcterms:W3CDTF）：
-/// `YYYY-MM-DDTHH:MM:SS[+HH:MM|Z]`。chrono `DateTime::parse_from_rfc3339` 接 RFC 3339。
 #[doc(hidden)]
 #[must_use]
 pub fn parse_iso8601_to_epoch(s: &str) -> Option<u64> {
@@ -161,6 +123,10 @@ fn find_subslice(haystack: &[u8], needle: &[u8]) -> Option<usize> {
         .windows(needle.len())
         .position(|window| window == needle)
 }
+
+#[cfg(test)]
+#[path = "ooxml_deep_tests.rs"]
+mod deep_tests;
 
 #[cfg(test)]
 #[path = "ooxml_tests.rs"]

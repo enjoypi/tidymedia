@@ -1,14 +1,13 @@
-use crate::adapters::backend::factory::DefaultBackendFactory;
 use crate::adapters::cli::Commands;
 use crate::entities::backend::factory::BackendFactory;
 use crate::entities::common::{Error, Result};
+use crate::frameworks::backend::DefaultBackendFactory;
 use crate::frameworks::detector::DefaultDetectorFactory;
 use crate::usecases::detector::DetectorFactory;
 use crate::usecases::move_text_shot::MoveTextShotReport;
 use crate::usecases::report::{CopyReport, FindReport};
 use crate::usecases::verify::VerifyReport;
 
-// 各子命令 dispatch 与公共 helper 拆到平级文件，保持本文件 ≤300 行。
 #[path = "dispatch_commands.rs"]
 mod commands;
 
@@ -16,10 +15,6 @@ use self::commands::{
     dispatch_copy_or_move, dispatch_find, dispatch_move_text_shot, dispatch_verify,
 };
 
-/// 子命令执行结果：Copy/Move 返回 [`CopyReport`]，Find 返回 [`FindReport`]，
-/// `MoveTextShot` 返回 [`MoveTextShotReport`]，
-/// `Verify` 返回 [`VerifyReport`]。
-/// `tidy_with` 单一入口同时服务 CLI（丢弃返回）与 Android/mobile（消费 report）。
 #[derive(Debug)]
 pub enum CommandResult {
     Copy(CopyReport),
@@ -28,19 +23,14 @@ pub enum CommandResult {
     Verify(VerifyReport),
 }
 
-/// 用默认 backend / detector factory 跑命令；旧入口，等价于
-/// `tidy_with(&DefaultBackendFactory, &DefaultDetectorFactory, ...)`。
-///
-/// # Errors
-///
-/// 当命令执行过程中发生 IO 错误、backend / detector 构造失败、业务逻辑出错，或
-/// Copy/Move 出现非零 failed（部分文件复制失败）时返回 `Err`，让 CLI 退出码非 0
-/// 让 CI/cron 脚本能区分"全部成功"与"部分失败"。
+#[expect(
+    clippy::missing_errors_doc,
+    reason = "错误经统一 Result 传播，失败计数在 CommandReport"
+)]
 pub fn tidy(command: Commands) -> Result<()> {
     let result = tidy_with(&DefaultBackendFactory, &DefaultDetectorFactory, command)?;
     match result {
         CommandResult::Copy(report) if report.failed > 0 => {
-            // (remove, doc_only) 区分四个子命令：错文案会让 CI 脚本误判子命令。
             let op = match (report.remove, report.doc_only) {
                 (false, false) => "copy",
                 (false, true) => "copy-doc",
@@ -79,16 +69,13 @@ pub fn tidy(command: Commands) -> Result<()> {
     }
 }
 
-/// 注入版入口：调用方提供 [`BackendFactory`] 与 [`DetectorFactory`]，常用于集成测试
-/// 用 fake 装配混合 scheme + 直接跑 Copy/Move/Find 而不加载 ONNX 模型。
-/// 返回结构化 [`CommandResult`]：CLI 路径直接 `?` 丢弃，mobile 路径 match 取 report。
-///
-/// # Errors
-///
-/// 当 backend / detector 构造失败、IO 操作出错或业务逻辑出错时返回 `Err`。
 #[expect(
     clippy::too_many_lines,
     reason = "各子命令 match 每 arm 是纯解构透传；拆分只会把 enum 解构搬到别处"
+)]
+#[expect(
+    clippy::missing_errors_doc,
+    reason = "错误经统一 Result 传播，调用方按 CommandResult 处理"
 )]
 pub fn tidy_with(
     factory: &dyn BackendFactory,
@@ -109,9 +96,9 @@ pub fn tidy_with(
             sources,
             output,
             dry_run,
-            /* remove = */ false,
+            false,
             include_non_media,
-            /* doc_only = */ false,
+            false,
             archive_template.as_deref(),
             report.as_deref(),
         ),
@@ -128,9 +115,9 @@ pub fn tidy_with(
             sources,
             output,
             dry_run,
-            /* remove = */ true,
+            true,
             include_non_media,
-            /* doc_only = */ false,
+            false,
             archive_template.as_deref(),
             report.as_deref(),
         ),
@@ -146,9 +133,9 @@ pub fn tidy_with(
             sources,
             output,
             dry_run,
-            /* remove = */ false,
-            /* include_non_media = */ false,
-            /* doc_only = */ true,
+            false,
+            false,
+            true,
             archive_template.as_deref(),
             report.as_deref(),
         ),
@@ -164,9 +151,9 @@ pub fn tidy_with(
             sources,
             output,
             dry_run,
-            /* remove = */ true,
-            /* include_non_media = */ false,
-            /* doc_only = */ true,
+            true,
+            false,
+            true,
             archive_template.as_deref(),
             report.as_deref(),
         ),
@@ -207,3 +194,7 @@ pub fn tidy_with(
         ),
     }
 }
+
+#[cfg(test)]
+#[path = "dispatch_tests.rs"]
+mod tests;

@@ -1,15 +1,8 @@
-//! `OpenDocument` (odt/ods/odp/odg) `meta.xml` 解析。
-//!
-//! ODF 是 zip 容器，含 `meta.xml`（XML，含 `<meta:creation-date>` + `<dc:date>`）。
-//! `<meta:creation-date>` 等价 OOXML `dcterms:created`（P0 creation 时间），
-//! `<dc:date>` 等价 `dcterms:modified`（last save）。
-//! 时间可能 naive（无 Z 后缀）：fallback 按 UTC 解释。
-
-use std::io::Read;
-
 use chrono::{DateTime, NaiveDateTime};
 
 use crate::entities::backend::MediaReader;
+
+use super::zip_io;
 
 const META_XML: &str = "meta.xml";
 const TAG_CREATED_OPEN: &[u8] = b"<meta:creation-date";
@@ -19,52 +12,34 @@ const TAG_DC_DATE_CLOSE: &[u8] = b"</dc:date>";
 
 const META_XML_MAX_BYTES: usize = 64 * 1024;
 
-/// 入口：把 reader 当 zip 容器打开，读 `meta.xml` 后调 `extract_dates`。
 #[doc(hidden)]
 pub fn parse(reader: &mut dyn MediaReader, _mime: &str) -> (u64, u64) {
-    let Ok(mut archive) = zip::ZipArchive::new(reader) else {
+    let Some(mut archive) = zip_io::open_zip(reader) else {
         return (0, 0);
     };
-    let Ok(entry) = archive.by_name(META_XML) else {
+    let Some(content) = zip_io::read_entry(&mut archive, META_XML, META_XML_MAX_BYTES as u64)
+    else {
         return (0, 0);
     };
-    let mut content = Vec::with_capacity(META_XML_MAX_BYTES);
-    if entry
-        .take(META_XML_MAX_BYTES as u64)
-        .read_to_end(&mut content)
-        .is_err()
-    {
-        return (0, 0);
-    }
     extract_dates(&content)
 }
 
-/// 正文文件（odt/ods/odp 共用单入口）与读取上限；markup 膨胀系数见 ooxml 同名常量。
 const CONTENT_XML: &str = "content.xml";
 const CONTENT_XML_MAX_BYTES: u64 = 256 * 1024;
 
 #[doc(hidden)]
 pub fn extract_text(reader: &mut dyn MediaReader, _mime: &str, max_bytes: usize) -> String {
-    let Ok(mut archive) = zip::ZipArchive::new(reader) else {
+    let Some(mut archive) = zip_io::open_zip(reader) else {
         return String::new();
     };
-    let Ok(entry) = archive.by_name(CONTENT_XML) else {
+    let Some(content) = zip_io::read_entry(&mut archive, CONTENT_XML, CONTENT_XML_MAX_BYTES) else {
         return String::new();
     };
-    let mut content = Vec::new();
-    if entry
-        .take(CONTENT_XML_MAX_BYTES)
-        .read_to_end(&mut content)
-        .is_err()
-    {
-        return String::new();
-    }
     let mut out = String::new();
     super::scan::strip_markup_into(&content, &mut out, max_bytes);
     out
 }
 
-/// 纯字节扫描业务：查 `meta:creation-date` 与 `dc:date` element 文本。
 #[doc(hidden)]
 pub fn extract_dates(buf: &[u8]) -> (u64, u64) {
     let created = scan_element_text(buf, TAG_CREATED_OPEN, TAG_CREATED_CLOSE)
@@ -76,8 +51,6 @@ pub fn extract_dates(buf: &[u8]) -> (u64, u64) {
     (created, modified)
 }
 
-/// ODF 时间可能带时区（RFC 3339）或 naive（无 Z）。先试 `parse_from_rfc3339`，
-/// 失败回退按 UTC 解析 `YYYY-MM-DDTHH:MM:SS`。
 #[doc(hidden)]
 #[must_use]
 pub fn parse_odf_datetime(s: &str) -> Option<u64> {
@@ -127,6 +100,10 @@ fn find_subslice(haystack: &[u8], needle: &[u8]) -> Option<usize> {
         .windows(needle.len())
         .position(|window| window == needle)
 }
+
+#[cfg(test)]
+#[path = "odf_deep_tests.rs"]
+mod deep_tests;
 
 #[cfg(test)]
 #[path = "odf_tests.rs"]

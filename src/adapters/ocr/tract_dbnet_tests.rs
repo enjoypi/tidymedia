@@ -1,12 +1,6 @@
-//! `tract_dbnet` 单元测试：装配 + 前/后处理 + Raw 注入 stub 测三态。
-//!
-//! 真实 tract `model.run` 走 `_real.rs` 由 ignore-regex 排除；本文件用 `RawDetector`
-//! trait 注入 stub model 让前/后处理 + `has_text` 主路径 100% 覆盖。
-
 use super::*;
 use camino::Utf8Path;
 
-/// 构造极小 PNG（1×1 红像素）供 preprocess 用——image crate 必能解码。
 fn tiny_png() -> Vec<u8> {
     use image::ImageEncoder;
     let mut out = Vec::new();
@@ -17,7 +11,22 @@ fn tiny_png() -> Vec<u8> {
     out
 }
 
-/// Stub `RawDetector`：返指定值的常量 sigmoid map，让 decide 阈值逻辑可测。
+fn solid_rgb_png(width: u32, height: u32) -> Vec<u8> {
+    use image::ImageEncoder;
+    let mut out = Vec::new();
+    let pixels = vec![30_u8; width as usize * height as usize * 3];
+    image::codecs::png::PngEncoder::new(&mut out)
+        .write_image(&pixels, width, height, image::ExtendedColorType::Rgb8)
+        .expect("encode solid png");
+    out
+}
+
+fn tensor_f32(shape: &[usize], data: &[f32]) -> Tensor {
+    tract_ndarray::Array::from_shape_vec(shape, data.to_vec())
+        .expect("stub tensor shape")
+        .into_tensor()
+}
+
 struct ConstRaw {
     value: f32,
     h: usize,
@@ -81,7 +90,7 @@ fn has_text_true_when_sigmoid_above_threshold() {
     let det = TractDbnetDetector::with_raw(cfg(), raw);
     assert!(
         det.has_text(Utf8Path::new("/x.png"), &tiny_png()).unwrap(),
-        "0.9 > 0.3 in all 1024 pixels → ratio=1.0 > 0.005 → true"
+        "ratio=1.0 > 0.005"
     );
 }
 
@@ -95,7 +104,7 @@ fn has_text_false_when_sigmoid_below_threshold() {
     let det = TractDbnetDetector::with_raw(cfg(), raw);
     assert!(
         !det.has_text(Utf8Path::new("/x.png"), &tiny_png()).unwrap(),
-        "0.1 < 0.3 → no hit → ratio=0 → false"
+        "ratio=0"
     );
 }
 
@@ -127,7 +136,6 @@ fn has_text_returns_invalid_data_on_bad_image_bytes() {
 
 #[test]
 fn preprocess_aligns_to_32_min_size() {
-    // 1×1 → 32×32（最小对齐边界）
     let t = preprocess(&tiny_png(), 736).unwrap();
     let shape = t.shape();
     assert_eq!(shape, [1, 3, 32, 32], "got: {shape:?}");
@@ -135,7 +143,6 @@ fn preprocess_aligns_to_32_min_size() {
 
 #[test]
 fn preprocess_caps_max_side_then_aligns() {
-    // 构造 800×600 PNG → max_side=736 → 长边按比例缩 → 32 对齐
     use image::ImageEncoder;
     let mut out = Vec::new();
     let pixels = vec![128_u8; 800 * 600 * 3];
@@ -144,13 +151,25 @@ fn preprocess_caps_max_side_then_aligns() {
         .unwrap();
     let t = preprocess(&out, 736).unwrap();
     let shape = t.shape();
-    // 800*736/800=736 ; 600*736/800=552 → 32 对齐：736, 576
     assert_eq!(shape, [1, 3, 576, 736], "got: {shape:?}");
 }
 
 #[test]
+fn preprocess_resizes_beyond_max_side_then_aligns() {
+    let t = preprocess(&solid_rgb_png(400, 300), 64).unwrap();
+    let shape = t.shape();
+    assert_eq!(shape, [1, 3, 64, 64], "got: {shape:?}");
+}
+
+#[test]
+fn preprocess_keeps_small_image_at_original_size() {
+    let t = preprocess(&solid_rgb_png(64, 64), 128).unwrap();
+    let shape = t.shape();
+    assert_eq!(shape, [1, 3, 64, 64], "got: {shape:?}");
+}
+
+#[test]
 fn preprocess_rejects_zero_byte_input() {
-    // image crate 解 0 字节失败 → preprocess InvalidData
     let e = preprocess(b"", 736).unwrap_err();
     assert_eq!(e.kind(), io::ErrorKind::InvalidData);
 }
@@ -158,26 +177,34 @@ fn preprocess_rejects_zero_byte_input() {
 #[test]
 fn decide_returns_false_on_empty_tensor() {
     let t = tract_ndarray::Array4::<f32>::zeros((1, 1, 0, 0)).into_tensor();
-    assert!(!decide(&t, 0.3, 0.005).unwrap());
+    assert!(!decide(&t, 0.3, 0.005));
+}
+
+#[test]
+fn decide_handles_empty_low_and_high_outputs() {
+    let empty = tensor_f32(&[1, 1, 0], &[]);
+    assert!(!decide(&empty, 0.3, 0.005));
+    let low = tensor_f32(&[1, 1, 4], &[0.1, 0.2, 0.1, 0.2]);
+    assert!(!decide(&low, 0.3, 0.005));
+    let high = tensor_f32(&[1, 1, 4], &[0.9, 0.9, 0.1, 0.2]);
+    assert!(decide(&high, 0.3, 0.01));
 }
 
 #[test]
 fn decide_boundary_ratio_strictly_greater() {
-    // 100 像素中刚好 1 个超阈值 → ratio=0.01 > 0.005 → true
     let mut data = vec![0.0_f32; 100];
     data[0] = 0.5;
     let t = tract_ndarray::Array4::from_shape_vec((1, 1, 10, 10), data)
         .unwrap()
         .into_tensor();
-    assert!(decide(&t, 0.3, 0.005).unwrap());
+    assert!(decide(&t, 0.3, 0.005));
 
-    // 1000 像素中 1 个超阈值 → ratio=0.001 < 0.005 → false
     let mut data = vec![0.0_f32; 1000];
     data[0] = 0.5;
     let t = tract_ndarray::Array4::from_shape_vec((1, 1, 25, 40), data)
         .unwrap()
         .into_tensor();
-    assert!(!decide(&t, 0.3, 0.005).unwrap());
+    assert!(!decide(&t, 0.3, 0.005));
 }
 
 #[test]
@@ -202,6 +229,40 @@ fn align32_handles_boundaries() {
     assert_eq!(align32(33), 64);
 }
 
+static LOADS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+#[expect(clippy::unnecessary_wraps, reason = "与生产 loader 签名一致")]
+fn load_counting(_: &std::path::Path) -> io::Result<Box<dyn RawDetector>> {
+    LOADS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    Ok(Box::new(ConstRaw {
+        value: 0.9,
+        h: 32,
+        w: 32,
+    }))
+}
+
+#[test]
+fn ensure_raw_loads_once_and_reuses_detector() {
+    LOADS.store(0, std::sync::atomic::Ordering::SeqCst);
+    let det = TractDbnetDetector {
+        cfg: cfg(),
+        raw: Mutex::new(None),
+    };
+    det.ensure_raw_with(load_counting).unwrap();
+    det.ensure_raw_with(load_counting).unwrap();
+    assert!(det.raw.lock().is_some());
+    assert_eq!(LOADS.load(std::sync::atomic::Ordering::SeqCst), 1);
+}
+
+#[test]
+fn has_text_propagates_model_load_error() {
+    let det = build_detector(&cfg()).unwrap();
+    let err = det
+        .has_text(Utf8Path::new("/x.png"), &tiny_png())
+        .unwrap_err();
+    assert!(err.to_string().contains("load DBNet ONNX"), "got: {err}");
+}
+
 #[test]
 fn target_size_keeps_small_image_at_min_32() {
     let (w, h) = target_size(1, 1, 736);
@@ -211,6 +272,5 @@ fn target_size_keeps_small_image_at_min_32() {
 #[test]
 fn target_size_scales_down_oversized_image() {
     let (w, h) = target_size(2000, 1000, 736);
-    // 长边 2000 → 736 ；scale=0.368 ；2000*0.368=736, 1000*0.368=368 → 对齐 736, 384
     assert_eq!((w, h), (736, 384));
 }

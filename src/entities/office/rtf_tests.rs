@@ -1,6 +1,44 @@
-//! RTF `\creatim` / `\revtim` 解析单测。
-
 use super::*;
+
+#[test]
+fn parse_read_error_returns_zeros() {
+    let mut io = crate::entities::test_common::FlakyIo::new(vec![0; 8], 0, 0);
+    assert_eq!(parse(&mut io, "application/rtf"), (0, 0));
+}
+
+#[test]
+fn extract_text_read_error_returns_empty() {
+    let mut io = crate::entities::test_common::FlakyIo::new(vec![0; 8], 0, 0);
+    assert_eq!(extract_text(&mut io, "application/rtf", 64), "");
+}
+
+#[test]
+fn strip_rtf_skip_group_with_nested_brace() {
+    let mut out = String::new();
+    strip_rtf_into(b"{\\rtf1{\\info a{b}c}body}", &mut out, 64);
+    assert_eq!(out, "body");
+}
+
+#[test]
+fn strip_rtf_hex_escape_truncated_digits() {
+    let mut out = String::new();
+    strip_rtf_into(b"{\\rtf1 \\'4}", &mut out, 64);
+    assert_eq!(out, "4");
+}
+
+#[test]
+fn strip_rtf_hex_escape_at_eof() {
+    let mut out = String::new();
+    strip_rtf_into(b"{\\rtf1 \\'", &mut out, 64);
+    assert_eq!(out, "");
+}
+
+#[test]
+fn strip_rtf_u_space_delimiter() {
+    let mut out = String::new();
+    strip_rtf_into(b"{\\rtf1 \\u65 32}", &mut out, 64);
+    assert_eq!(out, "A32");
+}
 
 #[test]
 fn extract_dates_happy_path() {
@@ -23,8 +61,6 @@ fn extract_dates_no_creatim_returns_zeros() {
     assert_eq!(extract_dates(br"{\rtf1\info}"), (0, 0));
 }
 
-// ============= scan_time_group =============
-
 #[test]
 fn scan_time_group_missing_yr_returns_none() {
     let rtf = br"\creatim\mo2\dy14";
@@ -33,7 +69,6 @@ fn scan_time_group_missing_yr_returns_none() {
 
 #[test]
 fn scan_time_group_mo_dy_default_to_one() {
-    // 只有 \yr → mo/dy 默认 1, hr/min/sec 默认 0 → 2017-01-01 00:00:00 UTC
     let rtf = br"\creatim\yr2017";
     let result = scan_time_group(rtf, b"\\creatim");
     assert_eq!(result, Some(1_483_228_800));
@@ -41,14 +76,12 @@ fn scan_time_group_mo_dy_default_to_one() {
 
 #[test]
 fn scan_time_group_invalid_date_returns_none() {
-    // 月 13 越界 → NaiveDate::from_ymd_opt 返 None。
     let rtf = br"\creatim\yr2017\mo13\dy1";
     assert!(scan_time_group(rtf, b"\\creatim").is_none());
 }
 
 #[test]
 fn scan_time_group_invalid_time_returns_none() {
-    // 时 25 越界 → and_hms_opt 返 None。
     let rtf = br"\creatim\yr2017\mo2\dy14\hr25";
     assert!(scan_time_group(rtf, b"\\creatim").is_none());
 }
@@ -64,8 +97,6 @@ fn scan_time_group_no_tag_returns_none() {
     assert!(scan_time_group(br"no creatim here", b"\\creatim").is_none());
 }
 
-// ============= scan_int_after =============
-
 #[test]
 fn scan_int_after_positive() {
     let r: Option<i32> = scan_int_after(br"\yr2017\mo", b"\\yr");
@@ -80,7 +111,6 @@ fn scan_int_after_negative() {
 
 #[test]
 fn scan_int_after_only_dash_returns_none() {
-    // `\yr-` 后无数字 → None。
     let r: Option<i32> = scan_int_after(br"\yr-\mo", b"\\yr");
     assert_eq!(r, None);
 }
@@ -105,14 +135,12 @@ fn scan_int_after_empty_after_returns_none() {
 
 #[test]
 fn scan_int_after_overflow_returns_none() {
-    // 超过 i32 range 让 parse Err。
     let r: Option<i32> = scan_int_after(br"\yr99999999999", b"\\yr");
     assert_eq!(r, None);
 }
 
 #[test]
 fn scan_int_after_negative_only_no_more_digits() {
-    // 仅 `-` 没数字。
     let r: Option<i32> = scan_int_after(b"\\yr-", b"\\yr");
     assert_eq!(r, None);
 }
@@ -123,12 +151,8 @@ fn find_subslice_basic() {
     assert!(find_subslice(b"hello", b"world").is_none());
 }
 
-// ============= group bounding =============
-
 #[test]
 fn scan_time_group_missing_yr_does_not_leak_to_next_group() {
-    // \creatim 组内无 \yr，但紧跟的 \revtim 组含 \yr2024：组边界让前者返 None
-    // 而不是错读 2024 作为创建年（旧无界扫描的 bug）。
     let rtf = br"{\rtf1\info{\creatim\mo6\dy15}{\revtim\yr2024\mo1\dy1}}";
     let (created, modified) = extract_dates(rtf);
     assert_eq!(
@@ -140,23 +164,19 @@ fn scan_time_group_missing_yr_does_not_leak_to_next_group() {
 
 #[test]
 fn scan_time_group_creatim_mo_default_when_next_group_has_mo() {
-    // \creatim 仅给 \yr2017；mo/dy 默认 1（而不是跨段读 \revtim 的 mo6）。
     let rtf = br"{\creatim\yr2017}{\revtim\yr2018\mo6\dy15}";
     let result = scan_time_group(rtf, b"\\creatim");
-    // 2017-01-01 00:00:00 UTC
     assert_eq!(result, Some(1_483_228_800));
 }
 
 #[test]
 fn find_group_end_handles_nested_braces() {
-    // depth 计数：嵌套 `{...}` 不应误判外层 `}` 为结束。
     let buf = br"abc{xy}def}rest";
     assert_eq!(find_group_end(buf, 0), 10);
 }
 
 #[test]
 fn find_group_end_skips_rtf_escape() {
-    // RTF 转义 `\{` `\}` `\\` 不参与 brace depth 计数。
     let buf = br"\{\}\\}rest";
     assert_eq!(find_group_end(buf, 0), 6);
 }
@@ -169,21 +189,15 @@ fn find_group_end_unterminated_returns_buf_len() {
 
 #[test]
 fn find_group_end_backslash_followed_by_non_escape_is_literal() {
-    // buf[i]=b'\\' 但 buf[i+1] 非 `{` / `}` / `\\` → `matches!` False → 落
-    // `_ => {}` catch-all；覆盖 L70 `matches!(buf[i+1], b'{'|b'}'|b'\\')` 的 False 分支。
     let buf = br"\a}rest";
     assert_eq!(find_group_end(buf, 0), 2);
 }
 
 #[test]
 fn find_group_end_trailing_backslash_no_next_byte() {
-    // buf 末尾单个 `\`，i+1 >= buf.len() → guard 短路 False → catch-all；
-    // 覆盖 `i + 1 < buf.len()` 短路 False 分支。
     let buf = b"a\\";
     assert_eq!(find_group_end(buf, 0), buf.len());
 }
-
-// ============= strip_rtf_into（extract_text 业务） =============
 
 #[test]
 fn strip_rtf_extracts_plain_text() {
@@ -194,7 +208,6 @@ fn strip_rtf_extracts_plain_text() {
 
 #[test]
 fn strip_rtf_decodes_unicode_escape_chinese() {
-    // 发=U+53D1=21457 票=U+7968=31080；`\uN?` 的 fallback `?` 必须被吞。
     let mut out = String::new();
     strip_rtf_into(b"{\\rtf1 \\u21457?\\u31080?}", &mut out, 64);
     assert_eq!(out, "发票");
@@ -202,7 +215,6 @@ fn strip_rtf_decodes_unicode_escape_chinese() {
 
 #[test]
 fn strip_rtf_unicode_negative_wraps_to_bmp() {
-    // \u-10179 → -10179 + 65536 = 55357 落 surrogate 区 → from_u32 None → 丢弃。
     let mut out = String::new();
     strip_rtf_into(b"{\\u-10179?}x", &mut out, 64);
     assert_eq!(out, "x");
@@ -273,7 +285,6 @@ fn strip_rtf_trailing_backslash_is_safe() {
 
 #[test]
 fn strip_rtf_escaped_brace_inside_skip_group_not_terminating() {
-    // skip group 内 `\}` 转义不得当组闭合；组后正文保留。
     let mut out = String::new();
     strip_rtf_into(b"{\\info \\} still}after", &mut out, 64);
     assert_eq!(out, "after");

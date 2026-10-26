@@ -134,9 +134,7 @@ fn strip_source_root_strips_root_prefix() {
         strip_source_root("/photos/2024/01/a.jpg", &roots),
         "2024/01/a.jpg"
     );
-    // 剥不掉时回退 basename
     assert_eq!(strip_source_root("/unrelated/x.jpg", &roots), "x.jpg");
-    // 空剩余（根就是文件本身）回退 basename
     assert_eq!(strip_source_root("/photos", &roots), "photos");
 }
 
@@ -178,6 +176,16 @@ fn load_tsv_reads_existing_file() {
 fn strip_source_root_without_file_name_returns_input() {
     let roots = vec!["/photos".to_owned()];
     assert_eq!(strip_source_root("..", &roots), "..");
+}
+
+#[test]
+fn strip_source_root_handles_missing_filename() {
+    assert_eq!(strip_source_root("/", &[]), "/");
+    assert_eq!(strip_source_root("/a/b.jpg", &[]), "b.jpg");
+    assert_eq!(
+        strip_source_root("/root/x.jpg", &["/root".to_string()]),
+        "x.jpg"
+    );
 }
 
 #[test]

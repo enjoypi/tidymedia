@@ -25,6 +25,8 @@ pub(crate) use summary::format_summary;
 pub(crate) mod bucket;
 pub(crate) mod candidates;
 pub(crate) mod content_diff;
+#[path = "content_diff_io.rs"]
+pub(crate) mod content_diff_io;
 pub(crate) mod diagnose;
 mod evaluate;
 pub(crate) mod exif_tsv;
@@ -32,6 +34,8 @@ pub(crate) mod filename_hint;
 pub(crate) mod phash;
 pub(crate) mod report;
 pub(crate) mod summary;
+#[path = "verify_io.rs"]
+mod verify_io;
 
 pub(crate) const DEFAULT_PHASH_MAX: u8 = 20;
 
@@ -156,7 +160,7 @@ fn load_tsv(exif_tsv: Option<&Path>) -> Vec<ExifRow> {
     let Some(path) = exif_tsv else {
         return Vec::new();
     };
-    match std::fs::read_to_string(path) {
+    match verify_io::read_to_string(path) {
         Ok(content) => parse_tsv(&content),
         Err(e) => {
             warn!(
@@ -186,9 +190,8 @@ fn lookup_tsv<'a>(map: &HashMap<&str, &'a ExifRow>, path: &str) -> Option<&'a Ex
 
 // 剥 source 根前缀得相对路径（skill 的 SOURCE_ROOT 语义），避免根目录年份段污染
 // 文件名/路径日期解析；剥不掉时回退 basename。
-#[doc(hidden)]
 #[must_use]
-pub fn strip_source_root(full: &str, roots: &[String]) -> String {
+pub(crate) fn strip_source_root(full: &str, roots: &[String]) -> String {
     let norm = normalize_sep(full);
     for r in roots {
         let root = normalize_sep(r).trim_end_matches('/').to_owned();

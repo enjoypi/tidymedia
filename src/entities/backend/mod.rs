@@ -9,7 +9,7 @@ mod output_write;
 mod partial_move;
 
 pub use self::output_write::{is_output_write_denied, output_write_error};
-pub use self::partial_move::{is_partial_move, partial_move_error};
+pub(crate) use self::partial_move::{is_partial_move, partial_move_error};
 
 /// `stream_copy` 的 `BufReader` / `BufWriter` 容量：1 MiB 让远端单文件大视频的
 /// `std::io::copy` 默认 8 KiB stack buffer 减少 128× syscall / RTT 次数；本地

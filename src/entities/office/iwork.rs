@@ -1,46 +1,30 @@
-//! Apple iWork (`.pages` / `.numbers` / `.key`) `Metadata/Properties.plist` 解析。
-//!
-//! iWork 是 zip 容器，常含 `Metadata/Properties.plist`（binary 或 xml plist）。
-//! plist 字典内可能含 `createdDate` / `modifiedDate` 字段（`plist::Value::Date`，
-//! 直接返 `SystemTime` — plist crate 已把 Cocoa absolute time 转为 Unix epoch）。
-//! 文件结构因 iWork 版本不同有差异：iWork '09 含 xml `index.xml`，iWork '13+ 用
-//! IWA (Snappy + protobuf)，本模块仅尽力解析 plist 主入口，找不到字段返 0 退到 mtime。
-
-use std::io::Read;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::entities::backend::MediaReader;
 
+use super::plist_io;
+use super::zip_io;
+
 const PROPERTIES_PLIST: &str = "Metadata/Properties.plist";
 const KEY_CREATED: &str = "createdDate";
 const KEY_MODIFIED: &str = "modifiedDate";
-
-/// plist 最大读入字节数。Properties.plist 通常 < 4 KiB，64 KiB 留余量。
 const PLIST_MAX_BYTES: usize = 64 * 1024;
 
 #[doc(hidden)]
 pub fn parse(reader: &mut dyn MediaReader, _mime: &str) -> (u64, u64) {
-    let Ok(mut archive) = zip::ZipArchive::new(reader) else {
+    let Some(mut archive) = zip_io::open_zip(reader) else {
         return (0, 0);
     };
-    let Ok(entry) = archive.by_name(PROPERTIES_PLIST) else {
+    let Some(content) = zip_io::read_entry(&mut archive, PROPERTIES_PLIST, PLIST_MAX_BYTES as u64)
+    else {
         return (0, 0);
     };
-    let mut content = Vec::with_capacity(PLIST_MAX_BYTES);
-    if entry
-        .take(PLIST_MAX_BYTES as u64)
-        .read_to_end(&mut content)
-        .is_err()
-    {
-        return (0, 0);
-    }
     extract_dates_from_plist(&content)
 }
 
-/// 纯 plist 字典解析业务：找 `createdDate` / `modifiedDate` Date 字段。
 #[doc(hidden)]
 pub fn extract_dates_from_plist(buf: &[u8]) -> (u64, u64) {
-    let Ok(value) = plist::Value::from_reader(std::io::Cursor::new(buf)) else {
+    let Some(value) = plist_io::read_value(buf) else {
         return (0, 0);
     };
     let Some(dict) = value.as_dictionary() else {
@@ -62,6 +46,10 @@ pub fn extract_dates_from_plist(buf: &[u8]) -> (u64, u64) {
 fn systemtime_to_epoch(t: SystemTime) -> Option<u64> {
     t.duration_since(UNIX_EPOCH).ok().map(|d| d.as_secs())
 }
+
+#[cfg(test)]
+#[path = "iwork_deep_tests.rs"]
+mod deep_tests;
 
 #[cfg(test)]
 #[path = "iwork_tests.rs"]

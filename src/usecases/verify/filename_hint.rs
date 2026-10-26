@@ -33,10 +33,10 @@ fn re_yy_mm_dd() -> &'static Regex {
     })
 }
 
-#[path = "filename_hint_phantom.rs"]
-mod phantom;
+#[path = "date_bucket.rs"]
+mod date_bucket;
 #[doc(hidden)]
-pub(crate) use self::phantom::parse_path_date_bucket;
+pub(crate) use self::date_bucket::parse_path_date_bucket;
 
 #[cfg(test)]
 #[path = "filename_hint_tests.rs"]

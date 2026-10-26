@@ -1,31 +1,22 @@
-//! 办公文档时间解析路由。
-//!
-//! 按 MIME 分流到子模块（PDF / OOXML / CFB / iWork / ODF / RTF / EPUB / 思维导图 / 纯文本）。
-//! 各子模块返回 `(created_epoch, modified_epoch)` 二元组，0 表字段缺失。
-//! 上层 `entities::exif::document::populate_document_dates` 调本 fn 后填 `Exif.doc_created`
-//! / `Exif.doc_modified`，下游 `Info::create_time` 把非零 `doc_created` 注入 P0
-//! [`crate::entities::media_time::Source::DocumentCreated`] 候选。
-
-// 占位实现：commit 2-10 接入各子模块解析主体后逐个移除本节 allow；首版 stub
-// 让装配链路（types.rs 分流 + Source 注入 + e2e fixture）先编译通过。
-#![allow(dead_code, reason = "占位实现：commit 2-10 接入各子模块解析主体后移除")]
-
 use crate::entities::backend::MediaReader;
 
 pub mod cfb;
+mod cfb_io;
 pub(crate) mod epub;
+mod flate_io;
 pub(crate) mod iwork;
 pub(crate) mod mindmap_mm;
 pub mod mindmap_zip;
 pub(crate) mod odf;
 pub(crate) mod ooxml;
 pub(crate) mod pdf;
+mod plist_io;
+mod read_io;
 pub(crate) mod rtf;
 pub(crate) mod scan;
 pub(crate) mod text;
+mod zip_io;
 
-// MIME 常量集中此处避免与 exif/mime.rs 双向引用循环。`mime_from_ext` 会用同套
-// 字面量做扩展名→MIME 反查；新增容器 MUST 在两处同步（src/CLAUDE.md「同步检查点」）。
 pub(crate) const MIME_PDF: &str = "application/pdf";
 pub(crate) const MIME_DOCX: &str =
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
@@ -55,9 +46,6 @@ pub(crate) const MIME_FREEMIND: &str = "application/x-freemind";
 pub(crate) const MIME_MINDNODE: &str = "application/x-mindnode";
 pub(crate) const MIME_ITMZ: &str = "application/x-itmz";
 pub(crate) const MIME_MINDMANAGER: &str = "application/x-mindmanager";
-/// infer 对 CFB 的兜底识别：doc matcher 需要完整 CFB header（512+ 字节）经
-/// cfb crate 读根 CLSID 才能细分 doc/xls/ppt，本项目 sniff 只喂 256 字节必失败，
-/// 落到 archive matcher 的泛化 MIME——与 `application/zip` 同理按扩展名重映射。
 pub(crate) const MIME_OLE_STORAGE: &str = "application/x-ole-storage";
 pub(crate) const MIME_TEXT_PLAIN: &str = "text/plain";
 pub(crate) const MIME_TEXT_MARKDOWN: &str = "text/markdown";
@@ -65,11 +53,6 @@ pub(crate) const MIME_TEXT_RST: &str = "text/x-rst";
 pub(crate) const MIME_TEXT_CSV: &str = "text/csv";
 pub(crate) const MIME_TEXT_TSV: &str = "text/tab-separated-values";
 
-/// 路由入口：按 mime 分流到子解析器，返 `(created_epoch, modified_epoch)`；0 表缺失。
-///
-/// 接 `&mut dyn MediaReader` 而非 `Box<dyn MediaReader>`：让 stub 阶段子模块不消费
-/// reader 不触发 `clippy::needless_pass_by_value`；commit 2-9 接入主体时（zip /
-/// pdf 字节读 / cfb 容器读取）`&mut Read + Seek` 仍是合法 trait bound。
 #[doc(hidden)]
 pub fn populate_office_dates(reader: &mut dyn MediaReader, mime: &str) -> (u64, u64) {
     if mime.starts_with(MIME_PDF) {
@@ -91,15 +74,10 @@ pub fn populate_office_dates(reader: &mut dyn MediaReader, mime: &str) -> (u64, 
     } else if mime == MIME_FREEMIND {
         mindmap_mm::parse(reader, mime)
     } else {
-        // 纯文本族 text/plain text/markdown text/csv 等：无 metadata，由调用方退到 P2/P4。
         text::parse(reader, mime)
     }
 }
 
-/// 文本提取路由：按 mime 分流到子提取器，返 best-effort 正文片段（分类用，
-/// 非全文保真）。空串 = 提不出文本（扫描版 PDF / iWork IWA / 损坏容器），
-/// 调用方（`usecases::copy::classify`）落 `uncategorized`。
-/// `max_bytes` 是输出文本上限（分类 embedding 只吃前几百 token，无需全文）。
 #[doc(hidden)]
 pub fn extract_office_text(reader: &mut dyn MediaReader, mime: &str, max_bytes: usize) -> String {
     if mime.starts_with(MIME_PDF) {
@@ -109,7 +87,6 @@ pub fn extract_office_text(reader: &mut dyn MediaReader, mime: &str, max_bytes: 
     } else if is_cfb_mime(mime) {
         cfb::extract_text(reader, mime, max_bytes)
     } else if is_iwork_mime(mime) {
-        // iWork '13+ IWA（Snappy+protobuf）不解析：返空走 uncategorized（已知限制）。
         String::new()
     } else if mime.starts_with(MIME_ODF_PREFIX) {
         odf::extract_text(reader, mime, max_bytes)
@@ -156,5 +133,13 @@ fn is_mindmap_zip_mime(mime: &str) -> bool {
 }
 
 #[cfg(test)]
+#[path = "mod_deep_tests.rs"]
+mod deep_tests;
+
+#[cfg(test)]
 #[path = "mod_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "office_tests_common.rs"]
+pub(crate) mod tests_common;

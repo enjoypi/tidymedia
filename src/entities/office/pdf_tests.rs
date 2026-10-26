@@ -1,30 +1,27 @@
-//! PDF 字节扫描单测：helper 微测覆盖 `D:` 格式各分支 + 路由 `parse()` e2e
-//! 用手写 PDF 字串（不依赖 fixture 文件 —— PDF 文档化签名 `%PDF-1.4` 起头 +
-//! 任意位置的 `/CreationDate (D:...)` 即可被扫描器命中）。
-
 use std::io::Cursor;
 
 use super::*;
 
-// ============= parse_pdf_d_format helper 微测 =============
+#[test]
+fn extract_text_read_error_returns_empty() {
+    let mut io = crate::entities::test_common::FlakyIo::new(vec![0; 32], 0, 0);
+    assert_eq!(extract_text(&mut io, "application/pdf", 64), "");
+}
 
 #[test]
 fn parse_pdf_d_format_full_with_positive_tz() {
-    // 2017-02-14 10:30:00 +08:00 → UTC 02:30:00 → 1_487_039_400
     let epoch = parse_pdf_d_format("D:20170214103000+08'00'").unwrap();
     assert_eq!(epoch, 1_487_039_400);
 }
 
 #[test]
 fn parse_pdf_d_format_full_with_negative_tz() {
-    // 2017-02-14 10:30:00 -05:00 → UTC 15:30:00
     let epoch = parse_pdf_d_format("D:20170214103000-05'00'").unwrap();
     assert_eq!(epoch, 1_487_086_200);
 }
 
 #[test]
 fn parse_pdf_d_format_full_with_z_suffix() {
-    // 2017-02-14 10:30:00Z（UTC）
     let epoch = parse_pdf_d_format("D:20170214103000Z").unwrap();
     assert_eq!(epoch, 1_487_068_200);
 }
@@ -37,16 +34,13 @@ fn parse_pdf_d_format_no_tz_treats_as_utc() {
 
 #[test]
 fn parse_pdf_d_format_date_only_minimum_length() {
-    // D:YYYYMMDD（8 字符），时分秒缺省 → 0
     let epoch = parse_pdf_d_format("D:20170214").unwrap();
-    // 2017-02-14 00:00:00 UTC = 1_487_030_400
     assert_eq!(epoch, 1_487_030_400);
 }
 
 #[test]
 fn parse_pdf_d_format_hour_only_truncates_mm_ss() {
     let epoch = parse_pdf_d_format("D:2017021410").unwrap();
-    // 2017-02-14 10:00:00 UTC
     assert_eq!(epoch, 1_487_066_400);
 }
 
@@ -77,7 +71,6 @@ fn parse_pdf_d_format_invalid_day_returns_none() {
 
 #[test]
 fn parse_pdf_d_format_month_out_of_range_returns_none() {
-    // 第 13 月 → NaiveDate::from_ymd_opt 返 None
     assert!(parse_pdf_d_format("D:20171314").is_none());
 }
 
@@ -88,39 +81,30 @@ fn parse_pdf_d_format_day_out_of_range_returns_none() {
 
 #[test]
 fn parse_pdf_d_format_hour_out_of_range_returns_none() {
-    // 25:00 → from_hms_opt 返 None
     assert!(parse_pdf_d_format("D:2017021425").is_none());
 }
 
 #[test]
 fn parse_pdf_d_format_invalid_hour_chars_falls_back_to_zero() {
-    // 时分秒解析失败按 0 处理（parse_pair 返 None → unwrap_or(0)）
-    // hour 字段是 "XX" → parse_pair None → 0；解析成功为 2017-02-14 00:00:00 UTC
     let epoch = parse_pdf_d_format("D:20170214XX").unwrap();
     assert_eq!(epoch, 1_487_030_400);
 }
 
 #[test]
 fn parse_pdf_d_format_pre_epoch_year_returns_none() {
-    // 1969 年 → epoch 为负 → None
     assert!(parse_pdf_d_format("D:19690101000000Z").is_none());
 }
 
 #[test]
 fn parse_pdf_d_format_year_9999_valid() {
-    // 边界年 9999 仍合法
     let epoch = parse_pdf_d_format("D:99990101000000Z").unwrap();
     assert!(epoch > 1_700_000_000);
 }
 
-/// 覆盖 `parse_tz_offset(&bytes[14..])?` Err arm：合法 `YYYYMMDDHHmmSS` + 非法时区
-/// 让 `parse_tz_offset` 返 None 让 `?` bubble。
 #[test]
 fn parse_pdf_d_format_invalid_tz_returns_none() {
     assert!(parse_pdf_d_format("D:20170214103000+XY'00'").is_none());
 }
-
-// ============= parse_tz_offset 分支覆盖 =============
 
 #[test]
 fn parse_tz_offset_empty_returns_utc() {
@@ -146,21 +130,18 @@ fn parse_tz_offset_negative_hh_mm() {
 
 #[test]
 fn parse_tz_offset_hh_only_no_mm_treats_as_zero_mm() {
-    // 缺 mm 字段 → mm=0；+08 解析为 +08:00
     let off = parse_tz_offset(b"+08").unwrap();
     assert_eq!(off.local_minus_utc(), 8 * 3600);
 }
 
 #[test]
 fn parse_tz_offset_unknown_sign_falls_back_to_utc() {
-    // 既非 +/-/Z 也非空 → match 默认 arm 返 UTC
     let off = parse_tz_offset(b"X").unwrap();
     assert_eq!(off.local_minus_utc(), 0);
 }
 
 #[test]
 fn parse_tz_offset_too_short_after_sign_returns_none() {
-    // 只有 `+`，hh 字段不全 → None
     assert!(parse_tz_offset(b"+").is_none());
 }
 
@@ -174,13 +155,11 @@ fn parse_tz_offset_non_digit_mm_returns_none() {
     assert!(parse_tz_offset(b"+08'XY'").is_none());
 }
 
-/// 覆盖 `from_utf8(tz.get(1..3)?).ok()?` Err arm：tz 含非 UTF-8 字节 → `from_utf8` Err。
 #[test]
 fn parse_tz_offset_non_utf8_hh_returns_none() {
     assert!(parse_tz_offset(b"+\xff\xff").is_none());
 }
 
-/// 覆盖 mm 解析时 `from_utf8(&mm).ok()?` Err arm：mm 字段含非 UTF-8 字节。
 #[test]
 fn parse_tz_offset_non_utf8_mm_returns_none() {
     let mut buf: Vec<u8> = b"+08'".to_vec();
@@ -190,28 +169,21 @@ fn parse_tz_offset_non_utf8_mm_returns_none() {
     assert!(parse_tz_offset(&buf).is_none());
 }
 
-// ============= parse_pair 边界 =============
-
-/// 覆盖 `from_utf8(slice).ok()?` Err arm：slice 含非 UTF-8 字节。
 #[test]
 fn parse_pair_non_utf8_bytes_returns_none() {
     let bytes = [b'D', b':', 0xff, 0xff];
     assert!(parse_pair(&bytes, 2).is_none());
 }
 
-/// 覆盖 `bytes.get(offset..offset + 2)?` Err arm：offset 超出 slice 长度。
 #[test]
 fn parse_pair_offset_past_end_returns_none() {
     assert!(parse_pair(b"ab", 5).is_none());
 }
 
-/// happy path：两位 ASCII 数字 → 解析为 u32。
 #[test]
 fn parse_pair_two_digit_ok() {
     assert_eq!(parse_pair(b"12", 0), Some(12));
 }
-
-// ============= find_subslice 边界 =============
 
 #[test]
 fn find_subslice_found() {
@@ -222,8 +194,6 @@ fn find_subslice_found() {
 fn find_subslice_not_found() {
     assert!(find_subslice(b"abcdef", b"xyz").is_none());
 }
-
-// ============= scan_d_date_after_key 分支 =============
 
 #[test]
 fn scan_d_date_after_key_happy_path() {
@@ -254,7 +224,6 @@ fn scan_d_date_after_key_missing_close_paren_returns_none() {
 
 #[test]
 fn scan_d_date_after_key_invalid_utf8_payload_returns_none() {
-    // 非法 UTF-8 字节（0xff）在 (...) 内 → from_utf8 失败 → None
     let mut buf: Vec<u8> = b"/CreationDate (".to_vec();
     buf.push(0xff);
     buf.extend_from_slice(b")");
@@ -263,12 +232,9 @@ fn scan_d_date_after_key_invalid_utf8_payload_returns_none() {
 
 #[test]
 fn scan_d_date_after_key_invalid_date_format_returns_none() {
-    // key + (..) 但内容非 D: 格式 → parse_pdf_d_format 返 None
     let buf = b"/CreationDate (not a date)";
     assert!(scan_d_date_after_key(buf, b"/CreationDate").is_none());
 }
-
-// ============= parse(reader, mime) e2e =============
 
 #[test]
 fn parse_extracts_creation_and_mod_dates() {
@@ -297,8 +263,6 @@ fn parse_with_creation_only_returns_zero_for_modified() {
 
 #[test]
 fn parse_drops_middle_region_of_large_pdf() {
-    // >2×64 KB 文件的中段（头尾窗口之外）仍是盲区：/CreationDate 放正中 →
-    // 找不到 → (0, 0)。记录双窗口方案的残留可接受限制。
     let head_tail = usize::try_from(PDF_SCAN_BYTES).unwrap();
     let mut data = vec![0u8; head_tail + 512];
     data.extend_from_slice(b"/CreationDate (D:20170214103000Z)");
@@ -309,7 +273,6 @@ fn parse_drops_middle_region_of_large_pdf() {
 
 #[test]
 fn parse_finds_creation_date_in_tail_window() {
-    // 旧单窗口漏检的场景：未线性化大 PDF 的 /Info 在文件尾。双窗口后命中。
     let filler = usize::try_from(3 * PDF_SCAN_BYTES).unwrap();
     let mut data = vec![b' '; filler];
     data.extend_from_slice(b"trailer << /Info 1 0 R >> /CreationDate (D:20170214103000Z)");
@@ -320,7 +283,6 @@ fn parse_finds_creation_date_in_tail_window() {
 
 #[test]
 fn parse_head_window_wins_over_tail() {
-    // 头尾各有 /CreationDate：头窗口字节在 buffer 前部，首个匹配胜出。
     let filler = usize::try_from(3 * PDF_SCAN_BYTES).unwrap();
     let mut data = b"%PDF-1.4 /CreationDate (D:20170214103000Z) ".to_vec();
     data.extend(vec![b' '; filler]);
@@ -332,7 +294,6 @@ fn parse_head_window_wins_over_tail() {
 
 #[test]
 fn parse_whole_file_read_when_at_most_two_windows() {
-    // 总大小 ≤ 2×64 KB 走整读：旧实现会截断漏检的「64 KB+100 处日期」现在命中。
     let head = usize::try_from(PDF_SCAN_BYTES).unwrap();
     let mut data = vec![0u8; head + 100];
     data.extend_from_slice(b"/CreationDate (D:20170214103000Z)");
@@ -340,8 +301,6 @@ fn parse_whole_file_read_when_at_most_two_windows() {
     let (c, _) = parse(&mut r, "application/pdf");
     assert_eq!(c, 1_487_068_200);
 }
-
-// ============= scan_windows 纯窗口划分 =============
 
 #[test]
 fn scan_windows_zero_size_single_empty_range() {
@@ -378,9 +337,6 @@ fn scan_windows_large_file_windows_sized_exactly() {
     assert_eq!(tail.end - tail.start, PDF_SCAN_BYTES);
 }
 
-/// Reader read Err 时直接返 (0, 0)。用包装 reader 注入读错。
-/// seek 必须返非 0 apparent size：返 0 会让 `scan_windows(0)` 产生空窗口，
-/// read 永不被调用，测试假通过。
 #[test]
 fn parse_returns_zeros_on_read_error() {
     use std::io;

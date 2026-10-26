@@ -8,6 +8,7 @@
 - 推理 Output Port 放在对应 `usecases/<feature>/`，基础设施 Port 放在 `entities/backend/`；具体 impl 放 `adapters/`，选择 impl 的 factory 放 `frameworks/`。
 - `tidy()` 在部分失败时返回 Err 以提供非零退出码；`tidy_with()` 直接返回 `CommandResult`，不重复检查。
 - 生产目录使用 `foo/mod.rs` 声明与 re-export，子模块不得命名为 `core`。测试需要访问的内部项用 `#[cfg(test)]` 私有 re-export 或 `pub(super)`。
+- OS、模型 runtime 和第三方容器适配与业务分文件；`_io.rs`、`_real.rs` 仅是职责命名，不自动获得覆盖率排除。纯 bytes 解析、端口编排和业务错误分类不得迁入非业务文件。
 - 新模块先完成 `lib.rs` re-export 和 dispatch 装配再实现主体；仅在未消费模块的独立阶段允许 `#![allow(dead_code)]`，接入时删除。
 - `#[cfg(test)]` 标在方法或 import 上，不标在同时含生产代码的 `impl` 块上。
 

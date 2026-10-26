@@ -1,17 +1,7 @@
-//! PDF 文本层提取族：扫 `stream…endstream` 块，`/FlateDecode` 解压后收集
-//! `BT…ET` 内 `(...)` 字符串字面量。`extract_text_from_buf` 是纯字节扫描业务；
-//! IO 读取入口 `extract_text` 在父模块；共享 `find_subslice` 在父模块。
-
-use std::io::Read;
-
+use super::super::flate_io::inflate_capped;
 use super::super::scan::truncate_at_boundary;
 use super::find_subslice;
 
-/// 单 content stream 解压输出上限：防 Flate 炸弹。
-const INFLATE_OUTPUT_CAP: usize = 2 * 1024 * 1024;
-
-/// 纯字节扫描业务：遍历 `stream`/`endstream` 对，按前导字典是否含
-/// `/FlateDecode` 决定解压，再收集 `BT…ET` 文本块内的字符串字面量。
 #[must_use]
 pub fn extract_text_from_buf(buf: &[u8], max_bytes: usize) -> String {
     let mut out = String::new();
@@ -26,7 +16,6 @@ pub fn extract_text_from_buf(buf: &[u8], max_bytes: usize) -> String {
             break;
         };
         let data = &buf[data_start..data_start + end_rel];
-        // 字典在 `stream` 关键字前的 `<<…>>`；仅回看 1 KiB（Length/Filter 字典很短）。
         let dict_window_start = kw_start.saturating_sub(1024);
         let dict = &buf[dict_window_start..kw_start];
         if find_subslice(dict, b"/FlateDecode").is_some() {
@@ -41,23 +30,6 @@ pub fn extract_text_from_buf(buf: &[u8], max_bytes: usize) -> String {
     out
 }
 
-/// zlib 解压 content stream，输出 cap 防炸弹；非 zlib 数据（加密/其它 filter
-/// 链）返 `None` 跳过。
-pub(super) fn inflate_capped(data: &[u8]) -> Option<Vec<u8>> {
-    let decoder = flate2::read::ZlibDecoder::new(data);
-    let mut inflated = Vec::new();
-    let n = decoder
-        .take(INFLATE_OUTPUT_CAP as u64)
-        .read_to_end(&mut inflated);
-    match n {
-        Ok(0) | Err(_) => None,
-        Ok(_) => Some(inflated),
-    }
-}
-
-/// 收集 content 内 `(...)` 字符串字面量（PDF 文本 show 运算符 `Tj`/`TJ`/`'`/`"`
-/// 的操作数），处理 `\(` `\)` `\\` 转义与嵌套括号；仅当 content 含 `BT`
-/// （text block 开始运算符）才扫，过滤纯图形 stream。
 pub fn collect_string_literals(content: &[u8], out: &mut String, max_bytes: usize) {
     if find_subslice(content, b"BT").is_none() {
         return;
@@ -115,7 +87,6 @@ pub fn collect_string_literals(content: &[u8], out: &mut String, max_bytes: usiz
     truncate_at_boundary(out, max_bytes);
 }
 
-/// `stream` 关键字后跳过 EOL（`\r\n` 或 `\n`，PDF spec §7.3.8）。
 pub(super) fn skip_stream_eol(buf: &[u8], mut i: usize) -> usize {
     if buf.get(i) == Some(&b'\r') {
         i += 1;

@@ -80,10 +80,10 @@ fn dashed_window_shape_ok(w: &[u8]) -> bool {
     })
 }
 
-#[path = "filename_matchers_phantom.rs"]
-mod phantom;
+#[path = "compact_matchers.rs"]
+mod compact;
 #[doc(hidden)]
-pub(crate) use self::phantom::{try_parenthesized_compact, try_qq_export};
+pub(crate) use self::compact::{try_parenthesized_compact, try_qq_export};
 
 pub(super) fn try_camera_or_phone(stem: &str, default_offset: FixedOffset) -> Option<Candidate> {
     let (rest, source) = stem

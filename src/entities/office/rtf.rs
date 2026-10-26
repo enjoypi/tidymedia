@@ -5,8 +5,7 @@
 //! `\revtim` 同结构，表修订时间。无时区信息，按 UTC 解释。
 //!
 //! 入口与复杂业务 fn（`parse` / `extract_text` / `strip_rtf_into` / `consume_control` /
-//! `scan_int_after`）含 per-instance phantom branch 缺口，独立到 `phantom` 子模块供
-//! ignore-regex 排除（CLAUDE.md office 子模块套路）；本文件保留纯字节扫描纯函数。
+//! `scan_int_after`）在 `parse` 子模块；本文件保留纯字节扫描纯函数。
 
 use chrono::NaiveDate;
 
@@ -27,11 +26,12 @@ const SKIP_GROUPS: &[&[u8]] = &[
     b"\\*",
 ];
 
-#[path = "rtf_phantom.rs"]
-mod phantom;
+#[path = "rtf_parse.rs"]
+mod parse;
 
-#[doc(hidden)]
-pub use self::phantom::{consume_control, extract_text, parse, scan_int_after, strip_rtf_into};
+#[cfg(test)]
+pub use self::parse::{consume_control, strip_rtf_into};
+pub use self::parse::{extract_text, parse, scan_int_after};
 
 /// `{` 后是否紧跟 [`SKIP_GROUPS`] 前缀；命中返回前缀长度。
 fn match_skip_group(rest: &[u8]) -> Option<usize> {
@@ -115,6 +115,10 @@ fn find_subslice(haystack: &[u8], needle: &[u8]) -> Option<usize> {
         .windows(needle.len())
         .position(|window| window == needle)
 }
+
+#[cfg(test)]
+#[path = "rtf_deep_tests.rs"]
+mod deep_tests;
 
 #[cfg(test)]
 #[path = "rtf_tests.rs"]

@@ -9,7 +9,6 @@ use super::DuplicateGroup;
 use super::Index;
 use super::Info;
 
-// 测试辅助：从 Vec<DuplicateGroup> 中按 size 查首个匹配组（旧 BTreeMap 索引语义的替代）。
 fn group_by_size(groups: &[DuplicateGroup], size: u64) -> &DuplicateGroup {
     groups
         .iter()
@@ -52,22 +51,6 @@ fn search_same() {
     assert!(large.paths.contains(&large_copy));
     assert!(small.paths.contains(&small_path));
     assert!(small.paths.contains(&small_copy));
-}
-
-#[test]
-fn parse_exif() {
-    let mut index = Index::new();
-    index.visit_dir(common::DATA_DIR);
-    index.parse_exif(chrono::FixedOffset::east_opt(0).unwrap(), true, false);
-
-    let jpeg_path = file_info::full_path(common::DATA_JPEG_WITH_EXIF).unwrap();
-    let entry = index.get(jpeg_path.as_path()).unwrap();
-    let info = entry.value();
-    let exif = info.exif().unwrap();
-    assert_eq!(exif.mime_type(), "image/jpeg");
-    assert!(exif.is_media());
-    // 本 fixture EXIF 含 DateTimeOriginal=2024-01-01
-    assert_eq!(exif.date_time_original(), 1_704_110_400);
 }
 
 #[test]
@@ -121,8 +104,6 @@ fn visit_dir_handles_nonexistent_path() {
     assert_eq!(index.len(), 0);
 }
 
-// full_path 仅在相对路径上调 canonicalize_utf8()，绝对路径直接返 Ok。
-// 此用例用相对路径触发 canonicalize 失败 → 走 Err arm 回退到原字符串。
 #[test]
 fn visit_dir_falls_back_when_relative_path_cannot_canonicalize() {
     let mut index = Index::new();
@@ -179,28 +160,6 @@ fn bytes_read_sums_individual() {
 }
 
 #[test]
-fn parse_exif_empty_index_ok() {
-    let mut index = Index::new();
-    index.parse_exif(chrono::FixedOffset::east_opt(0).unwrap(), true, false);
-    assert_eq!(index.len(), 0);
-}
-
-/// 文件在 `visit_dir` 之后被删除 → `Exif::from_path` 返回 Err →
-/// `parse_exif` 内 `if let Ok` 的 Err 分支被覆盖，对应 entry 保留无 exif。
-#[test]
-fn parse_exif_skips_files_deleted_between_visit_and_parse() {
-    let dir = tempdir().unwrap();
-    let path = dir.path().join("ghost.bin");
-    fs::write(&path, [0xFFu8; 32]).unwrap();
-    let mut index = Index::new();
-    index.visit_dir(dir.path().to_str().unwrap());
-    assert_eq!(index.len(), 1);
-    fs::remove_file(&path).unwrap();
-    index.parse_exif(chrono::FixedOffset::east_opt(0).unwrap(), true, false);
-    assert_eq!(index.len(), 1);
-}
-
-#[test]
 fn fast_search_same_matches_search_same() {
     let mut index = Index::new();
     index.visit_dir(common::DATA_DIR);
@@ -217,8 +176,6 @@ fn index_debug_format_renders_files() {
     assert!(dbg.contains("data_small"));
 }
 
-// 自定义 fmt::Write 总返回 Err 强制 Debug 实现里的 writeln!(...)? 走 Err 分支。
-// 覆盖 file_index.rs L25 的 ? Err region。
 struct FailingWriter;
 impl fmt::Write for FailingWriter {
     fn write_str(&mut self, _: &str) -> fmt::Result {
@@ -234,8 +191,6 @@ fn debug_fmt_propagates_writer_error() {
     assert!(res.is_err());
 }
 
-// 外部传入的 src_file 底层已删除，让 exists() 中
-// `f.calc_full_hash()? == src_file.calc_full_hash()?` 的右侧 ? 走 Err 分支。
 #[test]
 fn exists_propagates_calc_hash_error_when_src_deleted() {
     let dir = tempdir().unwrap();
@@ -254,14 +209,11 @@ fn exists_propagates_calc_hash_error_when_src_deleted() {
     let index = Index::new();
     index.insert(a_path.to_str().unwrap()).unwrap();
     let info_b = Info::from(b_path.to_str().unwrap()).unwrap();
-    // 仅删 src 文件 b，保留 index 中的 a
     fs::remove_file(&b_path).unwrap();
     let err = index.exists(&info_b, false).unwrap_err();
     assert_eq!(err.kind(), std::io::ErrorKind::NotFound);
 }
 
-// index 中保存的 Info 指向的源文件被外部删除后，exists() 内调用 calc_full_hash
-// 会因 mmap 失败而 Err，触发 L70 的 ? Err 分支。
 #[test]
 fn exists_propagates_calc_hash_error_when_file_deleted() {
     let dir = tempdir().unwrap();
@@ -280,14 +232,11 @@ fn exists_propagates_calc_hash_error_when_file_deleted() {
     let index = Index::new();
     index.insert(a_path.to_str().unwrap()).unwrap();
     let info_b = Info::from(b_path.to_str().unwrap()).unwrap();
-
-    // 删 index 中已经登记的 a 文件
     fs::remove_file(&a_path).unwrap();
     let err = index.exists(&info_b, false).unwrap_err();
     assert_eq!(err.kind(), std::io::ErrorKind::NotFound);
 }
 
-// 触发 insert() 内 Info::from(path)? 的 Err 分支（L150）。
 #[test]
 fn insert_propagates_info_from_error() {
     let index = Index::new();
@@ -295,9 +244,6 @@ fn insert_propagates_info_from_error() {
     assert_eq!(err.kind(), std::io::ErrorKind::NotFound);
 }
 
-// calc_same 预过滤只放行 fast_hash 冲突桶（len>1）：唯一文件的单例桶不得进入
-// 逐文件 hash 阶段。结果以 pub calc_same 返回 Vec 的元素个数观测（search_same 的
-// filter_and_sort 会把单例再滤掉，杀不了「>1 变 >=1」边界变异）。
 #[test]
 fn calc_same_excludes_singleton_buckets_from_results() {
     let dir = tempdir().unwrap();
@@ -321,8 +267,6 @@ fn calc_same_excludes_singleton_buckets_from_results() {
     );
 }
 
-// remove_under_prefix：仅移除 prefix 子树内条目，similar_files bucket 同步清理，
-// 剩余条目的 exists 查询不得 panic（bucket 指针悬空会触发 expect）。
 #[test]
 fn remove_under_prefix_removes_subtree_and_keeps_outside() {
     let dir = tempdir().unwrap();
@@ -330,7 +274,6 @@ fn remove_under_prefix_removes_subtree_and_keeps_outside() {
     fs::create_dir_all(&sub).unwrap();
     let outside = dir.path().join("a.bin");
     let inside = sub.join("b.bin");
-    // 相同内容 → 相同 fast_hash → 共享 similar_files bucket。
     fs::write(&outside, b"same-content-x").unwrap();
     fs::write(&inside, b"same-content-x").unwrap();
 
@@ -339,21 +282,16 @@ fn remove_under_prefix_removes_subtree_and_keeps_outside() {
     index.insert(inside.to_str().unwrap()).unwrap();
     assert_eq!(index.len(), 2);
 
-    // prefix 与生产入口 canonical_prefix 同走 full_path（绝对路径透传），
-    // 不可手动 canonicalize：profile 目录为符号链接时（C:\Users\x → D:\Users\x）
-    // canonicalize 会解析出与索引存储不同的盘符，导致前缀匹配失败
     let sub_prefix = file_info::full_path(sub.to_str().unwrap()).unwrap();
     let removed = index.remove_under_prefix(sub_prefix.as_str());
     assert_eq!(removed, 1);
     assert_eq!(index.len(), 1);
 
-    // bucket 已清理：对剩余文件做 exists 查询不得 panic。
     let probe = Info::from(outside.to_str().unwrap()).unwrap();
     let dup = index.exists(&probe, false).unwrap();
     assert!(dup.is_some(), "outside file must remain queryable");
 }
 
-// 前缀必须按分隔符边界匹配：/photos_backup 不是 /photos 的子树。
 #[test]
 fn remove_under_prefix_does_not_match_sibling_with_common_prefix() {
     let dir = tempdir().unwrap();
@@ -371,9 +309,6 @@ fn remove_under_prefix_does_not_match_sibling_with_common_prefix() {
     assert_eq!(index.len(), 1);
 }
 
-// 让 similar_files 有两个冲突 path，其中一个对应的文件已删除：
-// - calc(info) 对删除的文件 Err → 被 `if let Ok` 过滤 (L98 失败分支)
-// - 剩 1 个 path → filter_and_sort 走 paths.len()==1 的 else 分支 (L126)
 #[test]
 fn calc_same_skips_files_with_calc_error_and_singletons() {
     let dir = tempdir().unwrap();
@@ -393,131 +328,10 @@ fn calc_same_skips_files_with_calc_error_and_singletons() {
     index.insert(a_path.to_str().unwrap()).unwrap();
     index.insert(b_path.to_str().unwrap()).unwrap();
 
-    // 删除 a，让 secure_hash 在 calc_same 中对 a Err
     fs::remove_file(&a_path).unwrap();
 
     let same = index.search_same();
-    // a 被 calc Err 过滤掉；b 剩单独一条，paths.len()==1，filter_and_sort 不保留
     assert_eq!(same, []);
-}
-
-// ============= classify_documents（copy-doc/move-doc 分类富集） =============
-
-#[test]
-fn classify_documents_writes_back_category_for_office_files() {
-    use crate::entities::file_index::TextClassifyProvider;
-
-    let dir = tempdir().unwrap();
-    let txt = dir.path().join("notes.txt");
-    std::fs::write(&txt, b"invoice body text").unwrap();
-    let mut index = Index::new();
-    index.insert(txt.to_str().unwrap()).unwrap();
-    index.parse_exif(chrono::FixedOffset::east_opt(0).unwrap(), true, true);
-
-    let provider: TextClassifyProvider =
-        Box::new(|_loc, _backend, mime| (mime == "text/plain").then(|| "invoice".to_string()));
-    index.classify_documents(&provider);
-
-    let key = camino::Utf8PathBuf::from(txt.to_str().unwrap());
-    let entry = index.get(&key).unwrap();
-    assert_eq!(entry.value().category_ref(), Some("invoice"));
-}
-
-#[test]
-fn classify_documents_skips_non_office_files() {
-    use crate::entities::file_index::TextClassifyProvider;
-
-    let dir = tempdir().unwrap();
-    let png = common::copy_png_to(dir.path(), "photo.png").unwrap();
-    let mut index = Index::new();
-    index.insert(png.to_str().unwrap()).unwrap();
-    index.parse_exif(chrono::FixedOffset::east_opt(0).unwrap(), true, false);
-
-    let provider: TextClassifyProvider = Box::new(|_, _, _| Some("should-not-happen".to_string()));
-    index.classify_documents(&provider);
-
-    let key = camino::Utf8PathBuf::from(png.to_str().unwrap());
-    let entry = index.get(&key).unwrap();
-    assert!(entry.value().category_ref().is_none());
-}
-
-#[test]
-fn classify_documents_none_leaves_category_unset() {
-    use crate::entities::file_index::TextClassifyProvider;
-
-    let dir = tempdir().unwrap();
-    let txt = dir.path().join("plain.txt");
-    std::fs::write(&txt, b"nothing matches").unwrap();
-    let mut index = Index::new();
-    index.insert(txt.to_str().unwrap()).unwrap();
-    index.parse_exif(chrono::FixedOffset::east_opt(0).unwrap(), true, true);
-
-    let provider: TextClassifyProvider = Box::new(|_, _, _| None);
-    index.classify_documents(&provider);
-
-    let key = camino::Utf8PathBuf::from(txt.to_str().unwrap());
-    let entry = index.get(&key).unwrap();
-    assert!(entry.value().category_ref().is_none());
-}
-
-// parse_exif 对 open_filtered Err（open_read 注入失败）静默跳过：Info 无 exif。
-#[test]
-fn parse_exif_skips_file_when_open_read_fails() {
-    use std::sync::Arc;
-
-    use crate::adapters::backend::fake::{FakeBackend, Op};
-    use crate::entities::uri::Location;
-
-    let fake = Arc::new(FakeBackend::new("fake"));
-    let loc = Location::Local(camino::Utf8PathBuf::from("/in-mem/broken.txt"));
-    fake.add_file(loc.clone(), b"some text body".to_vec());
-    let backend: Arc<dyn crate::entities::backend::Backend> = Arc::clone(&fake) as _;
-
-    let mut index = Index::new();
-    index.visit_location(&loc, &backend);
-    fake.inject_error(loc.clone(), Op::OpenRead, std::io::ErrorKind::TimedOut);
-    index.parse_exif(chrono::FixedOffset::east_opt(0).unwrap(), true, false);
-
-    let key = camino::Utf8PathBuf::from(loc.display());
-    let entry = index.get(&key).unwrap();
-    assert!(
-        entry.value().exif_ref().is_none(),
-        "open_read Err must leave Info without exif"
-    );
-}
-
-// enrich_candidates 非空 candidates 分支：provider 返回一条候选 → add_candidates。
-#[test]
-fn enrich_candidates_adds_non_empty_candidates() {
-    use std::sync::Arc;
-
-    use crate::entities::backend::Backend;
-    use crate::entities::media_time::{Candidate, Source};
-    use crate::entities::uri::Location;
-
-    fn one_candidate(_: &Location, _: &Arc<dyn Backend>) -> Vec<Candidate> {
-        vec![Candidate {
-            utc: chrono::DateTime::from_timestamp(1_487_068_200, 0).unwrap(),
-            offset: None,
-            source: Source::XmpSidecar,
-            inferred_offset: false,
-        }]
-    }
-
-    let dir = tempdir().unwrap();
-    let png = common::copy_png_to(dir.path(), "photo.png").unwrap();
-    let mut index = Index::new();
-    index.insert(png.to_str().unwrap()).unwrap();
-    index.enrich_candidates(one_candidate, &|_| true);
-
-    // P3 候选（2017-02-14）优先于 P4 mtime（2024-01-01）：create_time 反映注入生效。
-    let key = camino::Utf8PathBuf::from(png.to_str().unwrap());
-    let entry = index.get(&key).unwrap();
-    let t = entry
-        .value()
-        .create_time(0, chrono::FixedOffset::east_opt(0).unwrap());
-    let secs = t.duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
-    assert_eq!(secs, 1_487_068_200);
 }
 
 #[test]
@@ -529,40 +343,5 @@ fn into_infos_returns_every_indexed_file() {
     assert_eq!(
         infos[0].full_path,
         file_info::full_path(common::DATA_SMALL).unwrap()
-    );
-}
-
-#[test]
-fn enrich_candidates_skips_files_rejected_by_keep() {
-    use std::sync::Arc;
-
-    use crate::entities::backend::Backend;
-    use crate::entities::media_time::{Candidate, Source};
-    use crate::entities::uri::Location;
-
-    fn one_candidate(_: &Location, _: &Arc<dyn Backend>) -> Vec<Candidate> {
-        vec![Candidate {
-            utc: chrono::DateTime::from_timestamp(1_487_068_200, 0).unwrap(),
-            offset: None,
-            source: Source::XmpSidecar,
-            inferred_offset: false,
-        }]
-    }
-
-    let dir = tempdir().unwrap();
-    let png = common::copy_png_to(dir.path(), "photo.png").unwrap();
-    let mut index = Index::new();
-    index.insert(png.to_str().unwrap()).unwrap();
-    index.enrich_candidates(one_candidate, &|_| false);
-
-    let key = camino::Utf8PathBuf::from(png.to_str().unwrap());
-    let entry = index.get(&key).unwrap();
-    let t = entry
-        .value()
-        .create_time(0, chrono::FixedOffset::east_opt(0).unwrap());
-    let secs = t.duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
-    assert_eq!(
-        secs,
-        u64::try_from(crate::entities::test_common::FIXED_MEDIA_MTIME).unwrap()
     );
 }

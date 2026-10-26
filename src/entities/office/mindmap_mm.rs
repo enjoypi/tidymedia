@@ -118,5 +118,9 @@ fn find_subslice(haystack: &[u8], needle: &[u8]) -> Option<usize> {
 }
 
 #[cfg(test)]
+#[path = "mindmap_mm_deep_tests.rs"]
+mod deep_tests;
+
+#[cfg(test)]
 #[path = "mindmap_mm_tests.rs"]
 mod tests;

@@ -5,17 +5,13 @@ use camino::Utf8PathBuf;
 use parking_lot::Mutex;
 
 use super::super::remote::RemoteClient;
-use super::SmbTarget;
-use crate::entities::backend::{Entry, EntryKind, Metadata};
-use crate::entities::uri::Location;
+use super::{SmbTarget, entries_from_listing, map_smb_err, metadata_from_file_info, path_or_root};
+use crate::entities::backend::{Entry, Metadata};
 
 pub struct RealSmbClient {
     runtime: tokio::runtime::Runtime,
     inner: Mutex<ShareSession>,
-    user: Option<String>,
-    host: String,
-    port: Option<u16>,
-    share: String,
+    conn: SmbTarget,
 }
 
 struct ShareSession {
@@ -26,17 +22,14 @@ struct ShareSession {
 impl std::fmt::Debug for RealSmbClient {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("RealSmbClient")
-            .field("host", &self.host)
-            .field("share", &self.share)
-            .field("user", &self.user)
+            .field("host", &self.conn.host)
+            .field("share", &self.conn.share)
+            .field("user", &self.conn.user)
             .finish_non_exhaustive()
     }
 }
 
 impl RealSmbClient {
-    /// 从 [`SmbTarget`] 模板构造：host/port/share + env 凭据 + 配置项（外部传入）。
-    /// `default_user` / `workgroup` / `timeout_secs` 由 factory 装配层从 `config()`
-    /// 读取并传入，避免 entities 层反向依赖 `usecases::config`（CA 内层无依赖原则）。
     pub fn new(
         target: &SmbTarget,
         default_user: &str,
@@ -72,29 +65,16 @@ impl RealSmbClient {
         Ok(Self {
             runtime,
             inner: Mutex::new(ShareSession { client, tree }),
-            user: target.user.clone(),
-            host: target.host.clone(),
-            port: target.port,
-            share: target.share.clone(),
+            conn: SmbTarget {
+                user: target.user.clone(),
+                host: target.host.clone(),
+                port: target.port,
+                share: target.share.clone(),
+                path: Utf8PathBuf::default(),
+                password: None,
+                krb5_ccname: None,
+            },
         })
-    }
-
-    fn child_target(&self, parent: &SmbTarget, name: &str) -> SmbTarget {
-        let child_path = if parent.path.as_str().is_empty() {
-            Utf8PathBuf::from(name)
-        } else {
-            let p = parent.path.as_str().trim_end_matches('/');
-            Utf8PathBuf::from(format!("{p}/{name}"))
-        };
-        SmbTarget {
-            user: self.user.clone(),
-            host: self.host.clone(),
-            port: self.port,
-            share: self.share.clone(),
-            path: child_path,
-            password: parent.password.clone(),
-            krb5_ccname: parent.krb5_ccname.clone(),
-        }
     }
 }
 
@@ -102,55 +82,24 @@ impl RemoteClient<SmbTarget> for RealSmbClient {
     fn stat(&self, target: &SmbTarget) -> io::Result<Metadata> {
         let mut guard = self.inner.lock();
         let ShareSession { client, tree } = &mut *guard;
-        let info = self
-            .runtime
+        self.runtime
             .block_on(client.stat(tree, path_or_root(&target.path)))
-            .map_err(map_smb_err)?;
-        Ok(Metadata {
-            size: info.size,
-            kind: if info.is_directory {
-                EntryKind::Dir
-            } else {
-                EntryKind::File
-            },
-            modified: info.modified.to_system_time(),
-            created: info.created.to_system_time(),
-        })
+            .map_err(map_smb_err)
+            .map(|info| metadata_from_file_info(&info))
     }
 
     fn list(&self, target: &SmbTarget) -> io::Result<Vec<Entry>> {
         let mut guard = self.inner.lock();
         let ShareSession { client, tree } = &mut *guard;
-        let entries = self
-            .runtime
+        self.runtime
             .block_on(client.list_directory(tree, path_or_root(&target.path)))
-            .map_err(map_smb_err)?;
-        let mut out = Vec::with_capacity(entries.len());
-        for e in entries {
-            if e.name == "." || e.name == ".." {
-                continue;
-            }
-            let kind = if e.is_directory {
-                EntryKind::Dir
-            } else {
-                EntryKind::File
-            };
-            let child = self.child_target(target, &e.name);
-            // smb2 DirectoryEntry 自带 size（QUERY_DIRECTORY 应答内含），免 pavao
-            // 时代的逐 file 二次 stat RTT（F5 优化顺带落地）。
-            out.push(Entry {
-                location: smb_location_from_target(&child),
-                size: e.size,
-                kind,
-            });
-        }
-        Ok(out)
+            .map_err(map_smb_err)
+            .map(|entries| entries_from_listing(&self.conn, target, entries))
     }
 
     fn read(&self, target: &SmbTarget) -> io::Result<Vec<u8>> {
         let mut guard = self.inner.lock();
         let ShareSession { client, tree } = &mut *guard;
-        // 整文件入堆（与 pavao 时代同口径的已知限制；F9 streaming 待做）。
         self.runtime
             .block_on(client.read_file(tree, path_or_root(&target.path)))
             .map_err(map_smb_err)
@@ -159,7 +108,6 @@ impl RemoteClient<SmbTarget> for RealSmbClient {
     fn write(&self, target: &SmbTarget, data: &[u8]) -> io::Result<u64> {
         let mut guard = self.inner.lock();
         let ShareSession { client, tree } = &mut *guard;
-        // write_file 语义 = create or overwrite（对齐 pavao write+create+truncate）。
         self.runtime
             .block_on(client.write_file(tree, path_or_root(&target.path), data))
             .map_err(map_smb_err)
@@ -179,48 +127,5 @@ impl RemoteClient<SmbTarget> for RealSmbClient {
         self.runtime
             .block_on(client.create_directory(tree, path_or_root(&target.path)))
             .map_err(map_smb_err)
-    }
-}
-
-// share 根用 "."（smb2 对空 path 未定义行为）；子路径已是 `/` 拼接（child_target）。
-fn path_or_root(p: &Utf8PathBuf) -> &str {
-    if p.as_str().is_empty() {
-        "."
-    } else {
-        p.as_str()
-    }
-}
-
-// 用作 `.map_err(map_smb_err)` 回调，签名必须接收 owned error（map_err 传 owned），
-// 故 needless_pass_by_value 在此不可消除。
-#[expect(
-    clippy::needless_pass_by_value,
-    reason = "用作 map_err 回调，必须接收 owned smb2::Error"
-)]
-fn map_smb_err(e: smb2::Error) -> io::Error {
-    // smb2 ErrorKind 精确分类（pavao 时代只能靠文案 to_ascii_lowercase 重映射）。
-    let kind = match e.kind() {
-        smb2::ErrorKind::NotFound => io::ErrorKind::NotFound,
-        smb2::ErrorKind::AccessDenied
-        | smb2::ErrorKind::AuthRequired
-        | smb2::ErrorKind::SigningRequired => io::ErrorKind::PermissionDenied,
-        smb2::ErrorKind::AlreadyExists => io::ErrorKind::AlreadyExists,
-        smb2::ErrorKind::TimedOut => io::ErrorKind::TimedOut,
-        smb2::ErrorKind::ConnectionLost | smb2::ErrorKind::SessionExpired => {
-            io::ErrorKind::ConnectionAborted
-        }
-        smb2::ErrorKind::DiskFull => io::ErrorKind::StorageFull,
-        _ => io::ErrorKind::Other,
-    };
-    io::Error::new(kind, format!("smb2: {e}"))
-}
-
-fn smb_location_from_target(t: &SmbTarget) -> Location {
-    Location::Smb {
-        user: t.user.clone(),
-        host: t.host.clone(),
-        port: t.port,
-        share: t.share.clone(),
-        path: t.path.clone(),
     }
 }

@@ -25,10 +25,42 @@ fn yyyymmdd_compact() {
 }
 
 #[test]
+fn yyyymmdd_pure_compact() {
+    assert_eq!(
+        parse_path_date_bucket("20210611").as_deref(),
+        Some("2021:06")
+    );
+}
+
+#[test]
+fn yyyymmdd_rejects_invalid_date_falls_through_to_year_month() {
+    assert_eq!(
+        parse_path_date_bucket("20211301120000.jpg").as_deref(),
+        Some("2021:01")
+    );
+}
+
+#[test]
+fn delimited_full_date_keeps_year_month_precision() {
+    assert_eq!(
+        parse_path_date_bucket("2023-10-25.jpg").as_deref(),
+        Some("2023:10")
+    );
+}
+
+#[test]
 fn yy_mm_dd_century_heuristic() {
     assert_eq!(
         parse_path_date_bucket("scan 13-08-21.jpg").as_deref(),
         Some("2013:08")
+    );
+}
+
+#[test]
+fn yy_mm_dd_pre_2000_century() {
+    assert_eq!(
+        parse_path_date_bucket("99-12-31.jpg").as_deref(),
+        Some("1999:12")
     );
 }
 

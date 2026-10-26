@@ -1,4 +1,5 @@
 mod document;
+mod exif_io;
 mod image;
 mod image_jpeg;
 mod image_png;
@@ -9,8 +10,6 @@ mod video;
 
 pub use self::types::Exif;
 
-// 测试要访问的内部 helper 在父 mod 私有 re-export，
-// 让 `exif_tests.rs` 的 `super::xxx` 引用照常解析（tests/CLAUDE.md「门禁与组织」节）。
 #[cfg(test)]
 use self::image::apply_tiff_ifd;
 #[cfg(test)]
@@ -49,8 +48,12 @@ use self::video::populate_video_dates;
 use super::backend::MediaReader;
 
 #[cfg(test)]
+#[path = "exif_io_tests.rs"]
+mod io_tests;
+
+#[cfg(test)]
 #[path = "exif_fixture_tests.rs"]
-mod tests_common;
+pub(crate) mod tests_common;
 
 #[cfg(test)]
 #[path = "exif_basic_tests.rs"]

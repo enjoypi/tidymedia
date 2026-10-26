@@ -65,14 +65,14 @@ pub(super) fn mkparent<A: RemoteAdapter>(
     if let Some(parent) = target.parent()
         && let Err(e) = mkdir_recursive::<A>(&parent, client)
     {
-        log_mkparent_err::<A>(&parent, &e);
+        log_mkparent_err(A::scheme(), parent.path(), &e);
     }
 }
 
-#[path = "remote_walk_phantom.rs"]
-mod phantom;
+#[path = "remote_walk_recursive.rs"]
+mod recursive;
 #[doc(hidden)]
-pub(crate) use self::phantom::{log_mkparent_err, walk_recursive};
+pub(crate) use self::recursive::{log_mkparent_err, walk_recursive};
 
 /// 远端 mkdir-p：自底向上用 stat 找到第一个已存在的祖先，再自浅入深逐层 mkdir。
 /// 远端协议的 mkdir 多为 POSIX 单层语义（父层缺失返回 ENOENT，如 pavao SMB），

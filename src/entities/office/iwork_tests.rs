@@ -6,6 +6,8 @@
 use std::io::Cursor;
 use std::time::{Duration, UNIX_EPOCH};
 
+use crate::entities::office::tests_common::{corrupt_zip_entry, make_zip};
+
 use super::*;
 
 fn build_plist_with_dates(created_secs: Option<u64>, modified_secs: Option<u64>) -> Vec<u8> {
@@ -24,6 +26,33 @@ fn build_plist_with_dates(created_secs: Option<u64>, modified_secs: Option<u64>)
         .to_writer_binary(Cursor::new(&mut buf))
         .expect("write binary plist");
     buf
+}
+
+#[test]
+fn parse_happy_path_extracts_dates() {
+    let plist = build_plist_with_dates(Some(1_487_068_200), Some(1_514_808_000));
+    let z = make_zip(&[("Metadata/Properties.plist", plist.as_slice())]);
+    let mut r = Cursor::new(z);
+    assert_eq!(
+        parse(&mut r, "application/vnd.apple.pages"),
+        (1_487_068_200, 1_514_808_000)
+    );
+}
+
+#[test]
+fn parse_missing_plist_returns_zeros() {
+    let z = make_zip(&[("index.xml", b"<x/>".as_slice())]);
+    let mut r = Cursor::new(z);
+    assert_eq!(parse(&mut r, "application/vnd.apple.pages"), (0, 0));
+}
+
+#[test]
+fn parse_corrupt_plist_read_error_returns_zeros() {
+    let plist = build_plist_with_dates(Some(1_487_068_200), None);
+    let mut z = make_zip(&[("Metadata/Properties.plist", plist.as_slice())]);
+    corrupt_zip_entry(&mut z, b"createdDate");
+    let mut r = Cursor::new(z);
+    assert_eq!(parse(&mut r, "application/vnd.apple.pages"), (0, 0));
 }
 
 #[test]
@@ -64,7 +93,6 @@ fn extract_dates_invalid_plist_returns_zeros() {
 
 #[test]
 fn extract_dates_non_dict_root_returns_zeros() {
-    // plist 顶层是数组而非字典 → as_dictionary 返 None。
     let value = plist::Value::Array(vec![plist::Value::Integer(1.into())]);
     let mut buf = Vec::new();
     value.to_writer_binary(Cursor::new(&mut buf)).unwrap();
@@ -73,7 +101,6 @@ fn extract_dates_non_dict_root_returns_zeros() {
 
 #[test]
 fn extract_dates_non_date_value_returns_zero_for_that_field() {
-    // createdDate 是 String 而非 Date → as_date 返 None → 0。
     let mut dict = plist::Dictionary::new();
     dict.insert(
         KEY_CREATED.into(),
@@ -85,8 +112,6 @@ fn extract_dates_non_date_value_returns_zero_for_that_field() {
     assert_eq!(extract_dates_from_plist(&buf), (0, 0));
 }
 
-// ============= systemtime_to_epoch =============
-
 #[test]
 fn systemtime_to_epoch_post_epoch() {
     let t = UNIX_EPOCH + Duration::from_secs(1_487_068_200);
@@ -95,7 +120,6 @@ fn systemtime_to_epoch_post_epoch() {
 
 #[test]
 fn systemtime_to_epoch_pre_unix_epoch_returns_none() {
-    // SystemTime 早于 UNIX_EPOCH → duration_since Err → None。
     let t = UNIX_EPOCH - Duration::from_secs(100);
     assert!(systemtime_to_epoch(t).is_none());
 }

@@ -1,8 +1,68 @@
-//! EPUB 单测：覆盖 `find_opf_path` + `extract_dates` + `scan_meta_property` 等 helper。
+use std::io::Cursor;
+
+use crate::entities::office::tests_common::{corrupt_zip_entry, make_zip};
 
 use super::*;
 
-// ============= extract_dates =============
+#[test]
+fn parse_happy_path_extracts_dates() {
+    let z = make_zip(&[
+        (
+            "META-INF/container.xml",
+            br#"<container><rootfiles><rootfile full-path="OEBPS/content.opf"/></rootfiles></container>"#.as_slice(),
+        ),
+        (
+            "OEBPS/content.opf",
+            b"<dc:date>2017-02-14T10:30:00Z</dc:date><meta property=\"dcterms:modified\">2018-01-01T12:00:00Z</meta>".as_slice(),
+        ),
+    ]);
+    let mut r = Cursor::new(z);
+    assert_eq!(
+        parse(&mut r, "application/epub+zip"),
+        (1_487_068_200, 1_514_808_000)
+    );
+}
+
+#[test]
+fn parse_missing_container_returns_zeros() {
+    let z = make_zip(&[("OEBPS/content.opf", b"<x/>".as_slice())]);
+    let mut r = Cursor::new(z);
+    assert_eq!(parse(&mut r, "application/epub+zip"), (0, 0));
+}
+
+#[test]
+fn parse_container_without_rootfile_returns_zeros() {
+    let z = make_zip(&[("META-INF/container.xml", b"<container/>".as_slice())]);
+    let mut r = Cursor::new(z);
+    assert_eq!(parse(&mut r, "application/epub+zip"), (0, 0));
+}
+
+#[test]
+fn parse_missing_opf_returns_zeros() {
+    let z = make_zip(&[(
+        "META-INF/container.xml",
+        br#"<container><rootfile full-path="OEBPS/missing.opf"/></container>"#.as_slice(),
+    )]);
+    let mut r = Cursor::new(z);
+    assert_eq!(parse(&mut r, "application/epub+zip"), (0, 0));
+}
+
+#[test]
+fn parse_corrupt_opf_read_error_returns_zeros() {
+    let mut z = make_zip(&[
+        (
+            "META-INF/container.xml",
+            br#"<container><rootfile full-path="OEBPS/content.opf"/></container>"#.as_slice(),
+        ),
+        (
+            "OEBPS/content.opf",
+            b"<dc:date>2017-02-14T10:30:00Z</dc:date>".as_slice(),
+        ),
+    ]);
+    corrupt_zip_entry(&mut z, b"2017-02-14");
+    let mut r = Cursor::new(z);
+    assert_eq!(parse(&mut r, "application/epub+zip"), (0, 0));
+}
 
 #[test]
 fn extract_dates_happy_path() {
@@ -39,8 +99,6 @@ fn extract_dates_invalid_dates_returns_zeros() {
     assert_eq!(extract_dates(opf), (0, 0));
 }
 
-// ============= find_opf_path =============
-
 #[test]
 fn find_opf_path_basic() {
     let xml = br#"<container><rootfiles><rootfile full-path="OEBPS/content.opf" media-type="..."/></rootfiles></container>"#;
@@ -65,8 +123,6 @@ fn find_opf_path_non_utf8_returns_none() {
     buf.push(b'"');
     assert!(find_opf_path(&buf).is_none());
 }
-
-// ============= scan_meta_property =============
 
 #[test]
 fn scan_meta_property_basic() {
@@ -107,8 +163,6 @@ fn scan_meta_property_non_utf8_returns_none() {
     assert!(scan_meta_property(&buf, b"dcterms:modified").is_none());
 }
 
-// ============= scan_element_text =============
-
 #[test]
 fn scan_element_text_basic() {
     let buf = b"<dc:date>2017-02-14T10:30:00Z</dc:date>";
@@ -141,8 +195,6 @@ fn scan_element_text_non_utf8_returns_none() {
     assert!(scan_element_text(&buf, b"<dc:date", b"</dc:date>").is_none());
 }
 
-// ============= parse_iso8601_to_epoch =============
-
 #[test]
 fn parse_iso8601_basic() {
     assert_eq!(
@@ -160,8 +212,6 @@ fn parse_iso8601_invalid_returns_none() {
 fn parse_iso8601_pre_epoch_returns_none() {
     assert!(parse_iso8601_to_epoch("1969-12-31T00:00:00Z").is_none());
 }
-
-// ============= find_byte / find_subslice =============
 
 #[test]
 fn find_byte_found_and_not_found() {

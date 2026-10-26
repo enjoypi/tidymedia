@@ -16,6 +16,7 @@
 - Windows + nightly 使用 `--no-rustc-wrapper`，通过 RUSTFLAGS 注入覆盖率，避免 RUSTC_WRAPPER 导致静默未插桩。
 - Windows cov 必须先导入 MSVC 环境；追加 coverage rustc cfg 时保留 `/LIBPATH`，确保原生依赖可链接。
 - lcov `SF:` 路径兼容 `/` 与 `\`；ignore-regex 使用 `[/\\]`，完整性自检先归一化为相对正斜杠路径。
-- 覆盖率排除现状包括真实 backend、真实模型入口、模型主体和 per-instance `_phantom.rs`；最后一类可含实际业务逻辑，不得误认为仅限模型。新增排除必须说明无法测试的原因，不得用于隐藏可测分支。
+- 覆盖率排除只使用 `tools/cov.sh` 的 `COV_NONBUSINESS` 与 `COV_TEST_SUPPORT` 逐文件精确清单，文件必须只含独立非业务边界或测试支持；不得按目录、`tract_*`、`_real`、`_io` 等后缀排除。历史 `_phantom.rs` 均为业务，不得进入清单。
+- `COV_ZERO_IGNORE=1 just cov` 用于零忽略审计；该模式不得传空 ignore regex，报告与完整性自检都必须绕开排除。最终业务门禁仍使用 `just cov`。
 - 日常源码变更后只清理 profraw，保留插桩编译缓存；修改 Cargo.toml、coverage 属性或工具配置后才清理 workspace 插桩产物。
 - macOS cov 为完整门禁，与 Windows 同一口径，不再视为固定失败。

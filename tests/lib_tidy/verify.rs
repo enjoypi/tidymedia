@@ -5,9 +5,7 @@ use std::path::PathBuf;
 
 use image::RgbImage;
 use tempfile::tempdir;
-use tidymedia::{
-    Commands, DefaultDetectorFactory, Location, reset_config_loader, run_cli, tidy, tidy_with,
-};
+use tidymedia::{Commands, DefaultDetectorFactory, Location, run_cli, tidy, tidy_with};
 
 use super::{DATA_DIR, FakeBackendFactory, local, smb_loc};
 
@@ -230,7 +228,6 @@ pub(super) fn verify_json(
 }
 
 pub(super) fn write_small_max_bytes_config() -> tempfile::TempDir {
-    reset_config_loader();
     let dir = tempdir().unwrap();
     let cfg_path = dir.path().join("config.yaml");
     fs::write(&cfg_path, "verify:\n  max_image_bytes: 1048576\n").unwrap();

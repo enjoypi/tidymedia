@@ -3,7 +3,7 @@ use std::fs;
 use camino::Utf8PathBuf;
 use tempfile::tempdir;
 
-use super::advanced_test_common::*;
+use super::tests_common::*;
 use super::*;
 use crate::adapters::report_sink::JsonFileReportSink;
 use crate::entities::backend::Backend;
@@ -11,8 +11,6 @@ use crate::entities::test_common as tc;
 use crate::entities::uri::Location;
 use crate::usecases::report::ReportSink;
 
-// 触发 ops.rs:122 stream_copy 内 `if let Err(e) = result` 的 Err arm：
-// FakeBackend output_backend 注入 OpenWrite Err 让 stream_copy 写阶段失败。
 #[test]
 fn do_copy_propagates_stream_copy_error_when_open_write_fails() {
     use crate::adapters::backend::fake::{FakeBackend, Op};
@@ -25,7 +23,6 @@ fn do_copy_propagates_stream_copy_error_when_open_write_fails() {
     let out_loc = Location::Local(Utf8PathBuf::from("/fake_out"));
     fake_out.add_file(out_loc.clone(), vec![]);
     let target_loc = Location::Local(Utf8PathBuf::from("/fake_out/2024/01/photo.png"));
-    // 让 open_write target 失败 → stream_copy 内 `if let Err(e) = result` 触发
     fake_out.inject_error(target_loc, Op::OpenWrite, ErrorKind::PermissionDenied);
 
     let idx = crate::entities::file_index::Index::new();
@@ -41,10 +38,6 @@ fn do_copy_propagates_stream_copy_error_when_open_write_fails() {
     let _ = err;
 }
 
-// ops.rs:107 修复后：dst 入 output_index 改用 src.cloned_at 复用 src 已算好的
-// hash / size / EXIF，不再对 dst 调 backend.open_read。本测试钉新不变量：
-// 即使注入 OpenRead Err 在 target_loc 上（race 删除 / NFS ESTALE / 反病毒抢占），
-// do_copy 也应成功，dst 仍入索引。
 #[test]
 fn do_copy_succeeds_when_dst_open_read_would_fail() {
     use crate::adapters::backend::fake::{FakeBackend, Op};
@@ -73,10 +66,6 @@ fn do_copy_succeeds_when_dst_open_read_would_fail() {
     assert!(ok, "do_copy 应报告 copy 成功");
 }
 
-// 跨 backend + remove=true：local src → FakeBackend(scheme!=local) dst。
-// 走 stream_copy 路径（line 74 三 condition 不全 True，绕过 rename fast-path）
-// 后 line 85 `if opts.remove` True arm 触发 → line 86 调 `src.backend().remove_file`
-// 删 src。本测试钉 lib unit binary 的 do_copy instance 覆盖该 True arm。
 #[test]
 fn do_copy_cross_backend_move_removes_src_after_stream_copy() {
     use crate::adapters::backend::fake::FakeBackend;
@@ -86,8 +75,6 @@ fn do_copy_cross_backend_move_removes_src_after_stream_copy() {
     let info = make_media_info(src_dir.path(), "photo.png");
     let src_path = src_dir.path().join("photo.png");
 
-    // scheme="smb" 让 output_backend.scheme() != "local" → 绕开 rename fast-path
-    // 走 stream_copy。FakeBackend 接收 mkdir_p / open_write / FakeWriter.finish 全 OK。
     let fake_out = Arc::new(FakeBackend::new("smb"));
     let out_loc = Location::Smb {
         user: None,
@@ -115,22 +102,15 @@ fn do_copy_cross_backend_move_removes_src_after_stream_copy() {
     );
 }
 
-/// F4 mkdir 缓存命中分支：2 个源文件同月份归档 → `output_backend.mkdir_p`
-/// 应只调一次同 `target_dir`，而非每文件一次。计入 `output_loc` 顶层 `mkdir_p`
-/// （`copy_with_sidecar:142`），总共 = 2 次（顶层 + 同 `target_dir` 一次），
-/// 而非 3 次（顶层 + 每文件各一次）。验证 `ops.rs::do_copy` 内 `HashSet` 命中跳过。
 #[test]
 fn mkdir_cache_skips_repeated_mkdir_for_same_target_dir() {
     use crate::adapters::backend::fake::FakeBackend;
     use std::sync::Arc;
 
     let src_dir = tempdir().unwrap();
-    // 两个媒体文件，归档时按 mtime 固定到同一 {year}/{month} 桶。
     tc::copy_png_to(src_dir.path(), "a.png").unwrap();
     tc::copy_png_to(src_dir.path(), "b.png").unwrap();
 
-    // output 用 FakeBackend("smb")：scheme != "local" 强制走 stream_copy +
-    // mkdir_p 路径，避开 rename fast-path（fast-path 不调 mkdir_p）。
     let fake_out = Arc::new(FakeBackend::new("smb"));
     let out_loc = Location::Smb {
         user: None,

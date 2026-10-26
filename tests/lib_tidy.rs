@@ -67,6 +67,9 @@ mod factory_errors;
 #[path = "lib_tidy/backends.rs"]
 mod backends;
 
+#[path = "lib_tidy/dry_run_errors.rs"]
+mod dry_run_errors;
+
 #[path = "lib_tidy/archive.rs"]
 mod archive;
 

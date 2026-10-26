@@ -1,42 +1,17 @@
-//! tract-onnx 实现的 `TextDetector`：跑 `PaddleOCR` `DBNet` `det.onnx` 仅判「有/无文本」。
-//!
-//! 设计：
-//! - **懒加载**：首次 `has_text` 触发模型加载（`OnceLock<Result<...>>` 风格——但 stable
-//!   Rust 不支持 `get_or_try_init`，用 `Mutex<Option<...>>` 兼容；模型加载是 idempotent
-//!   读 ONNX 文件，竞态首次加载多次也无副作用）
-//! - **极简后处理**：sigmoid 输出图中 `v > binarize_threshold` 像素占比 > `min_text_pixel_ratio`
-//!   即判命中。**跳过 polygon contour**（不取文本框坐标，本子命令只需二元判定）
-//! - **真实模型加载隔离**：`tract_dbnet_real::*` 拆出整文件让 `--ignore-filename-regex='_real\.rs$'`
-//!   排除（CI 无模型不可触发）；本文件只装配 + 前/后处理 + fake 注入测试
-
 use std::io;
-use std::sync::Arc;
 
 use camino::Utf8Path;
-use image::GenericImageView;
 use parking_lot::Mutex;
 use tract_onnx::prelude::*;
 
+use super::tract_dbnet_real::{as_f32_vec, decode_rgb, resize_rgb, rgb_chw_tensor};
 use crate::usecases::config::OcrConfig;
 use crate::usecases::ocr::TextDetector;
 
-/// 已优化并固定 shape 的 `DBNet` 推理图；`Arc` 让 trait 对象多线程共享。
-/// `TypedRunnableModel` 是 tract `RunnableModel<TypedFact, Box<dyn TypedOp>>` 的别名。
-pub(crate) type DetModel = Arc<TypedRunnableModel>;
-
-/// 把 OCR 推理拆成「模型加载」+「单张推理」两步注入：测试可注入 stub model 直接
-/// 验前/后处理；生产路径走 tract 真实加载（`tract_dbnet_real`）。trait 对象安全。
 pub(crate) trait RawDetector: Send + Sync {
-    /// 接收预处理后的 NCHW [1, 3, H, W] 张量；返回与之同 H/W 的 [1, 1, H, W] sigmoid 图。
-    ///
-    /// # Errors
-    ///
-    /// 当模型推理失败、输出维度不符预期时返回 `Err`。
     fn run(&self, input: Tensor) -> io::Result<Tensor>;
 }
 
-/// Detector 主体：持有 OCR 配置 + 懒加载模型。`Mutex<Option<...>>` 替代 nightly 的
-/// `OnceLock::get_or_try_init`；模型加载是 idempotent，竞态首次加载多次无副作用。
 pub struct TractDbnetDetector {
     pub(crate) cfg: OcrConfig,
     pub(crate) raw: Mutex<Option<Box<dyn RawDetector>>>,
@@ -54,16 +29,6 @@ impl std::fmt::Debug for TractDbnetDetector {
     }
 }
 
-impl TractDbnetDetector {
-    #[cfg(test)]
-    pub(crate) fn with_raw(cfg: OcrConfig, raw: Box<dyn RawDetector>) -> Self {
-        Self {
-            cfg,
-            raw: Mutex::new(Some(raw)),
-        }
-    }
-}
-
 impl TextDetector for TractDbnetDetector {
     fn has_text(&self, _path: &Utf8Path, image_bytes: &[u8]) -> io::Result<bool> {
         self.ensure_raw()?;
@@ -75,20 +40,15 @@ impl TextDetector for TractDbnetDetector {
                 .expect("ensure_raw set Some before lock release")
                 .run(input)?
         };
-        decide(
+        Ok(decide(
             &output,
             self.cfg.binarize_threshold,
             self.cfg.min_text_pixel_ratio,
-        )
+        ))
     }
 }
 
-/// 检测器装配入口：dispatch 调用此函数构造 `Box<dyn TextDetector>`。`det_model_path`
-/// 为空时报 `InvalidInput`（feature on 但未配模型），让用户感知配置缺失。
-///
-/// # Errors
-///
-/// 当 `det_model_path` 为空或模型加载失败时返回 `Err`。
+#[expect(clippy::missing_errors_doc, reason = "配置错误经统一 io::Result 传播")]
 pub fn build_detector(cfg: &OcrConfig) -> io::Result<Box<dyn TextDetector>> {
     if cfg.det_model_path.trim().is_empty() {
         return Err(io::Error::new(
@@ -102,24 +62,14 @@ pub fn build_detector(cfg: &OcrConfig) -> io::Result<Box<dyn TextDetector>> {
     }))
 }
 
-/// 把图像字节解码、resize 到 32 倍数短边、ImageNet normalize、HWC→CHW、add batch
-/// dim，返回 NCHW `[1, 3, H, W]` f32 Tensor。
-#[doc(hidden)]
-pub fn preprocess(bytes: &[u8], max_side: u32) -> io::Result<Tensor> {
-    // ImageNet 归一化：DBNet 训练默认 mean=[0.485,0.456,0.406] std=[0.229,0.224,0.225]
+pub(crate) fn preprocess(bytes: &[u8], max_side: u32) -> io::Result<Tensor> {
     const MEAN: [f32; 3] = [0.485, 0.456, 0.406];
     const STD: [f32; 3] = [0.229, 0.224, 0.225];
 
-    let img = image::load_from_memory(bytes)
+    let rgb = decode_rgb(bytes)
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, format!("decode image: {e}")))?;
-    // image crate 解码成功返非空 DynamicImage；零维度由 `target_size::max(32)`
-    // 兜底（任何输入维度都被钳到 ≥ 32），防御性 zero 检查移除避免不可达分支。
-    let (orig_w, orig_h) = img.dimensions();
-    let (width, height) = target_size(orig_w, orig_h, max_side);
-    let rgb = img
-        .resize_exact(width, height, image::imageops::FilterType::Triangle)
-        .to_rgb8();
-
+    let (width, height) = target_size(rgb.width(), rgb.height(), max_side);
+    let rgb = resize_rgb(&rgb, width, height);
     let h_usize = height as usize;
     let w_usize = width as usize;
     let mut chw = vec![0.0_f32; 3 * h_usize * w_usize];
@@ -132,16 +82,9 @@ pub fn preprocess(bytes: &[u8], max_side: u32) -> io::Result<Tensor> {
             chw[ch * plane + y * w_usize + x] = (v - MEAN[ch]) / STD[ch];
         }
     }
-    // shape_vec 失败仅当 chw.len() != prod(shape)，由上方 vec 预分配大小保证不可能；
-    // expect 标内部不变量，避免不可达 Err arm 拉低覆盖率。
-    let tensor = tract_ndarray::Array4::from_shape_vec((1, 3, h_usize, w_usize), chw)
-        .expect("internal: chw vec sized exactly 1*3*H*W")
-        .into_tensor();
-    Ok(tensor)
+    Ok(rgb_chw_tensor(chw, h_usize, w_usize))
 }
 
-/// 按 32 对齐 + 短边不超过 `max_side` 计算 resize 后宽高。DBNet 要求 H/W 是 32 倍数
-/// （池化层 5 次 2× 下采样）。
 fn target_size(w: u32, h: u32, max_side: u32) -> (u32, u32) {
     let scale = if w.max(h) > max_side {
         f64::from(max_side) / f64::from(w.max(h))
@@ -169,36 +112,23 @@ fn align32(v: u32) -> u32 {
     v.div_ceil(32) * 32
 }
 
-/// sigmoid 输出图二值化后看前景像素占比是否超阈值。`output` 期望 NCHW `[1, 1, H, W]`
-/// 但只看数值，不校验维度（DBNet 输出固定形状，由模型保证）。
-///
-/// # Errors
-///
-/// `cast_to` / `as_slice` 失败时返 `io::Error::other`（Datum 类型不可转或非
-/// contiguous Array4；DBNet 实际输出 f32 sigmoid + contiguous，正常路径不会触发）。
-#[doc(hidden)]
-pub fn decide(
-    output: &Tensor,
-    binarize_threshold: f32,
-    min_text_pixel_ratio: f32,
-) -> io::Result<bool> {
-    // 空 tensor 的 data pointer 可能不对齐；必须在 tract view/as_slice 之前返回。
+pub(crate) fn decide(output: &Tensor, binarize_threshold: f32, min_text_pixel_ratio: f32) -> bool {
     if output.len() == 0 {
-        return Ok(false);
+        return false;
     }
-    let cast = output.cast_to::<f32>().expect("numeric→f32 cast 恒成功");
-    let view = cast.view();
-    let slice = view
-        .as_slice::<f32>()
-        .expect("cast 成功后 view 恒 contiguous");
-    let hits = slice.iter().filter(|&&v| v > binarize_threshold).count();
+    let values = as_f32_vec(output);
+    let hits = values.iter().filter(|&&v| v > binarize_threshold).count();
     #[expect(
         clippy::cast_precision_loss,
         reason = "像素总数最多 ~10^6，f32 精度足以表达比例"
     )]
-    let ratio = hits as f32 / slice.len() as f32;
-    Ok(ratio > min_text_pixel_ratio)
+    let ratio = hits as f32 / values.len() as f32;
+    ratio > min_text_pixel_ratio
 }
+
+#[cfg(test)]
+#[path = "tract_dbnet_tests_common.rs"]
+mod tests_common;
 
 #[cfg(test)]
 #[path = "tract_dbnet_tests.rs"]

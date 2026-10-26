@@ -1,9 +1,12 @@
 use std::io;
 use std::path::Path;
+use std::sync::Arc;
 
 use tract_onnx::prelude::*;
 
-use super::tract_dbnet::{DetModel, RawDetector, TractDbnetDetector};
+use super::tract_dbnet::{RawDetector, TractDbnetDetector};
+
+pub(crate) type DetModel = Arc<TypedRunnableModel>;
 
 pub(crate) struct TractRawDetector {
     pub(crate) model: DetModel,
@@ -23,16 +26,28 @@ impl RawDetector for TractRawDetector {
     }
 }
 
-/// 读 ONNX 文件 → `TypedModel`（不调 `into_optimized`）→ `Arc<RunnableModel>`。
-///
-/// **不 optimize**：`PaddleOCR` `DBNet` `det.onnx` 是 dynamic H/W 输入（`[1, 3, ?, ?]`），
-/// tract `into_optimized()` 对未固化的 symbolic dim 做不了形状传播，加载即失败；
-/// `DBNet` 不在该脚本范围内（用户自备 onnx）。`into_typed` 仅做类型推导不需要静态 shape，
-/// `into_runnable` 接受 typed model 直接出 `RunnableModel`。
-///
-/// # Errors
-///
-/// 文件不存在、ONNX 解析失败、类型推导失败或 runnable 装配失败时返回 `Err`。
+pub(crate) fn decode_rgb(bytes: &[u8]) -> Result<image::RgbImage, image::ImageError> {
+    Ok(image::load_from_memory(bytes)?.to_rgb8())
+}
+
+pub(crate) fn resize_rgb(img: &image::RgbImage, width: u32, height: u32) -> image::RgbImage {
+    image::imageops::resize(img, width, height, image::imageops::FilterType::Triangle)
+}
+
+pub(crate) fn rgb_chw_tensor(chw: Vec<f32>, h: usize, w: usize) -> Tensor {
+    tract_ndarray::Array4::from_shape_vec((1, 3, h, w), chw)
+        .expect("internal: chw vec sized exactly 1*3*H*W")
+        .into_tensor()
+}
+
+pub(crate) fn as_f32_vec(t: &Tensor) -> Vec<f32> {
+    let cast = t.cast_to::<f32>().expect("numeric→f32 cast 恒成功");
+    cast.view()
+        .as_slice::<f32>()
+        .expect("cast 成功后 view 恒 contiguous")
+        .to_vec()
+}
+
 pub(crate) fn load_runnable(path: &Path) -> io::Result<DetModel> {
     let model = tract_onnx::onnx()
         .model_for_path(path)
@@ -44,14 +59,26 @@ pub(crate) fn load_runnable(path: &Path) -> io::Result<DetModel> {
     Ok(model)
 }
 
+pub(crate) fn load_detector(path: &Path) -> io::Result<Box<dyn RawDetector>> {
+    let model = load_runnable(path)?;
+    Ok(Box::new(TractRawDetector { model }))
+}
+
 impl TractDbnetDetector {
     pub(crate) fn ensure_raw(&self) -> io::Result<()> {
+        self.ensure_raw_with(load_detector)
+    }
+
+    pub(crate) fn ensure_raw_with(
+        &self,
+        loader: fn(&Path) -> io::Result<Box<dyn RawDetector>>,
+    ) -> io::Result<()> {
         let mut guard = self.raw.lock();
         if guard.is_some() {
             return Ok(());
         }
-        let model = load_runnable(Path::new(&self.cfg.det_model_path))?;
-        *guard = Some(Box::new(TractRawDetector { model }));
+        let raw = loader(Path::new(&self.cfg.det_model_path))?;
+        *guard = Some(raw);
         Ok(())
     }
 }

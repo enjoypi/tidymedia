@@ -1,6 +1,3 @@
-//! `pdf_text` 文本层提取单测：`extract_text_from_buf` / `collect_string_literals` /
-//! `inflate_capped` / `skip_stream_eol`。原属 `pdf_tests.rs`，拆分避免超 512 行。
-
 use super::*;
 
 #[test]
@@ -101,27 +98,6 @@ fn literals_appends_to_nonempty_out() {
     let mut out = String::from("existing");
     collect_string_literals(b"BT (new) Tj ET", &mut out, 64);
     assert_eq!(out, "existing new");
-}
-
-#[test]
-fn inflate_capped_valid_zlib_roundtrip() {
-    use std::io::Write;
-    let mut enc = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::default());
-    enc.write_all(b"payload").unwrap();
-    let z = enc.finish().unwrap();
-    assert_eq!(inflate_capped(&z).unwrap(), b"payload");
-}
-
-#[test]
-fn inflate_capped_garbage_returns_none() {
-    assert!(inflate_capped(b"definitely not zlib").is_none());
-}
-
-#[test]
-fn inflate_capped_empty_output_returns_none() {
-    let enc = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::default());
-    let z = enc.finish().unwrap();
-    assert!(inflate_capped(&z).is_none());
 }
 
 #[test]

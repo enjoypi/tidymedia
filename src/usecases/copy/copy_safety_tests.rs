@@ -124,6 +124,31 @@ fn move_opts() -> CopyOpts<'static> {
 }
 
 #[test]
+fn move_dry_run_does_not_delete_duplicate_source() {
+    let src = tempdir().unwrap();
+    let p = write_unique_png(src.path(), "duplicate.png", 7);
+    let info = media_info(&p);
+    let idx = Index::new();
+    idx.add(media_info(&p));
+    let opts = CopyOpts {
+        dry_run: true,
+        ..move_opts()
+    };
+    let copied = do_copy_raw(
+        &info,
+        &local_loc(src.path()),
+        &LocalBackend::arc(),
+        &idx,
+        &DashSet::new(),
+        true,
+        &opts,
+    )
+    .unwrap();
+    assert!(!copied);
+    assert!(p.exists());
+}
+
+#[test]
 fn move_keeps_non_media_source_that_duplicates_output() {
     let src = tempdir().unwrap();
     let out = tempdir().unwrap();

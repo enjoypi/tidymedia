@@ -1,19 +1,14 @@
-//! 测试用 `TextDetector` 实现：路径查表 + 路径级 Err 注入。
-//!
-//! 设计与 `FakeBackend::inject_reader_error` 一致——键是 `Utf8PathBuf`，遍历顺序
-//! 无关，断言精确。`default` 决定查表 miss 时的返回值，避免每条 fixture 都显式 `.with_result`。
-
 use std::collections::{HashMap, HashSet};
 use std::io;
 
 use camino::{Utf8Path, Utf8PathBuf};
 use parking_lot::Mutex;
+use tract_onnx::prelude::*;
 
+use super::tract_dbnet::{RawDetector, TractDbnetDetector};
+use crate::usecases::config::OcrConfig;
 use crate::usecases::ocr::TextDetector;
 
-/// 路径查表 + Err 注入。`new(default)` 设定查表 miss 的返回值；多次 `.with_result`
-/// 链式添加；`.inject_error(path)` 标记该路径返 Err。`Mutex` 让 trait 对象在
-/// 多线程访问下保持安全（且让 `inject_error` 在测试期可后置追加）。
 pub struct FakeTextDetector {
     results: Mutex<HashMap<Utf8PathBuf, bool>>,
     errors: Mutex<HashSet<Utf8PathBuf>>,
@@ -30,14 +25,12 @@ impl FakeTextDetector {
         }
     }
 
-    /// 注入「该路径返指定 bool」。链式风格，构造时一次性预设。
     #[must_use]
     pub fn with_result(self, path: impl Into<Utf8PathBuf>, has_text: bool) -> Self {
         self.results.lock().insert(path.into(), has_text);
         self
     }
 
-    /// 注入「该路径返 Err」，优先级高于 `with_result`。
     #[must_use]
     pub fn with_error(self, path: impl Into<Utf8PathBuf>) -> Self {
         self.errors.lock().insert(path.into());
@@ -69,6 +62,41 @@ impl TextDetector for FakeTextDetector {
             .copied()
             .unwrap_or(self.default))
     }
+}
+
+struct TractFakeRaw {
+    value: Option<f32>,
+}
+
+impl RawDetector for TractFakeRaw {
+    fn run(&self, _input: Tensor) -> io::Result<Tensor> {
+        let Some(value) = self.value else {
+            return Err(io::Error::other("stub tract failure"));
+        };
+        Ok(
+            tract_ndarray::Array4::from_shape_vec((1, 1, 1, 1), vec![value])
+                .expect("stub tensor shape")
+                .into_tensor(),
+        )
+    }
+}
+
+#[doc(hidden)]
+#[must_use]
+pub fn dbnet_with_output(cfg: OcrConfig, value: f32) -> Box<dyn TextDetector> {
+    Box::new(TractDbnetDetector {
+        cfg,
+        raw: Mutex::new(Some(Box::new(TractFakeRaw { value: Some(value) }))),
+    })
+}
+
+#[doc(hidden)]
+#[must_use]
+pub fn dbnet_with_error(cfg: OcrConfig) -> Box<dyn TextDetector> {
+    Box::new(TractDbnetDetector {
+        cfg,
+        raw: Mutex::new(Some(Box::new(TractFakeRaw { value: None }))),
+    })
 }
 
 #[cfg(test)]

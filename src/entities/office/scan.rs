@@ -62,5 +62,9 @@ pub fn truncate_at_boundary(s: &mut String, max_bytes: usize) {
 }
 
 #[cfg(test)]
+#[path = "scan_deep_tests.rs"]
+mod deep_tests;
+
+#[cfg(test)]
 #[path = "scan_tests.rs"]
 mod tests;

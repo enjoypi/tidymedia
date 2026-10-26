@@ -1,24 +1,15 @@
-//! copied 内容比对纯函数 + verdict 判定（口径与 tidy-verify skill 一致）：`SHA-512`
-//! 全文件（`EXACT_DUP`）+ 熵流 hash（`JPEG` SOS→EOF / `PNG` IDAT / `ISO-BMFF` mdat，
-//! 剥元数据只比像素流 → `PIXEL_SAME`）+ 旋转校正 pHash（四向 min hamming →
-//! `ROTATED_SAME`）。
-
 use camino::Utf8PathBuf;
 use sha2::{Digest, Sha512};
 
 use super::phash::{hamming, phash};
 use crate::entities::SecureHash;
-use crate::entities::backend::{Backend, EntryKind};
+use crate::entities::backend::EntryKind;
 use crate::entities::file_index::Index;
 use crate::entities::file_info::Info;
-use crate::entities::uri::Location;
 use crate::usecases::copy::Source;
 
 use super::candidates::CandidateIndex;
 
-/// 对单个源文件裁定内容比对 verdict（`exact_dup`/`pixel_same`/`rotated_same`/
-/// `name_only`/`absent`）。读失败或超 `max_bytes` 的文件降级 `name_only`（有同名
-/// 候选）或 `absent`（无候选）。
 pub(crate) fn verdict_for(
     info: &Info,
     lib: &OutputLibrary,
@@ -73,7 +64,6 @@ impl OutputLibrary {
     }
 }
 
-/// 构建输出库索引（output 非目录时为空，验证未归档场景）。
 pub(crate) fn build_output_index(output: &Source) -> Index {
     let mut idx = Index::new();
     let (loc, backend) = output;
@@ -101,7 +91,7 @@ fn read_guarded(info: &Info, max_bytes: u64) -> Option<Vec<u8>> {
     if info.size > max_bytes {
         return None;
     }
-    read_to_end(info.backend().as_ref(), info.location(), info.size)
+    super::content_diff_io::read_to_end(info.backend().as_ref(), info.location(), info.size)
 }
 
 fn read_guarded_by_path(out: &Index, path: &Utf8PathBuf, max_bytes: u64) -> Option<Vec<u8>> {
@@ -109,27 +99,8 @@ fn read_guarded_by_path(out: &Index, path: &Utf8PathBuf, max_bytes: u64) -> Opti
     read_guarded(&info, max_bytes)
 }
 
-fn read_to_end(backend: &dyn Backend, loc: &Location, size: u64) -> Option<Vec<u8>> {
-    let mut r = backend.open_read(loc).ok()?;
-    let mut buf = Vec::with_capacity(usize::try_from(size).unwrap_or(0));
-    std::io::Read::read_to_end(&mut r, &mut buf).ok()?;
-    Some(buf)
-}
-
-/// 全文件 SHA-512（内容比对单元测试辅助；生产 `EXACT_DUP` 走 `Index::exists(secure=true)`）。
-#[cfg(test)]
 #[must_use]
-pub(crate) fn sha512_bytes(bytes: &[u8]) -> SecureHash {
-    let mut h = Sha512::new();
-    h.update(bytes);
-    h.finalize()
-}
-
-/// 按扩展名算「像素流熵」哈希：仅 JPEG SOS 之后 / PNG IDAT 拼接 / BMFF mdat payload，
-/// 忽略元数据差异。不支持或解析失败返 `None`。
-#[doc(hidden)]
-#[must_use]
-pub fn entropy_hash(bytes: &[u8], ext: &str) -> Option<SecureHash> {
+pub(crate) fn entropy_hash(bytes: &[u8], ext: &str) -> Option<SecureHash> {
     match ext {
         "jpg" | "jpeg" => jpeg_entropy_hash(bytes).or_else(|| png_idat_hash(bytes)),
         "png" => png_idat_hash(bytes).or_else(|| jpeg_entropy_hash(bytes)),
@@ -138,13 +109,12 @@ pub fn entropy_hash(bytes: &[u8], ext: &str) -> Option<SecureHash> {
     }
 }
 
-/// 旋转校正 pHash 相似：源图 4 向（0/90/180/270）与目标图比较，最佳方向 Hamming
-/// ≤ `max_hamming` 且尺寸（允许旋转交换宽高）一致后，再经 L4 复核（512×512 归一
-/// 逐像素均差 < 5）防「同场景双机/连拍」假阳性。解码失败返 `false`。
-#[doc(hidden)]
 #[must_use]
-pub fn rotated_phash_similar(a: &[u8], b: &[u8], max_hamming: u8) -> bool {
-    let (Ok(img_a), Ok(img_b)) = (image::load_from_memory(a), image::load_from_memory(b)) else {
+pub(crate) fn rotated_phash_similar(a: &[u8], b: &[u8], max_hamming: u8) -> bool {
+    let (Ok(img_a), Ok(img_b)) = (
+        super::content_diff_io::load(a),
+        super::content_diff_io::load(b),
+    ) else {
         return false;
     };
     let (wa, ha) = (img_a.width(), img_a.height());
@@ -155,9 +125,9 @@ pub fn rotated_phash_similar(a: &[u8], b: &[u8], max_hamming: u8) -> bool {
     let a_rgb = img_a.to_rgb8();
     let b_rgb = img_b.to_rgb8();
     let h_b = phash(&b_rgb);
-    let a90 = image::imageops::rotate90(&a_rgb);
-    let a180 = image::imageops::rotate180(&a_rgb);
-    let a270 = image::imageops::rotate270(&a_rgb);
+    let a90 = super::content_diff_io::rotate90(&a_rgb);
+    let a180 = super::content_diff_io::rotate180(&a_rgb);
+    let a270 = super::content_diff_io::rotate270(&a_rgb);
     let rotations = [&a_rgb, &a90, &a180, &a270];
     let (best_img, best_h) = rotations
         .iter()
@@ -178,18 +148,8 @@ const MEAN_ABS_DIFF_MAX: f32 = 5.0;
     reason = "sum ≤ 255×3×512×512 ≈ 2×10^8，超 f32 尾数但 mean 阈值 5 的量级判定不受影响"
 )]
 fn mean_abs_diff_normalized(a: &image::RgbImage, b: &image::RgbImage) -> f32 {
-    let ra = image::imageops::resize(
-        a,
-        NORMALIZE_SIDE,
-        NORMALIZE_SIDE,
-        image::imageops::FilterType::Triangle,
-    );
-    let rb = image::imageops::resize(
-        b,
-        NORMALIZE_SIDE,
-        NORMALIZE_SIDE,
-        image::imageops::FilterType::Triangle,
-    );
+    let ra = super::content_diff_io::resize(a, NORMALIZE_SIDE);
+    let rb = super::content_diff_io::resize(b, NORMALIZE_SIDE);
     let mut sum = 0u64;
     for (pa, pb) in ra.pixels().zip(rb.pixels()) {
         for ch in 0..3 {
@@ -199,9 +159,8 @@ fn mean_abs_diff_normalized(a: &image::RgbImage, b: &image::RgbImage) -> f32 {
     sum as f32 / (NORMALIZE_SIDE * NORMALIZE_SIDE * 3) as f32
 }
 
-#[doc(hidden)]
 #[must_use]
-pub fn jpeg_entropy_hash(bytes: &[u8]) -> Option<SecureHash> {
+pub(crate) fn jpeg_entropy_hash(bytes: &[u8]) -> Option<SecureHash> {
     if bytes.len() < 4 || bytes[0] != 0xFF || bytes[1] != 0xD8 {
         return None;
     }
@@ -219,7 +178,6 @@ pub fn jpeg_entropy_hash(bytes: &[u8]) -> Option<SecureHash> {
             return None;
         }
         let marker = bytes[j];
-        // 无长度字段的 marker：SOI/RES 段（TEM、RST 范围）继续扫。
         if marker == 0xD8 || marker == 0x01 || (0xD0..=0xD7).contains(&marker) {
             i = j + 1;
             continue;
@@ -228,8 +186,6 @@ pub fn jpeg_entropy_hash(bytes: &[u8]) -> Option<SecureHash> {
             return None;
         }
         let seg_len = u16::from_be_bytes([bytes[j + 1], bytes[j + 2]]) as usize;
-        // 段（含 marker 与 len 字段自身）总长 = seg_len + 2；下一 marker 在
-        // j + seg_len + 1（j 是 marker code 位置，FF 在其前一字节）。
         if marker == 0xDA {
             return Some(hash_rest(bytes, j + 1 + seg_len));
         }
@@ -238,9 +194,8 @@ pub fn jpeg_entropy_hash(bytes: &[u8]) -> Option<SecureHash> {
     None
 }
 
-#[doc(hidden)]
 #[must_use]
-pub fn png_idat_hash(bytes: &[u8]) -> Option<SecureHash> {
+pub(crate) fn png_idat_hash(bytes: &[u8]) -> Option<SecureHash> {
     const SIG: &[u8] = b"\x89PNG\r\n\x1a\n";
     if !bytes.starts_with(SIG) {
         return None;
@@ -267,9 +222,8 @@ fn be_u32(bytes: &[u8], pos: usize) -> u32 {
     u32::from_be_bytes([bytes[pos], bytes[pos + 1], bytes[pos + 2], bytes[pos + 3]])
 }
 
-#[doc(hidden)]
 #[must_use]
-pub fn bmff_mdat_hash(bytes: &[u8]) -> Option<SecureHash> {
+pub(crate) fn bmff_mdat_hash(bytes: &[u8]) -> Option<SecureHash> {
     let mut h = Sha512::new();
     let mut found = false;
     let mut pos = 0;
@@ -300,13 +254,25 @@ pub fn bmff_mdat_hash(bytes: &[u8]) -> Option<SecureHash> {
     found.then(|| h.finalize())
 }
 
-#[doc(hidden)]
 #[must_use]
-pub fn hash_rest(bytes: &[u8], from: usize) -> SecureHash {
+pub(crate) fn hash_rest(bytes: &[u8], from: usize) -> SecureHash {
     let mut h = Sha512::new();
     h.update(bytes.get(from..).unwrap_or(&[]));
     h.finalize()
 }
+
+#[cfg(test)]
+use self::tests_common::sha512_bytes;
+#[cfg(test)]
+use super::content_diff_io::read_to_end;
+
+#[cfg(test)]
+#[path = "content_diff_tests_common.rs"]
+mod tests_common;
+
+#[cfg(test)]
+#[path = "content_diff_deep_tests.rs"]
+mod deep_tests;
 
 #[cfg(test)]
 #[path = "content_diff_tests.rs"]

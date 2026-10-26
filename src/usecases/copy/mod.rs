@@ -1,7 +1,3 @@
-//! copy use case：主流程编排（run）/ 单文件操作（ops）/ 命名策略（naming）/
-//! 日志与报告（reporting）子模块。对外路径（`usecases::copy::{copy, Source}`）
-//! 经 re-export 保持不变。
-
 pub(super) mod classify;
 pub(super) mod copy_loop;
 pub(super) mod index;
@@ -14,19 +10,16 @@ pub(crate) use self::classify::{make_classify_provider, template_needs_category}
 pub(crate) use self::index::source_skip_extensions;
 pub(crate) use self::run::{Source, copy_with_sidecar, resolved_template};
 
-// 测试经 `super::super::*` glob 访问的内部项（私有 use 对子模块可见，生产侧不暴露）。
 #[cfg(test)]
 use self::naming::{any_non_english, extract_valuable_name, generate_unique_name};
-// 测试经 wrapper 接 do_copy，避免 12 处测试调用同步 mkdir_cache 参数。
-// wrapper 每次构造空 set，等价旧行为；生产路径走 run_copy_loop 持 loop 级缓存。
-#[cfg(test)]
-use self::ops::do_copy_with_default_cache as do_copy;
 #[cfg(test)]
 use self::reporting::summary_result;
 #[cfg(test)]
 use self::run::CopyOpts;
 #[cfg(test)]
-use self::run::copy;
+use self::tests_common::copy;
+#[cfg(test)]
+use self::tests_common::do_copy_with_default_cache as do_copy;
 #[cfg(test)]
 use crate::entities::common::canonical_prefix;
 #[cfg(test)]
@@ -41,8 +34,8 @@ use time::UtcOffset;
 mod tests;
 
 #[cfg(test)]
-#[path = "copy_advanced_tests_common.rs"]
-mod advanced_test_common;
+#[path = "copy_tests_common.rs"]
+mod tests_common;
 
 #[cfg(test)]
 #[path = "copy_io_error_tests.rs"]

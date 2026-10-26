@@ -1,5 +1,3 @@
-pub mod factory;
-mod factory_real;
 #[cfg(test)]
 #[path = "fake_remote_fixture_tests.rs"]
 pub(crate) mod fake_remote;

@@ -31,6 +31,7 @@
 - `just test`：全量测试；`just test <名称>` 可过滤。
 - `just fmt`、`just lint`：格式化和 lint。
 - `just cov`：覆盖率门禁，已包含全量测试，不重复执行 `just test`。
+- `COV_ZERO_IGNORE=1 just cov`：零忽略审计，用于核对全部生产源码缺口。
 - `just gate`：完整门禁，具体步骤以 justfile 为准。
 - `just build-release`：发布、真模型和性能运行使用 release opt=3；仅需快速编译检查时可用 `just OPT=0 build-release`，不得用该产物评估性能。
 

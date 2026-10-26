@@ -1,6 +1,6 @@
 use std::sync::OnceLock;
 
-use image::{DynamicImage, RgbImage};
+use image::RgbImage;
 
 const DCT_SIDE: usize = 32;
 const DCT_SIDE_U32: u32 = 32;
@@ -8,13 +8,8 @@ const HASH_SIDE: usize = 8;
 
 #[must_use]
 pub(crate) fn phash(img: &RgbImage) -> u64 {
-    let small = image::imageops::resize(
-        img,
-        DCT_SIDE_U32,
-        DCT_SIDE_U32,
-        image::imageops::FilterType::Triangle,
-    );
-    let luma = image::imageops::grayscale(&DynamicImage::ImageRgb8(small));
+    let small = super::content_diff_io::resize(img, DCT_SIDE_U32);
+    let luma = super::content_diff_io::grayscale(small);
     let mut pixels = [[0.0_f32; DCT_SIDE]; DCT_SIDE];
     for (y, row) in pixels.iter_mut().enumerate() {
         for (x, cell) in row.iter_mut().enumerate() {

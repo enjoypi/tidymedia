@@ -129,9 +129,8 @@ pub(crate) fn find_duplicates(
 // 上方 is_dir 断言已过滤非目录；canonicalize 仍可能因 TOCTOU（验证后被外部
 // 删除）失败。与 copy/run.rs::canonical_prefix 同口径回退原路径，避免 expect
 // 触发进程崩溃（并发 cleanup / 自动备份脚本下可复现）。
-#[doc(hidden)]
 #[must_use]
-pub fn compute_output_prefix(output: Option<&Source>) -> Option<String> {
+fn compute_output_prefix(output: Option<&Source>) -> Option<String> {
     output.map(|(loc, _)| match loc {
         // 显式 match 替代 `.map_or_else(closure, closure)`：multi-binary instance 下
         // closure 在每个 binary 中独立编译，未被该 binary 触发即算 region miss；

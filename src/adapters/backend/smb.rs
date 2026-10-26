@@ -4,13 +4,9 @@ use std::sync::Arc;
 use camino::Utf8PathBuf;
 
 use super::remote::{RemoteAdapter, RemoteBackend, RemoteClient, RemoteTarget};
-use crate::entities::backend::Backend;
+use crate::entities::backend::{Backend, Entry, EntryKind, Metadata};
 use crate::entities::uri::Location;
 
-/// SMB target 的最小可识别参数集。`SmbClient` 实现按此参数访问远端。
-///
-/// Debug 手写而非 derive：password 字段对结构化日志（`debug!(target=?t)`）必须以
-/// `***` 占位，杜绝 `SMB_PASSWORD` 泄漏到 stdout/日志文件。其余字段照常展示。
 #[derive(Clone, PartialEq, Eq)]
 pub struct SmbTarget {
     pub user: Option<String>,
@@ -18,9 +14,7 @@ pub struct SmbTarget {
     pub port: Option<u16>,
     pub share: String,
     pub path: Utf8PathBuf,
-    /// 经环境变量 `SMB_PASSWORD` 注入；URI 中不暴露明文密码。
     pub password: Option<String>,
-    /// Kerberos ticket cache 路径，对应环境变量 `KRB5CCNAME`。
     pub krb5_ccname: Option<String>,
 }
 
@@ -35,6 +29,26 @@ impl std::fmt::Debug for SmbTarget {
             .field("password", &self.password.as_ref().map(|_| "***"))
             .field("krb5_ccname", &self.krb5_ccname)
             .finish()
+    }
+}
+
+impl SmbTarget {
+    pub(crate) fn child_target(conn: &SmbTarget, parent: &SmbTarget, name: &str) -> SmbTarget {
+        let child_path = if parent.path.as_str().is_empty() {
+            Utf8PathBuf::from(name)
+        } else {
+            let p = parent.path.as_str().trim_end_matches('/');
+            Utf8PathBuf::from(format!("{p}/{name}"))
+        };
+        SmbTarget {
+            user: conn.user.clone(),
+            host: conn.host.clone(),
+            port: conn.port,
+            share: conn.share.clone(),
+            path: child_path,
+            password: parent.password.clone(),
+            krb5_ccname: parent.krb5_ccname.clone(),
+        }
     }
 }
 
@@ -92,13 +106,76 @@ impl RemoteTarget for SmbTarget {
     }
 }
 
-/// SMB 协议客户端抽象。公开别名：任何实现了 [`RemoteClient`]`<`[`SmbTarget`]`>` 的
-/// 类型自动实现本 trait。
+pub(crate) fn path_or_root(p: &Utf8PathBuf) -> &str {
+    if p.as_str().is_empty() {
+        "."
+    } else {
+        p.as_str()
+    }
+}
+
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "用作 map_err 回调，必须接收 owned smb2::Error"
+)]
+pub(crate) fn map_smb_err(e: smb2::Error) -> io::Error {
+    let kind = match e.kind() {
+        smb2::ErrorKind::NotFound => io::ErrorKind::NotFound,
+        smb2::ErrorKind::AccessDenied | smb2::ErrorKind::AuthRequired => {
+            io::ErrorKind::PermissionDenied
+        }
+        smb2::ErrorKind::AlreadyExists => io::ErrorKind::AlreadyExists,
+        smb2::ErrorKind::TimedOut => io::ErrorKind::TimedOut,
+        smb2::ErrorKind::ConnectionLost | smb2::ErrorKind::SessionExpired => {
+            io::ErrorKind::ConnectionAborted
+        }
+        smb2::ErrorKind::DiskFull => io::ErrorKind::StorageFull,
+        _ => io::ErrorKind::Other,
+    };
+    io::Error::new(kind, format!("smb2: {e}"))
+}
+
+pub(crate) fn metadata_from_file_info(info: &smb2::FileInfo) -> Metadata {
+    Metadata {
+        size: info.size,
+        kind: if info.is_directory {
+            EntryKind::Dir
+        } else {
+            EntryKind::File
+        },
+        modified: info.modified.to_system_time(),
+        created: info.created.to_system_time(),
+    }
+}
+
+pub(crate) fn entries_from_listing(
+    conn: &SmbTarget,
+    parent: &SmbTarget,
+    entries: Vec<smb2::DirectoryEntry>,
+) -> Vec<Entry> {
+    let mut out = Vec::with_capacity(entries.len());
+    for e in entries {
+        if e.name == "." || e.name == ".." {
+            continue;
+        }
+        let kind = if e.is_directory {
+            EntryKind::Dir
+        } else {
+            EntryKind::File
+        };
+        let child = SmbTarget::child_target(conn, parent, &e.name);
+        out.push(Entry {
+            location: child.entry_location(child.path.clone()),
+            size: e.size,
+            kind,
+        });
+    }
+    out
+}
+
 pub trait SmbClient: RemoteClient<SmbTarget> {}
 impl<T: RemoteClient<SmbTarget>> SmbClient for T {}
 
-/// SMB 适配器：把 [`SmbTarget`] + [`SmbClient`] + scheme + error 映射捆在一起，
-/// 交给 [`RemoteBackend`] 泛型层驱动。
 pub struct SmbAdapter {
     client: Arc<dyn RemoteClient<SmbTarget>>,
 }
@@ -110,10 +187,6 @@ impl RemoteAdapter for SmbAdapter {
         "smb"
     }
 
-    /// pavao 把所有错误包成 `io::Error::other("pavao: ...")`：`mkdir_recursive` 的
-    /// `NotFound` 守卫必须靠文案重映射触发，否则多层归档目录创建必败。SMB 无方言
-    /// 特有的 `NotFound` 触发文案，沿用 `map_remote_error` 的通用 ENOENT / no such
-    /// file / does not exist 集合即可。
     fn map_error(e: io::Error) -> io::Error {
         super::remote::map_remote_error(e)
     }
@@ -127,11 +200,9 @@ impl RemoteAdapter for SmbAdapter {
     }
 }
 
-/// SMB Backend 类型别名。`Backend` trait 由泛型 [`RemoteBackend`]`<`[`SmbAdapter`]`>` 提供。
 pub type SmbBackend = RemoteBackend<SmbAdapter>;
 
 impl SmbBackend {
-    /// 注入自定义 client。测试用 fake，生产路径注入 `RealSmbClient`。
     pub fn with_client(client: Arc<dyn SmbClient>) -> Self {
         let remote: Arc<dyn RemoteClient<SmbTarget>> = client;
         RemoteBackend {
@@ -139,7 +210,6 @@ impl SmbBackend {
         }
     }
 
-    /// `Arc<dyn Backend>` 工厂：方便 Registry / `DefaultBackendFactory::for_location`。
     pub fn arc_with_client(client: Arc<dyn SmbClient>) -> Arc<dyn Backend> {
         Arc::new(Self::with_client(client))
     }
@@ -152,6 +222,10 @@ mod tests;
 #[cfg(test)]
 #[path = "smb_internals_tests.rs"]
 mod internals_tests;
+
+#[cfg(test)]
+#[path = "smb_convert_tests.rs"]
+mod convert_tests;
 
 #[path = "smb_real.rs"]
 pub mod real;

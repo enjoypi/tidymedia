@@ -1,4 +1,5 @@
-//! 路径规范化工具：`full_path` 绝对化 + Windows UNC 前缀剥离。
+#[path = "paths_io.rs"]
+mod paths_io;
 
 use std::io;
 
@@ -10,12 +11,10 @@ pub fn full_path(path: &str) -> io::Result<Utf8PathBuf> {
     if full.is_absolute() {
         return Ok(full.to_path_buf());
     }
-
-    let full = full.canonicalize_utf8()?;
+    let full = paths_io::canonicalize(full)?;
     Ok(Utf8PathBuf::from(strip_windows_unc(full.as_str())))
 }
 
-// pub(crate) 让 common::canonical_prefix 直接调（跨 entities 子模块）。
 #[cfg(target_os = "windows")]
 pub(crate) fn strip_windows_unc(path: &str) -> &str {
     path.strip_prefix(r"\\?\").unwrap_or(path)

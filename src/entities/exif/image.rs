@@ -1,26 +1,20 @@
-use std::io;
-
 use chrono::DateTime;
 use chrono::FixedOffset;
 use chrono::NaiveDate;
 use chrono::Utc;
 use nom_exif::ExifTag;
-use nom_exif::MediaParser;
-use nom_exif::MediaSource;
 use nom_exif::URational;
 use tracing::debug;
 
 use super::super::backend::MediaReader;
-use super::super::file_info::read_fill;
 use super::super::tiff_ifd::TiffIfd;
 use super::super::xmp;
+use super::exif_io;
 use super::image_jpeg::parse_jpeg_app1_exif;
 use super::types::Exif;
 use super::types::entry_value_to_epoch;
 use super::video::ascii_datetime_to_epoch;
 
-/// XMP packet fallback 扫描窗口。单段 APP1 最大 65533 字节，64 KB 覆盖单段
-/// XMP packet 起始；ExtendedXMP（跨多 APP1 段）不在范围。
 const XMP_SCAN_BYTES: usize = 64 * 1024;
 
 pub(super) fn populate_image_dates(
@@ -28,65 +22,34 @@ pub(super) fn populate_image_dates(
     exif: &mut Exif,
     local_offset: FixedOffset,
 ) {
-    // 先 buffer 头部供 XMP fallback；seek 回起点后再喂给 nom-exif。
-    // seek / seekable 失败时跳过 nom-exif 主路径但仍尝试 JPEG APP1 fallback 再退
-    // XMP——head 已读入，APP1 EXIF 段（若为 JPEG）与 XMP packet 都是纯字节扫描
-    // 无 seek 依赖，比直接退到 mtime 兜底准确得多。原本 seek/seekable Err 路径
-    // 直接跳 XMP 让 Canon EOS 7D 类 MakerNotes 异常 + 不可 seek 组合场景丢失
-    // APP1 可恢复的 DTO/CreateDate（image.rs 三态闭合对称性缺失）。
-    let mut head = vec![0u8; XMP_SCAN_BYTES];
-    let head_len = read_fill(reader.as_mut(), &mut head).unwrap_or(0);
-    head.truncate(head_len);
-    if reader.seek(io::SeekFrom::Start(0)).is_err() {
+    let head = exif_io::read_head(reader.as_mut(), XMP_SCAN_BYTES);
+    if exif_io::rewind(reader.as_mut()).is_err() {
         populate_image_from_head_only(&head, exif, local_offset);
         return;
     }
-
-    let Ok(ms) = MediaSource::seekable(reader) else {
+    let Some(parsed) = exif_io::parse_image_exif(reader) else {
         populate_image_from_head_only(&head, exif, local_offset);
         return;
     };
-    let mut parser = MediaParser::new();
-    let Ok(iter) = parser.parse_exif(ms) else {
-        // nom-exif 整体 Err（如 Canon EOS 7D MakerNotes 偏移异常）→ 先试 JPEG APP1
-        // 裸 IFD 自解析；APP1 仅含 Make/Model（re-tag 后 IFD0 仅剩 ModifyDate）的
-        // 情况通过共享 helper 再退 XMP，与主路径同口径。
-        if let Some(tiff) = parse_jpeg_app1_exif(&head) {
-            apply_tiff_ifd(exif, tiff, local_offset);
-        }
-        populate_image_xmp_fallback_if_empty(&head, exif);
-        return;
-    };
-    let parsed: nom_exif::Exif = iter.into();
     if let Some(v) = parsed.get(ExifTag::DateTimeOriginal) {
         exif.date_time_original = entry_value_to_epoch(v, local_offset);
     }
     if let Some(v) = parsed.get(ExifTag::CreateDate) {
         exif.create_date = entry_value_to_epoch(v, local_offset);
     }
-    // GPSDateStamp + GPSTimeStamp 合成 GPS UTC 作校验锚点。
     exif.gps_utc = parse_gps_utc(&parsed);
-    // ModifyDate 不进时间候选（编辑/导出时间会污染判定），仅供多数派仲裁
-    // 识别 re-save 痕迹（filename+mtime+ModifyDate 三方互证 → 否决推翻 P0）。
     if let Some(v) = parsed.get(ExifTag::ModifyDate) {
         exif.modify_date = entry_value_to_epoch(v, local_offset);
     }
-    // Make / Model：仅在 EXIF 存在时读取；用于 archive_template 占位符。
     exif.make = parsed
         .get(ExifTag::Make)
         .and_then(|v| v.as_str().map(str::to_owned));
     exif.model = parsed
         .get(ExifTag::Model)
         .and_then(|v| v.as_str().map(str::to_owned));
-
-    // XMP fallback：EXIF DTO/CreateDate 均缺（re-tag 后 IFD0 仅剩 ModifyDate 类
-    // 场景）时扫已 buffer 的头部，从 XMP packet 补 P0/P1 候选。
     populate_image_xmp_fallback_if_empty(&head, exif);
 }
 
-/// 仅靠已 buffer 的 head 字节恢复 EXIF（seek/seekable Err 路径共用）：先试 JPEG APP1
-/// 裸 IFD 扫描（非 JPEG 直接返 None），再退 XMP fallback。与 nom-exif 主路径 Err arm
-/// 同套路，对齐 image.rs 三态闭合对称性。
 fn populate_image_from_head_only(head: &[u8], exif: &mut Exif, local_offset: FixedOffset) {
     if let Some(tiff) = parse_jpeg_app1_exif(head) {
         apply_tiff_ifd(exif, tiff, local_offset);
@@ -94,17 +57,12 @@ fn populate_image_from_head_only(head: &[u8], exif: &mut Exif, local_offset: Fix
     populate_image_xmp_fallback_if_empty(head, exif);
 }
 
-/// 主路径 + APP1 fallback 路径 + PNG eXIf 路径共享的"空日期才退 XMP"决策点。
-/// 单点 `&&` short-circuit 让 LLVM 仅生成一组 BR，避免多调用点各自的 BR 子分支
-/// 分散导致 multi-instance 累加下某些 sub-branch 0-hit。
 pub(super) fn populate_image_xmp_fallback_if_empty(head: &[u8], exif: &mut Exif) {
     if exif.date_time_original == 0 && exif.create_date == 0 {
         populate_image_xmp_fallback(head, exif);
     }
 }
 
-/// 把裸 TIFF IFD 解析结果写入 `Exif`（ASCII 日期按 `local_offset` 转 epoch）。
-/// JPEG APP1 fallback 与 PNG `eXIf` chunk 路径共用此 helper。
 pub(super) fn apply_tiff_ifd(exif: &mut Exif, tiff: TiffIfd, local_offset: FixedOffset) {
     if let Some(s) = tiff.date_time_original.as_deref() {
         exif.date_time_original = ascii_datetime_to_epoch(s, local_offset);
@@ -125,9 +83,6 @@ pub(super) fn populate_image_xmp_fallback(head: &[u8], exif: &mut Exif) {
     };
     let dates = xmp::parse_xmp_dates(packet);
     if let Some(dt) = dates.photoshop_date_created {
-        // XMP 时间带 timezone，DateTime<FixedOffset>::timestamp() 直接是 UTC epoch。
-        // Exif 字段为 u64 不能存 1970 前的负值（数字摄影几乎不涉及，扫描件 XMP
-        // 偶有 1960s 标注会落入此分支）；丢弃前发 debug 让缺口可见。
         let secs = dt.timestamp();
         if secs > 0 {
             exif.date_time_original = secs.cast_unsigned();
@@ -159,15 +114,6 @@ pub(super) fn populate_image_xmp_fallback(head: &[u8], exif: &mut Exif) {
     }
 }
 
-/// 从已解析的 EXIF 读 `GPSDateStamp`（文本 "YYYY:MM:DD"）和
-/// `GPSTimeStamp`（3 元素 `URationalArray`：[时, 分, 秒]），合成 GPS UTC。
-/// GPS 时间永远是 UTC。任一字段缺失或格式非法均返回 None。
-///
-/// nom-exif 把 GPS 子 IFD 条目按 IFD 索引 ≥ 2 存入 `Exif`，无法用 `get()`
-/// 直接读；改用 `iter()` 遍历所有 IFD 条目按 tag code 匹配。
-// 用 raw tag code 替代 `.tag()`：避免 Unknown(_) None arm（无法稳定构造
-// 真 EXIF fixture 含 Unknown tag）。GPS code 由 EXIF spec 固定，nom-exif
-// const fn `code()` 可在 const 上下文求值。
 const GPS_DATE_STAMP: u16 = ExifTag::GPSDateStamp.code();
 const GPS_TIME_STAMP: u16 = ExifTag::GPSTimeStamp.code();
 
@@ -181,9 +127,6 @@ fn parse_gps_utc(parsed: &nom_exif::Exif) -> Option<DateTime<Utc>> {
                 date_str = entry.value.as_str().map(str::to_owned);
             }
             GPS_TIME_STAMP => {
-                // GPSTimeStamp per EXIF spec 必为 3 元素 URational；nom-exif 解析必返
-                // URationalArray(len=3)。None/非 3 元素 arm 不可达，用 .and_then + try_from
-                // 折叠两层短路成单表达式，消除 if-let branch counter。
                 time_rationals = entry
                     .value
                     .as_urational_slice()
@@ -197,8 +140,6 @@ fn parse_gps_utc(parsed: &nom_exif::Exif) -> Option<DateTime<Utc>> {
     build_gps_utc(date_str.as_deref(), time_rationals)
 }
 
-/// `date_str` = "YYYY:MM:DD", `time` = [hour, min, sec] Rational。
-/// 全部转为整秒（纳秒丢弃），合成 `DateTime<Utc>`。
 pub(super) fn build_gps_utc(
     date_str: Option<&str>,
     time: Option<[URational; 3]>,
@@ -212,7 +153,6 @@ pub(super) fn build_gps_utc(
 }
 
 pub(super) fn parse_gps_date(s: &str) -> Option<NaiveDate> {
-    // GPSDateStamp 格式 "YYYY:MM:DD"（exiftool/EXIF spec 2.31）
     let parts: Vec<&str> = s.splitn(3, ':').collect();
     if parts.len() < 3 {
         return None;

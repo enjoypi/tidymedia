@@ -1,6 +1,55 @@
-//! ODF 字节扫描单测：覆盖 `extract_dates` / `scan_element_text` / `parse_odf_datetime`。
+use std::io::Cursor;
+
+use crate::entities::office::tests_common::{corrupt_zip_entry, make_zip};
 
 use super::*;
+
+#[test]
+fn parse_happy_path_extracts_dates() {
+    let z = make_zip(&[(
+        "meta.xml",
+        b"<meta:creation-date>2017-02-14T10:30:00Z</meta:creation-date><dc:date>2018-01-01T12:00:00Z</dc:date>".as_slice(),
+    )]);
+    let mut r = Cursor::new(z);
+    assert_eq!(
+        parse(&mut r, "application/vnd.oasis.opendocument.text"),
+        (1_487_068_200, 1_514_808_000)
+    );
+}
+
+#[test]
+fn parse_missing_meta_xml_returns_zeros() {
+    let z = make_zip(&[("content.xml", b"<x/>".as_slice())]);
+    let mut r = Cursor::new(z);
+    assert_eq!(
+        parse(&mut r, "application/vnd.oasis.opendocument.text"),
+        (0, 0)
+    );
+}
+
+#[test]
+fn parse_corrupt_meta_read_error_returns_zeros() {
+    let mut z = make_zip(&[(
+        "meta.xml",
+        b"<meta:creation-date>2017-02-14T10:30:00Z</meta:creation-date>".as_slice(),
+    )]);
+    corrupt_zip_entry(&mut z, b"2017-02-14");
+    let mut r = Cursor::new(z);
+    assert_eq!(
+        parse(&mut r, "application/vnd.oasis.opendocument.text"),
+        (0, 0)
+    );
+}
+
+#[test]
+fn extract_text_missing_content_xml_returns_empty() {
+    let z = make_zip(&[("meta.xml", b"<x/>".as_slice())]);
+    let mut r = Cursor::new(z);
+    assert_eq!(
+        extract_text(&mut r, "application/vnd.oasis.opendocument.text", 64),
+        ""
+    );
+}
 
 #[test]
 fn extract_dates_happy_path() {
@@ -24,8 +73,6 @@ fn extract_dates_naive_datetime_treats_as_utc() {
 fn extract_dates_missing_both_returns_zeros() {
     assert_eq!(extract_dates(b"<no relevant tags />"), (0, 0));
 }
-
-// ============= parse_odf_datetime =============
 
 #[test]
 fn parse_odf_datetime_rfc3339_with_z() {
@@ -65,8 +112,6 @@ fn parse_odf_datetime_pre_epoch_rfc3339_returns_none() {
 fn parse_odf_datetime_pre_epoch_naive_returns_none() {
     assert!(parse_odf_datetime("1969-12-31T00:00:00").is_none());
 }
-
-// ============= scan_element_text =============
 
 #[test]
 fn scan_element_text_with_attributes() {
@@ -118,8 +163,6 @@ fn scan_element_text_non_utf8_returns_none() {
     buf.extend_from_slice(b"</meta:creation-date>");
     assert!(scan_element_text(&buf, b"<meta:creation-date", b"</meta:creation-date>").is_none());
 }
-
-// ============= find_byte / find_subslice =============
 
 #[test]
 fn find_byte_found_and_not_found() {

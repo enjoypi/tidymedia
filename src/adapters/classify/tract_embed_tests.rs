@@ -1,7 +1,3 @@
-//! stub `RawEmbedder` 注入验证 normalize / cosine / argmax / 阈值语义 +
-//! `build_classifier` 装配守卫。真实 tract 推理在 `tract_embed_real.rs`
-//! （覆盖率 ignore-regex 排除，e2e 由真模型手动验证）。
-
 use std::io;
 
 use camino::Utf8Path;
@@ -9,7 +5,6 @@ use camino::Utf8Path;
 use super::*;
 use crate::usecases::config::{CategoryDef, ClassifyConfig};
 
-/// 文本查表 stub：按 needle 子串返回预设向量；miss 返回 `fallback`。
 struct StubEmbedder {
     table: Vec<(&'static str, Vec<f32>)>,
     fallback: Vec<f32>,
@@ -26,7 +21,6 @@ impl RawEmbedder for StubEmbedder {
     }
 }
 
-/// 恒 Err stub：验证原型构建失败传播。
 struct FailEmbedder;
 
 impl RawEmbedder for FailEmbedder {
@@ -76,8 +70,6 @@ fn classify_picks_nearest_prototype() {
 
 #[test]
 fn classify_empty_categories_short_circuits_without_model() {
-    // categories 空 → 不触发 ensure_loaded（state 为 None 也不 panic），
-    // 返回空类目 + -inf 让任何阈值裁决为 uncategorized。
     let c = build_classifier(&cfg_with_categories(Vec::new())).unwrap();
     let r = c.classify(Utf8Path::new("/a.pdf"), "any").unwrap();
     assert_eq!(r.category, "");
@@ -128,8 +120,6 @@ fn debug_reports_loaded_state() {
     assert!(s.contains("loaded: true"), "got: {s}");
 }
 
-// ============= normalize / best_match 纯函数 =============
-
 #[test]
 fn normalize_unit_length() {
     let v = normalize(vec![3.0, 4.0]);
@@ -174,4 +164,110 @@ fn best_match_all_nan_still_returns_some_category() {
     let r = best_match(&[1.0], &protos);
     assert!(r.score.is_nan());
     assert_ne!(r.category, "");
+}
+
+#[test]
+fn normalize_infinite_norm_unchanged() {
+    let v = normalize(vec![f32::INFINITY, 0.0]);
+    assert_eq!(v, vec![f32::INFINITY, 0.0]);
+}
+
+#[test]
+fn best_match_finite_beats_trailing_nan() {
+    let protos = vec![
+        ("ok_cat".to_string(), vec![1.0]),
+        ("nan_cat".to_string(), vec![f32::NAN]),
+    ];
+    let r = best_match(&[0.5], &protos);
+    assert_eq!(r.category, "ok_cat");
+}
+
+#[test]
+fn pad_truncates_long_token_sequence_to_seq() {
+    let long: Vec<u32> = (0..300).collect();
+    let out = pad_i64(&long);
+    assert_eq!(out.len(), SEQ);
+    assert_eq!(out[0], 0);
+    assert_eq!(out[SEQ - 1], 255);
+}
+
+#[test]
+fn pad_pads_short_sequence_with_zero_ids() {
+    let out = pad_i64(&[7, 9]);
+    assert_eq!(out.len(), SEQ);
+    assert_eq!(&out[..2], &[7, 9]);
+    assert!(out[2..].iter().all(|&x| x == 0));
+}
+
+#[test]
+fn pad_preserves_exact_length_sequence() {
+    let exact: Vec<u32> = (0..256).collect();
+    let out = pad_i64(&exact);
+    let expected: Vec<i64> = (0..256).collect();
+    assert_eq!(out, expected);
+}
+
+struct FailOnTextEmbedder {
+    ok: Vec<f32>,
+    trigger: &'static str,
+}
+
+impl RawEmbedder for FailOnTextEmbedder {
+    fn embed(&self, text: &str) -> io::Result<Vec<f32>> {
+        if text.contains(self.trigger) {
+            return Err(io::Error::other("stub inference failure"));
+        }
+        Ok(self.ok.clone())
+    }
+}
+
+#[test]
+fn classify_embed_failure_at_inference_propagates() {
+    let c = TractEmbedClassifier::with_raw(
+        cfg_with_categories(vec![cat("x", "stable description")]),
+        Box::new(FailOnTextEmbedder {
+            ok: vec![1.0],
+            trigger: "boom",
+        }),
+    )
+    .unwrap();
+    let err = c
+        .classify(Utf8Path::new("/a.pdf"), "boom text")
+        .unwrap_err();
+    assert!(
+        err.to_string().contains("stub inference failure"),
+        "got: {err}"
+    );
+}
+
+#[test]
+fn classify_unloaded_propagates_loader_error() {
+    let c = build_classifier(&cfg_with_categories(vec![cat("x", "d")])).unwrap();
+    let err = c.classify(Utf8Path::new("/a.pdf"), "any").unwrap_err();
+    assert!(err.to_string().contains("load tokenizer"), "got: {err}");
+}
+
+static LOADS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+#[expect(clippy::unnecessary_wraps, reason = "与生产 loader 签名一致")]
+fn load_counting(_: &ClassifyConfig) -> io::Result<Box<dyn RawEmbedder>> {
+    LOADS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    Ok(Box::new(StubEmbedder {
+        table: Vec::new(),
+        fallback: vec![1.0, 0.0],
+    }))
+}
+
+#[test]
+fn ensure_loaded_builds_prototypes_once() {
+    LOADS.store(0, std::sync::atomic::Ordering::SeqCst);
+    let c = TractEmbedClassifier {
+        cfg: cfg_with_categories(vec![cat("x", "d")]),
+        state: Mutex::new(None),
+    };
+    c.ensure_loaded_with(load_counting).unwrap();
+    c.ensure_loaded_with(load_counting).unwrap();
+    let state = c.state.lock();
+    assert_eq!(state.as_ref().unwrap().prototypes.len(), 1);
+    assert_eq!(LOADS.load(std::sync::atomic::Ordering::SeqCst), 1);
 }

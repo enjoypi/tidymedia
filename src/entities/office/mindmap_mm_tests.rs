@@ -1,10 +1,19 @@
-//! FreeMind/FreePlane `.mm` 单测。
-
 use super::*;
 
 #[test]
+fn parse_read_error_returns_zeros() {
+    let mut io = crate::entities::test_common::FlakyIo::new(vec![0; 8], 0, 0);
+    assert_eq!(parse(&mut io, "application/x-freemind"), (0, 0));
+}
+
+#[test]
+fn extract_text_read_error_returns_empty() {
+    let mut io = crate::entities::test_common::FlakyIo::new(vec![0; 8], 0, 0);
+    assert_eq!(extract_text(&mut io, "application/x-freemind", 64), "");
+}
+
+#[test]
 fn extract_dates_happy_path() {
-    // CREATED=1487068200000 (2017-02-14T10:30:00Z), MODIFIED=1514808000000 (2018-01-01T12:00:00Z)
     let mm = br#"<?xml version="1.0"?>
 <map version="1.0.1">
 <node CREATED="1487068200000" MODIFIED="1514808000000" TEXT="root">
@@ -31,13 +40,10 @@ fn extract_dates_missing_modified_returns_zero() {
 
 #[test]
 fn extract_dates_no_gt_after_node_uses_buf_end() {
-    // `<node` 后无 `>` → attr_end = after.len()，仍能扫描 attrs。
     let mm = br#"<node CREATED="1487068200000""#;
     let (c, _) = extract_dates(mm);
     assert_eq!(c, 1_487_068_200);
 }
-
-// ============= scan_quoted_u64 =============
 
 #[test]
 fn scan_quoted_u64_basic() {
@@ -70,8 +76,6 @@ fn scan_quoted_u64_non_utf8_returns_none() {
     assert!(scan_quoted_u64(&buf, b"CREATED=\"").is_none());
 }
 
-// ============= millis_to_secs =============
-
 #[test]
 fn millis_to_secs_modern() {
     assert_eq!(millis_to_secs(1_487_068_200_000), Some(1_487_068_200));
@@ -79,11 +83,8 @@ fn millis_to_secs_modern() {
 
 #[test]
 fn millis_to_secs_pre_first_day_returns_none() {
-    // < 1970-01-02 视为无效。
     assert!(millis_to_secs(60_000).is_none());
 }
-
-// ============= find_byte / find_subslice =============
 
 #[test]
 fn find_byte_found_and_not_found() {
@@ -96,8 +97,6 @@ fn find_subslice_found_and_not_found() {
     assert_eq!(find_subslice(b"hello world", b"world"), Some(6));
     assert!(find_subslice(b"hello", b"world").is_none());
 }
-
-// ============= collect_text_attrs（extract_text 业务） =============
 
 #[test]
 fn collect_text_attrs_multiple_nodes() {

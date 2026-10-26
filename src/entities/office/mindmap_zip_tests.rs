@@ -1,6 +1,27 @@
-//! `mindmap_zip` 单测：覆盖 `extract_dates_from_json` + `millis_to_secs`。
+use std::io::Cursor;
+
+use crate::entities::office::tests_common::{corrupt_zip_entry, make_zip};
 
 use super::*;
+
+#[test]
+fn parse_corrupt_metadata_read_error_returns_zeros() {
+    let mut z = make_zip(&[("metadata.json", br#"{"created": 1487068200000}"#.as_slice())]);
+    corrupt_zip_entry(&mut z, b"1487068200000");
+    let mut r = Cursor::new(z);
+    assert_eq!(parse(&mut r, MIME_XMIND), (0, 0));
+}
+
+#[test]
+fn extract_text_corrupt_xml_falls_back_to_json() {
+    let mut z = make_zip(&[
+        ("content.xml", b"<topic>from xml</topic>".as_slice()),
+        ("content.json", br#"{"title":"from json"}"#.as_slice()),
+    ]);
+    corrupt_zip_entry(&mut z, b"from xml");
+    let mut r = Cursor::new(z);
+    assert_eq!(extract_text(&mut r, MIME_XMIND, 64), "from json");
+}
 
 #[test]
 fn extract_dates_happy_path() {
@@ -53,8 +74,6 @@ fn millis_to_secs_pre_first_day_returns_none() {
     assert!(millis_to_secs(60_000).is_none());
 }
 
-// ============= collect_json_titles（extract_text 业务） =============
-
 #[test]
 fn json_titles_collects_nested_topics() {
     let mut out = String::new();
@@ -100,8 +119,6 @@ fn json_titles_empty_value_skipped() {
     collect_json_titles(br#"{"title":"","title":"x"}"#, &mut out, 64);
     assert_eq!(out, "x");
 }
-
-use super::{collect_json_titles, find_subslice, millis_to_secs};
 
 #[test]
 fn collect_json_titles_extracts_title_values() {
@@ -155,51 +172,21 @@ fn millis_to_secs_rejects_sub_day_and_converts() {
 
 #[test]
 fn extract_text_uses_xml_and_json_fallback() {
-    use std::io::{Cursor, Write};
-    fn zip_bytes(files: &[(&str, &[u8])]) -> Vec<u8> {
-        let mut w = zip::ZipWriter::new(Cursor::new(Vec::new()));
-        for (name, data) in files {
-            w.start_file(
-                *name,
-                zip::write::SimpleFileOptions::default()
-                    .compression_method(zip::CompressionMethod::Stored),
-            )
-            .expect("start zip entry");
-            w.write_all(data).expect("write zip entry");
-        }
-        w.finish().expect("finish zip").into_inner()
-    }
-
-    let xml_zip = zip_bytes(&[("content.xml", b"<a>from xml</a>")]);
+    let xml_zip = make_zip(&[("content.xml", b"<a>from xml</a>")]);
     let mut reader = Cursor::new(xml_zip);
     assert_eq!(extract_text(&mut reader, MIME_XMIND, 64), "from xml");
 
-    let json_zip = zip_bytes(&[("content.json", br#"{"title":"from json"}"#)]);
+    let json_zip = make_zip(&[("content.json", br#"{"title":"from json"}"#)]);
     let mut reader = Cursor::new(json_zip);
     assert_eq!(extract_text(&mut reader, MIME_XMIND, 64), "from json");
 }
 
 #[test]
 fn extract_text_invalid_or_entryless_yields_empty() {
-    use std::io::{Cursor, Write};
-    fn zip_bytes(files: &[(&str, &[u8])]) -> Vec<u8> {
-        let mut w = zip::ZipWriter::new(Cursor::new(Vec::new()));
-        for (name, data) in files {
-            w.start_file(
-                *name,
-                zip::write::SimpleFileOptions::default()
-                    .compression_method(zip::CompressionMethod::Stored),
-            )
-            .expect("start zip entry");
-            w.write_all(data).expect("write zip entry");
-        }
-        w.finish().expect("finish zip").into_inner()
-    }
-
     let mut bad = Cursor::new(b"not a zip".to_vec());
     assert_eq!(extract_text(&mut bad, MIME_XMIND, 64), "");
 
-    let empty = zip_bytes(&[("other.txt", b"x")]);
+    let empty = make_zip(&[("other.txt", b"x")]);
     let mut reader = Cursor::new(empty);
     assert_eq!(extract_text(&mut reader, MIME_XMIND, 64), "");
 }
