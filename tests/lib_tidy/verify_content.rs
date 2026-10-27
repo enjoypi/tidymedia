@@ -51,6 +51,26 @@ fn verify_rotated_same_when_candidate_is_rotated_copy() {
 }
 
 #[test]
+fn verify_rotated_same_reuses_shared_candidate_features() {
+    let img = noise_image(128, 128, 43);
+    let rotated = image::imageops::rotate90(&img);
+    let src = tempdir().unwrap();
+    let src_dir = src.path().to_str().unwrap();
+    for dir in ["a", "b"] {
+        let path = PathBuf::from(src_dir).join(dir);
+        std::fs::create_dir_all(&path).unwrap();
+        write(path.join("r.bmp"), encode_png(&img)).unwrap();
+    }
+    let out = tempdir().unwrap();
+    write(out.path().join("r.bmp"), encode_png(&rotated)).unwrap();
+    let report_dir = tempdir().unwrap();
+    let json = verify_json(src_dir, out.path().to_str().unwrap(), &report_dir);
+    assert_eq!(json["compared"], 2);
+    assert_eq!(json["entries"][0]["duplicate_verdict"], "rotated_same");
+    assert_eq!(json["entries"][1]["duplicate_verdict"], "rotated_same");
+}
+
+#[test]
 fn verify_name_only_when_candidates_do_not_match_content() {
     let src = tempdir().unwrap();
     let src_dir = src.path().to_str().unwrap();

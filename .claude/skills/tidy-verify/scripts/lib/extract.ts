@@ -2,47 +2,48 @@
 
 import { appendFileSync, writeFileSync } from "node:fs";
 import { decodeExifText } from "./gbk.ts";
+export { spawnRunner } from "./procs.ts";
+export type { ExecResult, Runner } from "./procs.ts";
 
-export interface ExecResult {
-  out: Uint8Array;
-  err: Uint8Array;
-  exit: number;
-}
-
-export type Runner = (cmd: string[]) => Promise<ExecResult>;
-
-export async function spawnRunner(cmd: string[]): Promise<ExecResult> {
-  const proc = Bun.spawn(cmd, { stdout: "pipe", stderr: "pipe" });
-  const [out, err] = await Promise.all([
-    new Response(proc.stdout).arrayBuffer(),
-    new Response(proc.stderr).arrayBuffer(),
-  ]);
-  return { out: new Uint8Array(out), err: new Uint8Array(err), exit: await proc.exited };
-}
-
-export function planGroups(counts: Map<string, number>, concurrency: number): string[][] {
-  const k = Math.min(Math.max(concurrency, 1), counts.size);
-  const groups = Array.from({ length: k }, () => ({ dirs: [] as string[], load: 0 }));
-  const sorted = [...counts.entries()].sort((a, b) => b[1] - a[1]);
-  for (const [dir, n] of sorted) {
-    const lightest = groups.reduce((min, g) => (g.load < min.load ? g : min));
-    lightest.dirs.push(dir);
-    lightest.load += n;
+export function planGroups(files: Map<string, string[]>, concurrency: number): string[][] {
+  const total = [...files.values()].reduce((s, l) => s + l.length, 0);
+  if (total === 0) {
+    return [];
   }
-  return groups.map((g) => g.dirs);
+  const share = Math.ceil(total / Math.min(Math.max(concurrency, 1), total));
+  const items: { line: string; weight: number }[] = [];
+  for (const [dir, list] of files) {
+    if (list.length > share) {
+      for (const path of list) {
+        items.push({ line: path, weight: 1 });
+      }
+    } else {
+      items.push({ line: dir, weight: list.length });
+    }
+  }
+  const k = Math.min(Math.max(concurrency, 1), items.length);
+  const groups = Array.from({ length: k }, () => ({ lines: [] as string[], load: 0 }));
+  for (const item of [...items].sort((a, b) => b.weight - a.weight)) {
+    const lightest = groups.reduce((min, g) => (g.load < min.load ? g : min));
+    lightest.lines.push(item.line);
+    lightest.load += item.weight;
+  }
+  return groups.map((g) => g.lines);
 }
 
-export async function listDirCounts(root: string): Promise<Map<string, number>> {
+export async function listDirCounts(root: string): Promise<Map<string, string[]>> {
   const base = root.replaceAll("\\", "/").replace(/\/+$/, "");
-  const counts = new Map<string, number>();
+  const files = new Map<string, string[]>();
   const glob = new Bun.Glob("**/*");
   for await (const rel of glob.scan({ cwd: base, onlyFiles: true, dot: false })) {
     const norm = rel.replaceAll("\\", "/");
     const cut = norm.lastIndexOf("/");
     const dir = cut < 0 ? base : `${base}/${norm.slice(0, cut)}`;
-    counts.set(dir, (counts.get(dir) ?? 0) + 1);
+    const list = files.get(dir) ?? [];
+    list.push(`${base}/${norm}`);
+    files.set(dir, list);
   }
-  return counts;
+  return files;
 }
 
 export interface FileRun {
@@ -63,7 +64,7 @@ export function spawnToFiles(r: FileRun): Promise<number> {
 export interface ExtractOptions {
   bin: string;
   fmt: string;
-  counts: Map<string, number>;
+  counts: Map<string, string[]>;
   work: string;
   concurrency: number;
   run: FileRunner;
@@ -98,9 +99,9 @@ export async function extractExif(opts: ExtractOptions): Promise<ExtractResult> 
   const groups = planGroups(opts.counts, opts.concurrency);
   const part = (i: number, ext: string) => `${opts.work}/exif-${i}.${ext}`;
   const exits = await Promise.all(
-    groups.map(async (dirs, i) => {
+    groups.map(async (lines, i) => {
       const argfile = `${opts.work}/exif-args-${i}.txt`;
-      await Bun.write(argfile, `${dirs.join("\n")}\n`);
+      await Bun.write(argfile, `${lines.join("\n")}\n`);
       return opts.run({
         cmd: [opts.bin, "-charset", "filename=utf8", "-q", "-T", "-p", opts.fmt, "-@", argfile],
         out: part(i, "tsv"),

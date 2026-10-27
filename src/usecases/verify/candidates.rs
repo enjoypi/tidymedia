@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use camino::Utf8PathBuf;
 
 use super::content_diff::{basename, split_stem_ext};
+#[cfg(test)]
 use crate::entities::file_index::Index;
 
 #[derive(Default)]
@@ -12,10 +13,19 @@ pub(crate) struct CandidateIndex {
 }
 
 impl CandidateIndex {
+    #[cfg(test)]
     pub(crate) fn build(out: &Index) -> Self {
         let mut idx = Self::default();
         for entry in out.iter() {
             idx.insert(entry.key());
+        }
+        idx
+    }
+
+    pub(crate) fn build_from_paths<'a>(paths: impl IntoIterator<Item = &'a Utf8PathBuf>) -> Self {
+        let mut idx = Self::default();
+        for path in paths {
+            idx.insert(path);
         }
         idx
     }

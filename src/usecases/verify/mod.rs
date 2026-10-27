@@ -16,9 +16,9 @@ use crate::usecases::report::elapsed_ms;
 
 use super::copy::Source;
 use super::report::FEATURE_VERIFY;
-use super::verify::content_diff::{OutputLibrary, build_output_index};
 use super::verify::evaluate::{EvalCtx, Evaluated, evaluate};
 use super::verify::exif_tsv::{ExifRow, normalize_sep, parse_tsv};
+use super::verify::output_library::OutputLibrary;
 pub use report::{VerifyEntry, VerifyReport};
 pub(crate) use summary::format_summary;
 
@@ -27,10 +27,12 @@ pub(crate) mod candidates;
 pub(crate) mod content_diff;
 #[path = "content_diff_io.rs"]
 pub(crate) mod content_diff_io;
+pub(crate) mod content_features;
 pub(crate) mod diagnose;
 mod evaluate;
 pub(crate) mod exif_tsv;
 pub(crate) mod filename_hint;
+pub(crate) mod output_library;
 pub(crate) mod phash;
 pub(crate) mod report;
 pub(crate) mod summary;
@@ -49,26 +51,29 @@ pub(crate) fn verify(
     exif_tsv: Option<&Path>,
 ) -> VerifyReport {
     let start = Instant::now();
-    let skip_ext = super::copy::source_skip_extensions(include_non_media, false);
-    let mut src_index = file_index::Index::new();
-    for (loc, backend) in sources {
-        src_index.visit_location_skipping(loc, backend, skip_ext);
-    }
+    let tsv_reader = exif_tsv.filter(|path| *path == Path::new("-")).map(|path| {
+        let path = path.to_path_buf();
+        std::thread::spawn(move || load_tsv(Some(path.as_path())))
+    });
     let tz = crate::usecases::config::config().copy.timezone_offset_hours;
     let offset = crate::usecases::config::chrono_offset_from_hours(tz);
-    src_index.parse_exif(offset, include_non_media, false);
-    let scanned = src_index.touched_count();
-    debug!(
-        feature = FEATURE_VERIFY,
-        operation = "scan_complete",
-        result = "ok",
-        files = scanned,
-        "verify source index built"
-    );
-    let tsv_rows = load_tsv(exif_tsv);
-    let tsv = index_tsv(&tsv_rows);
+    let (src_index, scanned) = scan_sources(sources, include_non_media, offset);
     let roots: Vec<String> = sources.iter().map(|(loc, _)| loc.display()).collect();
-    let out = OutputLibrary::new(build_output_index(output));
+    let infos: Vec<Info> = src_index
+        .into_infos()
+        .into_iter()
+        .filter(|i| include_non_media || i.is_media())
+        .collect();
+    let output_start = Instant::now();
+    let out = OutputLibrary::from_source(output);
+    log_stage("output_walk", output_start);
+    let prepare_start = Instant::now();
+    out.prepare_exact(&infos);
+    log_stage("output_prepare", prepare_start);
+    let tsv_start = Instant::now();
+    let tsv_rows = join_tsv(tsv_reader, exif_tsv);
+    let tsv = index_tsv(&tsv_rows);
+    log_stage("tsv_wait", tsv_start);
     let ctx = EvalCtx {
         offset,
         tz,
@@ -78,21 +83,79 @@ pub(crate) fn verify(
         phash_max,
         max_bytes: crate::usecases::config::config().verify.max_image_bytes,
     };
-    let infos: Vec<Info> = src_index
-        .into_infos()
-        .into_iter()
-        .filter(|i| include_non_media || i.is_media())
-        .collect();
+    let evaluate_start = Instant::now();
     let evaluated: Vec<Evaluated> = infos.par_iter().map(|i| evaluate(i, &ctx)).collect();
+    log_stage("evaluate", evaluate_start);
     let mut report = VerifyReport {
         scanned,
         include_non_media,
         dry_run: true,
         ..Default::default()
     };
+    let fold_start = Instant::now();
     fold_evaluated(&mut report, evaluated);
+    log_stage("fold", fold_start);
     report.duration_ms = elapsed_ms(start);
     report
+}
+
+fn scan_sources(
+    sources: &[Source],
+    include_non_media: bool,
+    offset: chrono::FixedOffset,
+) -> (file_index::Index, usize) {
+    let walk_start = Instant::now();
+    let skip_ext = super::copy::source_skip_extensions(include_non_media, false);
+    let mut index = file_index::Index::new();
+    for (loc, backend) in sources {
+        index.visit_location_skipping(loc, backend, skip_ext);
+    }
+    log_stage("source_walk", walk_start);
+    let exif_start = Instant::now();
+    index.parse_exif(offset, include_non_media, false);
+    log_stage("source_exif", exif_start);
+    let scanned = index.touched_count();
+    debug!(
+        feature = FEATURE_VERIFY,
+        operation = "scan_complete",
+        result = "ok",
+        files = scanned,
+        "verify source index built"
+    );
+    (index, scanned)
+}
+
+fn join_tsv(
+    reader: Option<std::thread::JoinHandle<Vec<ExifRow>>>,
+    fallback: Option<&Path>,
+) -> Vec<ExifRow> {
+    match reader {
+        Some(handle) => {
+            if let Ok(rows) = handle.join() {
+                rows
+            } else {
+                warn!(
+                    feature = FEATURE_VERIFY,
+                    operation = "load_exif_tsv",
+                    result = "error",
+                    error = "reader thread panicked",
+                    "exif tsv reader failed; cross-check disabled"
+                );
+                Vec::new()
+            }
+        }
+        None => load_tsv(fallback),
+    }
+}
+
+fn log_stage(operation: &'static str, start: Instant) {
+    debug!(
+        feature = FEATURE_VERIFY,
+        operation,
+        result = "ok",
+        elapsed_ms = elapsed_ms(start),
+        "verify stage complete"
+    );
 }
 
 fn fold_evaluated(report: &mut VerifyReport, mut evaluated: Vec<Evaluated>) {

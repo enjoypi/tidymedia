@@ -151,8 +151,8 @@ use std::sync::Arc;
 use camino::Utf8PathBuf;
 
 use super::{
-    OutputLibrary, basename, build_output_index, read_guarded, read_guarded_by_path, read_to_end,
-    split_stem_ext, verdict_for,
+    OutputLibrary, PreparedSource, basename, build_output_index, read_guarded,
+    read_guarded_by_path, read_to_end, retry_if_needed, split_stem_ext, verdict_for,
 };
 use crate::adapters::backend::fake::FakeBackend;
 use crate::entities::file_index::Index;
@@ -166,6 +166,12 @@ fn local(path: &str) -> Location {
 fn fake_info(backend: &Arc<FakeBackend>, path: &str, data: Vec<u8>) -> Info {
     backend.add_file(local(path), data);
     Info::open(&local(path), backend.clone()).expect("internal: fake info open")
+}
+
+fn output_library(backend: &Arc<FakeBackend>, root: &str) -> OutputLibrary {
+    backend.add_dir(local(root));
+    let source: crate::usecases::Source = (local(root), backend.clone());
+    OutputLibrary::from_source(&source)
 }
 
 #[test]
@@ -219,10 +225,9 @@ fn read_guarded_by_path_returns_none_when_missing() {
 fn verdict_for_exact_dup_when_hash_equal() {
     let be = Arc::new(FakeBackend::new("local"));
     let src = fake_info(&be, "/src/a.jpg", b"same".to_vec());
-    let out = fake_info(&be, "/out/a.jpg", b"same".to_vec());
-    let idx = Index::new();
-    idx.add(out);
-    let verdict = verdict_for(&src, &OutputLibrary::new(idx), 10, 1000);
+    fake_info(&be, "/out/a.jpg", b"same".to_vec());
+    let lib = output_library(&be, "/out");
+    let verdict = verdict_for(&src, &lib, 10, 1000);
     assert_eq!(verdict, "exact_dup");
 }
 
@@ -230,25 +235,17 @@ fn verdict_for_exact_dup_when_hash_equal() {
 fn verdict_for_absent_when_no_candidate() {
     let be = Arc::new(FakeBackend::new("local"));
     let src = fake_info(&be, "/src/a.jpg", b"same".to_vec());
-    let idx = Index::new();
-    assert_eq!(
-        verdict_for(&src, &OutputLibrary::new(idx), 10, 1000),
-        "absent"
-    );
+    let lib = output_library(&be, "/out");
+    assert_eq!(verdict_for(&src, &lib, 10, 1000), "absent");
 }
 
 #[test]
 fn verdict_for_name_only_when_oversize() {
     let be = Arc::new(FakeBackend::new("local"));
     let src = fake_info(&be, "/src/a.jpg", b"12345".to_vec());
-    let out = fake_info(&be, "/out/a.jpg", b"x".to_vec());
-    let idx = Index::new();
-    idx.add(out);
-    // max_bytes=1 让 src 读超限 → 无字节可比 → name_only
-    assert_eq!(
-        verdict_for(&src, &OutputLibrary::new(idx), 10, 1),
-        "name_only"
-    );
+    fake_info(&be, "/out/a.jpg", b"x".to_vec());
+    let lib = output_library(&be, "/out");
+    assert_eq!(verdict_for(&src, &lib, 10, 1), "name_only");
 }
 
 #[test]
@@ -285,45 +282,65 @@ fn minimal_jpeg(meta: &[u8]) -> Vec<u8> {
 #[test]
 fn verdict_for_pixel_same_when_entropy_equal() {
     let be = Arc::new(FakeBackend::new("local"));
-    // src 与候选 JPEG 元数据不同但像素流相同 → entropy 相等
     let src = fake_info(&be, "/src/photo.jpg", minimal_jpeg(b"metadata-a"));
-    let out = fake_info(&be, "/out/photo.jpg", minimal_jpeg(b"metadata-b"));
-    let idx = Index::new();
-    idx.add(out);
-    assert_eq!(
-        verdict_for(&src, &OutputLibrary::new(idx), 10, 1000),
-        "pixel_same"
-    );
+    fake_info(&be, "/out/photo.jpg", minimal_jpeg(b"metadata-b"));
+    let lib = output_library(&be, "/out");
+    assert_eq!(verdict_for(&src, &lib, 10, 1000), "pixel_same");
+}
+
+#[test]
+fn verdict_for_name_only_after_candidate_content_miss() {
+    let be = Arc::new(FakeBackend::new("local"));
+    let src = fake_info(&be, "/src/photo.jpg", minimal_jpeg(b"metadata-a"));
+    let mut out_bytes = minimal_jpeg(b"metadata-b");
+    out_bytes.push(1);
+    fake_info(&be, "/out/photo.jpg", out_bytes);
+    let lib = output_library(&be, "/out");
+    assert_eq!(verdict_for(&src, &lib, 10, 1000), "name_only");
 }
 
 #[test]
 fn verdict_for_pixel_same_with_windows_backslash_paths() {
     let be = Arc::new(FakeBackend::new("local"));
-    // Windows LocalBackend walk 产出反斜杠路径；basename 必须同时识别 `\`
     let src = fake_info(&be, r"C:\src\photo.jpg", minimal_jpeg(b"metadata-a"));
-    let out = fake_info(&be, r"C:\out\photo.jpg", minimal_jpeg(b"metadata-b"));
-    let idx = Index::new();
-    idx.add(out);
-    assert_eq!(
-        verdict_for(&src, &OutputLibrary::new(idx), 10, 1000),
-        "pixel_same"
-    );
+    fake_info(&be, r"C:\out\photo.jpg", minimal_jpeg(b"metadata-b"));
+    let lib = output_library(&be, r"C:\out");
+    assert_eq!(verdict_for(&src, &lib, 10, 1000), "pixel_same");
 }
 
 #[test]
 fn verdict_for_rotated_same_when_phash_rotated() {
     let be = Arc::new(FakeBackend::new("local"));
-    // src 图与候选图是旋转 90° 关系 → rotated_phash_similar 命中
     let img = noise_image(128, 41);
     let rotated = image::imageops::rotate90(&img);
     let src = fake_info(&be, "/src/r.jpg", encode_png(&img));
-    let out = fake_info(&be, "/out/r.jpg", encode_png(&rotated));
-    let idx = Index::new();
-    idx.add(out);
-    assert_eq!(
-        verdict_for(&src, &OutputLibrary::new(idx), 10, 1_000_000),
-        "rotated_same"
-    );
+    fake_info(&be, "/out/r.jpg", encode_png(&rotated));
+    let lib = output_library(&be, "/out");
+    assert_eq!(verdict_for(&src, &lib, 10, 1_000_000), "rotated_same");
+}
+
+#[test]
+fn verdict_for_rotated_same_when_entropy_is_unavailable() {
+    let be = Arc::new(FakeBackend::new("local"));
+    let img = noise_image(128, 43);
+    let rotated = image::imageops::rotate90(&img);
+    let src = fake_info(&be, "/src/r.bmp", encode_png(&img));
+    fake_info(&be, "/out/r.bmp", encode_png(&rotated));
+    let lib = output_library(&be, "/out");
+    assert_eq!(verdict_for(&src, &lib, 10, 1_000_000), "rotated_same");
+}
+
+#[test]
+fn retry_rotated_accepts_matching_candidate() {
+    let be = Arc::new(FakeBackend::new("local"));
+    let img = noise_image(128, 47);
+    let rotated = image::imageops::rotate90(&img);
+    let src_bytes = encode_png(&img);
+    fake_info(&be, "/out/r.jpg", encode_png(&rotated));
+    let lib = output_library(&be, "/out");
+    let source = PreparedSource::new(&src_bytes);
+    let paths = vec![Utf8PathBuf::from("/out/r.jpg")];
+    assert!(retry_if_needed(&source, &paths, &lib, 10, 1_000_000, false,));
 }
 
 #[test]
@@ -333,4 +350,24 @@ fn read_to_end_returns_none_when_read_fails() {
     be.inject_reader_error(local("/src/a.txt"), std::io::ErrorKind::TimedOut);
     let bytes = read_to_end(info.backend().as_ref(), info.location(), info.size);
     assert!(bytes.is_none());
+}
+
+#[test]
+fn prepared_source_image_is_reused() {
+    let bytes = encode_png(&noise_image(64, 17));
+    let source = PreparedSource::new(&bytes);
+    let first = std::ptr::from_ref(source.image().expect("internal: valid image"));
+    let second = std::ptr::from_ref(source.image().expect("internal: valid image"));
+    assert_eq!(first, second);
+}
+
+#[test]
+fn output_candidate_features_are_reused() {
+    let be = Arc::new(FakeBackend::new("local"));
+    fake_info(&be, "/out/r.jpg", encode_png(&noise_image(64, 23)));
+    let lib = output_library(&be, "/out");
+    let path = Utf8PathBuf::from("/out/r.jpg");
+    let first = lib.features(&path, 1_000_000).expect("internal: features");
+    let second = lib.features(&path, 1_000_000).expect("internal: features");
+    assert!(Arc::ptr_eq(&first, &second));
 }

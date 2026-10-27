@@ -19,16 +19,14 @@ pub(crate) fn phash(img: &RgbImage) -> u64 {
             *cell = f32::from(px.0[0]);
         }
     }
-    let dct = dct_2d(&pixels);
+    let dct = dct_2d_low(&pixels);
     hash_from_block(&dct)
 }
 
-fn hash_from_block(dct: &[[f32; DCT_SIDE]; DCT_SIDE]) -> u64 {
+fn hash_from_block(dct: &[[f32; HASH_SIDE]; HASH_SIDE]) -> u64 {
     let mut block = [0.0_f32; HASH_SIDE * HASH_SIDE];
-    for u in 0..HASH_SIDE {
-        for v in 0..HASH_SIDE {
-            block[u * HASH_SIDE + v] = dct[u][v];
-        }
+    for (u, row) in dct.iter().enumerate() {
+        block[u * HASH_SIDE..(u + 1) * HASH_SIDE].copy_from_slice(row);
     }
     let mut without_dc: Vec<f32> = block[1..].to_vec();
     without_dc.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
@@ -45,9 +43,9 @@ fn hash_from_block(dct: &[[f32; DCT_SIDE]; DCT_SIDE]) -> u64 {
     hash
 }
 
-fn dct_2d(input: &[[f32; DCT_SIDE]; DCT_SIDE]) -> [[f32; DCT_SIDE]; DCT_SIDE] {
+fn dct_2d_low(input: &[[f32; DCT_SIDE]; DCT_SIDE]) -> [[f32; HASH_SIDE]; HASH_SIDE] {
     let cos = cos_table();
-    let mut tmp = [[0.0_f32; DCT_SIDE]; DCT_SIDE];
+    let mut tmp = [[0.0_f32; HASH_SIDE]; DCT_SIDE];
     for (y, row_in) in input.iter().enumerate() {
         for (u, tmp_cell) in tmp[y].iter_mut().enumerate() {
             let mut s = 0.0_f32;
@@ -57,14 +55,14 @@ fn dct_2d(input: &[[f32; DCT_SIDE]; DCT_SIDE]) -> [[f32; DCT_SIDE]; DCT_SIDE] {
             *tmp_cell = s;
         }
     }
-    let mut out = [[0.0_f32; DCT_SIDE]; DCT_SIDE];
-    for v in 0..DCT_SIDE {
-        for u in 0..DCT_SIDE {
+    let mut out = [[0.0_f32; HASH_SIDE]; HASH_SIDE];
+    for (v, row) in out.iter_mut().enumerate() {
+        for (u, cell) in row.iter_mut().enumerate() {
             let mut s = 0.0_f32;
             for y in 0..DCT_SIDE {
                 s = tmp[y][u].mul_add(cos[v][y], s);
             }
-            out[v][u] = s;
+            *cell = s;
         }
     }
     out

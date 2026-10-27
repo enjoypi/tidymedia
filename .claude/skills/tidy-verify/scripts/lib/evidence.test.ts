@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   buildCard,
+  collectCards,
   filenameHintKind,
   isDefaultClockValue,
   parseExiftoolDump,
@@ -9,6 +10,7 @@ import {
   selectReviewEntries,
   type EvidenceEntry,
 } from "./evidence.ts";
+import type { ExecResult } from "./procs.ts";
 
 function entry(over: Partial<EvidenceEntry>): EvidenceEntry {
   return {
@@ -183,5 +185,76 @@ describe("buildCard", () => {
     expect(card).toContain("exiftool 桶**: NONE");
     expect(card).toContain("路径暗示**: 无");
     expect(card).toContain("DTO=<无>");
+  });
+});
+
+describe("collectCards", () => {
+  const enc = (s: string) => new TextEncoder().encode(s);
+  const dtoDump = (v: string) => `[EXIF]          DateTimeOriginal            : ${v}\n`;
+  const ok = (out: string): ExecResult => ({ out: enc(out), err: enc(""), exit: 0 });
+
+  test("每个 exiftool 只处理一个文件，参数保持全量 dump 且按 review 顺序稳定", async () => {
+    const cmds: string[][] = [];
+    const entries = ["z.jpg", "a.jpg", "m.jpg"].map((p) =>
+      entry({ source_path: `/src/${p}`, mismatch: true }),
+    );
+    const { cards, failures } = await collectCards(entries, "/src", 2, async (cmd) => {
+      cmds.push(cmd);
+      const name = (cmd[cmd.length - 1] ?? "").split("/").pop() ?? "";
+      await new Promise((res) => setTimeout(res, name === "z.jpg" ? 20 : 1));
+      return ok(dtoDump(`2020:01:01 00:00:00 ${name}`));
+    });
+    expect(failures).toEqual([]);
+    expect(cmds.map((c) => c.slice(0, -1))).toEqual([
+      ["-s", "-G", "-time:all", "-Make", "-Model"],
+      ["-s", "-G", "-time:all", "-Make", "-Model"],
+      ["-s", "-G", "-time:all", "-Make", "-Model"],
+    ]);
+    expect(cmds.map((c) => c[c.length - 1])).toEqual(["/src/z.jpg", "/src/a.jpg", "/src/m.jpg"]);
+    expect(cards.map((c) => c.split("\n")[0])).toEqual(["### z.jpg", "### a.jpg", "### m.jpg"]);
+    expect(cards[0]).toContain("DTO=2020:01:01 00:00:00 z.jpg");
+    expect(cards[1]).toContain("DTO=2020:01:01 00:00:00 a.jpg");
+  });
+
+  test("非零退出记为失败，exit=0 警告保留卡片", async () => {
+    const entries = ["a.jpg", "b.jpg", "c.jpg"].map((p) =>
+      entry({ source_path: `/src/${p}`, mismatch: true }),
+    );
+    const { cards, failures, warnings } = await collectCards(entries, "/src", 3, async (cmd) => {
+      const name = cmd[cmd.length - 1] ?? "";
+      if (name.endsWith("a.jpg")) {
+        return { out: enc(""), err: enc(""), exit: 1 };
+      }
+      if (name.endsWith("b.jpg")) {
+        return { out: enc(dtoDump("2021:01:02 03:04:05")), err: enc("Warning: corrupt metadata"), exit: 0 };
+      }
+      return ok(dtoDump("2021:02:03 04:05:06"));
+    });
+    expect(cards.length).toBe(2);
+    expect(cards[0]).toContain("### b.jpg");
+    expect(cards[1]).toContain("### c.jpg");
+    expect(failures).toEqual([
+      { path: "/src/a.jpg", exit: 1, err: "" },
+    ]);
+    expect(warnings).toEqual([
+      { path: "/src/b.jpg", exit: 0, err: "Warning: corrupt metadata" },
+    ]);
+  });
+
+  test("并发不超过上限", async () => {
+    let active = 0;
+    let maxActive = 0;
+    const entries = Array.from({ length: 8 }, (_, i) =>
+      entry({ source_path: `/src/f${i}.jpg`, mismatch: true }),
+    );
+    const { failures } = await collectCards(entries, "/src", 3, async () => {
+      active += 1;
+      maxActive = Math.max(maxActive, active);
+      await new Promise((res) => setTimeout(res, 10));
+      active -= 1;
+      return ok(dtoDump("2021:02:03 04:05:06"));
+    });
+    expect(failures).toEqual([]);
+    expect(maxActive).toBeLessThanOrEqual(3);
   });
 });

@@ -5,9 +5,10 @@ import { freemem } from "node:os";
 import { dirname } from "node:path";
 import { exiftoolBin, loadConfig, tidymediaBin, workPath } from "./lib/config.ts";
 import type { SkillConfig } from "./lib/config.ts";
-import { extractExif, listDirCounts, spawnRunner, spawnToFiles } from "./lib/extract.ts";
+import { extractExif, listDirCounts, spawnToFiles } from "./lib/extract.ts";
 import { isImageRunning, killTree, pickConcurrency, reapStale, recordPid } from "./lib/procs.ts";
-import { verifyCommand } from "./lib/verify.ts";
+import { startVerify, verifyCommand, verifyExitCode } from "./lib/verify.ts";
+import type { RunningVerify } from "./lib/verify.ts";
 
 async function extractStep(cfg: SkillConfig, src: string): Promise<string | null> {
   const bin = await exiftoolBin(cfg);
@@ -33,15 +34,24 @@ async function extractStep(cfg: SkillConfig, src: string): Promise<string | null
   return tsv;
 }
 
-async function verifyStep(cfg: SkillConfig, bin: string, src: string, out: string, tsv: string | null): Promise<number> {
-  const t0 = performance.now();
-  const r = await spawnRunner(verifyCommand(bin, src, out, tsv, workPath(cfg, cfg.verifyReport)));
+async function finishVerifyStep(
+  cfg: SkillConfig,
+  running: RunningVerify,
+  started: number,
+  tsv: string | null,
+): Promise<number> {
+  const input = tsv === null ? new Uint8Array() : new Uint8Array(await Bun.file(tsv).arrayBuffer());
+  const sent = await running.send(input);
+  const r = await running.finish();
   const summary = new TextDecoder().decode(r.out);
   await Bun.write(workPath(cfg, "summary.txt"), summary);
   await Bun.write(workPath(cfg, "verify.err"), r.err);
   console.log(summary.trimEnd());
-  console.log(`verify_exit=${r.exit} verify_ms=${Math.round(performance.now() - t0)}`);
-  return r.exit;
+  console.log(`verify_exit=${r.exit} verify_ms=${Math.round(performance.now() - started)}`);
+  if (!sent) {
+    console.log("verify_stdin=error");
+  }
+  return verifyExitCode(r.exit, sent);
 }
 
 async function main(args: string[]): Promise<number> {
@@ -50,6 +60,7 @@ async function main(args: string[]): Promise<number> {
     console.error("Usage: bun run.ts <source_dir> <output_dir> <work_dir>");
     return 2;
   }
+  const total = performance.now();
   const cfg = { ...(await loadConfig()), workDir: work };
   const bin = await tidymediaBin(cfg);
   if (!bin) {
@@ -58,8 +69,12 @@ async function main(args: string[]): Promise<number> {
   }
   mkdirSync(work, { recursive: true });
   console.log(`work_dir=${work}`);
+  const started = performance.now();
+  const running = startVerify(verifyCommand(bin, src, out, "-", workPath(cfg, cfg.verifyReport)));
   const tsv = await extractStep(cfg, src);
-  return verifyStep(cfg, bin, src, out, tsv);
+  const code = await finishVerifyStep(cfg, running, started, tsv);
+  console.log(`total_ms=${Math.round(performance.now() - total)}`);
+  return code;
 }
 
 process.exit(await main(process.argv.slice(2)));

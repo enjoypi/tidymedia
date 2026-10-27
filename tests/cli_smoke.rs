@@ -85,5 +85,39 @@ fn cli_report_write_failures_exit_nonzero() {
         .failure();
 }
 
+#[test]
+fn cli_verify_reads_exif_tsv_from_stdin() {
+    let src = tempfile::tempdir().unwrap();
+    let out = tempfile::tempdir().unwrap();
+    let report_dir = tempfile::tempdir().unwrap();
+    let jpg = src.path().join("IMG_20240101_120000.jpg");
+    std::fs::write(
+        &jpg,
+        b"\xFF\xD8\xFF\xE0\x00\x10JFIF\x00\x01\x02\x00\x00\x01\x00\x01\x00\x00",
+    )
+    .unwrap();
+    let report = report_dir.path().join("verify.json");
+    let tsv = format!(
+        "{}\t2023:06:01 10:00:00\t-\t-\t-\t-\tPanasonic\tDMC-GF6\n",
+        jpg.display()
+    );
+    tidymedia()
+        .arg("verify")
+        .arg(src.path())
+        .arg("--output")
+        .arg(out.path())
+        .arg("--exif-tsv")
+        .arg("-")
+        .arg("--report")
+        .arg(&report)
+        .write_stdin(tsv)
+        .assert()
+        .failure();
+    let json: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(report).unwrap()).unwrap();
+    assert_eq!(json["mismatched"], 1);
+    assert_eq!(json["entries"][0]["exif_exp_bucket"], "2023:06");
+}
+
 #[path = "support/tracing_fixture_tests.rs"]
 mod tracing_fixture;

@@ -3,15 +3,14 @@
 // Usage: bun collect_evidence.ts <verify.json> <src_root> [out.md]
 /// <reference path="./lib/bun.d.ts" />
 
+import { freemem } from "node:os";
 import { exiftoolBin, loadConfig, workPath } from "./lib/config.ts";
 import {
-  buildCard,
-  parseExiftoolDump,
-  relativePath,
+  collectCards,
   selectReviewEntries,
   type EvidenceEntry,
 } from "./lib/evidence.ts";
-import { decodeExifText } from "./lib/gbk.ts";
+import { pickConcurrency, spawnRunner } from "./lib/procs.ts";
 
 async function main(args: string[]): Promise<number> {
   const [jsonPath, srcRoot, outArg] = args;
@@ -35,15 +34,20 @@ async function main(args: string[]): Promise<number> {
     return 0;
   }
 
-  // 逐文件全量 dump：-s 短名 -G 分组 -time:all 全部时间类 tag；多文件一次
-  // spawn 会让 -G 输出跨文件交错难解析，U 通常很小，逐文件调用换取解析简单。
-  const cards: string[] = [];
-  for (const e of review) {
-    const proc = Bun.spawn([bin, "-s", "-G", "-time:all", "-Make", "-Model", e.source_path]);
-    const out = new Uint8Array(await new Response(proc.stdout).arrayBuffer());
-    await proc.exited;
-    const dump = parseExiftoolDump(decodeExifText(out).replace(/\r\n/g, "\n"));
-    cards.push(buildCard(e, dump, relativePath(e.source_path, srcRoot)));
+  const limit = pickConcurrency(cfg.exiftoolConcurrency, freemem(), cfg.exiftoolMemMb * 1024 * 1024);
+  const { cards, failures, warnings } = await collectCards(review, srcRoot, limit, (cmd) => spawnRunner([bin, ...cmd]));
+  for (const w of warnings) {
+    console.error(`exiftool 警告 path=${w.path} stderr=${w.err}`);
+  }
+  if (warnings.length > 0) {
+    console.error(`evidence_warnings=${warnings.length}`);
+  }
+  if (failures.length > 0) {
+    for (const f of failures) {
+      console.error(`exiftool 失败 path=${f.path} exit=${f.exit} stderr=${f.err}`);
+    }
+    console.error(`evidence_incomplete=${failures.length}，未生成 evidence.md`);
+    return 1;
   }
 
   const outPath = outArg ?? workPath(cfg, "evidence.md");

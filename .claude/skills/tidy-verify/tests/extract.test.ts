@@ -6,21 +6,60 @@ import { tmpdir } from "node:os";
 import { extractExif, listDirCounts, mergeParts, planGroups, spawnRunner, spawnToFiles } from "../scripts/lib/extract.ts";
 import type { FileRun } from "../scripts/lib/extract.ts";
 
-function sums(groups: string[][], counts: Map<string, number>): number[] {
-  return groups.map((g) => g.reduce((s, d) => s + (counts.get(d) ?? 0), 0));
+function filesOf(entries: [string, number][]): Map<string, string[]> {
+  return new Map(
+    entries.map(([dir, n]) => [
+      dir,
+      Array.from({ length: n }, (_, i) => `${dir}/f${String(i).padStart(2, "0")}.jpg`),
+    ]),
+  );
+}
+
+function loadsOf(groups: string[][], files: Map<string, string[]>): number[] {
+  return groups.map((g) =>
+    g.reduce((s, line) => {
+      const list = files.get(line);
+      return s + (list ? list.length : 1);
+    }, 0),
+  );
 }
 
 test("planGroups 按文件数均衡分组且每个目录恰好出现一次", () => {
-  const counts = new Map([["a", 7], ["b", 6], ["c", 5], ["d", 4]]);
-  const groups = planGroups(counts, 2);
+  const files = filesOf([["a", 7], ["b", 6], ["c", 5], ["d", 4]]);
+  const groups = planGroups(files, 2);
   expect(groups.length).toBe(2);
-  expect(sums(groups, counts).sort((x, y) => x - y)).toEqual([11, 11]);
+  expect(loadsOf(groups, files).sort((x, y) => x - y)).toEqual([11, 11]);
   expect(groups.flat().sort()).toEqual(["a", "b", "c", "d"]);
 });
 
-test("planGroups 组数大于目录数时不产空组", () => {
-  const counts = new Map([["a", 3], ["b", 1]]);
-  expect(planGroups(counts, 8).length).toBe(2);
+test("planGroups 单巨目录拆成文件行且负载按文件数均衡", () => {
+  const big = Array.from({ length: 20 }, (_, i) => `/s/big/f${String(i).padStart(2, "0")}.jpg`);
+  const groups = planGroups(new Map([["/s/big", big]]), 4);
+  expect(groups.length).toBe(4);
+  expect(groups.map((g) => g.length).sort((x, y) => x - y)).toEqual([5, 5, 5, 5]);
+  const lines = groups.flat();
+  expect([...lines].sort()).toEqual([...big].sort());
+  expect(lines.every((l) => l !== "/s/big")).toBe(true);
+});
+
+test("planGroups 超大目录拆文件而小目录仍保留为目录行", () => {
+  const files = filesOf([["/s/a", 9], ["/s/b", 2], ["/s/c", 2]]);
+  const groups = planGroups(files, 3);
+  expect(groups.length).toBe(3);
+  const lines = groups.flat();
+  expect(lines).toContain("/s/b");
+  expect(lines).toContain("/s/c");
+  for (const f of files.get("/s/a") ?? []) {
+    expect(lines).toContain(f);
+  }
+  expect([...lines].sort()).toEqual([...new Set(lines)].sort());
+  expect(loadsOf(groups, files).sort((x, y) => x - y)).toEqual([4, 4, 5]);
+});
+
+test("planGroups 组数不超过文件总数且不产空组", () => {
+  const groups = planGroups(filesOf([["a", 3], ["b", 1]]), 8);
+  expect(groups.length).toBeLessThanOrEqual(4);
+  expect(groups.every((g) => g.length > 0)).toBe(true);
 });
 
 test("planGroups 无目录返回空", () => {
@@ -28,11 +67,10 @@ test("planGroups 无目录返回空", () => {
 });
 
 test("planGroups 并发数小于 1 按 1 处理", () => {
-  const counts = new Map([["a", 1], ["b", 1]]);
-  expect(planGroups(counts, 0)).toEqual([["a", "b"]]);
+  expect(planGroups(filesOf([["a", 1], ["b", 1]]), 0)).toEqual([["a", "b"]]);
 });
 
-test("listDirCounts 统计每个目录直属文件数并跳过隐藏目录", async () => {
+test("listDirCounts 返回每个目录的文件清单并跳过隐藏目录", async () => {
   const root = mkdtempSync(`${tmpdir()}/tv-list-`).replaceAll("\\", "/");
   try {
     await Bun.write(`${root}/top.jpg`, "x");
@@ -40,11 +78,12 @@ test("listDirCounts 统计每个目录直属文件数并跳过隐藏目录", asy
     await Bun.write(`${root}/中文 目录/b.jpg`, "x");
     await Bun.write(`${root}/中文 目录/子/c.mov`, "x");
     await Bun.write(`${root}/.hidden/d.jpg`, "x");
-    const counts = await listDirCounts(root);
-    expect([...counts.entries()].sort()).toEqual([
-      [root, 1],
-      [`${root}/中文 目录`, 2],
-      [`${root}/中文 目录/子`, 1],
+    const files = await listDirCounts(root);
+    const norm = [...files.entries()].map(([d, l]) => [d, [...l].sort()] as const).sort();
+    expect(norm).toEqual([
+      [root, [`${root}/top.jpg`]],
+      [`${root}/中文 目录`, [`${root}/中文 目录/a.jpg`, `${root}/中文 目录/b.jpg`].sort()],
+      [`${root}/中文 目录/子`, [`${root}/中文 目录/子/c.mov`]],
     ]);
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -64,9 +103,9 @@ test("extractExif 每组输出落盘再逐组合并，回报 pid、行数与最�
     return dirs.length === 1 ? 1 : 0;
   };
   try {
-    const counts = new Map([["D:/s/a", 5], ["D:/s/b", 3], ["D:/s/c", 2]]);
+    const files = filesOf([["D:/s/a", 5], ["D:/s/b", 3], ["D:/s/c", 2]]);
     const r = await extractExif({
-      bin: "exiftool", fmt: "F", counts, work, concurrency: 2, run,
+      bin: "exiftool", fmt: "F", counts: files, work, concurrency: 2, run,
       tsv: `${work}/exif.tsv`, err: `${work}/exif.tsv.err`, onSpawn: (pid) => pids.push(pid),
     });
     expect(calls.length).toBe(2);
@@ -84,6 +123,37 @@ test("extractExif 每组输出落盘再逐组合并，回报 pid、行数与最�
     const err = await Bun.file(`${work}/exif.tsv.err`).text();
     expect(err).toContain("e1\n");
     expect(err).toContain("e2\n");
+  } finally {
+    rmSync(work, { recursive: true, force: true });
+  }
+});
+
+test("extractExif 单巨目录拆分时 argfile 写文件清单且参数文件内容完整", async () => {
+  const work = mkdtempSync(`${tmpdir()}/tv-split-`).replaceAll("\\", "/");
+  const calls: FileRun[] = [];
+  const run = async (r: FileRun): Promise<number> => {
+    calls.push(r);
+    r.onSpawn(200 + calls.length);
+    const lines = (await Bun.file(r.cmd[r.cmd.length - 1]).text()).trim().split("\n");
+    await Bun.write(r.out, lines.map((l) => `${l}\t-\r\n`).join(""));
+    await Bun.write(r.err, "");
+    return 0;
+  };
+  try {
+    const big = Array.from({ length: 12 }, (_, i) => `D:/s/中文 目录/img ${i}.jpg`);
+    const r = await extractExif({
+      bin: "exiftool", fmt: "F", counts: new Map([["D:/s/中文 目录", big]]), work,
+      concurrency: 3, run, tsv: `${work}/exif.tsv`, err: `${work}/exif.tsv.err`, onSpawn: () => {},
+    });
+    expect(r).toEqual({ rows: 12, exit: 0, groups: 3 });
+    const argLines: string[] = [];
+    for (const c of calls) {
+      argLines.push(...(await Bun.file(c.cmd[c.cmd.length - 1]).text()).trim().split("\n"));
+    }
+    expect(calls.length).toBe(3);
+    expect([...argLines].sort()).toEqual([...big].sort());
+    const tsv = await Bun.file(`${work}/exif.tsv`).text();
+    expect(tsv.split("\n").filter((l) => l !== "").length).toBe(12);
   } finally {
     rmSync(work, { recursive: true, force: true });
   }

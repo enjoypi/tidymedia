@@ -104,7 +104,7 @@ tidymedia verify -o <OUT> [--report <REPORT>] <SOURCES...>
 tidymedia verify -o <OUT> --include-non-media <SOURCES...>
 ```
 
-`verify` 不移动或修改源文件及归档媒体，用于检查预测归档位置、时间冲突、目标库重复情况及修复建议。指定 `--report` 时仍会写报告文件。视频修复必须同时核对 QuickTime `CreationDate` 与 `CreateDate`，不能直接执行只覆盖其中一个字段的建议；操作系统时区与配置时区不同时，基于文件修改时间的交叉对账结果不可直接采用。高级选项 `--exif-tsv` 和 `--phash-max` 可用 `tidymedia verify --help` 查看。
+`verify` 不移动或修改源文件及归档媒体，用于检查预测归档位置、时间冲突、目标库重复情况及修复建议。指定 `--report` 时仍会写报告文件。视频修复必须同时核对 QuickTime `CreationDate` 与 `CreateDate`，不能直接执行只覆盖其中一个字段的建议；操作系统时区与配置时区不同时，基于文件修改时间的交叉对账结果不可直接采用。高级选项 `--exif-tsv` 和 `--phash-max` 可用 `tidymedia verify --help` 查看。`--exif-tsv -` 从 stdin 读取同一格式的 TSV，允许 exiftool 抽取与 verify 扫描并行。
 
 ## 配置
 

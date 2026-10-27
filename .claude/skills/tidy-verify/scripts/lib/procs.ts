@@ -43,3 +43,49 @@ export function killTree(pid: number): void {
     process.kill(pid, "SIGKILL");
   }
 }
+
+export interface ExecResult {
+  out: Uint8Array;
+  err: Uint8Array;
+  exit: number;
+}
+
+export type Runner = (cmd: string[]) => Promise<ExecResult>;
+
+export async function spawnRunner(cmd: string[]): Promise<ExecResult> {
+  const proc = Bun.spawn(cmd, { stdout: "pipe", stderr: "pipe" });
+  const [out, err] = await Promise.all([
+    new Response(proc.stdout).arrayBuffer(),
+    new Response(proc.stderr).arrayBuffer(),
+  ]);
+  return { out: new Uint8Array(out), err: new Uint8Array(err), exit: await proc.exited };
+}
+
+export async function runPool<T, R>(
+  items: readonly T[],
+  limit: number,
+  fn: (item: T, index: number) => Promise<R>,
+): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let next = 0;
+  let failed = false;
+  let failure: unknown;
+  async function lane(): Promise<void> {
+    while (!failed && next < items.length) {
+      const index = next;
+      next += 1;
+      try {
+        results[index] = await fn(items[index] as T, index);
+      } catch (e) {
+        failed = true;
+        failure = e;
+      }
+    }
+  }
+  const lanes = Math.min(Math.max(limit, 1), items.length);
+  await Promise.all(Array.from({ length: lanes }, lane));
+  if (failed) {
+    throw failure;
+  }
+  return results;
+}

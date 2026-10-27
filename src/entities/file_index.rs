@@ -39,7 +39,7 @@ pub struct Index {
     stats: VisitStats,
 }
 
-fn target_key(loc: &Location) -> Utf8PathBuf {
+pub(crate) fn target_key(loc: &Location) -> Utf8PathBuf {
     match loc {
         Location::Local(p) => p.clone(),
         other @ Location::Smb { .. } => other.display().into(),

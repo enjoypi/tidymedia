@@ -1,14 +1,15 @@
-use camino::Utf8PathBuf;
 use sha2::{Digest, Sha512};
 
-use super::phash::{hamming, phash};
 use crate::entities::SecureHash;
-use crate::entities::backend::EntryKind;
-use crate::entities::file_index::Index;
 use crate::entities::file_info::Info;
-use crate::usecases::copy::Source;
 
-use super::candidates::CandidateIndex;
+pub(crate) use super::content_features::PreparedSource;
+use super::content_features::rotated_candidate_similar;
+#[cfg(test)]
+pub(crate) use super::content_features::rotated_phash_similar;
+pub(crate) use super::output_library::OutputLibrary;
+#[cfg(test)]
+pub(crate) use super::output_library::{build_output_index, read_guarded_by_path};
 
 pub(crate) fn verdict_for(
     info: &Info,
@@ -16,12 +17,11 @@ pub(crate) fn verdict_for(
     phash_max: u8,
     max_bytes: u64,
 ) -> String {
-    let out = &lib.index;
-    if matches!(out.exists(info, true), Ok(Some(_))) {
+    if lib.has_exact(info) {
         return "exact_dup".to_owned();
     }
     let base = basename(info.full_path.as_str()).to_owned();
-    let cands = lib.cands.find(&base);
+    let cands = lib.candidates(&base);
     if cands.is_empty() {
         return "absent".to_owned();
     }
@@ -33,47 +33,59 @@ pub(crate) fn verdict_for(
         .extension()
         .map_or_default(str::to_ascii_lowercase);
     let src_entropy = entropy_hash(&src_bytes, &ext);
-    for path in &cands {
-        let Some(c_bytes) = read_guarded_by_path(out, path, max_bytes) else {
+    let source = PreparedSource::new(&src_bytes);
+    let mut rotated = false;
+    let mut retry = Vec::new();
+    for path in cands {
+        let Some(features) = lib.features(&path, max_bytes) else {
+            retry.push(path);
             continue;
         };
-        if src_entropy.is_some() && entropy_hash(&c_bytes, &ext) == src_entropy {
+        if src_entropy.is_some() && features.entropy == src_entropy {
             return "pixel_same".to_owned();
         }
-    }
-    for path in &cands {
-        let Some(c_bytes) = read_guarded_by_path(out, path, max_bytes) else {
-            continue;
-        };
-        if rotated_phash_similar(&src_bytes, &c_bytes, phash_max) {
-            return "rotated_same".to_owned();
+        if rotated_candidate_similar(&source, &features, phash_max, &|| {
+            lib.read_candidate(&path, max_bytes)
+        }) {
+            if src_entropy.is_none() {
+                return "rotated_same".to_owned();
+            }
+            rotated = true;
         }
     }
-    "name_only".to_owned()
-}
-
-pub(crate) struct OutputLibrary {
-    index: Index,
-    cands: CandidateIndex,
-}
-
-impl OutputLibrary {
-    pub(crate) fn new(index: Index) -> Self {
-        let cands = CandidateIndex::build(&index);
-        Self { index, cands }
+    rotated = retry_if_needed(&source, &retry, lib, phash_max, max_bytes, rotated);
+    if rotated {
+        "rotated_same".to_owned()
+    } else {
+        "name_only".to_owned()
     }
 }
 
-pub(crate) fn build_output_index(output: &Source) -> Index {
-    let mut idx = Index::new();
-    let (loc, backend) = output;
-    if backend
-        .metadata(loc)
-        .is_ok_and(|m| m.kind == EntryKind::Dir)
-    {
-        idx.visit_location(loc, backend);
-    }
-    idx
+fn retry_if_needed(
+    source: &PreparedSource<'_>,
+    paths: &[camino::Utf8PathBuf],
+    lib: &OutputLibrary,
+    phash_max: u8,
+    max_bytes: u64,
+    rotated: bool,
+) -> bool {
+    rotated || retry_rotated(source, paths, lib, phash_max, max_bytes)
+}
+
+fn retry_rotated(
+    source: &PreparedSource<'_>,
+    paths: &[camino::Utf8PathBuf],
+    lib: &OutputLibrary,
+    phash_max: u8,
+    max_bytes: u64,
+) -> bool {
+    paths.iter().any(|path| {
+        lib.features(path, max_bytes).is_some_and(|features| {
+            rotated_candidate_similar(source, &features, phash_max, &|| {
+                lib.read_candidate(path, max_bytes)
+            })
+        })
+    })
 }
 
 pub(crate) fn split_stem_ext(name: &str) -> (String, String) {
@@ -87,16 +99,11 @@ pub(crate) fn basename(p: &str) -> &str {
     p.rsplit(['/', '\\']).next().unwrap_or(p)
 }
 
-fn read_guarded(info: &Info, max_bytes: u64) -> Option<Vec<u8>> {
+pub(super) fn read_guarded(info: &Info, max_bytes: u64) -> Option<Vec<u8>> {
     if info.size > max_bytes {
         return None;
     }
     super::content_diff_io::read_to_end(info.backend().as_ref(), info.location(), info.size)
-}
-
-fn read_guarded_by_path(out: &Index, path: &Utf8PathBuf, max_bytes: u64) -> Option<Vec<u8>> {
-    let info = out.get(path)?;
-    read_guarded(&info, max_bytes)
 }
 
 #[must_use]
@@ -107,56 +114,6 @@ pub(crate) fn entropy_hash(bytes: &[u8], ext: &str) -> Option<SecureHash> {
         "mp4" | "mov" | "m4v" | "3gp" | "heic" | "heif" => bmff_mdat_hash(bytes),
         _ => None,
     }
-}
-
-#[must_use]
-pub(crate) fn rotated_phash_similar(a: &[u8], b: &[u8], max_hamming: u8) -> bool {
-    let (Ok(img_a), Ok(img_b)) = (
-        super::content_diff_io::load(a),
-        super::content_diff_io::load(b),
-    ) else {
-        return false;
-    };
-    let (wa, ha) = (img_a.width(), img_a.height());
-    let (wb, hb) = (img_b.width(), img_b.height());
-    if (wa, ha) != (wb, hb) && (wa, ha) != (hb, wb) {
-        return false;
-    }
-    let a_rgb = img_a.to_rgb8();
-    let b_rgb = img_b.to_rgb8();
-    let h_b = phash(&b_rgb);
-    let a90 = super::content_diff_io::rotate90(&a_rgb);
-    let a180 = super::content_diff_io::rotate180(&a_rgb);
-    let a270 = super::content_diff_io::rotate270(&a_rgb);
-    let rotations = [&a_rgb, &a90, &a180, &a270];
-    let (best_img, best_h) = rotations
-        .iter()
-        .map(|img| (img, hamming(phash(img), h_b)))
-        .min_by_key(|(_, h)| *h)
-        .expect("internal: rotations non-empty");
-    if best_h > u32::from(max_hamming) {
-        return false;
-    }
-    mean_abs_diff_normalized(best_img, &b_rgb) < MEAN_ABS_DIFF_MAX
-}
-
-const NORMALIZE_SIDE: u32 = 512;
-const MEAN_ABS_DIFF_MAX: f32 = 5.0;
-
-#[expect(
-    clippy::cast_precision_loss,
-    reason = "sum ≤ 255×3×512×512 ≈ 2×10^8，超 f32 尾数但 mean 阈值 5 的量级判定不受影响"
-)]
-fn mean_abs_diff_normalized(a: &image::RgbImage, b: &image::RgbImage) -> f32 {
-    let ra = super::content_diff_io::resize(a, NORMALIZE_SIDE);
-    let rb = super::content_diff_io::resize(b, NORMALIZE_SIDE);
-    let mut sum = 0u64;
-    for (pa, pb) in ra.pixels().zip(rb.pixels()) {
-        for ch in 0..3 {
-            sum += u64::from((i32::from(pa.0[ch]) - i32::from(pb.0[ch])).unsigned_abs());
-        }
-    }
-    sum as f32 / (NORMALIZE_SIDE * NORMALIZE_SIDE * 3) as f32
 }
 
 #[must_use]

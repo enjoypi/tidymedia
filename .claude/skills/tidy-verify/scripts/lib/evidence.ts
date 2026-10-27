@@ -1,6 +1,9 @@
 // Step 3 证据收集纯函数：exiftool 全量 dump 解析 / 路径目录日期暗示 / 文件名
 // 日期暗示（strong/weak/coincidental）/ 出厂默认时钟判定 / 证据卡片组装。
-// 判定表口径见 references/patterns.md；I/O 在 scripts/collect_evidence.ts。
+// 判定表口径见 references/patterns.md。
+
+import { decodeExifText } from "./gbk.ts";
+import { runPool, type ExecResult } from "./procs.ts";
 
 export interface EvidenceEntry {
   source_path: string;
@@ -118,6 +121,42 @@ export function isDefaultClockValue(
     return false;
   }
   return /^\d{4}:01:01 00:00:00$/.test(dto);
+}
+
+export const EVIDENCE_DUMP_ARGS = ["-s", "-G", "-time:all", "-Make", "-Model"];
+
+export interface EvidenceIssue {
+  path: string;
+  exit: number;
+  err: string;
+}
+
+export async function collectCards(
+  entries: EvidenceEntry[],
+  srcRoot: string,
+  limit: number,
+  run: (cmd: string[]) => Promise<ExecResult>,
+): Promise<{ cards: string[]; failures: EvidenceIssue[]; warnings: EvidenceIssue[] }> {
+  const results = await runPool(entries, limit, async (e) => {
+    const result = await run([...EVIDENCE_DUMP_ARGS, e.source_path]);
+    return { entry: e, result };
+  });
+  const cards: string[] = [];
+  const failures: EvidenceIssue[] = [];
+  const warnings: EvidenceIssue[] = [];
+  for (const { entry, result } of results) {
+    const err = decodeExifText(result.err).trim();
+    if (result.exit !== 0) {
+      failures.push({ path: entry.source_path, exit: result.exit, err });
+      continue;
+    }
+    if (err !== "") {
+      warnings.push({ path: entry.source_path, exit: result.exit, err });
+    }
+    const text = decodeExifText(result.out).replace(/\r\n/g, "\n");
+    cards.push(buildCard(entry, parseExiftoolDump(text), relativePath(entry.source_path, srcRoot)));
+  }
+  return { cards, failures, warnings };
 }
 
 // 证据卡片：除「推荐」外全字段填充；「推荐」由 AI 研判后补。

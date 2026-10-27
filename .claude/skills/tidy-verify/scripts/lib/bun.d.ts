@@ -8,14 +8,21 @@ interface BunFile {
   exists(): Promise<boolean>;
 }
 
+interface BunFileSink {
+  write(data: Uint8Array): Promise<number> | number;
+  end(): Promise<void> | void;
+}
+
 interface BunSubprocess {
   readonly pid: number;
+  readonly stdin: BunFileSink;
   readonly stdout: ReadableStream<Uint8Array>;
   readonly stderr: ReadableStream<Uint8Array>;
   readonly exited: Promise<number>;
 }
 
 interface BunSpawnOptions {
+  stdin?: "pipe";
   stdout?: "pipe" | "inherit" | "ignore" | BunFile;
   stderr?: "pipe" | "inherit" | "ignore" | BunFile;
 }
@@ -76,6 +83,7 @@ declare module "bun:test" {
     toBeNull(): void;
     toBeTruthy(): void;
     toBeGreaterThan(n: number): void;
+    toBeLessThanOrEqual(n: number): void;
     toContain(expected: unknown): void;
     readonly not: Expect;
   }

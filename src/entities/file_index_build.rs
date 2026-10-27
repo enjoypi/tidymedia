@@ -175,7 +175,18 @@ impl Index {
         backend: &Arc<dyn Backend>,
         skip_ext: &[String],
     ) {
-        let mut locs: Vec<Location> = Vec::new();
+        let entries = self.scan_entries(root, backend, skip_ext);
+        let locs: Vec<Location> = entries.into_iter().map(|entry| entry.location).collect();
+        self.open_locations(&locs, backend);
+    }
+
+    pub fn scan_entries(
+        &mut self,
+        root: &Location,
+        backend: &Arc<dyn Backend>,
+        skip_ext: &[String],
+    ) -> Vec<crate::entities::backend::Entry> {
+        let mut entries = Vec::new();
         for entry_res in backend.walk(root) {
             let entry = match entry_res {
                 Ok(e) => e,
@@ -211,14 +222,29 @@ impl Index {
                 );
                 continue;
             }
-            locs.push(entry.location);
+            entries.push(entry);
         }
+        entries
+    }
 
+    pub fn open_locations(&mut self, locs: &[Location], backend: &Arc<dyn Backend>) {
         let infos: Vec<_> = install_io(|| {
             locs.par_iter()
                 .map(|loc| Info::open(loc, Arc::clone(backend)))
                 .collect()
         });
+        self.add_open_results(locs, infos);
+    }
+
+    pub fn open_locations_sequential(&mut self, locs: &[Location], backend: &Arc<dyn Backend>) {
+        let infos: Vec<_> = locs
+            .iter()
+            .map(|loc| Info::open(loc, Arc::clone(backend)))
+            .collect();
+        self.add_open_results(locs, infos);
+    }
+
+    fn add_open_results(&mut self, locs: &[Location], infos: Vec<io::Result<Info>>) {
         for (loc, result) in locs.iter().zip(infos) {
             match result {
                 Ok(info) => self.add(info),

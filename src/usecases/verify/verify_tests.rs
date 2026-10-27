@@ -87,11 +87,30 @@ fn build_entry_with_decision_fills_priority_source_conflicts() {
 use std::path::Path;
 
 use super::super::verify::exif_tsv::ExifRow;
-use super::{index_tsv, load_tsv, lookup_tsv, strip_source_root};
+use super::{index_tsv, join_tsv, load_tsv, lookup_tsv, strip_source_root};
 
 #[test]
 fn load_tsv_none_returns_empty() {
     assert!(load_tsv(None).is_empty());
+}
+
+#[test]
+fn join_tsv_thread_panic_returns_empty() {
+    let handle = std::thread::spawn(|| -> Vec<ExifRow> { panic!("injected reader panic") });
+    assert!(join_tsv(Some(handle), None).is_empty());
+}
+
+#[test]
+fn join_tsv_returns_thread_rows() {
+    let handle = std::thread::spawn(|| {
+        vec![ExifRow {
+            path: "/a.jpg".to_owned(),
+            fields: Default::default(),
+            make: String::new(),
+            model: String::new(),
+        }]
+    });
+    assert_eq!(join_tsv(Some(handle), None).len(), 1);
 }
 
 #[test]
@@ -208,6 +227,28 @@ fn verify_skips_listed_extensions_from_source_scan() {
         None,
     );
     assert_eq!((report.scanned, report.compared), (2, 1));
+}
+
+#[test]
+fn verify_includes_non_media_when_requested() {
+    crate::install_config_loader();
+    let src = tempfile::tempdir().unwrap();
+    std::fs::copy("tests/data/sample-with-exif.jpg", src.path().join("a.jpg")).unwrap();
+    std::fs::write(src.path().join("note.txt"), b"text").unwrap();
+    let out = tempfile::tempdir().unwrap();
+    let be: std::sync::Arc<dyn crate::entities::backend::Backend> =
+        crate::adapters::backend::local::LocalBackend::arc();
+    let loc = |p: &std::path::Path| {
+        crate::entities::uri::Location::Local(camino::Utf8PathBuf::from(p.to_str().unwrap()))
+    };
+    let report = super::verify(
+        &[(loc(src.path()), be.clone())],
+        &(loc(out.path()), be),
+        super::DEFAULT_PHASH_MAX,
+        true,
+        None,
+    );
+    assert_eq!((report.scanned, report.compared), (2, 2));
 }
 
 #[test]

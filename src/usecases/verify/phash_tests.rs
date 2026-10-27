@@ -119,10 +119,53 @@ fn hamming_counts_bit_diffs() {
 #[test]
 fn dct_2d_of_constant_concentrates_energy_in_dc() {
     let input = [[42.0_f32; DCT_SIDE]; DCT_SIDE];
-    let out = dct_2d(&input);
+    let out = dct_2d_low(&input);
     let dc = out[0][0].abs();
-    for &(u, v) in &[(0_usize, 1_usize), (1, 0), (5, 7), (15, 23)] {
+    for &(u, v) in &[(0_usize, 1_usize), (1, 0), (5, 7), (7, 7)] {
         let val = out[u][v];
         assert!(val.abs() < dc * 1e-3, "(u,v)=({u},{v}) value={val} dc={dc}");
     }
+}
+
+#[test]
+fn dct_2d_low_matches_full_reference_bit_for_bit() {
+    let mut input = [[0.0_f32; DCT_SIDE]; DCT_SIDE];
+    for (y, row) in input.iter_mut().enumerate() {
+        for (x, cell) in row.iter_mut().enumerate() {
+            let value = u8::try_from((x * 37 + y * 61 + x * y * 3) % 255).unwrap();
+            *cell = f32::from(value);
+        }
+    }
+    let actual = dct_2d_low(&input);
+    let expected = reference_dct_2d(&input);
+    for v in 0..HASH_SIDE {
+        for u in 0..HASH_SIDE {
+            assert_eq!(actual[v][u].to_bits(), expected[v][u].to_bits());
+        }
+    }
+}
+
+fn reference_dct_2d(input: &[[f32; DCT_SIDE]; DCT_SIDE]) -> [[f32; DCT_SIDE]; DCT_SIDE] {
+    let cos = cos_table();
+    let mut tmp = [[0.0_f32; DCT_SIDE]; DCT_SIDE];
+    for (y, row_in) in input.iter().enumerate() {
+        for (u, tmp_cell) in tmp[y].iter_mut().enumerate() {
+            let mut s = 0.0_f32;
+            for (x, &v) in row_in.iter().enumerate() {
+                s = v.mul_add(cos[u][x], s);
+            }
+            *tmp_cell = s;
+        }
+    }
+    let mut out = [[0.0_f32; DCT_SIDE]; DCT_SIDE];
+    for v in 0..DCT_SIDE {
+        for u in 0..DCT_SIDE {
+            let mut s = 0.0_f32;
+            for y in 0..DCT_SIDE {
+                s = tmp[y][u].mul_add(cos[v][y], s);
+            }
+            out[v][u] = s;
+        }
+    }
+    out
 }
