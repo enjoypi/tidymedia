@@ -1,7 +1,6 @@
 //! `impl Backend for LocalBackend`：Backend trait 各方法直接映射 `std::fs`。
 //!
 //! 从 `local.rs` 拆出（原 357 行 → ≤300）；路径 / rename / walk 纯助手见 `local.rs`，
-//! mmap 读 + 文件写见 `local_mmap`。
 
 use std::fs;
 use std::io;
@@ -9,7 +8,7 @@ use std::io;
 use ignore::WalkBuilder;
 
 use super::LocalBackend;
-use super::mmap::{LocalWriter, open_read_inner};
+use super::local_io::{LocalWriter, open_read_inner};
 use super::{local_path, noreplace, rename_or_fallback, to_metadata, walk_entry_to_io};
 use crate::adapters::backend::remote::MAX_TEXT_BYTES;
 use crate::entities::backend::{Backend, Entry, MediaReader, MediaWriter, Metadata};

@@ -207,5 +207,27 @@ fn verify_skips_listed_extensions_from_source_scan() {
         false,
         None,
     );
-    assert_eq!((report.scanned, report.compared), (1, 1));
+    assert_eq!((report.scanned, report.compared), (2, 1));
+}
+
+#[test]
+fn verify_scanned_counts_empty_files_as_touched() {
+    crate::install_config_loader();
+    let src = tempfile::tempdir().unwrap();
+    std::fs::copy("tests/data/sample-with-exif.jpg", src.path().join("a.jpg")).unwrap();
+    std::fs::write(src.path().join("empty.jpg"), b"").unwrap();
+    let out = tempfile::tempdir().unwrap();
+    let be: std::sync::Arc<dyn crate::entities::backend::Backend> =
+        crate::adapters::backend::local::LocalBackend::arc();
+    let loc = |p: &std::path::Path| {
+        crate::entities::uri::Location::Local(camino::Utf8PathBuf::from(p.to_str().unwrap()))
+    };
+    let report = super::verify(
+        &[(loc(src.path()), be.clone())],
+        &(loc(out.path()), be),
+        super::DEFAULT_PHASH_MAX,
+        false,
+        None,
+    );
+    assert_eq!((report.scanned, report.compared), (2, 1));
 }

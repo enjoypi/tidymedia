@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { buildCli, findGnuTime, parseTimeV, psSampleScript, renderReport } from "../../scripts/perf-collect.ts";
+import { buildCli, findGnuTime, parseTimeV, psSampleScript, renderReport, validateArgs } from "../../scripts/perf-collect.ts";
 
 test("buildCli verify 不加 --dry-run 且带 -o", () => {
   expect(buildCli("verify", "S", [], "R.json", "O")).toEqual(["verify", "S", "-o", "O", "--report", "R.json"]);
@@ -80,6 +80,24 @@ test("findGnuTime 候选不含 /usr/bin/time 且全缺返回 null", () => {
     }),
   ).toBeNull();
   expect(probed).toEqual(["/usr/local/bin/gtime", "/opt/homebrew/bin/gtime"]);
+});
+
+test("validateArgs 除 find 外强制 --output-target", () => {
+  for (const sub of ["copy", "move", "move-text-shot", "verify"]) {
+    expect(validateArgs({ sub, data: "S", "output-dir": "O" })).toBe("--output-target");
+    expect(validateArgs({ sub, data: "S", "output-dir": "O", "output-target": "T" })).toBeNull();
+  }
+});
+
+test("validateArgs find 无需 --output-target", () => {
+  expect(validateArgs({ sub: "find", data: "S", "output-dir": "O" })).toBeNull();
+});
+
+test("validateArgs 缺 sub/data/output-dir 分别报错", () => {
+  expect(validateArgs({})).toBe("--sub");
+  expect(validateArgs({ sub: "nope", data: "S", "output-dir": "O" })).toBe("--sub");
+  expect(validateArgs({ sub: "find" })).toBe("--data");
+  expect(validateArgs({ sub: "find", data: "S" })).toBe("--output-dir");
 });
 
 test("renderReport 系统资源标题只引用 gtime", () => {

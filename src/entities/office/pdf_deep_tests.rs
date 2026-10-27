@@ -5,6 +5,7 @@ use super::{
     extract_text_from_buf as pdf_extract_text_from_buf, parse as pdf_parse,
 };
 use crate::entities::office::tests_common::FailReader;
+use crate::entities::office::tests_common::utc_offset;
 
 #[test]
 fn pdf_parse_extracts_head_window_dates() {
@@ -12,7 +13,7 @@ fn pdf_parse_extracts_head_window_dates() {
         b"%PDF-1.4\n<< /CreationDate (D:20170214103000Z) /ModDate (D:20180101120000Z) >>".to_vec();
     let mut reader = Cursor::new(pdf);
     assert_eq!(
-        pdf_parse(&mut reader, "application/pdf"),
+        pdf_parse(&mut reader, "application/pdf", utc_offset()),
         (1_487_068_200, 1_514_808_000)
     );
 }

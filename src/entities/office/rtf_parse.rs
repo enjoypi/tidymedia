@@ -112,7 +112,7 @@ pub fn consume_control(rest: &[u8], text: &mut Vec<u8>) -> usize {
     }
     if word == b"u" {
         if let Ok(n) = std::str::from_utf8(&rest[num_start..j])
-            .expect("internal: digit/dash bytes are ASCII")
+            .unwrap_or_default()
             .parse::<i32>()
         {
             let code = if n < 0 { n + 65_536 } else { n };
@@ -156,7 +156,7 @@ pub fn scan_int_after<T: std::str::FromStr>(buf: &[u8], key: &[u8]) -> Option<T>
         return None;
     }
     std::str::from_utf8(&after[..end])
-        .expect("internal: digit/dash bytes are ASCII")
+        .unwrap_or_default()
         .parse()
         .ok()
 }

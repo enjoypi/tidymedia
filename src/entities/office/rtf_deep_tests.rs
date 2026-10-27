@@ -102,3 +102,33 @@ fn scan_int_after_u32_covers_all_branches() {
     assert_eq!(rtf_scan_int_after::<u32>(br"\yr4x", b"\\yr"), Some(4));
     assert_eq!(rtf_scan_int_after::<u32>(br"\yr99999999999", b"\\yr"), None);
 }
+
+#[test]
+fn consume_control_u_digits_before_multibyte_stops_at_lead_byte() {
+    let (n, text) = consume("u65é".as_bytes());
+    assert_eq!((n, text), (3, b"A".to_vec()));
+}
+
+#[test]
+fn scan_int_after_stops_before_multibyte() {
+    assert_eq!(
+        rtf_scan_int_after::<i32>(br"\yr2017\xe5\x8f\x91", b"\\yr"),
+        Some(2017)
+    );
+}
+
+#[test]
+fn strip_rtf_multibyte_after_u_escape_does_not_panic() {
+    let mut out = String::new();
+    rtf_strip_rtf_into("{\\rtf1 \\u65é}".as_bytes(), &mut out, 64);
+    assert_eq!(out, "Aé");
+}
+
+#[test]
+fn scan_time_group_ignores_multibyte_tail_in_group() {
+    let rtf = br"\creatim\yr2017\mo2\dy14\xe5\x8f\x91";
+    assert_eq!(
+        super::scan_time_group(rtf, b"\\creatim"),
+        Some(1_487_030_400)
+    );
+}

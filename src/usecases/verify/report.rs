@@ -4,7 +4,6 @@ use serde_derive::Serialize;
 
 use crate::usecases::report::ReportError;
 
-/// verify 操作报告。`scanned` = 源端 walker 触达文件数（与 `CopyReport` 同口径）；
 /// `compared` = 进入逐项对账的文件数；`mismatched` = 归档桶对账不一致的条目数；
 /// `decision_failed` = 无 P0..P4 候选可裁决（`media_time_decision` 为 None）的文件数。
 /// `dry_run` 恒 true：verify 只诊断不写盘。

@@ -11,11 +11,7 @@ mod partial_move;
 pub use self::output_write::{is_output_write_denied, output_write_error};
 pub(crate) use self::partial_move::{is_partial_move, partial_move_error};
 
-/// `stream_copy` 的 `BufReader` / `BufWriter` 容量：1 MiB 让远端单文件大视频的
-/// `std::io::copy` 默认 8 KiB stack buffer 减少 128× syscall / RTT 次数；本地
-/// buffered IO 仍受益（每 1 MiB 一次 write syscall）。CLAUDE.md 例外「算法/IO
-/// 边界常量」列表内，不外置到 config。
-const STREAM_BUFFER_BYTES: usize = 1 << 20;
+pub(crate) const STREAM_BUFFER_BYTES: usize = 1 << 20;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum EntryKind {
@@ -39,7 +35,6 @@ pub struct Metadata {
     pub created: Option<SystemTime>,
 }
 
-/// 可被 Backend 抽象返回的"按字节读"句柄。本地实现包 mmap-Cursor，
 /// 远程实现走客户端 `read_at` + 内部缓冲；两者都暴露 [`Read`] + [`Seek`]。
 /// `Debug` supertrait 是为了让 `Result<Box<dyn MediaReader>, _>::unwrap_err()`
 /// 等惯用模式可用——所有具体实现自行 derive 或手写。

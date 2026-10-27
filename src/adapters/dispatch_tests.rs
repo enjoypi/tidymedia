@@ -124,3 +124,138 @@ fn move_with_partial_move_rename_registers_dst_index_and_fails() {
     assert_eq!(report.failed, 1);
     assert_eq!(report.copied, 0);
 }
+
+#[test]
+fn tidy_with_prechecks_config_before_dispatch() {
+    crate::usecases::config::install_loader(|| Err("cfg broken".to_string()));
+    let dir = tempdir().unwrap();
+    let root = dir.path().to_str().unwrap().to_string();
+    let result = tidy_with(
+        &AlwaysSameBackendFactory(Arc::new(FakeBackend::new("local"))),
+        &DefaultDetectorFactory,
+        Commands::Move {
+            dry_run: true,
+            include_non_media: false,
+            sources: vec![Location::Local(Utf8PathBuf::from(format!("{root}/src")))],
+            output: Location::Local(Utf8PathBuf::from(format!("{root}/out"))),
+            archive_template: None,
+            report: None,
+        },
+    );
+    let err = result.expect_err("precheck must fail");
+    assert!(format!("{err}").contains("cfg broken"), "got: {err}");
+}
+
+struct LocalOnlyFactory;
+
+impl BackendFactory for LocalOnlyFactory {
+    fn for_location(&self, _loc: &Location) -> Result<Arc<dyn Backend>> {
+        Ok(crate::adapters::backend::local::LocalBackend::arc())
+    }
+}
+
+fn local_loc_str(p: &std::path::Path) -> Location {
+    Location::Local(Utf8PathBuf::from(p.to_str().unwrap()))
+}
+
+#[test]
+fn find_report_write_failure_exits_nonzero() {
+    let src = tempdir().unwrap();
+    let result = tidy_with(
+        &LocalOnlyFactory,
+        &DefaultDetectorFactory,
+        Commands::Find {
+            secure: false,
+            sources: vec![local_loc_str(src.path())],
+            output: None,
+            report: Some("/nonexistent_dir_xyz/find_report.json".to_string()),
+        },
+    );
+    let err = result.expect_err("report write failure must propagate");
+    assert!(
+        err.to_string().contains("nonexistent_dir_xyz"),
+        "got: {err}"
+    );
+}
+
+#[test]
+fn verify_report_write_failure_exits_nonzero() {
+    let src = tempdir().unwrap();
+    let out = tempdir().unwrap();
+    let result = tidy_with(
+        &LocalOnlyFactory,
+        &DefaultDetectorFactory,
+        Commands::Verify {
+            sources: vec![local_loc_str(src.path())],
+            output: local_loc_str(out.path()),
+            include_non_media: false,
+            exif_tsv: None,
+            phash_max: None,
+            report: Some("/nonexistent_dir_xyz/verify_report.json".to_string()),
+        },
+    );
+    let err = result.expect_err("report write failure must propagate");
+    assert!(
+        err.to_string().contains("nonexistent_dir_xyz"),
+        "got: {err}"
+    );
+}
+
+#[derive(Debug)]
+struct StubTextDetector;
+
+impl crate::usecases::ocr::TextDetector for StubTextDetector {
+    fn has_text(&self, _path: &camino::Utf8Path, _image_bytes: &[u8]) -> io::Result<bool> {
+        Ok(false)
+    }
+}
+
+#[derive(Debug)]
+struct StubClassifier;
+
+impl crate::usecases::classify::DocumentClassifier for StubClassifier {
+    fn classify(
+        &self,
+        _path: &camino::Utf8Path,
+        _text: &str,
+    ) -> io::Result<crate::usecases::classify::Classification> {
+        unreachable!("move-text-shot dispatch 不构造文档分类器")
+    }
+}
+
+struct StubDetectorFactory;
+
+impl crate::usecases::detector::DetectorFactory for StubDetectorFactory {
+    fn build_text_detector(&self) -> io::Result<Box<dyn crate::usecases::ocr::TextDetector>> {
+        Ok(Box::new(StubTextDetector))
+    }
+
+    fn build_document_classifier(
+        &self,
+    ) -> io::Result<Box<dyn crate::usecases::classify::DocumentClassifier>> {
+        Ok(Box::new(StubClassifier))
+    }
+}
+
+#[test]
+fn move_text_shot_report_write_failure_exits_nonzero() {
+    let src = tempdir().unwrap();
+    let out = tempdir().unwrap();
+    let result = tidy_with(
+        &LocalOnlyFactory,
+        &StubDetectorFactory,
+        Commands::MoveTextShot {
+            dry_run: false,
+            sources: vec![local_loc_str(src.path())],
+            output: local_loc_str(out.path()),
+            report: Some("/nonexistent_dir_xyz/mts_report.json".to_string()),
+        },
+    );
+    let err = result.expect_err("report write failure must propagate");
+    assert!(
+        err.to_string().contains("nonexistent_dir_xyz"),
+        "got: {err}"
+    );
+}
+
+include!("dispatch_more_tests.rs");

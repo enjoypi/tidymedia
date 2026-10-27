@@ -25,6 +25,13 @@ pub struct VisitStats {
     pub skipped_by_ext: u64,
 }
 
+impl VisitStats {
+    #[must_use]
+    pub fn skipped_total(&self) -> u64 {
+        self.skipped_empty + self.skipped_unreadable + self.walker_errors + self.skipped_by_ext
+    }
+}
+
 pub struct Index {
     similar_files: DashMap<u64, Mutex<HashSet<Utf8PathBuf>>>,
     files: DashMap<Utf8PathBuf, Info>,
@@ -130,6 +137,11 @@ impl Index {
         }
 
         bytes_read
+    }
+
+    #[must_use]
+    pub fn touched_count(&self) -> usize {
+        self.len() + usize::try_from(self.stats.skipped_total()).unwrap_or(usize::MAX)
     }
 }
 

@@ -68,13 +68,19 @@ fn remove_src_after_stream_copy(
 
 #[inline(never)]
 pub(super) fn refuse_self_duplicate(src: &Location, dup: &Utf8Path) -> common::Result<()> {
-    let Location::Local(p) = src else {
-        return Ok(());
+    let same = match src {
+        Location::Local(p) => common::canonical_paths_equal(p, dup),
+        Location::Smb { .. } => {
+            common::canonical_prefix(src) == common::key_from_display(dup.as_str())
+        }
     };
-    if common::canonical_paths_equal(p, dup) {
+    if same {
         return Err(common::Error::Io(std::io::Error::new(
             std::io::ErrorKind::InvalidInput,
-            format!("refusing to remove {p}: it is the output duplicate {dup} itself"),
+            format!(
+                "refusing to remove {}: it is the output duplicate {dup} itself",
+                src.display()
+            ),
         )));
     }
     Ok(())

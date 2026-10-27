@@ -1,11 +1,15 @@
 #[path = "paths_io.rs"]
 mod paths_io;
 
+#[cfg(test)]
 use std::io;
 
+#[cfg(test)]
 use camino::Utf8Path;
+#[cfg(test)]
 use camino::Utf8PathBuf;
 
+#[cfg(test)]
 pub fn full_path(path: &str) -> io::Result<Utf8PathBuf> {
     let full = Utf8Path::new(path);
     if full.is_absolute() {

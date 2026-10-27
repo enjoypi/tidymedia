@@ -3,6 +3,7 @@ use std::io;
 use tempfile::tempdir;
 
 use super::{JsonFileReportSink, TempPersist, write_and_persist};
+use crate::entities::common;
 use crate::usecases::report::{CopyReport, FindReport, Report};
 
 struct WriteFails;
@@ -81,7 +82,7 @@ fn sink_writes_valid_copy_json() {
     let path = dir.path().join("report.json");
     let sink = JsonFileReportSink::new(path.to_str().unwrap());
     let r = sample_copy_report();
-    sink.write(&Report::Copy(&r));
+    sink.write(&Report::Copy(&r)).unwrap();
     let content = std::fs::read_to_string(&path).unwrap();
     let parsed: serde_json::Value = serde_json::from_str(&content).unwrap();
     assert_eq!(parsed["scanned"], 5);
@@ -95,7 +96,7 @@ fn sink_writes_valid_find_json() {
     let path = dir.path().join("find_report.json");
     let sink = JsonFileReportSink::new(path.to_str().unwrap());
     let r = sample_find_report();
-    sink.write(&Report::Find(&r));
+    sink.write(&Report::Find(&r)).unwrap();
     let content = std::fs::read_to_string(&path).unwrap();
     let parsed: serde_json::Value = serde_json::from_str(&content).unwrap();
     assert_eq!(parsed["scanned"], 10);
@@ -109,18 +110,45 @@ fn sink_writes_valid_find_json() {
 }
 
 #[test]
-fn sink_copy_invalid_path_only_warns() {
-    // 父目录不存在 → warn 不 panic
+fn sink_copy_invalid_path_returns_err() {
     let sink = JsonFileReportSink::new("/nonexistent_dir_xyz/r.json");
     let r = sample_copy_report();
-    sink.write(&Report::Copy(&r));
+    let err = sink.write(&Report::Copy(&r)).unwrap_err();
+    let common::Error::Io(io_err) = err;
+    assert_eq!(io_err.kind(), io::ErrorKind::NotFound);
 }
 
 #[test]
-fn sink_find_invalid_path_only_warns() {
+fn sink_find_invalid_path_returns_err() {
     let sink = JsonFileReportSink::new("/nonexistent_dir_xyz/r.json");
     let r = sample_find_report();
-    sink.write(&Report::Find(&r));
+    let err = sink.write(&Report::Find(&r)).unwrap_err();
+    let common::Error::Io(io_err) = err;
+    assert_eq!(io_err.kind(), io::ErrorKind::NotFound);
+}
+
+#[test]
+fn sink_move_text_shot_invalid_path_returns_err() {
+    let sink = JsonFileReportSink::new("/nonexistent_dir_xyz/r.json");
+    let r = crate::usecases::move_text_shot::MoveTextShotReport {
+        scanned: 1,
+        ..Default::default()
+    };
+    let err = sink.write(&Report::MoveTextShot(&r)).unwrap_err();
+    let common::Error::Io(io_err) = err;
+    assert_eq!(io_err.kind(), io::ErrorKind::NotFound);
+}
+
+#[test]
+fn sink_verify_invalid_path_returns_err() {
+    let sink = JsonFileReportSink::new("/nonexistent_dir_xyz/r.json");
+    let r = crate::usecases::verify::VerifyReport {
+        scanned: 1,
+        ..Default::default()
+    };
+    let err = sink.write(&Report::Verify(&r)).unwrap_err();
+    let common::Error::Io(io_err) = err;
+    assert_eq!(io_err.kind(), io::ErrorKind::NotFound);
 }
 
 #[test]
@@ -130,7 +158,14 @@ fn sink_copy_persist_fails_when_target_is_directory() {
     std::fs::create_dir(&target).unwrap();
     std::fs::write(target.join("placeholder"), b"x").unwrap();
     let sink = JsonFileReportSink::new(target.to_str().unwrap());
-    sink.write(&Report::Copy(&sample_copy_report()));
+    let err = sink
+        .write(&Report::Copy(&sample_copy_report()))
+        .unwrap_err();
+    let common::Error::Io(io_err) = err;
+    assert!(
+        io_err.to_string().contains("cannot write report to"),
+        "got: {io_err}"
+    );
     assert!(target.is_dir());
 }
 
@@ -141,7 +176,14 @@ fn sink_find_persist_fails_when_target_is_directory() {
     std::fs::create_dir(&target).unwrap();
     std::fs::write(target.join("placeholder"), b"x").unwrap();
     let sink = JsonFileReportSink::new(target.to_str().unwrap());
-    sink.write(&Report::Find(&sample_find_report()));
+    let err = sink
+        .write(&Report::Find(&sample_find_report()))
+        .unwrap_err();
+    let common::Error::Io(io_err) = err;
+    assert!(
+        io_err.to_string().contains("cannot write report to"),
+        "got: {io_err}"
+    );
     assert!(target.is_dir());
 }
 

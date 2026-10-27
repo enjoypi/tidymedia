@@ -4,14 +4,17 @@
 
 use std::collections::HashMap;
 use std::io;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
 
 use camino::Utf8PathBuf;
 
 use super::remote::RemoteClient;
 use super::remote::RemoteTarget;
-use crate::entities::backend::{Entry, EntryKind, Metadata};
+use crate::entities::backend::{Entry, EntryKind, MediaWriter, Metadata};
+
+#[path = "fake_remote_writer_tests.rs"]
+mod writer;
 
 /// `child` 是否为 `parent` 目录的直属项（parent/<name>，<name> 不含分隔符）。
 /// 不复用 `under_prefix`：那个函数把 path == prefix 也算 true，且不剥分隔符之后的
@@ -76,8 +79,8 @@ fn file_meta(size: u64) -> Metadata {
 /// 统一远端 Fake Client。`error_factory` 允许 SMB 注入 EACCES 文案让
 /// `map_error` 识别；默认 `|k| k.into()` 直接按 kind 构造。
 pub(crate) struct FakeRemoteClient<T: RemoteTarget> {
-    files: Mutex<HashMap<Utf8PathBuf, FileEntry>>,
-    op_errors: Mutex<HashMap<(RemoteFakeOp, Utf8PathBuf), io::ErrorKind>>,
+    files: Arc<Mutex<HashMap<Utf8PathBuf, FileEntry>>>,
+    op_errors: Arc<Mutex<HashMap<(RemoteFakeOp, Utf8PathBuf), io::ErrorKind>>>,
     pub spy: Mutex<Spy<T>>,
     error_factory: fn(io::ErrorKind) -> io::Error,
 }
@@ -85,8 +88,8 @@ pub(crate) struct FakeRemoteClient<T: RemoteTarget> {
 impl<T: RemoteTarget> FakeRemoteClient<T> {
     pub fn new() -> Self {
         Self {
-            files: Mutex::new(HashMap::new()),
-            op_errors: Mutex::new(HashMap::new()),
+            files: Arc::new(Mutex::new(HashMap::new())),
+            op_errors: Arc::new(Mutex::new(HashMap::new())),
             spy: Mutex::new(Spy::new()),
             error_factory: |k| io::Error::from(k),
         }
@@ -219,19 +222,17 @@ impl<T: RemoteTarget> RemoteClient<T> for FakeRemoteClient<T> {
             .ok_or_else(|| io::Error::from(io::ErrorKind::NotFound))
     }
 
-    fn write(&self, target: &T, data: &[u8]) -> io::Result<u64> {
+    fn create_writer(&self, target: &T) -> io::Result<Box<dyn MediaWriter>> {
         self.record(target);
-        self.check(RemoteFakeOp::Write, target.path())?;
-        let size = data.len() as u64;
-        let mut s = self.files.lock().unwrap();
-        s.insert(
-            target.path().to_path_buf(),
-            FileEntry {
-                data: data.to_vec(),
-                meta: file_meta(size),
-            },
-        );
-        Ok(size)
+        if self.files.lock().unwrap().contains_key(target.path()) {
+            return Err(io::Error::from(io::ErrorKind::AlreadyExists));
+        }
+        Ok(Box::new(writer::FakeRemoteWriter::new(
+            target.clone(),
+            Arc::clone(&self.files),
+            Arc::clone(&self.op_errors),
+            self.error_factory,
+        )))
     }
 
     fn unlink(&self, target: &T) -> io::Result<()> {

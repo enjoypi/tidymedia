@@ -48,7 +48,7 @@ pub fn build_smb_backend(loc: &Location) -> Result<Arc<dyn Backend>> {
         password: std::env::var("SMB_PASSWORD").ok(),
         krb5_ccname: std::env::var("KRB5CCNAME").ok(),
     };
-    let cfg = &crate::usecases::config::config().backend.smb;
+    let cfg = &crate::usecases::config::checked_config()?.backend.smb;
     let client = RealSmbClient::new(&target, &cfg.default_user, &cfg.workgroup, cfg.timeout_secs)?;
     Ok(SmbBackend::arc_with_client(Arc::new(client)))
 }

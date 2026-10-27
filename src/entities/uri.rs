@@ -127,6 +127,31 @@ impl Location {
     }
 
     #[must_use]
+    pub(crate) fn storage_key(&self) -> String {
+        match self {
+            Self::Local(path) => path.to_string(),
+            Self::Smb {
+                host,
+                port,
+                share,
+                path,
+                ..
+            } => {
+                let port = port
+                    .filter(|p| *p != 445)
+                    .map_or_default(|p| format!(":{p}"));
+                format!(
+                    "smb://{}{}/{}/{}",
+                    host.to_ascii_lowercase(),
+                    port,
+                    share.to_ascii_lowercase(),
+                    path.as_str().to_ascii_lowercase()
+                )
+            }
+        }
+    }
+
+    #[must_use]
     pub fn display(&self) -> String {
         match self {
             Self::Local(path) => path.to_string(),

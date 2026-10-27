@@ -127,16 +127,28 @@ fn ignore_to_io_handles_io_variant_propagates_kind() {
     assert_eq!(io_err.kind(), io::ErrorKind::PermissionDenied);
 }
 
-// `open_read_inner_with` 注入 mock mmap_fn 触发 line 247 mmap `?` Err arm。
-fn mock_mmap_fails(_: &fs::File) -> io::Result<memmap2::Mmap> {
-    Err(io::Error::other("inject mmap fail"))
+fn mock_open_fails(_: &std::path::Path) -> io::Result<fs::File> {
+    Err(io::Error::other("inject open fail"))
 }
 
 #[test]
-fn open_read_inner_propagates_mmap_err() {
+fn open_read_inner_propagates_open_err() {
+    let err = super::open_read_inner_with(std::path::Path::new("/x/nope.bin"), mock_open_fails)
+        .unwrap_err();
+    assert!(err.to_string().contains("inject open fail"), "{err}");
+}
+
+#[test]
+fn open_read_inner_reads_and_seeks_buffered() {
     let dir = tempdir().unwrap();
     let f = dir.path().join("ok.bin");
     fs::write(&f, b"hello").unwrap();
-    let err = super::open_read_inner_with(&f, mock_mmap_fails).unwrap_err();
-    assert!(err.to_string().contains("inject mmap fail"), "{err}");
+    let mut r = super::open_read_inner_with(&f, super::local_io::real_open).unwrap();
+    let mut buf = String::new();
+    r.read_to_string(&mut buf).unwrap();
+    assert_eq!(buf, "hello");
+    r.seek(SeekFrom::Start(1)).unwrap();
+    let mut rest = String::new();
+    r.read_to_string(&mut rest).unwrap();
+    assert_eq!(rest, "ello");
 }

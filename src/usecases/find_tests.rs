@@ -29,7 +29,7 @@ fn local_dir(p: &std::path::Path) -> (Location, Arc<dyn Backend>) {
 
 fn run_render(same: &[DuplicateGroup], prefix: Option<&str>) -> String {
     let mut sink: Vec<u8> = Vec::new();
-    render_script(same, prefix, &mut sink);
+    render_script(same, prefix, &mut sink).unwrap();
     String::from_utf8(sink).unwrap()
 }
 

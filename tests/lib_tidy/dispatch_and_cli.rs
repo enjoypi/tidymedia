@@ -2,7 +2,8 @@
 //! 从 `tests/lib_tidy.rs` 拆出避免单文件 > 512 行。
 
 use tempfile::tempdir;
-use tidymedia::{Commands, DefaultDetectorFactory, run_cli, tidy, tidy_with};
+use tidymedia::{Commands, DefaultDetectorFactory};
+use tidymedia::{run_cli, tidy, tidy_with};
 
 use super::FakeBackendFactory;
 use super::{DATA_DIR, local};

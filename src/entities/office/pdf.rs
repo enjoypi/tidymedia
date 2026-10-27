@@ -1,5 +1,7 @@
 use std::ops::Range;
 
+use chrono::FixedOffset;
+
 use crate::entities::backend::MediaReader;
 
 use super::read_io;
@@ -22,11 +24,11 @@ pub use text::extract_text_from_buf;
 const PDF_SCAN_BYTES: u64 = 64 * 1024;
 
 #[doc(hidden)]
-pub fn parse(reader: &mut dyn MediaReader, _mime: &str) -> (u64, u64) {
+pub fn parse(reader: &mut dyn MediaReader, _mime: &str, default_offset: FixedOffset) -> (u64, u64) {
     let Some(buf) = read_windows(reader) else {
         return (0, 0);
     };
-    extract_dates(&buf)
+    extract_dates(&buf, default_offset)
 }
 
 #[doc(hidden)]
@@ -73,3 +75,7 @@ mod deep_tests;
 #[cfg(test)]
 #[path = "pdf_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "pdf_tz_tests.rs"]
+mod tz_tests;

@@ -57,7 +57,7 @@ pub(super) fn route_reader(
         // 办公文档（PDF / OOXML / CFB / iWork / ODF / RTF / EPUB / 思维导图 /
         // 纯文本）走独立分流，不读 EXIF / XMP；子模块返 (created, modified)
         // 二元组归一为 Unix UTC epoch。`reader.as_mut()` 借引用，函数末尾 Drop。
-        populate_document_dates(reader.as_mut(), mime_type, &mut exif);
+        populate_document_dates(reader.as_mut(), mime_type, &mut exif, local_offset);
     }
     exif
 }

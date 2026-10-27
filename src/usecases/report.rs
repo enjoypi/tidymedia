@@ -63,7 +63,6 @@ pub fn extend_errors_capped(
 )]
 #[derive(Debug, Serialize)]
 pub struct CopyReport {
-    /// walker 触达的源端文件总数（含 `skipped_empty` / `skipped_unreadable` / `walker_errors`）。
     pub scanned: usize,
     pub copied: usize,
     pub ignored: usize,
@@ -88,9 +87,6 @@ pub struct CopyReport {
     pub duration_ms: u64,
 }
 
-/// find 操作报告。`scanned` = Index 中实际入索引的文件总数（不仅是重复组路径数）；
-/// `bytes_read` = 流式哈希过程中累计读取的字节数；`groups` 保留每组完整字段（size + paths）
-/// 不展平，让下游按 size 过滤或排序时不丢信息（`render_script` 的 `# SIZE N` 注释亦此口径）。
 #[derive(Debug, Default, Serialize)]
 pub struct FindReport {
     pub scanned: usize,
@@ -127,9 +123,8 @@ pub enum Report<'a> {
 
 /// 报告输出端：序列化格式 + 持久化机制由实现者决定（JSON 写盘 / stdout / 推送…）。
 /// Use Case 仅持有 trait 引用，不知道协议与 IO 细节。单方法 `write` 替代旧 `write_copy` /
-/// `write_find` 双方法 boilerplate（同时保持对象安全）。
 pub trait ReportSink: Send + Sync {
-    fn write(&self, report: &Report<'_>);
+    fn write(&self, report: &Report<'_>) -> crate::entities::common::Result<()>;
 }
 
 #[cfg(test)]

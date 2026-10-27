@@ -7,6 +7,7 @@ use std::sync::Arc;
 use camino::Utf8PathBuf;
 use tempfile::tempdir;
 
+use super::index::ensure_sources_outside_output;
 use super::*;
 use crate::adapters::backend::local::LocalBackend;
 use crate::entities::backend::Backend;
@@ -37,6 +38,15 @@ fn run(
 }
 
 // source == output：move 会把每个源文件判为 output 中已存在的副本并删除自身。
+#[test]
+fn copy_rejects_smb_source_inside_output_with_uri_alias() {
+    let src = Location::parse("smb://user@NAS:445/Share/Photos").unwrap();
+    let out = Location::parse("smb://nas/share").unwrap();
+    let sources = vec![(src, LocalBackend::arc() as Arc<dyn Backend>)];
+    let err = ensure_sources_outside_output(&sources, &canonical_prefix(&out)).unwrap_err();
+    assert!(err.to_string().contains("inside output"));
+}
+
 #[test]
 fn copy_rejects_source_equal_to_output() {
     let dir = tempdir().unwrap();

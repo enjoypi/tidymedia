@@ -81,14 +81,25 @@ fn open_read_err_propagates() {
 fn open_write_mkparents_false() {
     let w = backend().open_write(&loc(), false).unwrap();
     let s = format!("{w:?}");
-    assert!(s.contains("RemoteBufferedWriter"));
+    assert!(s.contains("DummyWriter"));
 }
 
 #[test]
 fn open_write_mkparents_true_ok() {
     let w = backend().open_write(&loc(), true).unwrap();
     let s = format!("{w:?}");
-    assert!(s.contains("RemoteBufferedWriter"));
+    assert!(s.contains("DummyWriter"));
+}
+
+#[test]
+fn open_write_flush_error_propagates() {
+    let b = backend_with_client(DummyClient {
+        write: Some(io::ErrorKind::TimedOut),
+        ..Default::default()
+    });
+    let mut writer = b.open_write(&loc(), false).unwrap();
+    let err = io::Write::flush(&mut writer).unwrap_err();
+    assert_eq!(err.kind(), io::ErrorKind::TimedOut);
 }
 
 #[test]
@@ -139,9 +150,6 @@ fn read_to_string_invalid_utf8() {
         fn read(&self, _t: &DummyTarget) -> io::Result<Vec<u8>> {
             Ok(vec![0xff, 0xfe]) // invalid UTF-8
         }
-        fn write(&self, _t: &DummyTarget, _data: &[u8]) -> io::Result<u64> {
-            unreachable!()
-        }
         fn unlink(&self, _t: &DummyTarget) -> io::Result<()> {
             unreachable!()
         }
@@ -180,9 +188,6 @@ fn read_to_string_accepts_size_exactly_at_cap() {
             // stat 报告值，read 返回少量字节用于断言路径未被错拒。
             Ok(b"ok".to_vec())
         }
-        fn write(&self, _t: &DummyTarget, _data: &[u8]) -> io::Result<u64> {
-            unreachable!()
-        }
         fn unlink(&self, _t: &DummyTarget) -> io::Result<()> {
             unreachable!()
         }
@@ -219,9 +224,6 @@ fn read_to_string_rejects_file_above_size_cap() {
         fn read(&self, _t: &DummyTarget) -> io::Result<Vec<u8>> {
             // 超限时不应到此：unreachable 既验证短路也用作 mutation kill。
             unreachable!("read must not be called when stat exceeds MAX_TEXT_BYTES")
-        }
-        fn write(&self, _t: &DummyTarget, _data: &[u8]) -> io::Result<u64> {
-            unreachable!()
         }
         fn unlink(&self, _t: &DummyTarget) -> io::Result<()> {
             unreachable!()

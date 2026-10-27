@@ -55,5 +55,35 @@ fn cli_unknown_subcommand_fails() {
         .failure();
 }
 
+#[test]
+fn cli_report_write_failures_exit_nonzero() {
+    let src = tempfile::tempdir().unwrap();
+    let out = tempfile::tempdir().unwrap();
+    let report = "/nonexistent_dir_xyz/report.json";
+    let src = src.path().to_str().unwrap();
+    let out = out.path().to_str().unwrap();
+    tidymedia()
+        .args(["find", src, "-o", out, "--report", report])
+        .assert()
+        .failure();
+    tidymedia()
+        .args([
+            "move-text-shot",
+            "--dry-run",
+            src,
+            "-o",
+            out,
+            "--report",
+            report,
+        ])
+        .env("TIDYMEDIA_OCR_DET_MODEL", "unused.onnx")
+        .assert()
+        .failure();
+    tidymedia()
+        .args(["verify", src, "-o", out, "--report", report])
+        .assert()
+        .failure();
+}
+
 #[path = "support/tracing_fixture_tests.rs"]
 mod tracing_fixture;

@@ -93,7 +93,7 @@ pub(crate) fn do_copy(
                     if e.kind() == std::io::ErrorKind::AlreadyExists {
                         continue;
                     }
-                    return Err(output_write_error(e).into());
+                    return Err(e.into());
                 }
             }
         }

@@ -5,6 +5,8 @@ use chrono::{FixedOffset, Offset, Utc};
 use serde_derive::Deserialize;
 use time::UtcOffset;
 
+use crate::entities::common::Error;
+
 #[path = "config_models.rs"]
 mod config_models;
 #[allow(unused_imports)]
@@ -13,19 +15,32 @@ pub use config_models::{
     SmbBackendConfig, VerifyConfig,
 };
 
-static CONFIG: Mutex<Option<&'static Config>> = Mutex::new(None);
-static LOADER: Mutex<Option<fn() -> Config>> = Mutex::new(None);
+type ConfigLoader = fn() -> Result<Config, String>;
 
-pub fn config() -> &'static Config {
-    let mut guard = CONFIG.lock().unwrap_or_else(PoisonError::into_inner);
-    guard.get_or_insert_with(|| {
+static RESULT: Mutex<Option<&'static Result<Config, String>>> = Mutex::new(None);
+static LOADER: Mutex<Option<ConfigLoader>> = Mutex::new(None);
+
+pub fn try_config() -> Result<&'static Config, String> {
+    let mut guard = RESULT.lock().unwrap_or_else(PoisonError::into_inner);
+    let res = guard.get_or_insert_with(|| {
         let ldr = LOADER.lock().unwrap_or_else(PoisonError::into_inner);
-        let loader: Option<fn() -> Config> = *ldr;
-        Box::leak(Box::new(loader.map_or_else(Config::default, |f| f())))
-    })
+        let loader: Option<ConfigLoader> = *ldr;
+        Box::leak(Box::new(
+            loader.map_or_else(|| Ok(Config::default()), |f| f()),
+        ))
+    });
+    res.as_ref().map_err(Clone::clone)
 }
 
-pub fn install_loader(loader: fn() -> Config) {
+pub fn config() -> &'static Config {
+    try_config().expect("internal: config() requires successful try_config() precheck")
+}
+
+pub fn checked_config() -> crate::entities::common::Result<&'static Config> {
+    try_config().map_err(|e| Error::Io(std::io::Error::other(e)))
+}
+
+pub fn install_loader(loader: fn() -> Result<Config, String>) {
     *LOADER.lock().unwrap_or_else(PoisonError::into_inner) = Some(loader);
 }
 
@@ -84,7 +99,7 @@ pub fn validate_archive_template(template: &str) -> Result<(), String> {
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct Config {
     pub copy: CopyConfig,
     pub exif: ExifConfig,

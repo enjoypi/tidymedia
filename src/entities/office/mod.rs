@@ -1,3 +1,5 @@
+use chrono::FixedOffset;
+
 use crate::entities::backend::MediaReader;
 
 pub mod cfb;
@@ -54,9 +56,13 @@ pub(crate) const MIME_TEXT_CSV: &str = "text/csv";
 pub(crate) const MIME_TEXT_TSV: &str = "text/tab-separated-values";
 
 #[doc(hidden)]
-pub fn populate_office_dates(reader: &mut dyn MediaReader, mime: &str) -> (u64, u64) {
+pub fn populate_office_dates(
+    reader: &mut dyn MediaReader,
+    mime: &str,
+    default_offset: FixedOffset,
+) -> (u64, u64) {
     if mime.starts_with(MIME_PDF) {
-        pdf::parse(reader, mime)
+        pdf::parse(reader, mime, default_offset)
     } else if is_ooxml_mime(mime) {
         ooxml::parse(reader, mime)
     } else if is_cfb_mime(mime) {

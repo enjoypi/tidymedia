@@ -57,7 +57,7 @@ pub(crate) fn verify(
     let tz = crate::usecases::config::config().copy.timezone_offset_hours;
     let offset = crate::usecases::config::chrono_offset_from_hours(tz);
     src_index.parse_exif(offset, include_non_media, false);
-    let scanned = src_index.len();
+    let scanned = src_index.touched_count();
     debug!(
         feature = FEATURE_VERIFY,
         operation = "scan_complete",

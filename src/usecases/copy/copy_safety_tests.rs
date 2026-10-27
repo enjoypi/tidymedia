@@ -190,6 +190,13 @@ fn move_refuses_to_delete_source_that_is_its_own_duplicate() {
 }
 
 #[test]
+fn refuse_self_duplicate_rejects_smb_uri_alias() {
+    let src = Location::parse("smb://user@NAS:445/Share/A.PNG").unwrap();
+    let dup = Utf8PathBuf::from("smb://nas/share/a.png");
+    assert!(refuse_self_duplicate(&src, &dup).is_err());
+}
+
+#[test]
 fn refuse_self_duplicate_allows_distinct_and_missing_and_remote() {
     let dir = tempdir().unwrap();
     let a = write_unique_png(dir.path(), "a.png", 1);

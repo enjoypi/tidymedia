@@ -345,3 +345,27 @@ fn into_infos_returns_every_indexed_file() {
         file_info::full_path(common::DATA_SMALL).unwrap()
     );
 }
+
+#[test]
+fn visit_stats_skipped_total_sums_four_skip_categories() {
+    let stats = super::VisitStats {
+        skipped_empty: 1,
+        skipped_unreadable: 2,
+        walker_errors: 3,
+        skipped_by_ext: 4,
+    };
+    assert_eq!(stats.skipped_total(), 10);
+    assert_eq!(super::VisitStats::default().skipped_total(), 0);
+}
+
+#[test]
+fn touched_count_equals_indexed_plus_all_skip_categories() {
+    let mut index = Index::new();
+    assert_eq!(index.touched_count(), 0);
+    index.insert(common::DATA_SMALL).unwrap();
+    index.stats.skipped_empty = 1;
+    index.stats.skipped_unreadable = 1;
+    index.stats.walker_errors = 1;
+    index.stats.skipped_by_ext = 1;
+    assert_eq!(index.touched_count(), 5);
+}

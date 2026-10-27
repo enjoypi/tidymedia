@@ -4,13 +4,66 @@
 //!（递归 walk / 递归 mkdir / 统一错误日志 / 缓冲写入）见 `remote_walk` / `remote_writer`。
 
 use std::io;
-use std::sync::Arc;
+
+use camino::Utf8PathBuf;
 
 use crate::entities::backend::{Backend, Entry, MediaReader, MediaWriter, Metadata};
 use crate::entities::uri::Location;
 
-use super::{MAX_TEXT_BYTES, RemoteAdapter, RemoteBackend, RemoteBufferedWriter, RemoteTarget};
+use super::{MAX_TEXT_BYTES, RemoteAdapter, RemoteBackend, RemoteTarget};
 use super::{map_and_log, mkdir_recursive, mkparent, walk_recursive};
+
+struct RemoteWriter {
+    inner: Box<dyn MediaWriter>,
+    path: Utf8PathBuf,
+    scheme: &'static str,
+    map_error: fn(io::Error) -> io::Error,
+}
+
+impl RemoteWriter {
+    fn new<A: RemoteAdapter>(inner: Box<dyn MediaWriter>, target: &A::Target) -> Self {
+        Self {
+            inner,
+            path: target.path().to_path_buf(),
+            scheme: A::scheme(),
+            map_error: A::map_error,
+        }
+    }
+
+    fn map(&self, operation: &'static str, error: io::Error) -> io::Error {
+        map_and_log(self.scheme, operation, &self.path, self.map_error, error)
+    }
+}
+
+impl std::fmt::Debug for RemoteWriter {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.inner.fmt(f)
+    }
+}
+
+impl io::Write for RemoteWriter {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        self.inner.write(buf).map_err(|e| self.map("write", e))
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.inner.flush().map_err(|e| self.map("flush", e))
+    }
+}
+
+impl MediaWriter for RemoteWriter {
+    fn finish(self: Box<Self>) -> io::Result<()> {
+        let Self {
+            inner,
+            path,
+            scheme,
+            map_error,
+        } = *self;
+        inner
+            .finish()
+            .map_err(|e| map_and_log(scheme, "finish", &path, map_error, e))
+    }
+}
 
 impl<A: RemoteAdapter> std::fmt::Debug for RemoteBackend<A> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -57,12 +110,10 @@ impl<A: RemoteAdapter> Backend for RemoteBackend<A> {
 
     fn open_read(&self, loc: &Location) -> io::Result<Box<dyn MediaReader>> {
         let target = self.build_target(loc)?;
-        let bytes = self
-            .adapter
+        self.adapter
             .client()
-            .read(&target)
-            .map_err(|e| map_and_log(A::scheme(), "read", target.path(), A::map_error, e))?;
-        Ok(Box::new(std::io::Cursor::new(bytes)))
+            .open_reader(&target)
+            .map_err(|e| map_and_log(A::scheme(), "open_reader", target.path(), A::map_error, e))
     }
 
     fn open_write(&self, loc: &Location, mkparents: bool) -> io::Result<Box<dyn MediaWriter>> {
@@ -70,11 +121,10 @@ impl<A: RemoteAdapter> Backend for RemoteBackend<A> {
         if mkparents {
             mkparent::<A>(&target, self.adapter.client());
         }
-        Ok(Box::new(RemoteBufferedWriter::<A> {
-            target,
-            client: Arc::clone(self.adapter.client()),
-            buffer: Vec::new(),
-        }))
+        let writer = self.adapter.client().create_writer(&target).map_err(|e| {
+            map_and_log(A::scheme(), "create_writer", target.path(), A::map_error, e)
+        })?;
+        Ok(Box::new(RemoteWriter::new::<A>(writer, &target)))
     }
 
     fn remove_file(&self, loc: &Location) -> io::Result<()> {
@@ -119,20 +169,11 @@ impl<A: RemoteAdapter> Backend for RemoteBackend<A> {
     }
 
     fn copy_file(&self, src: &Location, dst: &Location, mkparents: bool) -> io::Result<u64> {
-        // 当前是 read(整文件到本地) + write(整文件回远端) 两次全量 RTT +
-        // 全文件堆分配；尚无 server-side copy，大文件场景必须考虑内存与网络开销。
-        let src_target = self.build_target(src)?;
+        self.build_target(src)?;
         let dst_target = self.build_target(dst)?;
         if mkparents {
             mkparent::<A>(&dst_target, self.adapter.client());
         }
-        let bytes =
-            self.adapter.client().read(&src_target).map_err(|e| {
-                map_and_log(A::scheme(), "read", src_target.path(), A::map_error, e)
-            })?;
-        self.adapter
-            .client()
-            .write(&dst_target, &bytes)
-            .map_err(|e| map_and_log(A::scheme(), "write", dst_target.path(), A::map_error, e))
+        crate::entities::backend::stream_copy(self, src, self, dst, false)
     }
 }

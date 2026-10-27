@@ -21,7 +21,7 @@
 bun scripts/perf-collect.ts --sub <copy|move|find|move-text-shot|verify> --data <真实源目录> --output-dir <目录>
 ```
 
-- `verify` 必须增加 `--output-target <目标库>`；需要额外 CLI 参数时使用脚本提供的 `--extra`。
+- 除 `find` 外所有子命令必须提供 `--output-target <目标库>`，`find` 不需要输出目标；需要额外 CLI 参数时使用脚本提供的 `--extra`。
 - copy/move/move-text-shot 默认 dry-run；其测量热点不一定等同正式移动。脚本目前不会自动在 `perf-report.md` 标明执行模式或构建方式，交付分析时必须人工补充，不得把运行时环境变量当作构建证明。
 - 产物包括 `report.json`、`time-v.txt`、`perf-report.md`；Windows 另保留 stderr 日志。产物保持机器可读，不生成 SVG 火焰图或二进制 pprof 作为默认交付。
 - 采集脚本测试使用 `bun test tests/scripts`；修改参数或产物字段时同步脚本测试和本文件。
@@ -31,7 +31,7 @@ bun scripts/perf-collect.ts --sub <copy|move|find|move-text-shot|verify> --data 
 - `duration_ms` 是 use case 内耗时，不包含进程启动和模型加载；整进程 wall clock 才包含固定开销。
 - macOS 使用 `gtime -v`（GNU time）采集 wall clock 与内存指标；未安装时先执行 `brew install gnu-time`。
 - Windows 使用 PowerShell 采样，提供 wall clock、CPU、峰值工作集和峰值私有内存；没有 Unix page fault、上下文切换和 fs IO 字段时不得编造。
-- Windows 工作集包含本地映射文件页，不等于堆占用；判断内存压力优先看峰值私有内存，并结合文件大小和读取方式。
+- Windows 工作集包含文件缓存页，不等于堆占用；判断内存压力优先看峰值私有内存，并结合文件大小和读取方式。
 - CPU 空闲且吞吐低时先排查 IO 和重复读取；CPU 饱和时再检查内容判重或推理。system CPU 偏高时检查频繁 metadata/open/close。
 - wall clock 明显大于 `duration_ms` 时检查启动和模型加载；只有实际使用模型的命令才归因模型开销。
 - major page fault 或私有内存异常增长时检查并发、整文件读取和缓冲；不得通过削弱内容判等换取表面性能。

@@ -10,7 +10,7 @@ use super::config_level;
 use crate::adapters::dispatch::tidy;
 use crate::entities::common::Error;
 use crate::entities::common::Result;
-use crate::usecases::config::config;
+use crate::usecases::config::checked_config;
 
 const FEATURE_CLI: &str = "cli";
 
@@ -64,9 +64,10 @@ where
             )));
         }
     };
+    let cfg = checked_config()?;
     let level = cli
         .log_level
-        .unwrap_or_else(|| config_level(&config().log.level));
+        .unwrap_or_else(|| config_level(&cfg.log.level));
     let log_level = install_logging(&cli, level);
     debug!(
         feature = FEATURE_CLI,

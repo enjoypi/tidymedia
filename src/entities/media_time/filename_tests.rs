@@ -62,3 +62,4 @@ fn camera_phone_video_parsed_utc(
 
 include!("filename_part1_tests.rs");
 include!("filename_part2_tests.rs");
+include!("filename_part3_tests.rs");

@@ -79,13 +79,18 @@ pub(super) fn dispatch_find(
 ) -> Result<CommandResult> {
     let src_pairs = build_sources(factory, sources)?;
     let out_pair = output.map(|loc| build_source(factory, loc)).transpose()?;
-    let find_report = crate::usecases::find_duplicates(secure, src_pairs, out_pair.as_ref())?;
+    let find_report = crate::usecases::find_duplicates(
+        secure,
+        src_pairs,
+        out_pair.as_ref(),
+        &mut std::io::stdout(),
+    )?;
     // Find use case 当前不接 sink（report 由 dispatch 层捕获最终结构后落盘），
     // 与 Copy/Move 把 sink 当参数传给 use case 的形态不对称——find_duplicates
     // 无 progress 回调需求，单点写盘已够；若未来需要流式输出再改为同 Copy 形态。
     if let Some(path) = report {
         let sink = JsonFileReportSink::new(path);
-        sink.write(&Report::Find(&find_report));
+        sink.write(&Report::Find(&find_report))?;
     }
     Ok(CommandResult::Find(find_report))
 }
@@ -107,7 +112,7 @@ pub(super) fn dispatch_move_text_shot(
         crate::usecases::move_text_shot(detector.as_ref(), factory, &sources, &output, dry_run)?;
     if let Some(path) = report_path {
         let sink = JsonFileReportSink::new(path);
-        sink.write(&Report::MoveTextShot(&move_report));
+        sink.write(&Report::MoveTextShot(&move_report))?;
     }
     Ok(CommandResult::MoveTextShot(move_report))
 }
@@ -138,7 +143,7 @@ pub(super) fn dispatch_verify(
     );
     if let Some(path) = report_path {
         let sink = JsonFileReportSink::new(path);
-        sink.write(&Report::Verify(&verify_report));
+        sink.write(&Report::Verify(&verify_report))?;
     }
     Ok(CommandResult::Verify(verify_report))
 }

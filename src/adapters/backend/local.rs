@@ -1,15 +1,11 @@
-//! Local Backend：`std::fs` + `ignore::WalkBuilder` + `memmap2::Mmap` 实现。
-//!
-//! mmap unsafe 通过 `Cursor<Mmap>` 借 `Mmap: Deref<Target=[u8]>` 收敛在 `MmapReader::new`。
 //!
 //! 拆分为三文件（原 357 行 → ≤300）：`local_backend_impl`（`impl Backend for LocalBackend`）、
-//! `local_mmap`（`MmapReader` / `LocalWriter` + 打开助手）、本文件（`LocalBackend` 类型 +
 //! 路径 / rename / walk 纯助手 + 测试装配）。
 
 #[path = "local_backend_impl.rs"]
 mod backend_impl;
-#[path = "local_mmap.rs"]
-mod mmap;
+#[path = "local_io.rs"]
+mod local_io;
 #[path = "local_noreplace.rs"]
 mod noreplace;
 
@@ -19,14 +15,11 @@ use std::path::Path;
 use std::sync::Arc;
 
 use camino::{Utf8Path, Utf8PathBuf};
-use memmap2::Mmap;
 
 use crate::entities::backend::{
     Backend, Entry, EntryKind, MediaReader, Metadata, partial_move_error,
 };
 use crate::entities::uri::Location;
-
-use self::mmap::MmapReader;
 
 #[derive(Debug, Default)]
 pub struct LocalBackend;
@@ -177,11 +170,10 @@ fn ignore_to_io(e: &ignore::Error) -> io::Error {
 
 pub(super) fn open_read_inner_with(
     path: &Path,
-    mmap_fn: fn(&fs::File) -> io::Result<Mmap>,
+    open_fn: fn(&Path) -> io::Result<fs::File>,
 ) -> io::Result<Box<dyn MediaReader>> {
-    let file = fs::File::open(path)?;
-    let mmap = mmap_fn(&file)?;
-    Ok(Box::new(MmapReader::new(mmap)))
+    let file = open_fn(path)?;
+    Ok(Box::new(local_io::FileReader::new(file)))
 }
 
 #[cfg(test)]

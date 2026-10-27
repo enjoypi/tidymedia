@@ -102,7 +102,7 @@ pub fn copy_with_sidecar(
         doc_only,
     };
     if total_files == 0 {
-        return Ok(finalize(
+        return finalize(
             report_sink,
             flags,
             scan_stats,
@@ -112,7 +112,7 @@ pub fn copy_with_sidecar(
             Vec::new(),
             false,
             crate::usecases::report::elapsed_ms(start),
-        ));
+        );
     }
 
     execute_copy(
@@ -167,7 +167,7 @@ fn execute_copy(
         flags,
         scan_stats,
     );
-    Ok(finalize(
+    finalize(
         report_sink,
         flags,
         scan_stats,
@@ -177,5 +177,5 @@ fn execute_copy(
         errors,
         errors_truncated,
         crate::usecases::report::elapsed_ms(start),
-    ))
+    )
 }

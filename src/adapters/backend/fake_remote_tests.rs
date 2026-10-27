@@ -73,8 +73,9 @@ fn write_then_read() {
     let t = TestTarget {
         path: Utf8PathBuf::from("/f"),
     };
-    let n = c.write(&t, b"data").unwrap();
-    assert_eq!(n, 4);
+    let mut writer = c.create_writer(&t).unwrap();
+    io::Write::write_all(&mut writer, b"data").unwrap();
+    writer.finish().unwrap();
     let data = c.read(&t).unwrap();
     assert_eq!(data, b"data");
 }

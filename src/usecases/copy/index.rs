@@ -45,7 +45,7 @@ pub(super) fn build_source_index(
     include_non_media: bool,
     doc_only: bool,
 ) -> Index {
-    let (output_prefix, output_literal) = output_prefixes;
+    let (output_prefix, _) = output_prefixes;
     let skip_ext = source_skip_extensions(include_non_media, doc_only);
     let mut source = Index::new();
     for (loc, backend) in sources {
@@ -56,8 +56,7 @@ pub(super) fn build_source_index(
     // canonical + 字面双前缀各剔一遍：index key 是 walker 字面路径，macOS
     // `/var → /private/var` 等 symlink 下 canonical 前缀匹配不到字面 key；
     // 两者相同时第二遍空剔除，幂等零副作用（免去相等判分支）。
-    let excluded =
-        source.remove_under_prefix(output_prefix) + source.remove_under_prefix(output_literal);
+    let excluded = source.remove_under_prefix(output_prefix);
     if excluded > 0 {
         debug!(
             feature,

@@ -1,5 +1,11 @@
 use std::io::{Cursor, Read, Seek, SeekFrom, Write};
 
+use chrono::FixedOffset;
+
+pub(crate) fn utc_offset() -> FixedOffset {
+    FixedOffset::east_opt(0).expect("internal: zero offset is within range")
+}
+
 #[derive(Debug)]
 pub(crate) struct FailReader;
 

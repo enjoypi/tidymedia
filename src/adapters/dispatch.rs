@@ -82,6 +82,7 @@ pub fn tidy_with(
     detectors: &dyn DetectorFactory,
     command: Commands,
 ) -> Result<CommandResult> {
+    crate::usecases::config::checked_config()?;
     match command {
         Commands::Copy {
             dry_run,

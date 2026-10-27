@@ -18,17 +18,17 @@ impl JsonFileReportSink {
         Self { path: path.into() }
     }
 
-    pub fn write(&self, report: &Report<'_>) {
-        <Self as ReportSink>::write(self, report);
+    pub fn write(&self, report: &Report<'_>) -> common::Result<()> {
+        <Self as ReportSink>::write(self, report)
     }
 }
 
 impl ReportSink for JsonFileReportSink {
-    fn write(&self, report: &Report<'_>) {
+    fn write(&self, report: &Report<'_>) -> common::Result<()> {
         match report {
             Report::Copy(r) => {
                 let feature = if r.remove { FEATURE_MOVE } else { FEATURE_COPY };
-                write_report_json(&self.path, *r, feature);
+                write_report_json(&self.path, *r, feature)
             }
             Report::Find(r) => write_report_json(&self.path, *r, FEATURE_FIND),
             Report::MoveTextShot(r) => write_report_json(&self.path, *r, FEATURE_MOVE_TEXT_SHOT),
@@ -37,21 +37,28 @@ impl ReportSink for JsonFileReportSink {
     }
 }
 
-fn write_report_json<T: serde::Serialize>(path: &str, report: &T, feature: &str) {
+fn write_report_json<T: serde::Serialize>(
+    path: &str,
+    report: &T,
+    feature: &str,
+) -> common::Result<()> {
     let json = report_sink_io::serialize(report);
-    match report_sink_io::try_write(path, json.as_bytes()) {
-        Ok(()) => {}
-        Err(e) => {
-            warn!(
-                feature,
-                operation = "write_report",
-                result = "error",
-                report_path = path,
-                error = %e,
-                "failed to write report; main flow continues"
-            );
-        }
-    }
+    report_sink_io::try_write(path, json.as_bytes()).map_err(|e| {
+        let common::Error::Io(io_err) = e;
+        let wrapped = std::io::Error::new(
+            io_err.kind(),
+            format!("cannot write report to {path}: {io_err}"),
+        );
+        warn!(
+            feature,
+            operation = "write_report",
+            result = "error",
+            report_path = path,
+            error = %wrapped,
+            "failed to write report"
+        );
+        common::Error::Io(wrapped)
+    })
 }
 
 pub(crate) trait TempPersist {

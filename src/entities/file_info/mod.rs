@@ -3,6 +3,7 @@ pub(super) mod paths;
 pub(super) mod streams;
 
 pub use self::info::Info;
+#[cfg(test)]
 pub use self::paths::full_path;
 pub(crate) use self::paths::strip_windows_unc;
 pub(crate) use self::streams::read_fill;

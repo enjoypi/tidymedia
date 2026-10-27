@@ -6,7 +6,7 @@ cd "$SCRIPT_DIR/.."
 
 LCOV_OUT=target/coverage.lcov
 COV_NONBUSINESS=(
-  src/adapters/backend/local_mmap.rs
+  src/adapters/backend/local_io.rs
   src/adapters/backend/smb_real.rs
   src/adapters/classify/tract_embed_real.rs
   src/adapters/cli_commands.rs

@@ -229,7 +229,7 @@ fn find_duplicates_output_is_file_returns_err() {
     let tmp = tempfile::NamedTempFile::new().unwrap();
     let out_loc = Location::Local(Utf8PathBuf::from(tmp.path().to_str().unwrap()));
     let out_pair = (out_loc, LocalBackend::arc());
-    let err = find_duplicates(true, vec![local_data_dir()], Some(&out_pair)).unwrap_err();
+    let err = find_duplicates(true, vec![local_data_dir()], Some(&out_pair), &mut Vec::new()).unwrap_err();
     assert!(err.to_string().contains("not a directory"), "got: {err}");
 }
 
@@ -237,18 +237,18 @@ fn find_duplicates_output_is_file_returns_err() {
 fn find_duplicates_output_missing_returns_err() {
     let out_loc = Location::Local(Utf8PathBuf::from("/no/such/dir/xyz"));
     let out_pair = (out_loc, LocalBackend::arc());
-    let err = find_duplicates(true, vec![local_data_dir()], Some(&out_pair)).unwrap_err();
+    let err = find_duplicates(true, vec![local_data_dir()], Some(&out_pair), &mut Vec::new()).unwrap_err();
     assert!(err.to_string().contains("not a directory"), "got: {err}");
 }
 
 #[test]
 fn find_duplicates_no_output_branch_runs() {
-    find_duplicates(true, vec![local_data_dir()], None).unwrap();
+    find_duplicates(true, vec![local_data_dir()], None, &mut Vec::new()).unwrap();
 }
 
 #[test]
 fn find_duplicates_with_output_branch_runs() {
     let dir = tempdir().unwrap();
     let out_pair = local_dir(dir.path());
-    find_duplicates(false, vec![local_data_dir()], Some(&out_pair)).unwrap();
+    find_duplicates(false, vec![local_data_dir()], Some(&out_pair), &mut Vec::new()).unwrap();
 }

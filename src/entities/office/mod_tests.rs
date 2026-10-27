@@ -5,10 +5,11 @@
 use std::io::Cursor;
 
 use super::*;
+use crate::entities::office::tests_common::utc_offset;
 
 fn route(buf: &[u8], mime: &str) -> (u64, u64) {
     let mut r = Cursor::new(buf.to_vec());
-    populate_office_dates(&mut r, mime)
+    populate_office_dates(&mut r, mime, utc_offset())
 }
 
 #[test]

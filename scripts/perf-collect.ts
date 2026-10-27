@@ -79,6 +79,15 @@ export function buildCli(
   return args;
 }
 
+export function validateArgs(opts: Record<string, string>): string | null {
+  const sub = opts.sub;
+  if (!sub || !SUBS.includes(sub)) return "--sub";
+  if (!opts.data) return "--data";
+  if (!opts["output-dir"]) return "--output-dir";
+  if (sub !== "find" && !opts["output-target"]) return "--output-target";
+  return null;
+}
+
 function runWithTimeV(
   timeBin: string,
   tidyBin: string,
@@ -198,9 +207,8 @@ export function renderReport(
     "",
     "1. 吞吐 vs 峰值 RSS：是否 IO/CPU/内存受限？",
     "2. `User/System CPU` 比例：kernel 时间占比高 → 系统调用密集（open/read 小文件）",
-    "3. 峰值 RSS 远大于峰值私有内存 → 多为本地 mmap 读的文件页（可回收），非堆分配",
-    "4. `Major page faults` 高 → 内存不足开始换页；建议减小 `STREAM_CHUNK` 或增大 RAM",
-    "5. `duration_ms` 与 `elapsed_wall` 差 → 后者含 Rust 启动 + tract 加载 ONNX 等固定开销",
+    "3. `Major page faults` 高 → 内存不足开始换页；建议减小 `STREAM_CHUNK` 或增大 RAM",
+    "4. `duration_ms` 与 `elapsed_wall` 差 → 后者含 Rust 启动 + tract 加载 ONNX 等固定开销",
     "",
   ];
   return lines.join("\n");
@@ -208,7 +216,7 @@ export function renderReport(
 
 function usage(): void {
   console.error(
-    "用法：bun scripts/perf-collect.ts --sub <copy|move|find|move-text-shot|verify> --data <dir> --output-dir <dir> [--output-target <path>] [--extra <args>] [--project-root <root>]",
+    "用法：bun scripts/perf-collect.ts --sub <copy|move|find|move-text-shot|verify> --data <dir> --output-dir <dir> --output-target <path（find 除外必填）> [--extra <args>] [--project-root <root>]",
   );
 }
 
@@ -230,14 +238,16 @@ function parseArgv(argv: string[]): Record<string, string> {
 
 function main(): void {
   const opts = parseArgv(process.argv.slice(2));
+  const invalid = validateArgs(opts);
+  if (invalid) {
+    console.error(`error: missing or invalid ${invalid}`);
+    usage();
+    process.exit(2);
+  }
   const sub = opts.sub;
   const data = opts.data;
   const outputDirArg = opts["output-dir"];
   const outputTarget = opts["output-target"] ?? null;
-  if (!sub || !outputDirArg || !SUBS.includes(sub) || !data || (sub === "verify" && !outputTarget)) {
-    usage();
-    process.exit(2);
-  }
   const projectRoot = resolve(opts["project-root"] ?? ".");
   const outputDir = resolve(outputDirArg);
   mkdirSync(outputDir, { recursive: true });

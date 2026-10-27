@@ -9,14 +9,10 @@ use crate::entities::common;
 use crate::entities::common::under_prefix;
 use crate::entities::file_index;
 use crate::entities::file_index::DuplicateGroup;
-use crate::entities::file_info;
-use crate::entities::uri::Location;
 
 use super::copy::Source;
 use super::report::{DuplicateGroupReport, FEATURE_FIND, FindReport};
 
-// 返回完整 FindReport（scanned = 入索引文件数；bytes_read 来自 Index 累计；
-// groups 为 DuplicateGroup 列表），dispatch 层直接落 JSON 而无需重新统计。
 //
 // # Errors
 //
@@ -26,6 +22,7 @@ pub(crate) fn find_duplicates(
     secure: bool,
     sources: Vec<Source>,
     output: Option<&Source>,
+    script_sink: &mut dyn Write,
 ) -> common::Result<FindReport> {
     let start = Instant::now();
     let mut index = file_index::Index::new();
@@ -70,7 +67,7 @@ pub(crate) fn find_duplicates(
     }
 
     let scan_stats = index.stats();
-    let scanned = index.len();
+    let scanned = index.touched_count();
     let bytes_read = index.bytes_read();
     debug!(
         feature = FEATURE_FIND,
@@ -102,7 +99,7 @@ pub(crate) fn find_duplicates(
 
     let prefix_owned = compute_output_prefix(output);
 
-    render_script(&groups, prefix_owned.as_deref(), &mut std::io::stdout());
+    render_script(&groups, prefix_owned.as_deref(), script_sink)?;
 
     debug!(
         feature = FEATURE_FIND,
@@ -126,21 +123,9 @@ pub(crate) fn find_duplicates(
     })
 }
 
-// 上方 is_dir 断言已过滤非目录；canonicalize 仍可能因 TOCTOU（验证后被外部
-// 删除）失败。与 copy/run.rs::canonical_prefix 同口径回退原路径，避免 expect
-// 触发进程崩溃（并发 cleanup / 自动备份脚本下可复现）。
 #[must_use]
 fn compute_output_prefix(output: Option<&Source>) -> Option<String> {
-    output.map(|(loc, _)| match loc {
-        // 显式 match 替代 `.map_or_else(closure, closure)`：multi-binary instance 下
-        // closure 在每个 binary 中独立编译，未被该 binary 触发即算 region miss；
-        // match arm 让 LLVM 把同名 region 在 instance 间合并。
-        Location::Local(p) => match file_info::full_path(p.as_str()) {
-            Ok(fp) => fp.as_str().to_string(),
-            Err(_) => p.as_str().to_string(),
-        },
-        other @ Location::Smb { .. } => other.display(),
-    })
+    output.map(|(loc, _)| common::canonical_prefix(loc))
 }
 
 /// 输出 Python 删除脚本：跨平台单一格式，消除 sh/cmd 双轨。
@@ -153,15 +138,15 @@ import os\n\n";
 pub(crate) fn render_script(
     same: &[DuplicateGroup],
     output_prefix: Option<&str>,
-    sink: &mut impl Write,
-) {
+    sink: &mut dyn Write,
+) -> std::io::Result<()> {
     if same.is_empty() {
-        return;
+        return Ok(());
     }
-    let _ = sink.write_all(SCRIPT_HEADER.as_bytes());
+    sink.write_all(SCRIPT_HEADER.as_bytes())?;
     // 输入已按 size 降序（DuplicateGroup filter_and_sort 内部约定）；直接顺序遍历。
     for group in same {
-        let _ = writeln!(sink, "# SIZE {}", group.size);
+        writeln!(sink, "# SIZE {}", group.size)?;
         // 当指定了 output_prefix 但组内**无任何**文件位于 prefix 下（用户尚未把任一份
         // 副本归档进 output），如果按原逻辑全发 active `os.remove(...)` 用户跑脚本即
         // 永久数据丢失。此时把首份保留为注释作 survivor，其余仍标记为删除，让用户
@@ -170,7 +155,7 @@ pub(crate) fn render_script(
             group
                 .paths
                 .iter()
-                .any(|path| under_prefix(path.as_str(), p))
+                .any(|path| under_prefix(&common::key_from_display(path.as_str()), p))
         });
         for (idx, path) in group.paths.iter().enumerate() {
             let path_str = path.as_str();
@@ -179,21 +164,21 @@ pub(crate) fn render_script(
                 decide_protect(idx, output_prefix, path_str, any_under_prefix);
             if protect {
                 if is_survivor {
-                    let _ = writeln!(sink, "# SURVIVOR (no copy under output)");
+                    writeln!(sink, "# SURVIVOR (no copy under output)")?;
                 }
-                let _ = writeln!(sink, "# os.remove(\"{escaped}\")");
+                writeln!(sink, "# os.remove(\"{escaped}\")")?;
             } else {
-                let _ = writeln!(sink, "os.remove(\"{escaped}\")");
+                writeln!(sink, "os.remove(\"{escaped}\")")?;
             }
         }
-        let _ = writeln!(sink);
+        writeln!(sink)?;
     }
+    Ok(())
 }
 
 /// 一条 `os.remove` 应否被注释（protect）以及是否是 survivor（组内无 path 在
 /// prefix 下的首份保留）。抽独立 fn 让 branch counter 收敛到单 codegen instance，
 /// 消除 `render_script` 在 lib unit + subprocess 双 instance 下的 phantom miss。
-/// 三 arm 由 `decide_protect_*` 测试完整覆盖。
 fn decide_protect(
     idx: usize,
     output_prefix: Option<&str>,
@@ -202,7 +187,9 @@ fn decide_protect(
 ) -> (bool, bool) {
     match output_prefix {
         None => (true, false),
-        Some(p) if any_under_prefix => (under_prefix(path_str, p), false),
+        Some(p) if any_under_prefix => {
+            (under_prefix(&common::key_from_display(path_str), p), false)
+        }
         // 无 path 在 prefix 下：保留首份作 survivor，其余仍删
         Some(_) => (idx == 0, idx == 0),
     }

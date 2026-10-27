@@ -2,22 +2,18 @@
 mod backend_impl;
 #[path = "remote_walk.rs"]
 mod walk;
-#[path = "remote_writer.rs"]
-mod writer;
 
 use std::io;
 use std::sync::Arc;
 
 use camino::Utf8PathBuf;
 
-use crate::entities::backend::{Entry, Metadata};
+use crate::entities::backend::{Entry, MediaReader, MediaWriter, Metadata};
 use crate::entities::uri::Location;
 
 #[cfg(test)]
-use crate::entities::backend::{Backend, MediaWriter};
+use crate::entities::backend::Backend;
 use walk::{map_and_log, mkdir_recursive, mkparent, walk_recursive};
-#[cfg(test)]
-use writer::check_buffer_size;
 
 pub trait RemoteTarget: Clone + Send + Sync + std::fmt::Debug + Eq + 'static {
     type Ctx: Send + Sync + 'static;
@@ -40,7 +36,16 @@ pub trait RemoteClient<T: RemoteTarget>: Send + Sync + std::fmt::Debug {
     fn stat(&self, t: &T) -> io::Result<Metadata>;
     fn list(&self, t: &T) -> io::Result<Vec<Entry>>;
     fn read(&self, t: &T) -> io::Result<Vec<u8>>;
-    fn write(&self, t: &T, data: &[u8]) -> io::Result<u64>;
+    fn open_reader(&self, t: &T) -> io::Result<Box<dyn MediaReader>> {
+        let bytes = self.read(t)?;
+        Ok(Box::new(std::io::Cursor::new(bytes)))
+    }
+    fn create_writer(&self, _t: &T) -> io::Result<Box<dyn MediaWriter>> {
+        Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "remote writer is not implemented",
+        ))
+    }
     fn unlink(&self, t: &T) -> io::Result<()>;
     fn mkdir(&self, t: &T) -> io::Result<()>;
 }
@@ -70,8 +75,6 @@ pub trait RemoteAdapter: Send + Sync + 'static {
 /// 不受信媒体目录（USB/SD/网盘挂载）下注入 1 GB 假 `.xmp` 可让进程 OOM，与远端
 /// 共享上限是同口径防御。
 pub(crate) const MAX_TEXT_BYTES: u64 = 8 << 20;
-
-pub(crate) const MAX_REMOTE_WRITE_BUFFER: u64 = 2 << 30;
 
 pub struct RemoteBackend<A: RemoteAdapter> {
     pub(crate) adapter: A,
@@ -104,12 +107,6 @@ pub(crate) fn map_remote_error(e: io::Error) -> io::Error {
         return io::Error::new(io::ErrorKind::AlreadyExists, e.to_string());
     }
     e
-}
-
-pub(crate) struct RemoteBufferedWriter<A: RemoteAdapter> {
-    target: A::Target,
-    client: Arc<dyn RemoteClient<A::Target>>,
-    buffer: Vec<u8>,
 }
 
 #[cfg(test)]

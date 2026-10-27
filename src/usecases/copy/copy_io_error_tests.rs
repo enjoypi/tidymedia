@@ -1,4 +1,5 @@
 use std::fs;
+use std::io;
 use std::sync::Arc;
 
 use camino::Utf8PathBuf;
@@ -6,8 +7,77 @@ use tempfile::tempdir;
 
 use super::tests_common::*;
 use super::*;
-use crate::entities::backend::Backend;
+use crate::adapters::backend::fake::FakeBackend;
+use crate::entities::backend::{
+    Backend, Entry, MediaReader, MediaWriter, Metadata, is_output_write_denied,
+};
+use crate::entities::test_common as tc;
 use crate::entities::uri::Location;
+
+struct RenameDeniedBackend {
+    inner: FakeBackend,
+}
+
+impl RenameDeniedBackend {
+    fn new() -> Self {
+        Self {
+            inner: FakeBackend::new("local"),
+        }
+    }
+}
+
+impl Backend for RenameDeniedBackend {
+    fn scheme(&self) -> &'static str {
+        self.inner.scheme()
+    }
+
+    fn metadata(&self, loc: &Location) -> io::Result<Metadata> {
+        self.inner.metadata(loc)
+    }
+
+    fn exists(&self, loc: &Location) -> io::Result<bool> {
+        self.inner.exists(loc)
+    }
+
+    fn walk<'a>(
+        &'a self,
+        root: &Location,
+    ) -> Box<dyn Iterator<Item = io::Result<Entry>> + Send + 'a> {
+        self.inner.walk(root)
+    }
+
+    fn open_read(&self, loc: &Location) -> io::Result<Box<dyn MediaReader>> {
+        self.inner.open_read(loc)
+    }
+
+    fn open_write(&self, loc: &Location, mkparents: bool) -> io::Result<Box<dyn MediaWriter>> {
+        self.inner.open_write(loc, mkparents)
+    }
+
+    fn remove_file(&self, loc: &Location) -> io::Result<()> {
+        self.inner.remove_file(loc)
+    }
+
+    fn mkdir_p(&self, loc: &Location) -> io::Result<()> {
+        self.inner.mkdir_p(loc)
+    }
+
+    fn read_to_string(&self, loc: &Location) -> io::Result<String> {
+        self.inner.read_to_string(loc)
+    }
+
+    fn copy_file(&self, src: &Location, dst: &Location, mkparents: bool) -> io::Result<u64> {
+        self.inner.copy_file(src, dst, mkparents)
+    }
+
+    fn supports_native_rename_to(&self, _other: &dyn Backend) -> bool {
+        true
+    }
+
+    fn rename(&self, _from: &Location, _to: &Location, _mkparents: bool) -> io::Result<()> {
+        Err(io::Error::from(io::ErrorKind::PermissionDenied))
+    }
+}
 
 #[test]
 fn do_copy_propagates_exists_error_when_indexed_file_deleted() {
@@ -240,4 +310,63 @@ fn do_copy_dry_run_propagates_hash_read_error() {
 
     let crate::entities::common::Error::Io(io_err) = err;
     assert_eq!(io_err.kind(), std::io::ErrorKind::PermissionDenied);
+}
+
+#[test]
+fn do_copy_rename_source_permission_error_is_not_output_write_denied() {
+    let be = Arc::new(RenameDeniedBackend::new());
+    let src = Location::Local(Utf8PathBuf::from("/src/photo.png"));
+    be.inner.add_file(src.clone(), b"payload".to_vec());
+    be.inner.add_dir(Location::Local(Utf8PathBuf::from("/out")));
+    let backend: Arc<dyn Backend> = be;
+    let mut info = Info::open(&src, Arc::clone(&backend)).unwrap();
+    info.set_exif(crate::entities::exif::Exif::with_mime("image/png"));
+    let opts = CopyOpts {
+        dry_run: false,
+        remove: true,
+        include_non_media: false,
+        doc_only: false,
+        template: DEFAULT_TMPL,
+    };
+    let idx = crate::entities::file_index::Index::new();
+    let out = Location::Local(Utf8PathBuf::from("/out"));
+    let err = do_copy(&info, &out, &backend, &idx, &opts).unwrap_err();
+
+    let crate::entities::common::Error::Io(io_err) = err;
+    assert_eq!(io_err.kind(), std::io::ErrorKind::PermissionDenied);
+    assert!(
+        !is_output_write_denied(&io_err),
+        "source-side rename failure must stay a per-file error, got fused marker: {io_err}"
+    );
+}
+
+#[test]
+fn copy_rename_source_permission_failure_counts_per_file_without_abort() {
+    let be = Arc::new(RenameDeniedBackend::new());
+    let png = fs::read(tc::DATA_DNS_BENCHMARK).unwrap();
+    let src_root = Location::Local(Utf8PathBuf::from("/src"));
+    be.inner.add_dir(src_root.clone());
+    for name in ["a.png", "b.png"] {
+        be.inner.add_file(src_root.join_path(name), png.clone());
+    }
+    let out = Location::Local(Utf8PathBuf::from("/out"));
+    be.inner.add_dir(out.clone());
+    let backend: Arc<dyn Backend> = be;
+    let report = copy(
+        &[(src_root, Arc::clone(&backend))],
+        (out, backend),
+        false,
+        true,
+        false,
+        None,
+        None,
+    )
+    .unwrap();
+    assert_eq!((report.copied, report.failed), (0, 2));
+    assert_eq!(report.errors.len(), 2);
+    assert!(
+        !report.errors.iter().any(|e| e.message.contains("aborted")),
+        "source rename failure must not abort remaining items: {:?}",
+        report.errors
+    );
 }

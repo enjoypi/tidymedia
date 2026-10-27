@@ -35,19 +35,19 @@ pub(super) fn fast_hash(path: &str) -> (usize, u64, u64) {
 }
 
 pub(super) fn full_hash(path: &str) -> (usize, u64) {
-    let file =
+    let mut file =
         std::fs::File::open(path).expect("test helper: fixture file must open for full_hash");
-    let mmap = unsafe {
-        memmap2::Mmap::map(&file).expect("test helper: fixture file must mmap for full_hash")
-    };
-    (mmap.len(), xxhash_rust::xxh3::xxh3_64(&mmap))
+    let mut buf = Vec::new();
+    file.read_to_end(&mut buf)
+        .expect("test helper: fixture file must read for full_hash");
+    (buf.len(), xxhash_rust::xxh3::xxh3_64(&buf))
 }
 
 pub(super) fn secure_hash(path: &str) -> (usize, SecureHash) {
-    let file =
+    let mut file =
         std::fs::File::open(path).expect("test helper: fixture file must open for secure_hash");
-    let mmap = unsafe {
-        memmap2::Mmap::map(&file).expect("test helper: fixture file must mmap for secure_hash")
-    };
-    (mmap.len(), Sha512::digest(&mmap))
+    let mut buf = Vec::new();
+    file.read_to_end(&mut buf)
+        .expect("test helper: fixture file must read for secure_hash");
+    (buf.len(), Sha512::digest(&buf))
 }

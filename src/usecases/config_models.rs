@@ -5,7 +5,7 @@ use serde_derive::Deserialize;
 use super::{DEFAULT_ARCHIVE_TEMPLATE, DEFAULT_DOC_ARCHIVE_TEMPLATE};
 
 #[derive(Clone, Debug, Deserialize)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct CopyConfig {
     pub timezone_offset_hours: i8,
     pub unique_name_max_attempts: u32,
@@ -31,7 +31,7 @@ impl Default for CopyConfig {
 }
 
 #[derive(Clone, Debug, Deserialize)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct VerifyConfig {
     pub max_image_bytes: u64,
 }
@@ -45,7 +45,7 @@ impl Default for VerifyConfig {
 }
 
 #[derive(Clone, Debug, Deserialize)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct LogConfig {
     /// 默认日志级别（trace/debug/info/warn/error）；CLI `--log-level` 与
     /// `RUST_LOG` 均优先于此值。
@@ -61,7 +61,7 @@ impl Default for LogConfig {
 }
 
 #[derive(Clone, Debug, Deserialize)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct ExifConfig {
     pub valid_date_time_secs: u64,
 }
@@ -75,7 +75,7 @@ impl Default for ExifConfig {
 }
 
 #[derive(Clone, Debug, Deserialize)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct SmbBackendConfig {
     pub default_user: String,
     pub workgroup: String,
@@ -97,7 +97,7 @@ impl Default for SmbBackendConfig {
 /// `move-text-shot` 子命令的文本检测后端参数。模型文件路径外置；
 /// 二值化与「响应像素占比」两阈值都暴露让用户按机型/语言调优。
 #[derive(Clone, Debug, Deserialize)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct OcrConfig {
     /// `PaddleOCR` `DBNet` `det.onnx` 模型本地路径。空串 = feature on 调用时报 `InvalidInput`。
     pub det_model_path: String,
@@ -127,7 +127,7 @@ impl Default for OcrConfig {
 /// `copy-doc`/`move-doc` 内容分类的单个用户类目：`name` 进 `{category}` 归档
 /// 路径段，`description` 是 zero-shot 原型文本（embedding 后与文档正文比相似度）。
 #[derive(Clone, Debug, Default, Deserialize)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct CategoryDef {
     pub name: String,
     pub description: String,
@@ -136,7 +136,7 @@ pub struct CategoryDef {
 /// `copy-doc`/`move-doc` 内容分类后端参数。模型/tokenizer 路径外置；
 /// `categories` 用户可自定义类目集（空 = 全部落 uncategorized，不加载模型）。
 #[derive(Clone, Debug, Deserialize)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct ClassifyConfig {
     /// bge-small-zh embedding ONNX 本地路径。空串 = 调用时报 `InvalidInput`。
     pub embed_model_path: String,
@@ -164,7 +164,7 @@ impl Default for ClassifyConfig {
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct BackendConfig {
     pub smb: SmbBackendConfig,
     pub ocr: OcrConfig,

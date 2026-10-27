@@ -35,7 +35,6 @@ fn info_from_unreadable_file_errors() {
     fs::set_permissions(&path, perms).unwrap();
 }
 
-// Info 实例创建后立刻删除底层文件，再调 calc_full_hash → mmap 打开失败。
 // 触发 file_info.rs L112 + L218/L219 的 Err region。
 #[test]
 fn calc_full_hash_errors_when_file_deleted() {

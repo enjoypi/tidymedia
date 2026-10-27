@@ -1,83 +1,13 @@
 #[test]
-fn buffered_writer_write_and_flush() {
-    let client: Arc<dyn RemoteClient<DummyTarget>> = Arc::new(DummyClient::default());
-    let target = DummyTarget::new("/f");
-    let mut w = RemoteBufferedWriter::<DummyAdapter> {
-        target,
-        client,
-        buffer: Vec::new(),
-    };
-    let n = io::Write::write(&mut w, b"abc").unwrap();
-    assert_eq!(n, 3);
-    io::Write::flush(&mut w).unwrap();
+fn stream_writer_accepts_more_than_former_two_gib_cap() {
+    let b = backend_with_client(DummyClient::default());
+    let mut writer = b.open_write(&loc(), false).unwrap();
+    let chunk = vec![0_u8; 1 << 20];
+    for _ in 0..=2048 {
+        io::Write::write_all(&mut writer, &chunk).unwrap();
+    }
+    writer.finish().unwrap();
 }
-
-#[test]
-fn buffered_writer_debug_shows_buffered_bytes() {
-    let client: Arc<dyn RemoteClient<DummyTarget>> = Arc::new(DummyClient::default());
-    let target = DummyTarget::new("/f");
-    let w = RemoteBufferedWriter::<DummyAdapter> {
-        target,
-        client,
-        buffer: vec![0u8; 10],
-    };
-    let s = format!("{w:?}");
-    assert!(s.contains("buffered_bytes"));
-    assert!(s.contains("10"));
-}
-
-#[test]
-fn buffered_writer_finish_writes_through() {
-    let client: Arc<dyn RemoteClient<DummyTarget>> = Arc::new(DummyClient::default());
-    let target = DummyTarget::new("/f");
-    let w = RemoteBufferedWriter::<DummyAdapter> {
-        target,
-        client,
-        buffer: b"data".to_vec(),
-    };
-    Box::new(w).finish().unwrap();
-}
-
-#[test]
-fn check_buffer_size_ok_when_within_limit() {
-    // sum <= MAX_REMOTE_WRITE_BUFFER → Ok
-    check_buffer_size(0, 1024).unwrap();
-    check_buffer_size(MAX_REMOTE_WRITE_BUFFER - 1, 1).unwrap();
-}
-
-#[test]
-fn check_buffer_size_err_when_exceeds_limit() {
-    // saturating_add MAX + 1 → 超上限 → OutOfMemory
-    let e = check_buffer_size(MAX_REMOTE_WRITE_BUFFER, 1).unwrap_err();
-    assert_eq!(e.kind(), io::ErrorKind::OutOfMemory);
-    assert!(e.to_string().contains("remote write buffer exceeds"));
-}
-
-#[test]
-fn check_buffer_size_saturating_add_does_not_overflow() {
-    // u64::MAX + u64::MAX 走 saturating_add 不 overflow，仍返 OOM Err
-    let e = check_buffer_size(u64::MAX, u64::MAX).unwrap_err();
-    assert_eq!(e.kind(), io::ErrorKind::OutOfMemory);
-}
-
-#[test]
-fn buffered_writer_finish_write_err_propagates() {
-    let c = DummyClient {
-        write: Some(io::ErrorKind::TimedOut),
-        ..Default::default()
-    };
-    let client: Arc<dyn RemoteClient<DummyTarget>> = Arc::new(c);
-    let target = DummyTarget::new("/f");
-    let w = RemoteBufferedWriter::<DummyAdapter> {
-        target,
-        client,
-        buffer: b"data".to_vec(),
-    };
-    let e = Box::new(w).finish().unwrap_err();
-    assert_eq!(e.kind(), io::ErrorKind::TimedOut);
-}
-
-// ── build_target Err（from_location 注入错误） ────────────────
 
 #[test]
 fn metadata_from_location_err_propagates() {
@@ -144,7 +74,7 @@ fn open_write_mkparents_with_root_skips_mkdir() {
     let b = backend_with_root_ctx();
     let w = b.open_write(&loc(), true).unwrap();
     let s = format!("{w:?}");
-    assert!(s.contains("RemoteBufferedWriter"));
+    assert!(s.contains("DummyWriter"));
 }
 
 #[test]

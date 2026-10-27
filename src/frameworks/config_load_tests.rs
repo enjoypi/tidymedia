@@ -4,38 +4,69 @@ use super::test_common::set_env_var;
 use crate::usecases::config::config;
 
 #[test]
-fn backend_config_yaml_overrides_defaults_and_ignores_removed_fields() {
+fn load_errors_on_unknown_field() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("backend.yaml");
     std::fs::write(
         &path,
-        "backend:\n  smb:\n    default_user: alice\n    workgroup: HOME\n    timeout_secs: 60\n  legacy:\n    enabled: false\n",
+        "backend:\n  smb:\n    default_user: alice\n    workgroup: HOME\n  legacy:\n    enabled: false\n",
     )
     .unwrap();
     set_env_var("TIDYMEDIA_CONFIG", path.to_str().unwrap());
-    let cfg = load();
-    assert_eq!(cfg.backend.smb.default_user, "alice");
-    assert_eq!(cfg.backend.smb.workgroup, "HOME");
+    let err = load().unwrap_err();
+    assert!(err.contains("legacy"), "got: {err}");
     remove_env_var("TIDYMEDIA_CONFIG");
 }
 
 #[test]
-fn load_falls_back_when_file_missing() {
+fn load_errors_when_explicit_file_missing() {
     set_env_var("TIDYMEDIA_CONFIG", "/no/such/file/xyz.yaml");
-    let cfg = load();
-    assert_eq!(cfg.copy.timezone_offset_hours, 8);
+    let err = load().unwrap_err();
+    assert!(err.contains("/no/such/file/xyz.yaml"), "got: {err}");
     remove_env_var("TIDYMEDIA_CONFIG");
 }
 
 #[test]
-fn load_falls_back_when_yaml_invalid() {
+fn load_errors_when_yaml_invalid() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("bad.yaml");
     std::fs::write(&path, "::: not yaml :::").unwrap();
     set_env_var("TIDYMEDIA_CONFIG", path.to_str().unwrap());
-    let cfg = load();
-    assert_eq!(cfg.copy.unique_name_max_attempts, 10);
+    let err = load().unwrap_err();
+    assert!(err.contains("cannot parse config file"), "got: {err}");
     remove_env_var("TIDYMEDIA_CONFIG");
+}
+
+#[test]
+fn load_errors_on_unreadable_config_path() {
+    let dir = tempfile::tempdir().unwrap();
+    set_env_var("TIDYMEDIA_CONFIG", dir.path().to_str().unwrap());
+    let err = load().unwrap_err();
+    assert!(err.contains("cannot read config file"), "got: {err}");
+    remove_env_var("TIDYMEDIA_CONFIG");
+}
+
+#[test]
+fn load_uses_defaults_when_default_file_missing() {
+    remove_env_var("TIDYMEDIA_CONFIG");
+    let dir = tempfile::tempdir().unwrap();
+    let original = std::env::current_dir().unwrap();
+    std::env::set_current_dir(dir.path()).unwrap();
+    let cfg = load().unwrap();
+    std::env::set_current_dir(original).unwrap();
+    assert_eq!(cfg.copy.timezone_offset_hours, 8);
+}
+
+#[test]
+fn load_errors_when_default_file_corrupt() {
+    remove_env_var("TIDYMEDIA_CONFIG");
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("config.yaml"), "::: not yaml :::").unwrap();
+    let original = std::env::current_dir().unwrap();
+    std::env::set_current_dir(dir.path()).unwrap();
+    let res = load();
+    std::env::set_current_dir(original).unwrap();
+    assert!(res.unwrap_err().contains("cannot parse config file"));
 }
 
 #[test]
@@ -48,7 +79,7 @@ fn load_reads_explicit_values_via_env_var() {
     )
     .unwrap();
     set_env_var("TIDYMEDIA_CONFIG", path.to_str().unwrap());
-    let cfg = load();
+    let cfg = load().unwrap();
     assert_eq!(cfg.copy.timezone_offset_hours, 0);
     assert_eq!(cfg.copy.unique_name_max_attempts, 5);
     assert_eq!(cfg.exif.valid_date_time_secs, 100);
@@ -70,7 +101,7 @@ fn load_sanitizes_zero_unique_name_max_attempts_to_default() {
     let path = dir.path().join("zero.yaml");
     std::fs::write(&path, "copy:\n  unique_name_max_attempts: 0\n").unwrap();
     set_env_var("TIDYMEDIA_CONFIG", path.to_str().unwrap());
-    let cfg = load();
+    let cfg = load().unwrap();
     assert_eq!(cfg.copy.unique_name_max_attempts, 10);
     remove_env_var("TIDYMEDIA_CONFIG");
 }
@@ -85,7 +116,7 @@ fn load_normalizes_skip_extensions() {
     )
     .unwrap();
     set_env_var("TIDYMEDIA_CONFIG", path.to_str().unwrap());
-    let cfg = load();
+    let cfg = load().unwrap();
     assert_eq!(cfg.copy.skip_extensions, ["js", "json"]);
     remove_env_var("TIDYMEDIA_CONFIG");
 }
@@ -97,7 +128,7 @@ fn load_sanitizes_zero_smb_timeout_secs_to_default() {
     let path = dir.path().join("zerosmb.yaml");
     std::fs::write(&path, "backend:\n  smb:\n    timeout_secs: 0\n").unwrap();
     set_env_var("TIDYMEDIA_CONFIG", path.to_str().unwrap());
-    let cfg = load();
+    let cfg = load().unwrap();
     assert_eq!(cfg.backend.smb.timeout_secs, 30);
     remove_env_var("TIDYMEDIA_CONFIG");
 }
@@ -110,7 +141,7 @@ fn load_sanitizes_out_of_range_timezone_offset_to_default() {
     let path = dir.path().join("badtz.yaml");
     std::fs::write(&path, "copy:\n  timezone_offset_hours: 26\n").unwrap();
     set_env_var("TIDYMEDIA_CONFIG", path.to_str().unwrap());
-    let cfg = load();
+    let cfg = load().unwrap();
     assert_eq!(cfg.copy.timezone_offset_hours, 8);
     remove_env_var("TIDYMEDIA_CONFIG");
 }
@@ -122,7 +153,7 @@ fn load_sanitizes_negative_out_of_range_timezone_offset_to_default() {
     let path = dir.path().join("badtz_neg.yaml");
     std::fs::write(&path, "copy:\n  timezone_offset_hours: -30\n").unwrap();
     set_env_var("TIDYMEDIA_CONFIG", path.to_str().unwrap());
-    let cfg = load();
+    let cfg = load().unwrap();
     assert_eq!(cfg.copy.timezone_offset_hours, 8);
     remove_env_var("TIDYMEDIA_CONFIG");
 }
@@ -134,7 +165,7 @@ fn load_sanitizes_invalid_archive_template_to_default() {
     let path = dir.path().join("badtmpl.yaml");
     std::fs::write(&path, "copy:\n  archive_template: \"{year/{month}}\"\n").unwrap();
     set_env_var("TIDYMEDIA_CONFIG", path.to_str().unwrap());
-    let cfg = load();
+    let cfg = load().unwrap();
     assert_eq!(cfg.copy.archive_template, "{year}/{month}/{valuable_name}");
     remove_env_var("TIDYMEDIA_CONFIG");
 }
@@ -146,7 +177,7 @@ fn load_sanitizes_invalid_log_level_to_default() {
     let path = dir.path().join("badlevel.yaml");
     std::fs::write(&path, "log:\n  level: chatty\n").unwrap();
     set_env_var("TIDYMEDIA_CONFIG", path.to_str().unwrap());
-    let cfg = load();
+    let cfg = load().unwrap();
     assert_eq!(cfg.log.level, "info");
     remove_env_var("TIDYMEDIA_CONFIG");
 }
@@ -158,7 +189,7 @@ fn load_keeps_valid_log_level_unchanged() {
     let path = dir.path().join("oklevel.yaml");
     std::fs::write(&path, "log:\n  level: debug\n").unwrap();
     set_env_var("TIDYMEDIA_CONFIG", path.to_str().unwrap());
-    let cfg = load();
+    let cfg = load().unwrap();
     assert_eq!(cfg.log.level, "debug");
     remove_env_var("TIDYMEDIA_CONFIG");
 }
@@ -176,7 +207,7 @@ fn load_parses_quoted_template_placeholder_default() {
     .unwrap();
     remove_env_var("TIDYMEDIA_TEST_LOAD_TMPL");
     set_env_var("TIDYMEDIA_CONFIG", path.to_str().unwrap());
-    let cfg = load();
+    let cfg = load().unwrap();
     assert_eq!(cfg.copy.archive_template, "{year}/{day}");
     // 同文件其余字段未因 parse_error 丢失
     assert_eq!(cfg.copy.unique_name_max_attempts, 4);
@@ -184,193 +215,5 @@ fn load_parses_quoted_template_placeholder_default() {
 }
 
 // OCR `binarize_threshold` 越界（≤0 或 ≥1 或 NaN）回退默认 0.3，避免恒真/恒假。
-#[test]
-fn load_sanitizes_invalid_ocr_binarize_threshold_to_default() {
-    let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("badbt.yaml");
-    std::fs::write(&path, "backend:\n  ocr:\n    binarize_threshold: 1.5\n").unwrap();
-    set_env_var("TIDYMEDIA_CONFIG", path.to_str().unwrap());
-    let cfg = load();
-    assert!((cfg.backend.ocr.binarize_threshold - 0.3).abs() < f32::EPSILON);
-    remove_env_var("TIDYMEDIA_CONFIG");
-}
 
-#[test]
-fn load_sanitizes_zero_ocr_binarize_threshold_to_default() {
-    let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("zerobt.yaml");
-    std::fs::write(&path, "backend:\n  ocr:\n    binarize_threshold: 0.0\n").unwrap();
-    set_env_var("TIDYMEDIA_CONFIG", path.to_str().unwrap());
-    let cfg = load();
-    assert!((cfg.backend.ocr.binarize_threshold - 0.3).abs() < f32::EPSILON);
-    remove_env_var("TIDYMEDIA_CONFIG");
-}
-
-#[test]
-fn load_sanitizes_nan_ocr_binarize_threshold_to_default() {
-    let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("nanbt.yaml");
-    // YAML 1.1 `.nan` 是 NaN 字面量；is_finite() 路径分支
-    std::fs::write(&path, "backend:\n  ocr:\n    binarize_threshold: .nan\n").unwrap();
-    set_env_var("TIDYMEDIA_CONFIG", path.to_str().unwrap());
-    let cfg = load();
-    assert!((cfg.backend.ocr.binarize_threshold - 0.3).abs() < f32::EPSILON);
-    remove_env_var("TIDYMEDIA_CONFIG");
-}
-
-#[test]
-fn load_sanitizes_negative_ocr_min_text_pixel_ratio_to_default() {
-    let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("negratio.yaml");
-    std::fs::write(&path, "backend:\n  ocr:\n    min_text_pixel_ratio: -0.1\n").unwrap();
-    set_env_var("TIDYMEDIA_CONFIG", path.to_str().unwrap());
-    let cfg = load();
-    assert!((cfg.backend.ocr.min_text_pixel_ratio - 0.005).abs() < f32::EPSILON);
-    remove_env_var("TIDYMEDIA_CONFIG");
-}
-
-#[test]
-fn load_sanitizes_invalid_ocr_min_text_pixel_ratio_to_default() {
-    let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("badratio.yaml");
-    std::fs::write(&path, "backend:\n  ocr:\n    min_text_pixel_ratio: 2.0\n").unwrap();
-    set_env_var("TIDYMEDIA_CONFIG", path.to_str().unwrap());
-    let cfg = load();
-    assert!((cfg.backend.ocr.min_text_pixel_ratio - 0.005).abs() < f32::EPSILON);
-    remove_env_var("TIDYMEDIA_CONFIG");
-}
-
-#[test]
-fn load_sanitizes_too_small_ocr_resize_max_side_to_default() {
-    let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("badside.yaml");
-    std::fs::write(&path, "backend:\n  ocr:\n    resize_max_side: 32\n").unwrap();
-    set_env_var("TIDYMEDIA_CONFIG", path.to_str().unwrap());
-    let cfg = load();
-    assert_eq!(cfg.backend.ocr.resize_max_side, 736);
-    remove_env_var("TIDYMEDIA_CONFIG");
-}
-
-#[test]
-fn load_keeps_valid_ocr_fields_unchanged() {
-    let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("okocr.yaml");
-    std::fs::write(
-        &path,
-        "backend:\n  ocr:\n    binarize_threshold: 0.4\n    min_text_pixel_ratio: 0.01\n    resize_max_side: 960\n",
-    )
-    .unwrap();
-    set_env_var("TIDYMEDIA_CONFIG", path.to_str().unwrap());
-    let cfg = load();
-    assert!((cfg.backend.ocr.binarize_threshold - 0.4).abs() < f32::EPSILON);
-    assert!((cfg.backend.ocr.min_text_pixel_ratio - 0.01).abs() < f32::EPSILON);
-    assert_eq!(cfg.backend.ocr.resize_max_side, 960);
-    remove_env_var("TIDYMEDIA_CONFIG");
-}
-
-// 合法配置不被 sanitize 改写（防 sanitize 被变异成无条件重置）。
-#[test]
-fn load_keeps_valid_copy_fields_unchanged() {
-    let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("valid.yaml");
-    std::fs::write(
-        &path,
-        "copy:\n  unique_name_max_attempts: 3\n  archive_template: \"{year}/{day}\"\n",
-    )
-    .unwrap();
-    set_env_var("TIDYMEDIA_CONFIG", path.to_str().unwrap());
-    let cfg = load();
-    assert_eq!(cfg.copy.unique_name_max_attempts, 3);
-    assert_eq!(cfg.copy.archive_template, "{year}/{day}");
-    remove_env_var("TIDYMEDIA_CONFIG");
-}
-
-#[test]
-fn load_sanitizes_undersized_max_image_bytes_to_default() {
-    // < 1 MiB 触发 sanitize_max_image_bytes 回退到默认 50 MiB。
-    let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("verify_max_bytes_small.yaml");
-    std::fs::write(&path, "verify:\n  max_image_bytes: 1024\n").unwrap();
-    set_env_var("TIDYMEDIA_CONFIG", path.to_str().unwrap());
-    let cfg = load();
-    assert_eq!(cfg.verify.max_image_bytes, 50 * 1024 * 1024);
-    remove_env_var("TIDYMEDIA_CONFIG");
-}
-
-#[test]
-fn load_sanitizes_midrange_max_image_bytes_to_default() {
-    // 5000 字节在 (1024+1024=2048, 1024*1024=1048576) 之间 → 杀掉
-    // `1024 * 1024` → `1024 + 1024` 变异：原代码 5000 < 1048576 触发回退，
-    // 变异代码 5000 > 2048 不触发回退保持 5000，断言行为不一致。
-    let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("verify_max_bytes_mid.yaml");
-    std::fs::write(&path, "verify:\n  max_image_bytes: 5000\n").unwrap();
-    set_env_var("TIDYMEDIA_CONFIG", path.to_str().unwrap());
-    let cfg = load();
-    assert_eq!(cfg.verify.max_image_bytes, 50 * 1024 * 1024);
-    remove_env_var("TIDYMEDIA_CONFIG");
-}
-
-#[test]
-fn load_sanitizes_undersized_ocr_max_image_bytes_to_default() {
-    let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("ocr_max_bytes_small.yaml");
-    std::fs::write(&path, "backend:\n  ocr:\n    max_image_bytes: 512\n").unwrap();
-    set_env_var("TIDYMEDIA_CONFIG", path.to_str().unwrap());
-    let cfg = load();
-    assert_eq!(cfg.backend.ocr.max_image_bytes, 50 * 1024 * 1024);
-    remove_env_var("TIDYMEDIA_CONFIG");
-}
-
-#[test]
-fn load_keeps_valid_verify_max_image_bytes() {
-    let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("verify_ok.yaml");
-    std::fs::write(&path, "verify:\n  max_image_bytes: 2097152\n").unwrap();
-    set_env_var("TIDYMEDIA_CONFIG", path.to_str().unwrap());
-    let cfg = load();
-    assert_eq!(cfg.verify.max_image_bytes, 2 * 1024 * 1024);
-    remove_env_var("TIDYMEDIA_CONFIG");
-}
-
-// classify `score_min` 越界（≤0 或 ≥1 或 NaN）回退默认 0.5，避免阈值恒真/恒假。
-#[test]
-fn load_sanitizes_invalid_classify_score_min_to_default() {
-    let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("badscore.yaml");
-    std::fs::write(&path, "backend:\n  classify:\n    score_min: 1.5\n").unwrap();
-    set_env_var("TIDYMEDIA_CONFIG", path.to_str().unwrap());
-    let cfg = load();
-    assert!((cfg.backend.classify.score_min - 0.5).abs() < f32::EPSILON);
-    remove_env_var("TIDYMEDIA_CONFIG");
-}
-
-// classify `max_text_bytes` 为 0 回退默认 4096——0 让所有文档提不出文本全落 uncategorized。
-#[test]
-fn load_sanitizes_zero_classify_max_text_bytes_to_default() {
-    let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("zerotext.yaml");
-    std::fs::write(&path, "backend:\n  classify:\n    max_text_bytes: 0\n").unwrap();
-    set_env_var("TIDYMEDIA_CONFIG", path.to_str().unwrap());
-    let cfg = load();
-    assert_eq!(cfg.backend.classify.max_text_bytes, 4096);
-    remove_env_var("TIDYMEDIA_CONFIG");
-}
-
-// classify categories 从 yaml 正确反序列化（name + description 两字段）。
-#[test]
-fn load_parses_classify_categories() {
-    let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("cats.yaml");
-    std::fs::write(
-        &path,
-        "backend:\n  classify:\n    categories:\n      - {name: invoice, description: \"发票\"}\n",
-    )
-    .unwrap();
-    set_env_var("TIDYMEDIA_CONFIG", path.to_str().unwrap());
-    let cfg = load();
-    assert_eq!(cfg.backend.classify.categories.len(), 1);
-    assert_eq!(cfg.backend.classify.categories[0].name, "invoice");
-    assert_eq!(cfg.backend.classify.categories[0].description, "发票");
-    remove_env_var("TIDYMEDIA_CONFIG");
-}
+include!("config_load_more_tests.rs");

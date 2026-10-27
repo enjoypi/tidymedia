@@ -53,6 +53,8 @@ fn smb_loc(path: &str) -> Location {
     }
 }
 
+#[path = "lib_tidy/config_fail_fast.rs"]
+mod config_fail_fast;
 #[path = "lib_tidy/dispatch_and_cli.rs"]
 mod dispatch_and_cli;
 

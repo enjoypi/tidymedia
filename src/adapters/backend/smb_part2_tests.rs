@@ -167,10 +167,6 @@ impl RemoteClient<SmbTarget> for InvalidEntryClient {
         unreachable!()
     }
 
-    fn write(&self, _: &SmbTarget, _: &[u8]) -> io::Result<u64> {
-        unreachable!()
-    }
-
     fn unlink(&self, _: &SmbTarget) -> io::Result<()> {
         unreachable!()
     }

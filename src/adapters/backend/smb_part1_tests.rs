@@ -128,6 +128,16 @@ fn open_write_buffers_and_finish_commits() {
 }
 
 #[test]
+fn open_write_rejects_existing_target_without_overwrite() {
+    let client = fake_client();
+    client.add_file("x.bin", b"old".to_vec());
+    let backend = backend_with(client.clone());
+    let err = backend.open_write(&smb("x.bin"), false).unwrap_err();
+    assert_eq!(err.kind(), io::ErrorKind::AlreadyExists);
+    assert_eq!(client.get_file("x.bin").as_deref(), Some(&b"old"[..]));
+}
+
+#[test]
 fn open_write_rejects_non_smb_scheme() {
     let backend = backend_with(fake_client());
     let err = backend

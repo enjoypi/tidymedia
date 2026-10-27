@@ -3,6 +3,18 @@ use camino::Utf8PathBuf;
 use pretty_assertions::assert_eq;
 
 #[test]
+fn smb_storage_key_normalizes_alias_fields() {
+    assert_eq!(
+        Location::Local(Utf8PathBuf::from("Local/A")).storage_key(),
+        "Local/A"
+    );
+    let loc = Location::parse("smb://alice@NAS:445/Photos/2024/IMG.JPG").unwrap();
+    assert_eq!(loc.storage_key(), "smb://nas/photos/2024/img.jpg");
+    let non_default = Location::parse("smb://NAS:139/Photos/A").unwrap();
+    assert_eq!(non_default.storage_key(), "smb://nas:139/photos/a");
+}
+
+#[test]
 fn local_absolute_path() {
     assert_eq!(
         Location::parse("/abs/dir").unwrap(),

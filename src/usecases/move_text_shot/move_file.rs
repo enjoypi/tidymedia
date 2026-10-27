@@ -97,8 +97,6 @@ pub(super) fn do_move_file(
     }
 
     // 跨 scheme / 跨实例：走 stream_copy 单点（1 MiB BufReader/BufWriter + 三阶段
-    // 闭合 + 半截 dst 清理），比原 `write_bytes(&bytes)` 少一份 Vec 驻留内存 + 走
-    // RemoteBufferedWriter 时不再撞 MAX_REMOTE_WRITE_BUFFER 2 GiB 上限。
     // src_backend 与 output_backend 若为同一实例（Arc::ptr_eq）走原生 copy_file，
     // 否则走 stream 泵；bytes 参数当前仅用于 src open_read 失败时不影响 stream_copy。
     let same_instance = Arc::ptr_eq(src_backend, output_backend);

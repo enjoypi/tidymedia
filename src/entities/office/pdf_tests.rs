@@ -1,6 +1,7 @@
 use std::io::Cursor;
 
 use super::*;
+use crate::entities::office::tests_common::utc_offset;
 
 #[test]
 fn extract_text_read_error_returns_empty() {
@@ -10,163 +11,95 @@ fn extract_text_read_error_returns_empty() {
 
 #[test]
 fn parse_pdf_d_format_full_with_positive_tz() {
-    let epoch = parse_pdf_d_format("D:20170214103000+08'00'").unwrap();
+    let epoch = parse_pdf_d_format("D:20170214103000+08'00'", utc_offset()).unwrap();
     assert_eq!(epoch, 1_487_039_400);
 }
 
 #[test]
 fn parse_pdf_d_format_full_with_negative_tz() {
-    let epoch = parse_pdf_d_format("D:20170214103000-05'00'").unwrap();
+    let epoch = parse_pdf_d_format("D:20170214103000-05'00'", utc_offset()).unwrap();
     assert_eq!(epoch, 1_487_086_200);
 }
 
 #[test]
 fn parse_pdf_d_format_full_with_z_suffix() {
-    let epoch = parse_pdf_d_format("D:20170214103000Z").unwrap();
+    let epoch = parse_pdf_d_format("D:20170214103000Z", utc_offset()).unwrap();
     assert_eq!(epoch, 1_487_068_200);
 }
 
 #[test]
 fn parse_pdf_d_format_no_tz_treats_as_utc() {
-    let epoch = parse_pdf_d_format("D:20170214103000").unwrap();
+    let epoch = parse_pdf_d_format("D:20170214103000", utc_offset()).unwrap();
     assert_eq!(epoch, 1_487_068_200);
 }
 
 #[test]
 fn parse_pdf_d_format_date_only_minimum_length() {
-    let epoch = parse_pdf_d_format("D:20170214").unwrap();
+    let epoch = parse_pdf_d_format("D:20170214", utc_offset()).unwrap();
     assert_eq!(epoch, 1_487_030_400);
 }
 
 #[test]
 fn parse_pdf_d_format_hour_only_truncates_mm_ss() {
-    let epoch = parse_pdf_d_format("D:2017021410").unwrap();
+    let epoch = parse_pdf_d_format("D:2017021410", utc_offset()).unwrap();
     assert_eq!(epoch, 1_487_066_400);
 }
 
 #[test]
 fn parse_pdf_d_format_missing_d_prefix_returns_none() {
-    assert!(parse_pdf_d_format("20170214103000").is_none());
+    assert!(parse_pdf_d_format("20170214103000", utc_offset()).is_none());
 }
 
 #[test]
 fn parse_pdf_d_format_too_short_returns_none() {
-    assert!(parse_pdf_d_format("D:2017").is_none());
+    assert!(parse_pdf_d_format("D:2017", utc_offset()).is_none());
 }
 
 #[test]
 fn parse_pdf_d_format_invalid_year_returns_none() {
-    assert!(parse_pdf_d_format("D:XXXX0214").is_none());
+    assert!(parse_pdf_d_format("D:XXXX0214", utc_offset()).is_none());
 }
 
 #[test]
 fn parse_pdf_d_format_invalid_month_returns_none() {
-    assert!(parse_pdf_d_format("D:2017XX14").is_none());
+    assert!(parse_pdf_d_format("D:2017XX14", utc_offset()).is_none());
 }
 
 #[test]
 fn parse_pdf_d_format_invalid_day_returns_none() {
-    assert!(parse_pdf_d_format("D:201702XX").is_none());
+    assert!(parse_pdf_d_format("D:201702XX", utc_offset()).is_none());
 }
 
 #[test]
 fn parse_pdf_d_format_month_out_of_range_returns_none() {
-    assert!(parse_pdf_d_format("D:20171314").is_none());
+    assert!(parse_pdf_d_format("D:20171314", utc_offset()).is_none());
 }
 
 #[test]
 fn parse_pdf_d_format_day_out_of_range_returns_none() {
-    assert!(parse_pdf_d_format("D:20170232").is_none());
+    assert!(parse_pdf_d_format("D:20170232", utc_offset()).is_none());
 }
 
 #[test]
 fn parse_pdf_d_format_hour_out_of_range_returns_none() {
-    assert!(parse_pdf_d_format("D:2017021425").is_none());
+    assert!(parse_pdf_d_format("D:2017021425", utc_offset()).is_none());
 }
 
 #[test]
 fn parse_pdf_d_format_invalid_hour_chars_falls_back_to_zero() {
-    let epoch = parse_pdf_d_format("D:20170214XX").unwrap();
+    let epoch = parse_pdf_d_format("D:20170214XX", utc_offset()).unwrap();
     assert_eq!(epoch, 1_487_030_400);
 }
 
 #[test]
 fn parse_pdf_d_format_pre_epoch_year_returns_none() {
-    assert!(parse_pdf_d_format("D:19690101000000Z").is_none());
+    assert!(parse_pdf_d_format("D:19690101000000Z", utc_offset()).is_none());
 }
 
 #[test]
 fn parse_pdf_d_format_year_9999_valid() {
-    let epoch = parse_pdf_d_format("D:99990101000000Z").unwrap();
+    let epoch = parse_pdf_d_format("D:99990101000000Z", utc_offset()).unwrap();
     assert!(epoch > 1_700_000_000);
-}
-
-#[test]
-fn parse_pdf_d_format_invalid_tz_returns_none() {
-    assert!(parse_pdf_d_format("D:20170214103000+XY'00'").is_none());
-}
-
-#[test]
-fn parse_tz_offset_empty_returns_utc() {
-    assert_eq!(parse_tz_offset(b"").unwrap().local_minus_utc(), 0);
-}
-
-#[test]
-fn parse_tz_offset_z_returns_utc() {
-    assert_eq!(parse_tz_offset(b"Z").unwrap().local_minus_utc(), 0);
-}
-
-#[test]
-fn parse_tz_offset_positive_hh_mm() {
-    let off = parse_tz_offset(b"+08'00'").unwrap();
-    assert_eq!(off.local_minus_utc(), 8 * 3600);
-}
-
-#[test]
-fn parse_tz_offset_negative_hh_mm() {
-    let off = parse_tz_offset(b"-05'30'").unwrap();
-    assert_eq!(off.local_minus_utc(), -(5 * 3600 + 30 * 60));
-}
-
-#[test]
-fn parse_tz_offset_hh_only_no_mm_treats_as_zero_mm() {
-    let off = parse_tz_offset(b"+08").unwrap();
-    assert_eq!(off.local_minus_utc(), 8 * 3600);
-}
-
-#[test]
-fn parse_tz_offset_unknown_sign_falls_back_to_utc() {
-    let off = parse_tz_offset(b"X").unwrap();
-    assert_eq!(off.local_minus_utc(), 0);
-}
-
-#[test]
-fn parse_tz_offset_too_short_after_sign_returns_none() {
-    assert!(parse_tz_offset(b"+").is_none());
-}
-
-#[test]
-fn parse_tz_offset_non_digit_hh_returns_none() {
-    assert!(parse_tz_offset(b"+XY'00'").is_none());
-}
-
-#[test]
-fn parse_tz_offset_non_digit_mm_returns_none() {
-    assert!(parse_tz_offset(b"+08'XY'").is_none());
-}
-
-#[test]
-fn parse_tz_offset_non_utf8_hh_returns_none() {
-    assert!(parse_tz_offset(b"+\xff\xff").is_none());
-}
-
-#[test]
-fn parse_tz_offset_non_utf8_mm_returns_none() {
-    let mut buf: Vec<u8> = b"+08'".to_vec();
-    buf.push(0xff);
-    buf.push(0xff);
-    buf.push(b'\'');
-    assert!(parse_tz_offset(&buf).is_none());
 }
 
 #[test]
@@ -199,7 +132,7 @@ fn find_subslice_not_found() {
 fn scan_d_date_after_key_happy_path() {
     let buf = b"/CreationDate (D:20170214103000+08'00') ...";
     assert_eq!(
-        scan_d_date_after_key(buf, b"/CreationDate"),
+        scan_d_date_after_key(buf, b"/CreationDate", utc_offset()),
         Some(1_487_039_400)
     );
 }
@@ -207,19 +140,19 @@ fn scan_d_date_after_key_happy_path() {
 #[test]
 fn scan_d_date_after_key_missing_key_returns_none() {
     let buf = b"no key here at all";
-    assert!(scan_d_date_after_key(buf, b"/CreationDate").is_none());
+    assert!(scan_d_date_after_key(buf, b"/CreationDate", utc_offset()).is_none());
 }
 
 #[test]
 fn scan_d_date_after_key_missing_open_paren_returns_none() {
     let buf = b"/CreationDate something_no_paren_after";
-    assert!(scan_d_date_after_key(buf, b"/CreationDate").is_none());
+    assert!(scan_d_date_after_key(buf, b"/CreationDate", utc_offset()).is_none());
 }
 
 #[test]
 fn scan_d_date_after_key_missing_close_paren_returns_none() {
     let buf = b"/CreationDate (D:20170214 no close paren ever";
-    assert!(scan_d_date_after_key(buf, b"/CreationDate").is_none());
+    assert!(scan_d_date_after_key(buf, b"/CreationDate", utc_offset()).is_none());
 }
 
 #[test]
@@ -227,20 +160,20 @@ fn scan_d_date_after_key_invalid_utf8_payload_returns_none() {
     let mut buf: Vec<u8> = b"/CreationDate (".to_vec();
     buf.push(0xff);
     buf.extend_from_slice(b")");
-    assert!(scan_d_date_after_key(&buf, b"/CreationDate").is_none());
+    assert!(scan_d_date_after_key(&buf, b"/CreationDate", utc_offset()).is_none());
 }
 
 #[test]
 fn scan_d_date_after_key_invalid_date_format_returns_none() {
     let buf = b"/CreationDate (not a date)";
-    assert!(scan_d_date_after_key(buf, b"/CreationDate").is_none());
+    assert!(scan_d_date_after_key(buf, b"/CreationDate", utc_offset()).is_none());
 }
 
 #[test]
 fn parse_extracts_creation_and_mod_dates() {
     let pdf = b"%PDF-1.4\n3 0 obj\n<< /CreationDate (D:20170214103000+08'00') /ModDate (D:20180101120000Z) >>\nendobj\n";
     let mut r = Cursor::new(pdf.to_vec());
-    let (c, m) = parse(&mut r, "application/pdf");
+    let (c, m) = parse(&mut r, "application/pdf", utc_offset());
     assert_eq!(c, 1_487_039_400);
     assert_eq!(m, 1_514_808_000);
 }
@@ -249,14 +182,14 @@ fn parse_extracts_creation_and_mod_dates() {
 fn parse_returns_zeros_when_no_info_dict() {
     let pdf = b"%PDF-1.4\nempty document with no /CreationDate";
     let mut r = Cursor::new(pdf.to_vec());
-    assert_eq!(parse(&mut r, "application/pdf"), (0, 0));
+    assert_eq!(parse(&mut r, "application/pdf", utc_offset()), (0, 0));
 }
 
 #[test]
 fn parse_with_creation_only_returns_zero_for_modified() {
     let pdf = b"%PDF-1.4\n3 0 obj << /CreationDate (D:20170214103000Z) >> endobj";
     let mut r = Cursor::new(pdf.to_vec());
-    let (c, m) = parse(&mut r, "application/pdf");
+    let (c, m) = parse(&mut r, "application/pdf", utc_offset());
     assert_eq!(c, 1_487_068_200);
     assert_eq!(m, 0);
 }
@@ -268,7 +201,7 @@ fn parse_drops_middle_region_of_large_pdf() {
     data.extend_from_slice(b"/CreationDate (D:20170214103000Z)");
     data.extend(vec![0u8; head_tail + 512]);
     let mut r = Cursor::new(data);
-    assert_eq!(parse(&mut r, "application/pdf"), (0, 0));
+    assert_eq!(parse(&mut r, "application/pdf", utc_offset()), (0, 0));
 }
 
 #[test]
@@ -277,7 +210,7 @@ fn parse_finds_creation_date_in_tail_window() {
     let mut data = vec![b' '; filler];
     data.extend_from_slice(b"trailer << /Info 1 0 R >> /CreationDate (D:20170214103000Z)");
     let mut r = Cursor::new(data);
-    let (c, _) = parse(&mut r, "application/pdf");
+    let (c, _) = parse(&mut r, "application/pdf", utc_offset());
     assert_eq!(c, 1_487_068_200);
 }
 
@@ -288,7 +221,7 @@ fn parse_head_window_wins_over_tail() {
     data.extend(vec![b' '; filler]);
     data.extend_from_slice(b"/CreationDate (D:20200101000000Z)");
     let mut r = Cursor::new(data);
-    let (c, _) = parse(&mut r, "application/pdf");
+    let (c, _) = parse(&mut r, "application/pdf", utc_offset());
     assert_eq!(c, 1_487_068_200);
 }
 
@@ -298,7 +231,7 @@ fn parse_whole_file_read_when_at_most_two_windows() {
     let mut data = vec![0u8; head + 100];
     data.extend_from_slice(b"/CreationDate (D:20170214103000Z)");
     let mut r = Cursor::new(data);
-    let (c, _) = parse(&mut r, "application/pdf");
+    let (c, _) = parse(&mut r, "application/pdf", utc_offset());
     assert_eq!(c, 1_487_068_200);
 }
 
@@ -355,7 +288,7 @@ fn parse_returns_zeros_on_read_error() {
     }
 
     let mut r = FailRead;
-    assert_eq!(parse(&mut r, "application/pdf"), (0, 0));
+    assert_eq!(parse(&mut r, "application/pdf", utc_offset()), (0, 0));
 }
 
 fn windows_of(io: &mut crate::entities::test_common::FlakyIo) -> Option<Vec<u8>> {

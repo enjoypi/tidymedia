@@ -126,6 +126,36 @@ impl RemoteTarget for DummyTarget {
 // ── DummyClient（按方法注入 ErrorKind）────────────────────────
 
 #[derive(Debug, Default)]
+pub(super) struct DummyWriter {
+    error: Option<io::ErrorKind>,
+}
+
+impl io::Write for DummyWriter {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        if let Some(kind) = self.error {
+            return Err(io::Error::from(kind));
+        }
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        if let Some(kind) = self.error {
+            return Err(io::Error::from(kind));
+        }
+        Ok(())
+    }
+}
+
+impl crate::entities::backend::MediaWriter for DummyWriter {
+    fn finish(self: Box<Self>) -> io::Result<()> {
+        if let Some(kind) = self.error {
+            return Err(io::Error::from(kind));
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Default)]
 pub(super) struct DummyClient {
     pub(super) stat: Option<io::ErrorKind>,
     pub(super) list: Option<io::ErrorKind>,
@@ -182,11 +212,8 @@ impl RemoteClient<DummyTarget> for DummyClient {
         }
         Ok(b"hello".to_vec())
     }
-    fn write(&self, _t: &DummyTarget, data: &[u8]) -> io::Result<u64> {
-        if let Some(k) = self.write {
-            return Err(io::Error::from(k));
-        }
-        Ok(data.len() as u64)
+    fn create_writer(&self, _t: &DummyTarget) -> io::Result<Box<dyn MediaWriter>> {
+        Ok(Box::new(DummyWriter { error: self.write }))
     }
     fn unlink(&self, _t: &DummyTarget) -> io::Result<()> {
         if let Some(k) = self.unlink {

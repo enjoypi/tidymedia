@@ -15,10 +15,10 @@
 ## 配置与日志
 
 - 配置结构在 `usecases/config.rs`，加载与 sanitize 在 `frameworks/config.rs`，示例和默认值以 `config.yaml` 为准，不在文档复制配置清单。
-- `install_config_loader()` 必须在 bin 入口和需要切换配置的集成测试中最先调用；lib 单元测试使用 crate 入口安装。
-- `TIDYMEDIA_CONFIG` 指定配置文件；`RUST_LOG` > `--log-level` > `log.level`。
+- `install_config_loader()` 必须在 bin 入口和需要切换配置的集成测试中最先调用；`run_cli`、`tidy_with` 及公开 factory 必须先经 `try_config()` 预检，lib 单元测试使用 crate 入口安装。
+- `TIDYMEDIA_CONFIG` 指定配置文件；仅未显式指定且默认 `config.yaml` 不存在时使用内置默认值，其他读取、解析和未知字段错误必须 fail-fast。`RUST_LOG` > `--log-level` > `log.level`。
 - `expand_env` 必须限制递归深度；环境值拼回 YAML 前使用 `sanitize_env_value`。展开后以 `{` 开头的 YAML 值必须加引号。
-- 非法配置经 sanitize 回退默认；日志安装前发生的关键回退同时用 stderr 提示。
+- 配置结构及其嵌套结构使用 `deny_unknown_fields`；合法字段值经 sanitize 回退默认，日志安装前发生的关键错误必须经统一 `Error` 返回并写 stderr。
 - 结构化日志包含 `feature`、`operation`、`result` 等维度。`feature` 常量统一从 `usecases::report` 获取，包括 verify，不另建副本。
 - CLI 的逐文件 stdout 是脚本输出，不替代结构化日志。
 
@@ -34,12 +34,13 @@
 - Backend `walk` 必须递归产生所有文件；远端遍历使用 `visited` 防环。浅列表缺少 size 时，补充 stat 的错误必须上抛。
 - `copy_file` 拒绝跨 scheme；跨 scheme 使用 `open_read`、`open_write`、流式复制和 `writer.finish`。判断同一存储实例用 `Arc::ptr_eq`，不能只比 scheme 字符串。
 - Backend 能力通过 trait method 查询，不在调用方硬编码 scheme。同盘 move 由 OS rename 是否成功判定，不在 Rust 层按盘符猜测。
-- 本地 `exists` 使用 `try_exists()?`；本地 `rename`、`copy_file`、`open_write` 必须不覆盖已有目标，冲突返回 `AlreadyExists`。远端没有统一的原子 no-replace 保证，调用方必须通过索引、命名和冲突错误保护目标，不得宣称与本地同等保证。
+- 本地 `exists` 使用 `try_exists()?`；本地与 SMB 的 `rename`、`copy_file`、`open_write` 不得覆盖已有目标，冲突返回 `AlreadyExists`。SMB 使用独占创建，调用方通过索引、命名和冲突错误完成换名。
 - mkdir/exists best-effort 缓存使用 `contains + insert`，避免失败操作污染缓存。
 - 远端 mkdir 使用真递归；client 原始调用统一经对应 `map_error`，操作日志统一经 `map_and_log`。NotFound/AlreadyExists 用 debug，其余错误用 warn。
 - 错误文案重映射先保留已正确分类的 kind，再以 ASCII 小写匹配 NotFound 和 PermissionDenied；不得吞掉其他错误。
-- 远端 `RemoteClient::read` 当前可能整文件入堆；修改读取、EXIF 或图像路径时必须考虑大文件内存，不得把拆目录当作根本修复。
-- 远端整文件写入必须设上限并使错误可见；flush/finish 错误必须传播。
+- 本地读取使用 `File + BufReader`，不得恢复 mmap；外部截断必须表现为 EOF 或 IO 错误，而不是 SIGBUS。
+- `RemoteClient::open_reader` 必须按需分段读取；整文件 `read` 仅限已有大小上限的 sidecar 文本路径。索引、EXIF、判重和复制不得先把远端文件整体装入内存。
+- 远端 writer 使用有界分块写入和独占创建；flush/finish 错误必须传播，失败清理只针对本次成功创建的目标。
 
 ## media_time 与容器解析
 
@@ -48,6 +49,7 @@
 - ModifyDate 只作旁证：与 filename 票互证时否决多数派推翻并记录冲突，不成为独立候选。
 - naive EXIF 和文件名时间按配置时区解释；QuickTime/MKV 等 UTC 时间先转 UTC，再按配置时区确定归档桶。EXIF naive 的桶可直接看原字符串年月，UTC 容器时间不可套用此规则。
 - `epoch_to_candidate(0)` 表示未填；合法的文件系统 UNIX_EPOCH 由独立转换路径处理。外部 timestamp 必须经整数转换、受限时间构造和 checked arithmetic 防溢出。
+- PDF 带符号时区非法或越界时保留墙钟日期并按配置时区解释；无 tz、`Z` 和未知前缀保持 UTC，分钟与总偏移不得静默归一化。
 - 1904 时间按当天窗口过滤；未来时间和 1995 年前低置信度候选按现有 filter 规则处理。
 - 冲突 `diff_secs = chosen.utc - other_utc`；override 分支 chosen 为新 winner，other 为原 P0 best。
 - sidecar 属于 `adapters/sidecar.rs`，通过依赖倒置注入 copy；backend-aware 路径规则不得假设所有来源都是 Local。
@@ -70,8 +72,8 @@
 - OCR/图像等 bytes 用例先读取 sniff 窗口，命中目标类型后再读完整内容；预分配容量必须处理 `u64` 到 `usize` 的转换。
 - copy-doc/move-doc 仅在文档模式且模板含 `{category}` 时装配分类器；分类在 EXIF/MIME 解析后进行，并经 `Info.category` 传入模板。分类阈值以下使用 `uncategorized`，路径段必须 sanitize。
 - 含 `errors` 的 Report 使用统一软上限和截断标记，rayon merge 传播截断状态；`failed` 不受上限影响。
-- `scanned` 在 walk 循环中按触达数累计，不能用成功项数量代替。耗时统一使用 `elapsed_ms`；新增字段同步所有对应 Report、fixture 和 JSON 断言，不写死 Report 数量。
-- `ReportSink` 使用 `enum Report<'a>` 和单一 `write(&Report<'_>)` 方法保持对象安全；新增变体不应强制所有 sink 增加专用方法。copy/move 的部分失败文案按实际操作分流并双向测试。
+- `scanned` 使用 `Index::touched_count` 统一按触达数累计，不能用成功项数量代替。耗时统一使用 `elapsed_ms`；新增字段同步所有对应 Report、fixture 和 JSON 断言，不写死 Report 数量。
+- `ReportSink` 使用 `enum Report<'a>` 和返回 `Result<()>` 的单一 `write(&Report<'_>)` 方法保持对象安全；新增变体不应强制所有 sink 增加专用方法。报告与 find stdout 写失败必须传播为非零退出，已完成的媒体操作不回滚。copy/move 的部分失败文案按实际操作分流并双向测试。
 - 动态 H/W 的 OCR DBNet 使用 `into_typed().into_runnable()`；BERT symbolic 维先 `into_typed()`，绑定 batch=1、sequence=256，再优化。tokenizer 输出手动 pad/truncate 到 sequence。
 - tract runnable 已由 Arc 持有，不重复包装。
 - 老 QuickTime 使用现有 nom-exif patch，并只用 `BoxHeader::parse` 解析 header；M2TS/AVCHD 使用现有 video PID 与 H.264 EP strip 规则，不把 container body 一次性装入解析 buffer。

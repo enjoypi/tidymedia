@@ -2853,7 +2853,6 @@ dependencies = [
  "ignore",
  "image",
  "infer",
- "memmap2",
  "nom-exif",
  "parking_lot",
  "percent-encoding",

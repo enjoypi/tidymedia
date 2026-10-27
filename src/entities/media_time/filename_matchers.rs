@@ -109,11 +109,8 @@ pub(super) fn try_camera_or_phone(stem: &str, default_offset: FixedOffset) -> Op
 /// 时间部分 = `yyyymmdd_HHMMSS`（前 15 chars），尾部毫秒和后缀丢弃。
 pub(super) fn try_pixel(stem: &str, default_offset: FixedOffset) -> Option<Candidate> {
     let rest = stem.strip_prefix(PIXEL_PREFIX)?;
-    // 至少 15 chars（日期+时间），后面可以有毫秒或其他标记
-    if rest.len() < 15 {
-        return None;
-    }
-    let naive = NaiveDateTime::parse_from_str(&rest[..15], "%Y%m%d_%H%M%S").ok()?;
+    let window = rest.get(..15)?;
+    let naive = NaiveDateTime::parse_from_str(window, "%Y%m%d_%H%M%S").ok()?;
     Some(naive_to_candidate(
         naive,
         default_offset,
@@ -127,12 +124,12 @@ pub(super) fn try_screenshot(stem: &str, default_offset: FixedOffset) -> Option<
     //   - yyyy-mm-dd-HH-mm-ss（19 chars，全 dash）
     //   - yyyymmdd_HHMMSS（15 chars，与 IMG_/DSC_ 同模板，Samsung/MIUI 常见）
     // 后者若退到 try_loose_yyyymmdd 兜底会丢失时分秒精度，必须在此显式解析。
-    let naive = if rest.len() >= 19
-        && let Ok(n) = NaiveDateTime::parse_from_str(&rest[..19], "%Y-%m-%d-%H-%M-%S")
+    let naive = if let Some(window) = rest.get(..19)
+        && let Ok(n) = NaiveDateTime::parse_from_str(window, "%Y-%m-%d-%H-%M-%S")
     {
         n
-    } else if rest.len() >= 15
-        && let Ok(n) = NaiveDateTime::parse_from_str(&rest[..15], "%Y%m%d_%H%M%S")
+    } else if let Some(window) = rest.get(..15)
+        && let Ok(n) = NaiveDateTime::parse_from_str(window, "%Y%m%d_%H%M%S")
     {
         n
     } else {
@@ -193,11 +190,8 @@ fn try_at_dotted(
     source: Source,
 ) -> Option<Candidate> {
     let rest = stem.strip_prefix(prefix)?;
-    if rest.len() < AT_DOTTED_LEN {
-        return None;
-    }
-    let naive =
-        NaiveDateTime::parse_from_str(&rest[..AT_DOTTED_LEN], "%Y-%m-%d at %H.%M.%S").ok()?;
+    let window = rest.get(..AT_DOTTED_LEN)?;
+    let naive = NaiveDateTime::parse_from_str(window, "%Y-%m-%d at %H.%M.%S").ok()?;
     Some(naive_to_candidate(naive, default_offset, source))
 }
 

@@ -154,8 +154,6 @@ pub(super) fn is_entry_under_output(entry_loc: &Location, output_prefix: &str) -
 
 /// 先读前 [`MIME_SNIFF_BYTES`] 字节做 `is_image` 判定：非 image 返 `Ok(None)`；
 /// image 则 `read_to_end` 剩余，配合 `Vec::with_capacity(size_hint)` 消除 geometric
-/// growth 的 realloc/memcpy 开销。远端 backend `open_read` 是全字节入堆的已知
-/// 限制（trait 文档），本 helper 至少避免了「白读 500 MB 非 image」的最坏情形。
 pub(super) fn sniff_and_read(
     backend: &Arc<dyn Backend>,
     loc: &Location,

@@ -26,8 +26,13 @@ pub fn canonical_prefix(loc: &Location) -> String {
             Ok(s) => crate::entities::file_info::strip_windows_unc(&s).to_string(),
             Err(_) => p.as_str().to_string(),
         },
-        other @ Location::Smb { .. } => other.display(),
+        Location::Smb { .. } => loc.storage_key(),
     }
+}
+
+#[must_use]
+pub(crate) fn key_from_display(value: &str) -> String {
+    Location::parse(value).map_or_else(|_| value.to_string(), |loc| canonical_prefix(&loc))
 }
 
 #[must_use]

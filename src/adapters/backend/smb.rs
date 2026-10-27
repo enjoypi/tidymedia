@@ -106,6 +106,20 @@ impl RemoteTarget for SmbTarget {
     }
 }
 
+pub(crate) fn seek_position(current: u64, size: u64, pos: io::SeekFrom) -> io::Result<u64> {
+    let next = match pos {
+        io::SeekFrom::Start(value) => i128::from(value),
+        io::SeekFrom::Current(delta) => i128::from(current) + i128::from(delta),
+        io::SeekFrom::End(delta) => i128::from(size) + i128::from(delta),
+    };
+    u64::try_from(next).map_err(|_| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "seek outside the supported file range",
+        )
+    })
+}
+
 pub(crate) fn path_or_root(p: &Utf8PathBuf) -> &str {
     if p.as_str().is_empty() {
         "."

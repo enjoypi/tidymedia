@@ -3,6 +3,7 @@
 
 use tracing::debug;
 
+use crate::entities::common;
 use crate::entities::file_index::VisitStats;
 use crate::usecases::report::{CopyReport, Report, ReportError, ReportSink};
 
@@ -74,7 +75,7 @@ pub(super) fn finalize(
     errors: Vec<ReportError>,
     errors_truncated: bool,
     duration_ms: u64,
-) -> CopyReport {
+) -> common::Result<CopyReport> {
     let report = make_report(
         flags,
         stats,
@@ -85,12 +86,11 @@ pub(super) fn finalize(
         errors_truncated,
         duration_ms,
     );
-    emit_report(sink, &report);
-    report
+    emit_report(sink, &report)?;
+    Ok(report)
 }
 
 // 构造 CopyReport 值对象；抽出避免参数列表过长。
-// scanned = 入索引文件数（indexed）+ walker 触达但跳过的（empty/unreadable/walker_errors）。
 #[expect(
     clippy::too_many_arguments,
     reason = "report 字段与 run_copy_loop 返回值一一对应；合并结构体反而在唯一调用点更绕"
@@ -107,11 +107,7 @@ fn make_report(
 ) -> CopyReport {
     // indexed = copied + ignored + failed（do_copy 三态都来自已入索引的文件）。
     let indexed = copied + ignored + failed;
-    let skipped_total = scan_stats.skipped_empty
-        + scan_stats.skipped_unreadable
-        + scan_stats.walker_errors
-        + scan_stats.skipped_by_ext;
-    let scanned = indexed + usize::try_from(skipped_total).unwrap_or(usize::MAX);
+    let scanned = indexed + usize::try_from(scan_stats.skipped_total()).unwrap_or(usize::MAX);
     CopyReport {
         scanned,
         copied,
@@ -136,8 +132,9 @@ pub(super) fn summary_result(failed: usize) -> &'static str {
 }
 
 // 通过注入的 sink 输出报告；None 时跳过（用 case 不知道协议与持久化细节）。
-fn emit_report(sink: Option<&dyn ReportSink>, report: &CopyReport) {
+fn emit_report(sink: Option<&dyn ReportSink>, report: &CopyReport) -> common::Result<()> {
     if let Some(s) = sink {
-        s.write(&Report::Copy(report));
+        return s.write(&Report::Copy(report));
     }
+    Ok(())
 }

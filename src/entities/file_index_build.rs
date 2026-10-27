@@ -112,10 +112,13 @@ impl Index {
     }
 
     pub fn remove_under_prefix(&self, prefix: &str) -> usize {
+        let prefix = common::key_from_display(prefix);
         let to_remove: Vec<Utf8PathBuf> = self
             .files
             .iter()
-            .filter(|kv| common::under_prefix(kv.key().as_str(), prefix))
+            .filter(|kv| {
+                common::under_prefix(&common::key_from_display(kv.key().as_str()), &prefix)
+            })
             .map(|kv| kv.key().clone())
             .collect();
         to_remove

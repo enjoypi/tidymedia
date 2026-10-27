@@ -50,15 +50,21 @@ impl RemoteClient<DummyTarget> for DirListThenEmpty {
     fn read(&self, _t: &DummyTarget) -> io::Result<Vec<u8>> {
         unreachable!()
     }
-    fn write(&self, _t: &DummyTarget, _data: &[u8]) -> io::Result<u64> {
-        unreachable!()
-    }
     fn unlink(&self, _t: &DummyTarget) -> io::Result<()> {
         unreachable!()
     }
     fn mkdir(&self, _t: &DummyTarget) -> io::Result<()> {
         unreachable!()
     }
+}
+
+#[test]
+fn default_create_writer_returns_unsupported() {
+    let client = DirListThenEmpty {
+        calls: std::sync::atomic::AtomicUsize::new(0),
+    };
+    let err = client.create_writer(&DummyTarget::new("/f")).unwrap_err();
+    assert_eq!(err.kind(), io::ErrorKind::Unsupported);
 }
 
 #[test]
@@ -105,9 +111,6 @@ fn walk_recursive_breaks_symlink_loop() {
             }])
         }
         fn read(&self, _t: &DummyTarget) -> io::Result<Vec<u8>> {
-            unreachable!()
-        }
-        fn write(&self, _t: &DummyTarget, _data: &[u8]) -> io::Result<u64> {
             unreachable!()
         }
         fn unlink(&self, _t: &DummyTarget) -> io::Result<()> {

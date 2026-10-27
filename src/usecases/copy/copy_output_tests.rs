@@ -7,6 +7,7 @@ use super::tests_common::*;
 use super::*;
 use crate::adapters::report_sink::JsonFileReportSink;
 use crate::entities::backend::Backend;
+use crate::entities::common;
 use crate::entities::test_common as tc;
 use crate::entities::uri::Location;
 use crate::usecases::report::ReportSink;
@@ -162,4 +163,56 @@ fn copy_empty_source_with_report_writes_zero_counts() {
     let parsed: serde_json::Value = serde_json::from_str(&content).unwrap();
     assert_eq!(parsed["scanned"], 0);
     assert_eq!(parsed["copied"], 0);
+}
+
+struct FailingSink;
+
+impl ReportSink for FailingSink {
+    fn write(&self, _report: &crate::usecases::report::Report<'_>) -> common::Result<()> {
+        Err(common::Error::Io(std::io::Error::other(
+            "injected sink failure",
+        )))
+    }
+}
+
+#[test]
+fn copy_propagates_report_sink_failure() {
+    let src = tempdir().unwrap();
+    tc::copy_png_to(src.path(), "photo.png").unwrap();
+    let out = tempdir().unwrap();
+    let err = copy(
+        &[local_source(src.path())],
+        local_source(out.path()),
+        false,
+        false,
+        false,
+        None,
+        Some(&FailingSink),
+    )
+    .unwrap_err();
+    assert!(
+        err.to_string().contains("injected sink failure"),
+        "got: {err}"
+    );
+    assert!(out.path().join("2024/01/photo.png").exists());
+}
+
+#[test]
+fn copy_empty_source_report_sink_failure_propagates() {
+    let src = tempdir().unwrap();
+    let out = tempdir().unwrap();
+    let err = copy(
+        &[local_source(src.path())],
+        local_source(out.path()),
+        false,
+        false,
+        false,
+        None,
+        Some(&FailingSink),
+    )
+    .unwrap_err();
+    assert!(
+        err.to_string().contains("injected sink failure"),
+        "got: {err}"
+    );
 }

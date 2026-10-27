@@ -1,5 +1,19 @@
-use super::{Config, chrono_offset_from_hours, offset_from_hours, validate_archive_template};
+use super::{
+    Config, chrono_offset_from_hours, config, install_loader, offset_from_hours, try_config,
+    validate_archive_template,
+};
 use time::UtcOffset;
+
+#[expect(clippy::unnecessary_wraps, reason = "匹配统一配置 loader 签名")]
+fn debug_loader() -> Result<Config, String> {
+    let mut cfg = Config::default();
+    cfg.log.level = "debug".to_string();
+    Ok(cfg)
+}
+
+fn failing_loader() -> Result<Config, String> {
+    Err("boom".to_string())
+}
 
 #[test]
 fn config_defaults_match_historical_constants() {
@@ -121,4 +135,52 @@ fn chrono_offset_from_hours_valid() {
 #[test]
 fn chrono_offset_from_hours_out_of_range_falls_back_to_utc() {
     assert_eq!(chrono_offset_from_hours(25).local_minus_utc(), 0);
+}
+
+#[test]
+fn config_rejects_unknown_top_level_field() {
+    let err = serde_yaml::from_str::<Config>("legacy: true\n").unwrap_err();
+    assert!(format!("{err}").contains("legacy"), "got: {err}");
+}
+
+#[test]
+fn config_rejects_unknown_nested_field() {
+    let err = serde_yaml::from_str::<Config>("backend:\n  smb:\n    timeout: 3\n").unwrap_err();
+    assert!(format!("{err}").contains("timeout"), "got: {err}");
+}
+
+#[test]
+fn config_allows_partial_yaml_with_known_fields() {
+    let cfg: Config = serde_yaml::from_str("copy:\n  unique_name_max_attempts: 3\n").unwrap();
+    assert_eq!(cfg.copy.unique_name_max_attempts, 3);
+    assert_eq!(cfg.log.level, "info");
+}
+
+#[test]
+fn try_config_defaults_without_loader() {
+    let cfg = try_config().unwrap();
+    assert_eq!(cfg.log.level, "info");
+}
+
+#[test]
+fn try_config_caches_ok_result() {
+    install_loader(debug_loader);
+    let a = try_config().unwrap();
+    let b = try_config().unwrap();
+    assert!(std::ptr::eq(a, b));
+    assert_eq!(a.log.level, "debug");
+}
+
+#[test]
+fn try_config_caches_error_result() {
+    install_loader(failing_loader);
+    assert_eq!(try_config().unwrap_err(), "boom");
+    assert_eq!(try_config().unwrap_err(), "boom");
+}
+
+#[test]
+#[should_panic(expected = "internal: config() requires successful try_config() precheck")]
+fn config_panics_when_load_failed() {
+    install_loader(failing_loader);
+    let _ = config();
 }
