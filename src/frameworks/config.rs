@@ -4,6 +4,10 @@ mod config_expand;
 mod config_io;
 #[path = "config_sanitize.rs"]
 mod config_sanitize;
+#[path = "config_sanitize_memory.rs"]
+mod config_sanitize_memory;
+
+use config_sanitize::eprintln_sanitize_fallback;
 
 use tracing::debug;
 use tracing::warn;

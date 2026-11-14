@@ -1,17 +1,33 @@
 use std::io::{self, BufReader, BufWriter, Read, Seek, Write};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::SystemTime;
 
 use super::uri::Location;
 
 pub mod factory;
 
+mod mapped;
 mod output_write;
 mod partial_move;
+
+pub use self::mapped::{FileBytes, MappedBytes, MappedFile};
 
 pub use self::output_write::{is_output_write_denied, output_write_error};
 pub(crate) use self::partial_move::{is_partial_move, partial_move_error};
 
 pub(crate) const STREAM_BUFFER_BYTES: usize = 1 << 20;
+pub const DEFAULT_READ_BUFFER_BYTES: usize = 64 << 10;
+
+static READ_BUFFER_BYTES: AtomicUsize = AtomicUsize::new(DEFAULT_READ_BUFFER_BYTES);
+
+pub fn set_read_buffer_bytes(bytes: usize) {
+    READ_BUFFER_BYTES.store(bytes, Ordering::Relaxed);
+}
+
+#[must_use]
+pub fn read_buffer_bytes() -> usize {
+    READ_BUFFER_BYTES.load(Ordering::Relaxed)
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum EntryKind {
@@ -135,6 +151,12 @@ pub trait Backend: Send + Sync {
                 ),
             )
         })
+    }
+
+    #[expect(clippy::missing_errors_doc)]
+    fn map_whole(&self, loc: &Location) -> io::Result<Option<MappedFile>> {
+        let _ = loc;
+        Ok(None)
     }
 
     fn supports_native_rename_to(&self, other: &dyn Backend) -> bool {

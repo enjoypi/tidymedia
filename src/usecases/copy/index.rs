@@ -4,10 +4,10 @@
 use tracing::debug;
 
 use super::ops::type_allowed;
-use super::run::{Source, configured_chrono_offset};
+use super::run::{CopyJob, Source, configured_chrono_offset};
 use crate::entities::common;
 use crate::entities::common::{canonical_prefix, under_prefix};
-use crate::entities::file_index::{CandidateProvider, Index, TextClassifyProvider};
+use crate::entities::file_index::Index;
 use crate::entities::file_info::Info;
 
 // 重叠保护：source ⊆ output（canonical 前缀含相等）时，dedup 会把每个源文件判为
@@ -31,55 +31,47 @@ pub(super) fn ensure_sources_outside_output(
     Ok(())
 }
 
-// 扫源建索引 + 重叠剔除 + EXIF/P3 富集 + 内容分类；拆出让 copy_with_sidecar 保持
-// 在 100 行内。include_non_media=false 时 parse_exif 对非媒体 MIME 短路（sniff 后
-// 跳过整文件容器解析）——这些文件后续在 do_copy 被 is_media 过滤，解析成本纯属浪费。
-// doc_only=true 反向短路：仅文档族整文件解析（copy-doc/move-doc 路径）。
-// classifier 已由调用方按「doc_only && 模板含 {category}」过滤——无消费点不做工。
-pub(super) fn build_source_index(
-    sources: &[Source],
-    output_prefixes: (&str, &str),
-    sidecar: Option<CandidateProvider>,
-    classifier: Option<TextClassifyProvider>,
-    feature: &'static str,
-    include_non_media: bool,
-    doc_only: bool,
-) -> Index {
-    let (output_prefix, _) = output_prefixes;
-    let skip_ext = source_skip_extensions(include_non_media, doc_only);
-    let mut source = Index::new();
-    for (loc, backend) in sources {
+pub(super) fn build_source_index(job: &CopyJob<'_>, mut source: Index) -> Index {
+    let flags = job.flags;
+    let skip_ext = source_skip_extensions(flags.include_non_media, flags.doc_only);
+    for (loc, backend) in job.sources {
         source.visit_location_skipping(loc, backend, skip_ext);
     }
-    // output ⊂ source（就地归档，如 copy /photos -o /photos/archive）：把已归档
-    // 文件从 source 索引剔除，否则它们会被再次复制 / 在 move 模式下被误删。
-    // canonical + 字面双前缀各剔一遍：index key 是 walker 字面路径，macOS
-    // `/var → /private/var` 等 symlink 下 canonical 前缀匹配不到字面 key；
-    // 两者相同时第二遍空剔除，幂等零副作用（免去相等判分支）。
-    let excluded = source.remove_under_prefix(output_prefix);
+    if source.overflowed() {
+        return source;
+    }
+    let excluded = source.remove_under_prefix(&job.output_prefix);
     if excluded > 0 {
         debug!(
-            feature,
+            feature = job.feature,
             operation = "exclude_output_subtree",
             result = "ok",
             excluded,
-            output = %output_prefix,
+            output = %job.output_prefix,
             "excluded already-archived files under output from source index"
         );
     }
-    source.parse_exif(configured_chrono_offset(), include_non_media, doc_only);
-    // P3 富集：adapters 层注入的 sidecar 发现（XMP / Takeout），entities 只消费
-    // 转换好的 Candidate（依赖倒置，协议细节不进 usecases）。
-    if let Some(provider) = sidecar {
+    source.parse_exif(
+        configured_chrono_offset(),
+        flags.include_non_media,
+        flags.doc_only,
+    );
+    if let Some(provider) = job.sidecar {
         source.enrich_candidates(provider, &|i: &Info| {
-            type_allowed(i, include_non_media, doc_only)
+            type_allowed(i, flags.include_non_media, flags.doc_only)
         });
     }
-    // 内容分类（copy-doc/move-doc）：MUST 在 parse_exif 之后（复用已 sniff MIME）。
-    if let Some(provider) = classifier {
-        source.classify_documents(&provider);
+    if let Some(provider) = job.classifier {
+        source.classify_documents(provider);
     }
     source
+}
+
+pub(super) fn scan_output(job: &CopyJob<'_>, mut output: Index) -> Index {
+    if !matches!(job.output_backend.exists(&job.output_loc), Ok(false)) {
+        output.visit_location(&job.output_loc, &job.output_backend);
+    }
+    output
 }
 
 pub(crate) fn source_skip_extensions(include_non_media: bool, doc_only: bool) -> &'static [String] {

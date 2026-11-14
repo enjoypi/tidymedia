@@ -42,8 +42,7 @@ fn write_report_json<T: serde::Serialize>(
     report: &T,
     feature: &str,
 ) -> common::Result<()> {
-    let json = report_sink_io::serialize(report);
-    report_sink_io::try_write(path, json.as_bytes()).map_err(|e| {
+    report_sink_io::try_write(path, report).map_err(|e| {
         let common::Error::Io(io_err) = e;
         let wrapped = std::io::Error::new(
             io_err.kind(),
@@ -67,13 +66,30 @@ pub(crate) trait TempPersist {
     fn persist_to(self: Box<Self>, path: &str) -> std::io::Result<()>;
 }
 
-fn write_and_persist(
+struct PersistWriter<'a>(&'a mut dyn TempPersist);
+
+impl std::io::Write for PersistWriter<'_> {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.0.write_all(buf).map(|()| buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.0.flush()
+    }
+}
+
+const REPORT_WRITE_BUFFER_BYTES: usize = 64 << 10;
+
+fn write_and_persist<T: serde::Serialize + ?Sized>(
     path: &str,
-    bytes: &[u8],
+    report: &T,
     mut tmp: Box<dyn TempPersist>,
 ) -> common::Result<()> {
-    tmp.write_all(bytes)?;
-    tmp.flush()?;
+    let mut writer =
+        std::io::BufWriter::with_capacity(REPORT_WRITE_BUFFER_BYTES, PersistWriter(tmp.as_mut()));
+    serde_json::to_writer_pretty(&mut writer, report).map_err(std::io::Error::from)?;
+    std::io::Write::flush(&mut writer)?;
+    drop(writer);
     tmp.persist_to(path).map_err(common::Error::Io)?;
     Ok(())
 }

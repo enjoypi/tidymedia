@@ -34,12 +34,14 @@ impl Default for CopyConfig {
 #[serde(default, deny_unknown_fields)]
 pub struct VerifyConfig {
     pub max_image_bytes: u64,
+    pub max_tsv_bytes: u64,
 }
 
 impl Default for VerifyConfig {
     fn default() -> Self {
         Self {
             max_image_bytes: 50 * 1024 * 1024,
+            max_tsv_bytes: 64 * 1024 * 1024,
         }
     }
 }

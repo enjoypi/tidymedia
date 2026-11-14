@@ -38,7 +38,7 @@
 - mkdir/exists best-effort 缓存使用 `contains + insert`，避免失败操作污染缓存。
 - 远端 mkdir 使用真递归；client 原始调用统一经对应 `map_error`，操作日志统一经 `map_and_log`。NotFound/AlreadyExists 用 debug，其余错误用 warn。
 - 错误文案重映射先保留已正确分类的 kind，再以 ASCII 小写匹配 NotFound 和 PermissionDenied；不得吞掉其他错误。
-- 本地读取使用 `File + BufReader`，不得恢复 mmap；外部截断必须表现为 EOF 或 IO 错误，而不是 SIGBUS。
+- 流式哈希、判等、复制使用 `File + BufReader` 固定缓冲，不得改为 mmap。整文件读取（verify 图像、move-text-shot 图像）经 `Backend::map_whole` 映射：仅本地固定卷启用（macOS `statfs` 的 `MNT_LOCAL`，Windows `GetDriveTypeW` 为 `DRIVE_FIXED`），网络卷、可移动卷、其他平台和远端返回 `None` 并回退流式读入堆。Windows 上映射存续期间文件不能删除或改名，删源、改名之前必须先释放映射（move-text-shot 在判重后立即 drop）。映射用后必须经 `FileBytes::unchanged` 比对长度与修改时间，变化按读取失败处理；已接受映射期间外部截断导致 SIGBUS 的残余风险。unsafe 只允许出现在 `local_mmap_io.rs`。
 - `RemoteClient::open_reader` 必须按需分段读取；整文件 `read` 仅限已有大小上限的 sidecar 文本路径。索引、EXIF、判重和复制不得先把远端文件整体装入内存。
 - 远端 writer 使用有界分块写入和独占创建；flush/finish 错误必须传播，失败清理只针对本次成功创建的目标。
 
@@ -62,7 +62,7 @@
 
 ## 复制、移动、报告与推理
 
-- 类型过滤必须先于重复删源；dry-run 要预填 hash 并把预计目标加入 output index，保持与真跑相同的命名决策。
+- 类型过滤必须先于重复删源；dry-run 用 `Info::staged_at` 把预计目标加入 output index（路径为目标、读取仍指向源），安全哈希只在同 fast_hash 且同 size 的文件需要比较时按需计算，保持与真跑相同的判重和命名决策。
 - 目标名通过 `Index::try_reserve_target` 原子占位，Windows 按路径组件小写折叠；`AlreadyExists` 时尝试下一候选名。
 - `generate_unique_name` 依次使用 output index、权威索引判定和 backend exists；修改 walk/VisitStats 语义时同步复核权威判定。
 - 目标已存在时按 size、双侧内容判等区分 Duplicate、Fresh、Exhausted；只有 Duplicate 才能删源并计入去重。
@@ -79,6 +79,19 @@
 - 老 QuickTime 使用现有 nom-exif patch，并只用该 patch 内的 `BoxHeader::parse` 解析 header；M2TS/AVCHD 使用现有 video PID 与 H.264 EP strip 规则，不把 container body 一次性装入解析 buffer。
 - 推理 metadata 与输入按值透传；模型路径为空时立即返回 `InvalidInput`。
 - tract 输出 tensor 的 cow、view、slice 必须保持有效生命周期；多输出分别持有 binding。
+
+## 内存预算
+
+- 进程私有内存上限由 `config.yaml` 的 `memory` 段定义，`entities::memory::derive` 推导 HOLD、WORK、RETAINED 三类额度，`usecases::memory::governor()` 为全局入口；测试用小容量 `Budget` 注入，不构造巨型资源。
+- 预约顺序固定为 HOLD → WORK，每级每线程最多一份，违规即 panic；持有 WORK 时不得等待锁或调用 rayon。
+- 整文件读入堆之前先预约 HOLD；图像解码一律经 `usecases::image_input::with_rgb`，由它按头部宽高预估并预约 WORK，不得直接调用 `image::load_from_memory`。
+- 单个请求超过额度返回 `TooLarge`，按“跳过并报告”处理：verify 记 `too_large`，move-text-shot 记 `skipped_too_large`；不得静默降级，也不得独占执行。
+- verify 不保留全分辨率旋转副本：pHash 与 512 归一化图在 `RotatedView` 上计算，与实体旋转逐字节等价；修改时保持 `rotated_view_tests` 与旧实现对照测试通过。
+- 新增会放大内存的配置项必须在 `config_sanitize_memory.rs` 加上限。
+- 常驻结构经 `Index::with_admission` 记账：常规先用 `Charging` 单轮扫描，溢出后 copy/find/verify 用 `retained_plan::plan_groups` 分组（大小桶 → 精确大小 → 文件头指纹 → 路径分块），来源用 `plan.filter`，输出库用 `plan.output_filter`。分组模式下输出索引非权威；仅 dry-run 经 `sharing_names` 跨组保留目标名，并结转分块键的预演条目。新增按文件数增长的结构须计入记账成本。
+- 随文件数增长的报告列表用 `spill::Listed`：分组时每组排序写入临时文件，输出时按 `SpillKey` 归并；遍历只用 `for_each`，不要依赖 `len`/索引。
+- 分组循环与汇总写出用 `try_for_each`/`and_then` 链传播错误，避免在泛型或批量代码里留下测试打不到的 `?` 分支。
+- move-text-shot 按 `ENTRY_CHUNK` 分块遍历处理，不得先收集整个 walk。
 
 ## 同步检查点
 

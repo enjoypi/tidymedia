@@ -140,3 +140,67 @@ fn dispatch_report_failures_propagate() {
     );
     assert!(verify.is_err());
 }
+
+#[test]
+fn dispatch_verify_propagates_memory_budget_error() {
+    let src = tempdir().unwrap();
+    std::fs::write(src.path().join("a.jpg"), [1, 2, 3]).unwrap();
+    let out = tempdir().unwrap();
+    let result = crate::usecases::memory::with_retained(10, || {
+        tidy_with(
+            &LocalOnlyFactory,
+            &StubDetectorFactory,
+            Commands::Verify {
+                sources: vec![local_loc_str(src.path())],
+                output: local_loc_str(out.path()),
+                include_non_media: false,
+                exif_tsv: None,
+                phash_max: None,
+                report: None,
+            },
+        )
+    });
+    let err = result.expect_err("memory budget error must propagate");
+    assert!(err.to_string().contains("memory budget"), "got: {err}");
+}
+
+struct RefuseMarkedFactory;
+
+impl crate::entities::backend::factory::BackendFactory for RefuseMarkedFactory {
+    fn for_location(
+        &self,
+        loc: &Location,
+    ) -> crate::entities::common::Result<Arc<dyn crate::entities::backend::Backend>> {
+        if loc.display().contains("refuse") {
+            return Err(crate::entities::common::Error::Io(std::io::Error::other(
+                "refused",
+            )));
+        }
+        Ok(crate::adapters::backend::local::LocalBackend::arc())
+    }
+}
+
+#[test]
+fn dispatch_verify_propagates_factory_errors() {
+    let dir = tempdir().unwrap();
+    let refused = local_loc_str(&dir.path().join("refuse"));
+    for (source, output) in [
+        (refused.clone(), local_loc_str(dir.path())),
+        (local_loc_str(dir.path()), refused),
+    ] {
+        let err = tidy_with(
+            &RefuseMarkedFactory,
+            &StubDetectorFactory,
+            Commands::Verify {
+                sources: vec![source],
+                output,
+                include_non_media: false,
+                exif_tsv: None,
+                phash_max: None,
+                report: None,
+            },
+        )
+        .expect_err("factory error must propagate");
+        assert!(err.to_string().contains("refused"), "got: {err}");
+    }
+}

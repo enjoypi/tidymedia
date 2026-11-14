@@ -83,6 +83,7 @@ pub fn tidy_with(
     command: Commands,
 ) -> Result<CommandResult> {
     crate::usecases::config::checked_config()?;
+    crate::usecases::memory::install();
     match command {
         Commands::Copy {
             dry_run,

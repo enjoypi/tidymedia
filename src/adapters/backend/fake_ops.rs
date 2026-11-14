@@ -8,7 +8,24 @@ use std::sync::atomic::Ordering;
 
 use super::writers::{FailingReader, FakeWriter, SeekFailingReader};
 use super::{FakeBackend, Op, file_meta};
-use crate::entities::backend::{Backend, Entry, EntryKind, MediaReader, MediaWriter, Metadata};
+use crate::entities::backend::{
+    Backend, Entry, EntryKind, MappedBytes, MappedFile, MediaReader, MediaWriter, Metadata,
+};
+
+struct FakeMapping {
+    data: Vec<u8>,
+    unchanged: bool,
+}
+
+impl MappedBytes for FakeMapping {
+    fn bytes(&self) -> &[u8] {
+        &self.data
+    }
+
+    fn unchanged(&self) -> bool {
+        self.unchanged
+    }
+}
 use crate::entities::common::under_prefix;
 use crate::entities::uri::Location;
 
@@ -72,6 +89,22 @@ impl Backend for FakeBackend {
             }));
         }
         Ok(Box::new(Cursor::new(bytes)))
+    }
+
+    fn map_whole(&self, loc: &Location) -> io::Result<Option<MappedFile>> {
+        let s = self.state.lock().unwrap();
+        let Some(unchanged) = s.mapped_unchanged else {
+            return Ok(None);
+        };
+        if let Some(kind) = s.errors.get(&(loc.clone(), Op::OpenRead)) {
+            return Err(io::Error::from(*kind));
+        }
+        Ok(s.files.get(loc).map(|data| {
+            MappedFile::new(Box::new(FakeMapping {
+                data: data.clone(),
+                unchanged,
+            }))
+        }))
     }
 
     fn open_write(&self, loc: &Location, _mkparents: bool) -> io::Result<Box<dyn MediaWriter>> {

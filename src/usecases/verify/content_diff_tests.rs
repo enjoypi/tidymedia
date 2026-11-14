@@ -240,12 +240,12 @@ fn verdict_for_absent_when_no_candidate() {
 }
 
 #[test]
-fn verdict_for_name_only_when_oversize() {
+fn verdict_for_too_large_when_oversize() {
     let be = Arc::new(FakeBackend::new("local"));
     let src = fake_info(&be, "/src/a.jpg", b"12345".to_vec());
     fake_info(&be, "/out/a.jpg", b"x".to_vec());
     let lib = output_library(&be, "/out");
-    assert_eq!(verdict_for(&src, &lib, 10, 1), "name_only");
+    assert_eq!(verdict_for(&src, &lib, 10, 1), "too_large");
 }
 
 #[test]
@@ -338,7 +338,7 @@ fn retry_rotated_accepts_matching_candidate() {
     let src_bytes = encode_png(&img);
     fake_info(&be, "/out/r.jpg", encode_png(&rotated));
     let lib = output_library(&be, "/out");
-    let source = PreparedSource::new(&src_bytes);
+    let source = PreparedSource::new(&src_bytes, lib.decode());
     let paths = vec![Utf8PathBuf::from("/out/r.jpg")];
     assert!(retry_if_needed(&source, &paths, &lib, 10, 1_000_000, false,));
 }
@@ -350,15 +350,6 @@ fn read_to_end_returns_none_when_read_fails() {
     be.inject_reader_error(local("/src/a.txt"), std::io::ErrorKind::TimedOut);
     let bytes = read_to_end(info.backend().as_ref(), info.location(), info.size);
     assert!(bytes.is_none());
-}
-
-#[test]
-fn prepared_source_image_is_reused() {
-    let bytes = encode_png(&noise_image(64, 17));
-    let source = PreparedSource::new(&bytes);
-    let first = std::ptr::from_ref(source.image().expect("internal: valid image"));
-    let second = std::ptr::from_ref(source.image().expect("internal: valid image"));
-    assert_eq!(first, second);
 }
 
 #[test]

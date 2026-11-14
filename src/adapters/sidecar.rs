@@ -14,6 +14,7 @@ use tracing::debug;
 use crate::entities::backend::Backend;
 use crate::entities::media_time::Candidate;
 use crate::entities::media_time::Source;
+use crate::entities::memory::{Budget, Reservation};
 use crate::entities::uri::Location;
 use crate::entities::xmp;
 
@@ -23,20 +24,30 @@ pub use sidecar_io::discover;
 
 const FEATURE_SIDECAR: &str = "sidecar";
 
+const PARSE_BYTES_PER_TEXT_BYTE: u64 = 8;
+
 pub fn discover_with_backend(media_loc: &Location, backend: &Arc<dyn Backend>) -> Vec<Candidate> {
+    discover_within(
+        media_loc,
+        backend.as_ref(),
+        &crate::usecases::memory::governor().work,
+    )
+}
+
+fn discover_within(media_loc: &Location, backend: &dyn Backend, work: &Budget) -> Vec<Candidate> {
     let mut out = Vec::new();
-    if let Some(c) = try_xmp(media_loc, backend.as_ref()) {
+    if let Some(c) = try_xmp(media_loc, backend, work) {
         out.push(c);
     }
-    if let Some(c) = try_takeout(media_loc, backend.as_ref()) {
+    if let Some(c) = try_takeout(media_loc, backend, work) {
         out.push(c);
     }
     out
 }
 
-fn try_xmp(media_loc: &Location, backend: &dyn Backend) -> Option<Candidate> {
+fn try_xmp(media_loc: &Location, backend: &dyn Backend, work: &Budget) -> Option<Candidate> {
     let xmp_loc = with_extension(media_loc, "xmp");
-    let content = read_sidecar(&xmp_loc, backend, "read_xmp")?;
+    let (content, _held) = read_sidecar(&xmp_loc, backend, work, "read_xmp")?;
     let Some(utc) = parse_xmp_date(&content) else {
         log_parse_failure("parse_xmp", &xmp_loc);
         return None;
@@ -49,9 +60,9 @@ fn try_xmp(media_loc: &Location, backend: &dyn Backend) -> Option<Candidate> {
     })
 }
 
-fn try_takeout(media_loc: &Location, backend: &dyn Backend) -> Option<Candidate> {
+fn try_takeout(media_loc: &Location, backend: &dyn Backend, work: &Budget) -> Option<Candidate> {
     let json_loc = append_suffix(media_loc, ".json");
-    let content = read_sidecar(&json_loc, backend, "read_takeout")?;
+    let (content, _held) = read_sidecar(&json_loc, backend, work, "read_takeout")?;
     let Some(utc) = parse_takeout_json(&content) else {
         log_parse_failure("parse_takeout", &json_loc);
         return None;
@@ -75,9 +86,21 @@ fn append_suffix(loc: &Location, sfx: &str) -> Location {
     loc.with_path(Utf8PathBuf::from(format!("{p}{sfx}")))
 }
 
-fn read_sidecar(loc: &Location, backend: &dyn Backend, operation: &'static str) -> Option<String> {
-    match sidecar_io::read(loc, backend) {
-        Ok(content) => Some(content),
+fn read_sidecar<'a>(
+    loc: &Location,
+    backend: &dyn Backend,
+    work: &'a Budget,
+    operation: &'static str,
+) -> Option<(String, Reservation<'a>)> {
+    let read = backend.metadata(loc).and_then(|meta| {
+        let need = meta.size.saturating_mul(PARSE_BYTES_PER_TEXT_BYTE);
+        let held = work
+            .reserve(need)
+            .map_err(|e| io::Error::new(io::ErrorKind::FileTooLarge, e.to_string()))?;
+        sidecar_io::read(loc, backend).map(|content| (content, held))
+    });
+    match read {
+        Ok(read) => Some(read),
         Err(e) => {
             if should_log_read_error(e.kind()) {
                 let path = loc.display();

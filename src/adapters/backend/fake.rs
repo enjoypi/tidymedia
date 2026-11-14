@@ -50,6 +50,7 @@ struct State {
     /// 让 `open_write` 成功但返回的 writer 在 `write` 时立即报错。覆盖
     /// `stream_copy` 中 `std::io::copy` 阶段失败（区别于 `Op::OpenWrite` 早返）。
     writer_errors: HashMap<Location, io::ErrorKind>,
+    mapped_unchanged: Option<bool>,
 }
 
 pub struct FakeBackend {
@@ -124,6 +125,10 @@ impl FakeBackend {
                 created: None,
             },
         );
+    }
+
+    pub fn set_mappable(&self, unchanged: bool) {
+        self.state.lock().unwrap().mapped_unchanged = Some(unchanged);
     }
 
     pub fn inject_error(&self, loc: Location, op: Op, kind: io::ErrorKind) {

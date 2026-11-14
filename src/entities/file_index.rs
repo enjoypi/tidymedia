@@ -1,5 +1,6 @@
 use std::collections::HashSet;
 use std::fmt;
+use std::sync::Arc;
 
 use camino::{Utf8Path, Utf8PathBuf};
 use dashmap::mapref::one::Ref;
@@ -35,8 +36,10 @@ impl VisitStats {
 pub struct Index {
     similar_files: DashMap<u64, Mutex<HashSet<Utf8PathBuf>>>,
     files: DashMap<Utf8PathBuf, Info>,
-    names: DashSet<String>,
+    names: Arc<DashSet<u64>>,
     stats: VisitStats,
+    admission: Option<Arc<dyn Admission>>,
+    overflowed: bool,
 }
 
 pub(crate) fn target_key(loc: &Location) -> Utf8PathBuf {
@@ -46,11 +49,13 @@ pub(crate) fn target_key(loc: &Location) -> Utf8PathBuf {
     }
 }
 
-fn name_key(key: &Utf8Path) -> String {
-    key.components()
+fn name_key(key: &Utf8Path) -> u64 {
+    let joined = key
+        .components()
         .map(|c| c.as_str().to_lowercase())
         .collect::<Vec<_>>()
-        .join("/")
+        .join("/");
+    xxhash_rust::xxh3::xxh3_64(joined.as_bytes())
 }
 
 impl fmt::Debug for Index {
@@ -72,9 +77,28 @@ impl Index {
         Self {
             files: DashMap::new(),
             similar_files: DashMap::new(),
-            names: DashSet::new(),
+            names: Arc::new(DashSet::new()),
             stats: VisitStats::default(),
+            admission: None,
+            overflowed: false,
         }
+    }
+
+    #[must_use]
+    pub fn with_admission(mut self, admission: Arc<dyn Admission>) -> Self {
+        self.admission = Some(admission);
+        self
+    }
+
+    #[must_use]
+    pub fn sharing_names(mut self, names: Arc<DashSet<u64>>) -> Self {
+        self.names = names;
+        self
+    }
+
+    #[must_use]
+    pub fn overflowed(&self) -> bool {
+        self.overflowed
     }
 
     pub fn stats(&self) -> VisitStats {
@@ -84,6 +108,11 @@ impl Index {
     #[must_use]
     pub fn len(&self) -> usize {
         self.files.len()
+    }
+
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.files.is_empty()
     }
 
     pub fn get(&self, key: &Utf8Path) -> Option<Ref<'_, Utf8PathBuf, Info>> {
@@ -145,8 +174,12 @@ impl Index {
     }
 }
 
+#[path = "file_index_admission.rs"]
+mod admission;
 #[path = "file_index_build.rs"]
 mod build;
+
+pub use self::admission::{Admission, Admit};
 
 #[path = "file_index_enrich.rs"]
 mod enrich;

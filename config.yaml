@@ -18,6 +18,37 @@ exif:
   valid_date_time_secs: ${TIDYMEDIA_VALID_DATE_TIME_SECS:-946684800}
 verify:
   max_image_bytes: ${TIDYMEDIA_VERIFY_MAX_BYTES:-52428800}
+  # --exif-tsv 读入上限，超过则告警并关闭交叉核对；最大 256 MiB
+  max_tsv_bytes: ${TIDYMEDIA_VERIFY_MAX_TSV_BYTES:-67108864}
+# 进程私有内存上限账本：固定开销之外的余额用于索引等常驻结构，不可行时回退默认
+memory:
+  limit_bytes: ${TIDYMEDIA_MEMORY_LIMIT_BYTES:-2147483648}
+  # 分配器碎片与依赖库内部分配的余量
+  reserve_bytes: ${TIDYMEDIA_MEMORY_RESERVE_BYTES:-268435456}
+  baseline_bytes: ${TIDYMEDIA_MEMORY_BASELINE_BYTES:-100663296}
+  model_bytes: ${TIDYMEDIA_MEMORY_MODEL_BYTES:-268435456}
+  per_thread_bytes: ${TIDYMEDIA_MEMORY_PER_THREAD_BYTES:-4194304}
+  # 远端整文件读入的总额度；单文件上限为其一半
+  hold_bytes: ${TIDYMEDIA_MEMORY_HOLD_BYTES:-134217728}
+  # 图像解码等瞬时大分配的总额度，超过此值的单张图片跳过并报告
+  work_bytes: ${TIDYMEDIA_MEMORY_WORK_BYTES:-402653184}
+  retained_min_bytes: ${TIDYMEDIA_MEMORY_RETAINED_MIN_BYTES:-67108864}
+  # 解码预估 = 解码输出字节 × 此系数，覆盖解码器内部缓冲，取值 1 到 16
+  decode_factor: ${TIDYMEDIA_MEMORY_DECODE_FACTOR:-3}
+  # 单个文件元数据解析读入：free 以内不占额度，超过后预约 WORK，超过 max 放弃解析并告警
+  metadata_free_bytes: ${TIDYMEDIA_METADATA_FREE_BYTES:-1048576}
+  metadata_max_bytes: ${TIDYMEDIA_METADATA_MAX_BYTES:-67108864}
+  # 常驻结构记账：每条索引 = 基础字节 + 路径长度 × path_copies；超出常驻额度时按文件大小自动分组处理
+  source_entry_bytes: ${TIDYMEDIA_MEMORY_SOURCE_ENTRY_BYTES:-3584}
+  output_entry_bytes: ${TIDYMEDIA_MEMORY_OUTPUT_ENTRY_BYTES:-2048}
+  name_entry_bytes: ${TIDYMEDIA_MEMORY_NAME_ENTRY_BYTES:-48}
+  path_copies: ${TIDYMEDIA_MEMORY_PATH_COPIES:-5}
+  # 本地读取句柄的缓冲大小，4 KiB 到 1 MiB；流式哈希与复制另用 1 MiB 分块
+  read_buffer_bytes: ${TIDYMEDIA_READ_BUFFER_BYTES:-65536}
+  # I/O 线程数 = CPU 核数 × per_cpu，限制在 [min, max]，max 不超过 64
+  io_threads_per_cpu: ${TIDYMEDIA_IO_THREADS_PER_CPU:-4}
+  io_threads_min: ${TIDYMEDIA_IO_THREADS_MIN:-8}
+  io_threads_max: ${TIDYMEDIA_IO_THREADS_MAX:-64}
 log:
   # 默认日志级别：trace/debug/info/warn/error；优先级 RUST_LOG > --log-level > 此处
   level: ${TIDYMEDIA_LOG_LEVEL:-info}

@@ -10,14 +10,16 @@ use rayon::iter::{IntoParallelIterator, ParallelIterator};
 
 use super::delta::{SourceDelta, record_failure, reduce_delta};
 use super::target::move_one;
-use crate::entities::backend::{Backend, Entry, EntryKind};
+use crate::entities::backend::{Backend, Entry, EntryKind, FileBytes};
 use crate::entities::common::{self};
+use crate::entities::memory::Reservation;
 use crate::entities::uri::Location;
 use crate::usecases::ocr::TextDetector;
 
 /// MIME sniff 头部字节数（与 `entities::exif::mime::MIME_SNIFF_BYTES` 同口径）；
 /// 非 image 文件仅读此长度即 skip，避免完整读入大视频/压缩包白耗 IO+内存。
 const MIME_SNIFF_BYTES: usize = 256;
+const ENTRY_CHUNK: usize = 4096;
 
 #[expect(
     clippy::too_many_arguments,
@@ -34,40 +36,51 @@ pub(super) fn process_source(
     max_image_bytes: u64,
     dry_run: bool,
 ) -> SourceDelta {
-    // 收集 walk 结果到 Vec 让 rayon `par_iter` 并行；walker 自身 Err 提前 `push` 到
-    // walker_errors 让并行阶段只处理成功 entry，语义清晰。
-    let mut entries: Vec<Entry> = Vec::new();
-    let mut walker_delta = SourceDelta::default();
-    for res in src_backend.walk(source) {
+    let process = |chunk: Vec<Entry>| {
+        chunk
+            .into_par_iter()
+            .map(|entry| {
+                process_entry(
+                    detector,
+                    source,
+                    src_backend,
+                    output,
+                    output_backend,
+                    output_prefix,
+                    mkdir_cache,
+                    max_image_bytes,
+                    dry_run,
+                    entry,
+                )
+            })
+            .reduce(SourceDelta::default, reduce_delta)
+    };
+    in_chunks(
+        src_backend.walk(source),
+        ENTRY_CHUNK,
+        &source.display(),
+        process,
+    )
+}
+
+pub(super) fn in_chunks(
+    walk: impl Iterator<Item = io::Result<Entry>>,
+    chunk_len: usize,
+    root: &str,
+    process: impl Fn(Vec<Entry>) -> SourceDelta,
+) -> SourceDelta {
+    let mut total = SourceDelta::default();
+    let mut chunk: Vec<Entry> = Vec::with_capacity(chunk_len);
+    for res in walk {
         match res {
-            Ok(e) => entries.push(e),
-            Err(err) => {
-                record_failure(&mut walker_delta, source.display(), &err);
-            }
+            Ok(e) => chunk.push(e),
+            Err(err) => record_failure(&mut total, root.to_owned(), &err),
+        }
+        if chunk.len() == chunk_len {
+            total = reduce_delta(total, process(std::mem::take(&mut chunk)));
         }
     }
-
-    // rayon par_iter：每个 entry 独立 SourceDelta，reduce 归并。has_text 是 CPU
-    // 密集 tract 推理（20-200 ms/张），并行让 8 vCPU 机器充分利用。
-    let processed = entries
-        .into_par_iter()
-        .map(|entry| {
-            process_entry(
-                detector,
-                source,
-                src_backend,
-                output,
-                output_backend,
-                output_prefix,
-                mkdir_cache,
-                max_image_bytes,
-                dry_run,
-                entry,
-            )
-        })
-        .reduce(SourceDelta::default, reduce_delta);
-
-    reduce_delta(walker_delta, processed)
+    reduce_delta(total, process(chunk))
 }
 
 #[expect(
@@ -102,27 +115,19 @@ pub(super) fn process_entry(
     if is_entry_under_output(&entry.location, output_prefix) {
         return delta;
     }
-    // size 前置门（防 OOM）：远端只需一次 stat 即可 skip 巨大 TIFF/PSD，比 open_read 全读快很多
-    if entry.size > max_image_bytes {
+    let Some(_hold) = hold_bytes(entry.size, max_image_bytes) else {
         delta.skipped_too_large += 1;
         return delta;
-    }
-
-    // 拆两段读：先 sniff MIME_SNIFF_BYTES 判 image，非 image 立即 skip 不再全读
-    let sniff_result = sniff_and_read(src_backend, &entry.location, entry.size);
-    let bytes = match sniff_result {
-        Ok(Some(b)) => b,
-        Ok(None) => {
-            delta.skipped_non_image += 1;
-            return delta;
-        }
-        Err(e) => {
-            record_failure(&mut delta, entry.location.display(), &e);
-            return delta;
-        }
+    };
+    let Some(bytes) = read_image(src_backend, &entry, &mut delta) else {
+        return delta;
     };
     delta.image_files += 1;
     match detector.has_text(entry.location.path(), &bytes) {
+        Ok(true) if !bytes.unchanged() => {
+            let changed = io::Error::other("source changed while it was being read");
+            record_failure(&mut delta, entry.location.display(), &changed);
+        }
         Ok(true) => {
             delta.ocr_hits += 1;
             move_one(
@@ -131,7 +136,7 @@ pub(super) fn process_entry(
                 source,
                 output,
                 output_backend,
-                &bytes,
+                bytes,
                 mkdir_cache,
                 dry_run,
                 &mut delta,
@@ -140,11 +145,40 @@ pub(super) fn process_entry(
         Ok(false) => {
             delta.skipped_no_text += 1;
         }
+        Err(e) if e.kind() == io::ErrorKind::FileTooLarge => {
+            delta.skipped_too_large += 1;
+        }
         Err(e) => {
             record_failure(&mut delta, entry.location.display(), &e);
         }
     }
     delta
+}
+
+fn hold_bytes(size: u64, max_image_bytes: u64) -> Option<Reservation<'static>> {
+    let hold = &crate::usecases::memory::governor().hold;
+    if size > max_image_bytes.min(hold.capacity()) {
+        return None;
+    }
+    hold.reserve(size).ok()
+}
+
+fn read_image(
+    src_backend: &Arc<dyn Backend>,
+    entry: &Entry,
+    delta: &mut SourceDelta,
+) -> Option<FileBytes> {
+    match sniff_and_read(src_backend, &entry.location, entry.size) {
+        Ok(Some(bytes)) => Some(bytes),
+        Ok(None) => {
+            delta.skipped_non_image += 1;
+            None
+        }
+        Err(e) => {
+            record_failure(delta, entry.location.display(), &e);
+            None
+        }
+    }
 }
 
 /// 见 [`common::entry_under_prefix`]（已上提 entities 单点）。
@@ -158,18 +192,22 @@ pub(super) fn sniff_and_read(
     backend: &Arc<dyn Backend>,
     loc: &Location,
     size_hint: u64,
-) -> io::Result<Option<Vec<u8>>> {
+) -> io::Result<Option<FileBytes>> {
+    if let Some(mapped) = backend.map_whole(loc)? {
+        let bytes = FileBytes::Mapped(mapped);
+        let head = &bytes[..bytes.len().min(MIME_SNIFF_BYTES)];
+        return Ok(is_image(head).then_some(bytes));
+    }
     let mut reader = backend.open_read(loc)?;
     // 预分配整文件大小；hint 与真实字节可能微差不影响正确性。
     // u64→usize 用 try_from 让 32-bit 平台大于 usize::MAX 时回退到未预分配（Vec::new()）。
-    let cap = usize::try_from(size_hint).unwrap_or(0);
-    let mut buf = Vec::with_capacity(cap);
     // 先填 sniff 窗口；若文件比 MIME_SNIFF_BYTES 小，read 会提前 EOF
     let mut head = [0u8; MIME_SNIFF_BYTES];
     let sniff_len = read_up_to(&mut *reader, &mut head)?;
     if !is_image(&head[..sniff_len]) {
         return Ok(None);
     }
+    let mut buf = Vec::with_capacity(usize::try_from(size_hint).unwrap_or(0));
     buf.extend_from_slice(&head[..sniff_len]);
     drain_reader_to_option(&mut *reader, buf)
 }
@@ -177,9 +215,12 @@ pub(super) fn sniff_and_read(
 /// `Read::read_to_end` + `Ok(Some(buf))` 一体化包装：sniff 成功后
 /// `read_to_end` 的 `?` Err arm 需构造「首 N 字节 OK 后续 Err」的分段 reader
 /// （fake 未支持），分段错误路径由测试注入 reader error 覆盖。
-fn drain_reader_to_option(reader: &mut dyn Read, mut buf: Vec<u8>) -> io::Result<Option<Vec<u8>>> {
+fn drain_reader_to_option(
+    reader: &mut dyn Read,
+    mut buf: Vec<u8>,
+) -> io::Result<Option<FileBytes>> {
     reader.read_to_end(&mut buf)?;
-    Ok(Some(buf))
+    Ok(Some(FileBytes::Heap(buf)))
 }
 
 /// 尽量把 reader 读满 buf；EOF 提前结束返实际字节数（不算错误）。与

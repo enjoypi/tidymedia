@@ -49,7 +49,6 @@ fn do_move_file_cache_prefilled_never_calls_mkdir_p() {
         &out,
         &local_loc("/out"),
         &local_loc("/out/a.png"),
-        b"png-bytes",
         &cache,
     )
     .unwrap();
@@ -98,4 +97,110 @@ fn move_text_shot_fast_path_rename_when_local_to_local() {
     // fast-path fs::rename 走完源已不在
     assert!(!src_path.exists());
     assert!(out_dir.path().join("a.png").exists());
+}
+
+#[derive(Debug)]
+struct BudgetExceededDetector;
+
+impl crate::usecases::ocr::TextDetector for BudgetExceededDetector {
+    fn has_text(&self, _path: &camino::Utf8Path, _image_bytes: &[u8]) -> io::Result<bool> {
+        Err(io::Error::new(io::ErrorKind::FileTooLarge, "inject"))
+    }
+}
+
+#[test]
+fn detector_budget_overflow_counts_as_skipped_too_large() {
+    let (fake, factory) = fake_factory();
+    fake.add_dir(local_loc("/src"));
+    fake.add_file(local_loc("/src/huge.png"), tiny_png());
+    let report = move_text_shot(
+        &BudgetExceededDetector,
+        &factory,
+        &[local_loc("/src")],
+        &local_loc("/out"),
+        true,
+    )
+    .unwrap();
+    assert_eq!(report.skipped_too_large, 1);
+    assert_eq!(report.failed, 0);
+}
+
+fn mapped_report(unchanged: bool) -> MoveTextShotReport {
+    let (fake, factory) = fake_factory();
+    fake.add_dir(local_loc("/src"));
+    fake.add_file(local_loc("/src/shot.png"), tiny_png());
+    fake.add_file(local_loc("/src/note.txt"), b"plain text".to_vec());
+    fake.set_mappable(unchanged);
+    let detector = FakeTextDetector::new(true);
+    move_text_shot(
+        &detector,
+        &factory,
+        &[local_loc("/src")],
+        &local_loc("/out"),
+        true,
+    )
+    .unwrap()
+}
+
+#[test]
+fn mapped_sources_are_sniffed_and_moved_like_streamed_ones() {
+    let report = mapped_report(true);
+    assert_eq!((report.moved, report.skipped_non_image), (1, 1));
+    assert_eq!(report.failed, 0);
+}
+
+#[test]
+fn mapped_source_changed_while_reading_is_reported_as_failure() {
+    let report = mapped_report(false);
+    assert_eq!((report.moved, report.failed), (0, 1));
+    assert!(report.errors[0].message.contains("changed while"));
+}
+
+#[test]
+fn mapping_failure_is_reported_as_failure() {
+    let (fake, factory) = fake_factory();
+    fake.add_dir(local_loc("/src"));
+    fake.add_file(local_loc("/src/shot.png"), tiny_png());
+    fake.set_mappable(true);
+    fake.inject_error(
+        local_loc("/src/shot.png"),
+        crate::FakeOp::OpenRead,
+        io::ErrorKind::PermissionDenied,
+    );
+    let detector = FakeTextDetector::new(true);
+    let report = move_text_shot(
+        &detector,
+        &factory,
+        &[local_loc("/src")],
+        &local_loc("/out"),
+        true,
+    )
+    .unwrap();
+    assert_eq!(report.failed, 1);
+}
+
+#[test]
+fn walk_is_processed_in_bounded_chunks() {
+    use crate::entities::backend::{Entry, EntryKind};
+
+    let entries = (0..6).map(|i| {
+        if i == 5 {
+            return Err(io::Error::other("walker"));
+        }
+        Ok(Entry {
+            location: local_loc(&format!("/src/{i}.png")),
+            size: 1,
+            kind: EntryKind::File,
+        })
+    });
+    let sizes = std::sync::Mutex::new(Vec::new());
+    let total = crate::usecases::move_text_shot::scan::in_chunks(entries, 2, "/src", |chunk| {
+        sizes.lock().unwrap().push(chunk.len());
+        crate::usecases::move_text_shot::delta::SourceDelta {
+            scanned: chunk.len(),
+            ..Default::default()
+        }
+    });
+    assert_eq!(*sizes.lock().unwrap(), [2, 2, 1]);
+    assert_eq!((total.scanned, total.failed), (5, 1));
 }

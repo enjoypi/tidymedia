@@ -6,8 +6,12 @@
 mod backend_impl;
 #[path = "local_io.rs"]
 mod local_io;
+#[path = "local_mmap_io.rs"]
+mod mmap_io;
 #[path = "local_noreplace.rs"]
 mod noreplace;
+#[path = "local_whole.rs"]
+mod whole;
 
 use std::fs;
 use std::io;

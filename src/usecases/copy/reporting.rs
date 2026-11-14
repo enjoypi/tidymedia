@@ -74,6 +74,7 @@ pub(super) fn finalize(
     failed: usize,
     errors: Vec<ReportError>,
     errors_truncated: bool,
+    bytes_read: u64,
     duration_ms: u64,
 ) -> common::Result<CopyReport> {
     let report = make_report(
@@ -84,6 +85,7 @@ pub(super) fn finalize(
         failed,
         errors,
         errors_truncated,
+        bytes_read,
         duration_ms,
     );
     emit_report(sink, &report)?;
@@ -103,6 +105,7 @@ fn make_report(
     failed: usize,
     errors: Vec<ReportError>,
     errors_truncated: bool,
+    bytes_read: u64,
     duration_ms: u64,
 ) -> CopyReport {
     // indexed = copied + ignored + failed（do_copy 三态都来自已入索引的文件）。
@@ -122,6 +125,7 @@ fn make_report(
         doc_only: flags.doc_only,
         errors,
         errors_truncated,
+        bytes_read,
         duration_ms,
     }
 }

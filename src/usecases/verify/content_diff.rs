@@ -1,6 +1,7 @@
 use sha2::{Digest, Sha512};
 
 use crate::entities::SecureHash;
+use crate::entities::backend::FileBytes;
 use crate::entities::file_info::Info;
 
 pub(crate) use super::content_features::PreparedSource;
@@ -25,39 +26,72 @@ pub(crate) fn verdict_for(
     if cands.is_empty() {
         return "absent".to_owned();
     }
+    if info.size > max_bytes {
+        return "too_large".to_owned();
+    }
+    let held = cands
+        .iter()
+        .map(|path| lib.size_of(path))
+        .filter(|size| *size <= max_bytes)
+        .max()
+        .unwrap_or(0);
+    let Ok(_hold) = lib.hold().reserve(info.size.saturating_add(held)) else {
+        return "too_large".to_owned();
+    };
     let Some(src_bytes) = read_guarded(info, max_bytes) else {
         return "name_only".to_owned();
     };
+    let verdict = compare(info, &src_bytes, &cands, lib, phash_max, max_bytes);
+    if src_bytes.unchanged() {
+        verdict.to_owned()
+    } else {
+        "name_only".to_owned()
+    }
+}
+
+fn compare(
+    info: &Info,
+    src_bytes: &[u8],
+    cands: &[camino::Utf8PathBuf],
+    lib: &OutputLibrary,
+    phash_max: u8,
+    max_bytes: u64,
+) -> &'static str {
     let ext = info
         .full_path
         .extension()
         .map_or_default(str::to_ascii_lowercase);
-    let src_entropy = entropy_hash(&src_bytes, &ext);
-    let source = PreparedSource::new(&src_bytes);
+    let src_entropy = entropy_hash(src_bytes, &ext);
+    let source = PreparedSource::new(src_bytes, lib.decode());
     let mut rotated = false;
+    let mut limited = false;
     let mut retry = Vec::new();
     for path in cands {
-        let Some(features) = lib.features(&path, max_bytes) else {
-            retry.push(path);
+        let Some(features) = lib.features(path, max_bytes) else {
+            limited |= lib.size_of(path) > max_bytes;
+            retry.push(path.clone());
             continue;
         };
+        limited |= features.too_large();
         if src_entropy.is_some() && features.entropy == src_entropy {
-            return "pixel_same".to_owned();
+            return "pixel_same";
         }
         if rotated_candidate_similar(&source, &features, phash_max, &|| {
-            lib.read_candidate(&path, max_bytes)
+            lib.read_candidate(path, max_bytes)
         }) {
             if src_entropy.is_none() {
-                return "rotated_same".to_owned();
+                return "rotated_same";
             }
             rotated = true;
         }
     }
     rotated = retry_if_needed(&source, &retry, lib, phash_max, max_bytes, rotated);
     if rotated {
-        "rotated_same".to_owned()
+        "rotated_same"
+    } else if limited || source.too_large() {
+        "too_large"
     } else {
-        "name_only".to_owned()
+        "name_only"
     }
 }
 
@@ -99,7 +133,7 @@ pub(crate) fn basename(p: &str) -> &str {
     p.rsplit(['/', '\\']).next().unwrap_or(p)
 }
 
-pub(super) fn read_guarded(info: &Info, max_bytes: u64) -> Option<Vec<u8>> {
+pub(super) fn read_guarded(info: &Info, max_bytes: u64) -> Option<FileBytes> {
     if info.size > max_bytes {
         return None;
     }
@@ -234,3 +268,7 @@ mod deep_tests;
 #[cfg(test)]
 #[path = "content_diff_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "content_limits_tests.rs"]
+mod limits_tests;

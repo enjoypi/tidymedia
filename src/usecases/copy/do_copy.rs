@@ -55,7 +55,7 @@ pub(crate) fn do_copy(
         index_authoritative,
     )? {
         if opts.dry_run {
-            return record_dry_run(src, target_loc, output_backend, output_index, feature);
+            return Ok(record_dry_run(src, &target_loc, output_index, feature));
         }
 
         if !mkdir_cache.contains(&target_dir_loc) {
@@ -124,11 +124,10 @@ pub(crate) fn do_copy(
 
 fn record_dry_run(
     src: &Info,
-    target_loc: Location,
-    output_backend: &Arc<dyn Backend>,
+    target_loc: &Location,
     output_index: &Index,
     feature: &'static str,
-) -> common::Result<bool> {
+) -> bool {
     let target_display = target_loc.display();
     debug!(
         feature,
@@ -138,7 +137,6 @@ fn record_dry_run(
         target = %target_display,
         "would transfer file"
     );
-    src.secure_hash()?;
-    output_index.add(src.cloned_at(target_loc, Arc::clone(output_backend)));
-    Ok(true)
+    output_index.add(src.staged_at(target_loc));
+    true
 }

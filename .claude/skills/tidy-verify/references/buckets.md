@@ -16,7 +16,7 @@ QuickTime CreationDate/CreateDate 是 UTC 语义。带 `±HH:MM` 或 `Z` 后缀�
 
 `move --dry-run` 的 `copied=N` 只表示目标库没有内容完全相同的副本，不等于都是全新内容；其中可能有时间写回、旋转或重编码版本。
 
-是否重复以 verify 的 `duplicate_verdict` 为准，包括 exact_dup、pixel_same、rotated_same、name_only、absent 等结果。不要只用文件名或预测桶判断重复。
+是否重复以 verify 的 `duplicate_verdict` 为准，包括 exact_dup、pixel_same、rotated_same、name_only、too_large、absent 等结果；too_large 表示文件超出内存额度未做内容比对，需人工核对。不要只用文件名或预测桶判断重复。
 
 ## 时区与路径格式
 

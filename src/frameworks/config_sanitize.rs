@@ -96,6 +96,7 @@ pub fn sanitize(mut cfg: Config) -> Config {
         eprintln_sanitize_fallback("log.level", &cfg.log.level, &fallback);
         cfg.log.level = fallback;
     }
+    super::config_sanitize_memory::sanitize_memory(&mut cfg, crate::entities::threadpool::cpus());
     cfg
 }
 

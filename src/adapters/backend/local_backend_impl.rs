@@ -9,9 +9,11 @@ use ignore::WalkBuilder;
 
 use super::LocalBackend;
 use super::local_io::{LocalWriter, open_read_inner};
+use super::mmap_io::{is_fixed_volume, map_path};
+use super::whole::map_local;
 use super::{local_path, noreplace, rename_or_fallback, to_metadata, walk_entry_to_io};
 use crate::adapters::backend::remote::MAX_TEXT_BYTES;
-use crate::entities::backend::{Backend, Entry, MediaReader, MediaWriter, Metadata};
+use crate::entities::backend::{Backend, Entry, MappedFile, MediaReader, MediaWriter, Metadata};
 use crate::entities::uri::Location;
 
 impl Backend for LocalBackend {
@@ -71,6 +73,11 @@ impl Backend for LocalBackend {
         Ok(Box::new(LocalWriter { file }))
     }
 
+    fn map_whole(&self, loc: &Location) -> io::Result<Option<MappedFile>> {
+        let path = local_path(loc)?;
+        map_local(path.as_std_path(), is_fixed_volume, map_path)
+    }
+
     fn remove_file(&self, loc: &Location) -> io::Result<()> {
         let path = local_path(loc)?;
         fs::remove_file(path.as_std_path())
@@ -86,14 +93,16 @@ impl Backend for LocalBackend {
         // sidecar.rs 唯一消费者：XMP/Takeout JSON 实测 < 10 KiB。不受信媒体目录
         // （USB/SD/网盘挂载）下注入 1 GB 假 `.xmp` 会让 read_to_string 一次性入堆
         // 致 OOM；与 RemoteBackend 共享同口径 MAX_TEXT_BYTES 上限。
-        let len = fs::metadata(path.as_std_path())?.len();
-        if len > MAX_TEXT_BYTES {
+        let file = fs::File::open(path.as_std_path())?;
+        let mut content = String::new();
+        io::Read::read_to_string(&mut io::Read::take(file, MAX_TEXT_BYTES + 1), &mut content)?;
+        if content.len() as u64 > MAX_TEXT_BYTES {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
-                format!("local text file too large: {len} bytes (limit {MAX_TEXT_BYTES})"),
+                format!("local text file too large (limit {MAX_TEXT_BYTES} bytes)"),
             ));
         }
-        fs::read_to_string(path.as_std_path())
+        Ok(content)
     }
 
     fn copy_file(&self, src: &Location, dst: &Location, mkparents: bool) -> io::Result<u64> {

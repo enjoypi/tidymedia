@@ -7,8 +7,11 @@ use time::UtcOffset;
 
 use crate::entities::common::Error;
 
+#[path = "config_memory.rs"]
+mod config_memory;
 #[path = "config_models.rs"]
 mod config_models;
+pub use config_memory::MemoryConfig;
 #[allow(unused_imports)]
 pub use config_models::{
     BackendConfig, CategoryDef, ClassifyConfig, CopyConfig, ExifConfig, LogConfig, OcrConfig,
@@ -106,6 +109,7 @@ pub struct Config {
     pub verify: VerifyConfig,
     pub backend: BackendConfig,
     pub log: LogConfig,
+    pub memory: MemoryConfig,
 }
 
 #[cfg(test)]

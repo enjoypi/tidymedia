@@ -1,3 +1,5 @@
+use image::RgbImage;
+
 use super::*;
 
 fn solid(color: [u8; 3]) -> RgbImage {

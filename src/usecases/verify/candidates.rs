@@ -48,7 +48,7 @@ impl CandidateIndex {
     }
 }
 
-fn variant_key(name_lower: &str) -> Option<String> {
+pub(crate) fn variant_key(name_lower: &str) -> Option<String> {
     let (stem, ext) = split_stem_ext(name_lower);
     let (head, digits) = stem.rsplit_once('_')?;
     if digits.is_empty() {

@@ -1,6 +1,19 @@
 use super::*;
 use camino::Utf8Path;
 
+use crate::entities::memory::{Budget, Level};
+
+#[test]
+fn preprocess_maps_budget_overflow_to_file_too_large() {
+    let work = Budget::new(Level::Work, 8);
+    let ctx = DecodeCtx {
+        work: &work,
+        factor: 3,
+    };
+    let e = preprocess(&tiny_png(), 736, ctx).unwrap_err();
+    assert_eq!(e.kind(), io::ErrorKind::FileTooLarge);
+}
+
 fn tiny_png() -> Vec<u8> {
     use image::ImageEncoder;
     let mut out = Vec::new();
@@ -136,7 +149,7 @@ fn has_text_returns_invalid_data_on_bad_image_bytes() {
 
 #[test]
 fn preprocess_aligns_to_32_min_size() {
-    let t = preprocess(&tiny_png(), 736).unwrap();
+    let t = preprocess(&tiny_png(), 736, DecodeCtx::global()).unwrap();
     let shape = t.shape();
     assert_eq!(shape, [1, 3, 32, 32], "got: {shape:?}");
 }
@@ -149,28 +162,28 @@ fn preprocess_caps_max_side_then_aligns() {
     image::codecs::png::PngEncoder::new(&mut out)
         .write_image(&pixels, 800, 600, image::ExtendedColorType::Rgb8)
         .unwrap();
-    let t = preprocess(&out, 736).unwrap();
+    let t = preprocess(&out, 736, DecodeCtx::global()).unwrap();
     let shape = t.shape();
     assert_eq!(shape, [1, 3, 576, 736], "got: {shape:?}");
 }
 
 #[test]
 fn preprocess_resizes_beyond_max_side_then_aligns() {
-    let t = preprocess(&solid_rgb_png(400, 300), 64).unwrap();
+    let t = preprocess(&solid_rgb_png(400, 300), 64, DecodeCtx::global()).unwrap();
     let shape = t.shape();
     assert_eq!(shape, [1, 3, 64, 64], "got: {shape:?}");
 }
 
 #[test]
 fn preprocess_keeps_small_image_at_original_size() {
-    let t = preprocess(&solid_rgb_png(64, 64), 128).unwrap();
+    let t = preprocess(&solid_rgb_png(64, 64), 128, DecodeCtx::global()).unwrap();
     let shape = t.shape();
     assert_eq!(shape, [1, 3, 64, 64], "got: {shape:?}");
 }
 
 #[test]
 fn preprocess_rejects_zero_byte_input() {
-    let e = preprocess(b"", 736).unwrap_err();
+    let e = preprocess(b"", 736, DecodeCtx::global()).unwrap_err();
     assert_eq!(e.kind(), io::ErrorKind::InvalidData);
 }
 

@@ -3,6 +3,7 @@ import { resolve } from "node:path";
 
 export const COV_NONBUSINESS = [
   "src/adapters/backend/local_io.rs",
+  "src/adapters/backend/local_mmap_io.rs",
   "src/adapters/backend/smb_real.rs",
   "src/adapters/classify/tract_embed_real.rs",
   "src/adapters/cli_commands.rs",
@@ -26,6 +27,7 @@ export const COV_NONBUSINESS = [
   "src/frameworks/backend.rs",
   "src/frameworks/config_io.rs",
   "src/frameworks/detector.rs",
+  "src/usecases/image_input_io.rs",
   "src/usecases/verify/content_diff_io.rs",
   "src/usecases/verify/verify_io.rs",
 ];

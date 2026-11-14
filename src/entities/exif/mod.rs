@@ -4,10 +4,12 @@ mod image;
 mod image_jpeg;
 mod image_png;
 mod image_rw2;
+mod metered;
 mod mime;
 mod types;
 mod video;
 
+pub use self::metered::{ParseLimits, set_parse_limits};
 pub use self::types::Exif;
 
 #[cfg(test)]

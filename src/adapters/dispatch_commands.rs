@@ -81,7 +81,7 @@ pub(super) fn dispatch_find(
     let out_pair = output.map(|loc| build_source(factory, loc)).transpose()?;
     let find_report = crate::usecases::find_duplicates(
         secure,
-        src_pairs,
+        &src_pairs,
         out_pair.as_ref(),
         &mut std::io::stdout(),
     )?;
@@ -135,17 +135,16 @@ pub(super) fn dispatch_verify(
         phash_max,
         include_non_media,
         exif_tsv.map(std::path::Path::new),
-    );
+    )?;
     // 汇总直接上 stdout（脚本可读）：skill 不再跑独立 analyze 脚本。
-    print!(
-        "{}",
-        crate::usecases::verify::format_summary(&verify_report)
-    );
-    if let Some(path) = report_path {
-        let sink = JsonFileReportSink::new(path);
-        sink.write(&Report::Verify(&verify_report))?;
-    }
-    Ok(CommandResult::Verify(verify_report))
+    crate::usecases::verify::write_summary(&verify_report, &mut std::io::stdout().lock())
+        .map_err(Error::Io)
+        .and_then(|()| {
+            report_path.map_or(Ok(()), |path| {
+                JsonFileReportSink::new(path).write(&Report::Verify(&verify_report))
+            })
+        })
+        .map(|()| CommandResult::Verify(verify_report))
 }
 
 // None 表示未传，跳过校验；Some(s) 时校验模板合法性。

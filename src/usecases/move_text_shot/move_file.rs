@@ -14,7 +14,7 @@ use crate::entities::uri::Location;
 
 #[expect(
     clippy::too_many_arguments,
-    reason = "参数透传：src/output 两 backend + 三 Location + bytes + mkdir_cache + dry_run/delta"
+    reason = "参数透传：src/output 两 backend + 三 Location + mkdir_cache + dry_run/delta"
 )]
 pub(super) fn do_move_or_dry_run(
     src_backend: &Arc<dyn Backend>,
@@ -22,7 +22,6 @@ pub(super) fn do_move_or_dry_run(
     output_backend: &Arc<dyn Backend>,
     target_dir_loc: &Location,
     target_loc: &Location,
-    bytes: &[u8],
     mkdir_cache: &Arc<dashmap::DashSet<Location>>,
     dry_run: bool,
     delta: &mut SourceDelta,
@@ -41,7 +40,6 @@ pub(super) fn do_move_or_dry_run(
         output_backend,
         target_dir_loc,
         target_loc,
-        bytes,
         mkdir_cache,
     ) {
         record_failure(delta, src_loc.display(), &e);
@@ -84,7 +82,6 @@ pub(super) fn do_move_file(
     output_backend: &Arc<dyn Backend>,
     target_dir_loc: &Location,
     target_loc: &Location,
-    bytes: &[u8],
     mkdir_cache: &Arc<dashmap::DashSet<Location>>,
 ) -> io::Result<()> {
     if !mkdir_cache.contains(target_dir_loc) {
@@ -98,10 +95,7 @@ pub(super) fn do_move_file(
 
     // 跨 scheme / 跨实例：走 stream_copy 单点（1 MiB BufReader/BufWriter + 三阶段
     // src_backend 与 output_backend 若为同一实例（Arc::ptr_eq）走原生 copy_file，
-    // 否则走 stream 泵；bytes 参数当前仅用于 src open_read 失败时不影响 stream_copy。
     let same_instance = Arc::ptr_eq(src_backend, output_backend);
-    // 复用变量避免 clippy noise：bytes 生命周期已由 caller 保证不悬垂
-    let _ = bytes;
     stream_copy(
         src_backend.as_ref(),
         src_loc,

@@ -14,23 +14,29 @@
 
 ## 性能采集
 
-采集前必须用 `just build-release` 重新构建 opt=3 产物；脚本只检查二进制存在，无法识别 `OPT=0` 产物。
+采集前必须用 `just build-release` 重新构建 opt=3 产物；脚本会拒绝早于源码的二进制，但无法识别 `OPT=0` 产物。
 
 ```bash
-bun scripts/perf-collect.ts --sub <copy|move|find|move-text-shot|verify> --data <真实源目录> --output-dir <目录>
+bun scripts/perf-collect.ts --sub <copy|move|copy-doc|move-doc|find|move-text-shot|verify> --data <真实源目录> --output-dir <目录>
+bun scripts/perf-compare.ts <基线产物目录> <候选产物目录>
+bun scripts/perf-dataset.ts <clone|photos|stress> --to <目录>
 ```
 
-- 除 `find` 外所有子命令必须提供 `--output-target <目标库>`；额外 CLI 参数用 `--extra`。
-- copy/move/move-text-shot 默认 dry-run，其测量热点不一定等同正式移动。
-- 产物包括 `report.json`、`time-v.txt`、`perf-report.md`；Windows 另保留 stderr 日志。产物保持机器可读，不生成 SVG 火焰图或二进制 pprof。
+- 除 `find` 外所有子命令必须提供 `--output-target <目标库>`；额外 CLI 参数用 `--extra`。输出目录和目标库位于 `--data` 之下时拒绝运行。
+- copy/move/copy-doc/move-doc/move-text-shot 默认 dry-run，其测量热点不一定等同正式移动。
+- `--binary` 指定另存的二进制（用于基线与候选交替对比），此时不做新旧检查。
+- `--repeat`、`--warmup` 控制测量与预热次数；`--max-private-mib` 为峰值私有内存门禁，超限退出码 3，采不到指标退出码 4。
+- 产物为 `perf.json`（命令、数据规模、git、各次指标、中位数与极值）和 `runs/<i>/{report.json,time.txt,stdout.txt}`。产物保持机器可读，不生成 SVG 火焰图或二进制 pprof。
+- `perf-compare` 仅在两组分布不重叠时判改进或回归，其余判噪声；stdout 或报告计数不一致时非零退出。实测秒数只留在产物中，不写入测试、文档或阈值。
+- `perf-dataset` 生成不入库数据集：`clone` 克隆真实目录（`--mutate-tail` 让同名文件内容不同），`photos` 以 `tests/data` 为种子生成大量小文件，`stress` 生成大像素图片及输出库同名副本。
 - 修改参数或产物字段时同步脚本测试和本文件。
 
 ## 指标与分析
 
-- 报告不含执行模式和构建方式。交付分析时人工注明命令、数据规模、文件类型、dry-run 或真跑、操作系统和构建方式；结论引用具体指标，不只凭总耗时判断。
+- `perf.json` 不含构建方式。交付分析时人工注明构建方式和数据覆盖范围（如是否含照片）；结论引用具体指标，不只凭总耗时判断。
 - `duration_ms` 是 use case 内耗时，不包含进程启动和模型加载；整进程 wall clock 才包含固定开销。
-- macOS 使用 `gtime -v`（GNU time）采集 wall clock 与内存指标；未安装时先执行 `brew install gnu-time`。
-- Windows 使用 PowerShell 采样，提供 wall clock、CPU、峰值工作集和峰值私有内存；没有 Unix page fault、上下文切换和 fs IO 字段时不得编造。
+- macOS 使用系统自带 `/usr/bin/time -l`，峰值私有内存取内核记录的 peak memory footprint，不采样、不依赖 gtime。
+- Windows 使用 PowerShell 采样，提供 wall clock、CPU、峰值工作集和峰值私有内存（`PeakPagedMemorySize64`）；没有 Unix page fault、上下文切换和 fs IO 字段时不得编造。
 - Windows 工作集包含文件缓存页，不等于堆占用；判断内存压力优先看峰值私有内存，并结合文件大小和读取方式。
 - CPU 空闲且吞吐低时先排查 IO 和重复读取；CPU 饱和时再检查内容判重或推理。system CPU 偏高时检查频繁 metadata/open/close。
 - wall clock 明显大于 `duration_ms` 时检查启动和模型加载；只有实际使用模型的命令才归因模型开销。

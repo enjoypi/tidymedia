@@ -3,16 +3,21 @@
 
 use std::collections::HashMap;
 use std::path::Path;
+use std::sync::Arc;
 use std::time::Instant;
 
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use tracing::debug;
 use tracing::warn;
 
+use crate::entities::common;
 use crate::entities::file_index;
 use crate::entities::file_info::Info;
 use crate::entities::media_time::MediaTimeDecision;
+use crate::entities::memory::Ledger;
+use crate::usecases::memory::{output_cost, retained, source_cost};
 use crate::usecases::report::elapsed_ms;
+use crate::usecases::retained::Charging;
 
 use super::copy::Source;
 use super::report::FEATURE_VERIFY;
@@ -20,7 +25,7 @@ use super::verify::evaluate::{EvalCtx, Evaluated, evaluate};
 use super::verify::exif_tsv::{ExifRow, normalize_sep, parse_tsv};
 use super::verify::output_library::OutputLibrary;
 pub use report::{VerifyEntry, VerifyReport};
-pub(crate) use summary::format_summary;
+pub(crate) use summary::write_summary;
 
 pub(crate) mod bucket;
 pub(crate) mod candidates;
@@ -32,97 +37,153 @@ pub(crate) mod diagnose;
 mod evaluate;
 pub(crate) mod exif_tsv;
 pub(crate) mod filename_hint;
+mod grouped;
 pub(crate) mod output_library;
 pub(crate) mod phash;
 pub(crate) mod report;
+mod rotated_view;
 pub(crate) mod summary;
 #[path = "verify_io.rs"]
 mod verify_io;
 
 pub(crate) const DEFAULT_PHASH_MAX: u8 = 20;
 
-/// 归档验证：扫描源端，对每个文件做拍摄时间决策与桶对账；注入 `--exif-tsv`
-/// 时用第二实现（exiftool）的期望桶交叉比对。只诊断不写盘。
+struct VerifyJob<'a> {
+    sources: &'a [Source],
+    output: &'a Source,
+    phash_max: u8,
+    include_non_media: bool,
+    offset: chrono::FixedOffset,
+    tz: i8,
+    roots: Vec<String>,
+}
+
 pub(crate) fn verify(
     sources: &[Source],
     output: &Source,
     phash_max: u8,
     include_non_media: bool,
     exif_tsv: Option<&Path>,
-) -> VerifyReport {
+) -> common::Result<VerifyReport> {
     let start = Instant::now();
+    let ledger = retained();
+    ledger.reset();
     let tsv_reader = exif_tsv.filter(|path| *path == Path::new("-")).map(|path| {
         let path = path.to_path_buf();
         std::thread::spawn(move || load_tsv(Some(path.as_path())))
     });
     let tz = crate::usecases::config::config().copy.timezone_offset_hours;
-    let offset = crate::usecases::config::chrono_offset_from_hours(tz);
-    let (src_index, scanned) = scan_sources(sources, include_non_media, offset);
-    let roots: Vec<String> = sources.iter().map(|(loc, _)| loc.display()).collect();
-    let infos: Vec<Info> = src_index
-        .into_infos()
-        .into_iter()
-        .filter(|i| include_non_media || i.is_media())
-        .collect();
-    let output_start = Instant::now();
-    let out = OutputLibrary::from_source(output);
-    log_stage("output_walk", output_start);
-    let prepare_start = Instant::now();
-    out.prepare_exact(&infos);
-    log_stage("output_prepare", prepare_start);
+    let job = VerifyJob {
+        sources,
+        output,
+        phash_max,
+        include_non_media,
+        offset: crate::usecases::config::chrono_offset_from_hours(tz),
+        tz,
+        roots: sources.iter().map(|(loc, _)| loc.display()).collect(),
+    };
+    let single = single_pass(&job, ledger);
     let tsv_start = Instant::now();
     let tsv_rows = join_tsv(tsv_reader, exif_tsv);
     let tsv = index_tsv(&tsv_rows);
     log_stage("tsv_wait", tsv_start);
-    let ctx = EvalCtx {
-        offset,
-        tz,
-        tsv: &tsv,
-        roots: &roots,
-        out: &out,
-        phash_max,
-        max_bytes: crate::usecases::config::config().verify.max_image_bytes,
-    };
-    let evaluate_start = Instant::now();
-    let evaluated: Vec<Evaluated> = infos.par_iter().map(|i| evaluate(i, &ctx)).collect();
-    log_stage("evaluate", evaluate_start);
     let mut report = VerifyReport {
-        scanned,
         include_non_media,
         dry_run: true,
         ..Default::default()
     };
-    let fold_start = Instant::now();
-    fold_evaluated(&mut report, evaluated);
-    log_stage("fold", fold_start);
+    match single {
+        Some((source, out)) => {
+            report.scanned = source.touched_count();
+            let evaluated = evaluate_all(&job, source, &out, &tsv);
+            report.entries = fold_evaluated(&mut report, evaluated).into();
+        }
+        None => grouped::run(&job, &tsv, &mut report, ledger)?,
+    }
     report.duration_ms = elapsed_ms(start);
-    report
+    Ok(report)
+}
+
+fn single_pass(
+    job: &VerifyJob<'_>,
+    ledger: &'static Ledger,
+) -> Option<(file_index::Index, OutputLibrary)> {
+    let source = scan_sources(
+        job,
+        Arc::new(Charging {
+            ledger,
+            cost: source_cost(),
+        }),
+    );
+    if source.overflowed() {
+        return None;
+    }
+    let output_start = Instant::now();
+    let (out, overflowed) = OutputLibrary::scan(
+        job.output,
+        Arc::new(Charging {
+            ledger,
+            cost: output_cost(),
+        }),
+    );
+    log_stage("output_walk", output_start);
+    (!overflowed).then_some((source, out))
+}
+
+fn evaluate_all(
+    job: &VerifyJob<'_>,
+    source: file_index::Index,
+    out: &OutputLibrary,
+    tsv: &HashMap<&str, &ExifRow>,
+) -> Vec<Evaluated> {
+    let infos: Vec<Info> = source
+        .into_infos()
+        .into_iter()
+        .filter(|i| job.include_non_media || i.is_media())
+        .collect();
+    let prepare_start = Instant::now();
+    out.prepare_exact(&infos);
+    log_stage("output_prepare", prepare_start);
+    let ctx = EvalCtx {
+        offset: job.offset,
+        tz: job.tz,
+        tsv,
+        roots: &job.roots,
+        out,
+        phash_max: job.phash_max,
+        max_bytes: crate::usecases::config::config().verify.max_image_bytes,
+    };
+    let evaluate_start = Instant::now();
+    let evaluated = infos.par_iter().map(|i| evaluate(i, &ctx)).collect();
+    log_stage("evaluate", evaluate_start);
+    evaluated
 }
 
 fn scan_sources(
-    sources: &[Source],
-    include_non_media: bool,
-    offset: chrono::FixedOffset,
-) -> (file_index::Index, usize) {
+    job: &VerifyJob<'_>,
+    admission: Arc<dyn file_index::Admission>,
+) -> file_index::Index {
     let walk_start = Instant::now();
-    let skip_ext = super::copy::source_skip_extensions(include_non_media, false);
-    let mut index = file_index::Index::new();
-    for (loc, backend) in sources {
+    let skip_ext = super::copy::source_skip_extensions(job.include_non_media, false);
+    let mut index = file_index::Index::new().with_admission(admission);
+    for (loc, backend) in job.sources {
         index.visit_location_skipping(loc, backend, skip_ext);
     }
     log_stage("source_walk", walk_start);
+    if index.overflowed() {
+        return index;
+    }
     let exif_start = Instant::now();
-    index.parse_exif(offset, include_non_media, false);
+    index.parse_exif(job.offset, job.include_non_media, false);
     log_stage("source_exif", exif_start);
-    let scanned = index.touched_count();
     debug!(
         feature = FEATURE_VERIFY,
         operation = "scan_complete",
         result = "ok",
-        files = scanned,
+        files = index.len(),
         "verify source index built"
     );
-    (index, scanned)
+    index
 }
 
 fn join_tsv(
@@ -158,8 +219,10 @@ fn log_stage(operation: &'static str, start: Instant) {
     );
 }
 
-fn fold_evaluated(report: &mut VerifyReport, mut evaluated: Vec<Evaluated>) {
+fn fold_evaluated(report: &mut VerifyReport, mut evaluated: Vec<Evaluated>) -> Vec<VerifyEntry> {
+    let fold_start = Instant::now();
     evaluated.sort_by(|a, b| a.entry.source_path.cmp(&b.entry.source_path));
+    let mut entries = Vec::with_capacity(evaluated.len());
     for ev in evaluated {
         report.compared += 1;
         if ev.decision_failed {
@@ -171,8 +234,10 @@ fn fold_evaluated(report: &mut VerifyReport, mut evaluated: Vec<Evaluated>) {
         for p in &ev.entry.patterns {
             *report.pattern_counts.entry(p.clone()).or_insert(0) += 1;
         }
-        report.entries.push(ev.entry);
+        entries.push(ev.entry);
     }
+    log_stage("fold", fold_start);
+    entries
 }
 
 struct EntryParts<'a> {
@@ -223,7 +288,7 @@ fn load_tsv(exif_tsv: Option<&Path>) -> Vec<ExifRow> {
     let Some(path) = exif_tsv else {
         return Vec::new();
     };
-    match verify_io::read_to_string(path) {
+    match verify_io::read_to_string(path, crate::usecases::config::config().verify.max_tsv_bytes) {
         Ok(content) => parse_tsv(&content),
         Err(e) => {
             warn!(

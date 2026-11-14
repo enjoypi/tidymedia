@@ -1,3 +1,4 @@
+use std::cell::RefCell;
 use std::io;
 
 use sha2::Digest;
@@ -20,33 +21,33 @@ pub fn fast_hash_stream(r: &mut dyn MediaReader) -> io::Result<(usize, u64, u64)
     ))
 }
 
+thread_local! {
+    static CHUNK: RefCell<Vec<u8>> = RefCell::new(vec![0u8; STREAM_CHUNK]);
+}
+
+fn drain(r: &mut dyn MediaReader, update: &mut dyn FnMut(&[u8])) -> io::Result<u64> {
+    CHUNK.with_borrow_mut(|buf| {
+        let mut total = 0u64;
+        loop {
+            let n = r.read(buf)?;
+            if n == 0 {
+                return Ok(total);
+            }
+            update(&buf[..n]);
+            total += n as u64;
+        }
+    })
+}
+
 pub fn full_hash_stream(r: &mut dyn MediaReader) -> io::Result<(u64, u64)> {
     let mut hasher = xxhash_rust::xxh3::Xxh3::new();
-    let mut buf = vec![0u8; STREAM_CHUNK];
-    let mut total = 0u64;
-    loop {
-        let n = r.read(&mut buf)?;
-        if n == 0 {
-            break;
-        }
-        hasher.update(&buf[..n]);
-        total += n as u64;
-    }
+    let total = drain(r, &mut |chunk| hasher.update(chunk))?;
     Ok((total, hasher.digest()))
 }
 
 pub fn secure_hash_stream(r: &mut dyn MediaReader) -> io::Result<(u64, SecureHash)> {
     let mut hasher = Sha512::new();
-    let mut buf = vec![0u8; STREAM_CHUNK];
-    let mut total = 0u64;
-    loop {
-        let n = r.read(&mut buf)?;
-        if n == 0 {
-            break;
-        }
-        hasher.update(&buf[..n]);
-        total += n as u64;
-    }
+    let total = drain(r, &mut |chunk| hasher.update(chunk))?;
     Ok((total, hasher.finalize()))
 }
 

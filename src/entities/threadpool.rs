@@ -14,11 +14,20 @@ use std::thread::available_parallelism;
 
 use rayon::ThreadPool;
 
+use crate::entities::memory::IoSizing;
+
 static IO_POOL: OnceLock<ThreadPool> = OnceLock::new();
 
-const IO_THREADS_MIN: usize = 8;
-const IO_THREADS_MAX: usize = 64;
-const IO_THREADS_PER_CPU: usize = 4;
+static IO_SIZING: OnceLock<IoSizing> = OnceLock::new();
+
+pub fn configure_io(sizing: IoSizing) {
+    let _ = IO_SIZING.set(sizing);
+}
+
+#[must_use]
+pub fn cpus() -> usize {
+    available_parallelism().map_or(4, NonZeroUsize::get)
+}
 
 /// 取 I/O 专用线程池；首次访问时按 `CPU × 4` 并 clamp 到 `[8, 64]` 构造。
 /// 调用方一般用 [`install_io`] wrapper 而非直接持 ref。
@@ -38,8 +47,11 @@ where
 }
 
 fn build_pool() -> ThreadPool {
-    let cpus = available_parallelism().map_or(4, NonZeroUsize::get);
-    let threads = (cpus * IO_THREADS_PER_CPU).clamp(IO_THREADS_MIN, IO_THREADS_MAX);
+    let threads = IO_SIZING
+        .get()
+        .copied()
+        .unwrap_or(IoSizing::DEFAULT)
+        .threads(cpus());
     rayon::ThreadPoolBuilder::new()
         .num_threads(threads)
         .thread_name(|i| format!("tm-io-{i}"))

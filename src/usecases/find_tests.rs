@@ -27,9 +27,19 @@ fn local_dir(p: &std::path::Path) -> (Location, Arc<dyn Backend>) {
     )
 }
 
+fn listed(
+    groups: Vec<DuplicateGroup>,
+) -> crate::usecases::spill::Listed<crate::usecases::report::DuplicateGroupReport> {
+    groups
+        .into_iter()
+        .map(crate::usecases::report::DuplicateGroupReport::from)
+        .collect::<Vec<_>>()
+        .into()
+}
+
 fn run_render(same: &[DuplicateGroup], prefix: Option<&str>) -> String {
     let mut sink: Vec<u8> = Vec::new();
-    render_script(same, prefix, &mut sink).unwrap();
+    render_script(&listed(same.to_vec()), prefix, &mut sink).unwrap();
     String::from_utf8(sink).unwrap()
 }
 

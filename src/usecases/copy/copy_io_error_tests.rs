@@ -291,22 +291,28 @@ fn do_copy_retries_next_name_when_write_hits_already_exists() {
 }
 
 #[test]
-fn do_copy_dry_run_propagates_hash_read_error() {
+fn do_copy_dry_run_reads_body_only_when_a_peer_needs_it() {
     use crate::adapters::backend::fake::FakeBackend;
 
     let be = Arc::new(FakeBackend::new("local"));
     let src = Location::Local(Utf8PathBuf::from("/src/photo.png"));
+    let peer_loc = Location::Local(Utf8PathBuf::from("/src/peer.png"));
     be.add_file(src.clone(), b"payload".to_vec());
+    be.add_file(peer_loc.clone(), b"payload".to_vec());
     let backend: Arc<dyn Backend> = be.clone();
     let mut info = Info::open(&src, Arc::clone(&backend)).unwrap();
     info.set_exif(crate::entities::exif::Exif::with_mime("image/png"));
+    let mut peer = Info::open(&peer_loc, Arc::clone(&backend)).unwrap();
+    peer.set_exif(crate::entities::exif::Exif::with_mime("image/png"));
     be.inject_reader_error(src, std::io::ErrorKind::PermissionDenied);
 
     let mut opts = default_opts("{valuable_name}");
     opts.dry_run = true;
     let idx = crate::entities::file_index::Index::new();
     let out = Location::Local(Utf8PathBuf::from("/out"));
-    let err = do_copy(&info, &out, &backend, &idx, &opts).unwrap_err();
+    assert!(do_copy(&info, &out, &backend, &idx, &opts).unwrap());
+    assert_eq!(idx.bytes_read(), 0);
+    let err = do_copy(&peer, &out, &backend, &idx, &opts).unwrap_err();
 
     let crate::entities::common::Error::Io(io_err) = err;
     assert_eq!(io_err.kind(), std::io::ErrorKind::PermissionDenied);

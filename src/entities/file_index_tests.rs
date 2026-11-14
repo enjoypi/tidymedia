@@ -268,6 +268,23 @@ fn calc_same_excludes_singleton_buckets_from_results() {
 }
 
 #[test]
+fn calc_same_does_not_hash_files_whose_size_is_unique_in_the_bucket() {
+    let dir = tempdir().unwrap();
+    let head = vec![9u8; 4096];
+    let short = dir.path().join("short.bin");
+    fs::write(&short, [head.as_slice(), b"A"].concat()).unwrap();
+    let long = dir.path().join("long.bin");
+    fs::write(&long, [head.as_slice(), b"AB"].concat()).unwrap();
+
+    let index = Index::new();
+    index.insert(short.to_str().unwrap()).unwrap();
+    index.insert(long.to_str().unwrap()).unwrap();
+
+    assert_eq!(index.search_same(), []);
+    assert_eq!(index.bytes_read(), 2 * 4096);
+}
+
+#[test]
 fn remove_under_prefix_removes_subtree_and_keeps_outside() {
     let dir = tempdir().unwrap();
     let sub = dir.path().join("archive");

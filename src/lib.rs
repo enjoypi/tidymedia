@@ -37,6 +37,12 @@ pub use adapters::classify::build_classifier;
 pub use adapters::classify::fake::FakeDocumentClassifier;
 pub use usecases::classify::{Classification, DocumentClassifier};
 
+#[doc(hidden)]
+#[must_use]
+pub fn calibrate_decode(bytes: &[u8]) -> Option<u64> {
+    usecases::image_input::calibrate(bytes)
+}
+
 pub fn install_config_loader() {
     frameworks::config::install_global_loader();
 }

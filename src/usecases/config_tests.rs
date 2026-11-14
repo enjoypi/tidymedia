@@ -36,6 +36,7 @@ fn config_defaults_match_historical_constants() {
     assert_eq!(c.backend.ocr.resize_max_side, 736);
     assert_eq!(c.backend.ocr.max_image_bytes, 50 * 1024 * 1024);
     assert_eq!(c.verify.max_image_bytes, 50 * 1024 * 1024);
+    assert_eq!(c.verify.max_tsv_bytes, 64 * 1024 * 1024);
     assert_eq!(c.backend.classify.embed_model_path, "");
     assert_eq!(c.backend.classify.tokenizer_path, "");
     assert!(c.backend.classify.categories.is_empty());
@@ -183,4 +184,34 @@ fn try_config_caches_error_result() {
 fn config_panics_when_load_failed() {
     install_loader(failing_loader);
     let _ = config();
+}
+
+#[test]
+fn memory_defaults_reserve_room_for_two_gib_limit() {
+    let memory = Config::default().memory;
+    assert_eq!(memory.limit_bytes, 2048 << 20);
+    assert_eq!(memory.reserve_bytes, 256 << 20);
+    assert_eq!(memory.baseline_bytes, 96 << 20);
+    assert_eq!(memory.model_bytes, 256 << 20);
+    assert_eq!(memory.per_thread_bytes, 4 << 20);
+    assert_eq!(memory.hold_bytes, 128 << 20);
+    assert_eq!(memory.work_bytes, 384 << 20);
+    assert_eq!(memory.retained_min_bytes, 64 << 20);
+    assert_eq!(memory.decode_factor, 3);
+    assert_eq!(memory.read_buffer_bytes, 64 << 10);
+    assert_eq!(memory.metadata_free_bytes, 1 << 20);
+    assert_eq!(memory.metadata_max_bytes, 64 << 20);
+    assert_eq!(
+        (
+            memory.source_entry_bytes,
+            memory.output_entry_bytes,
+            memory.name_entry_bytes,
+            memory.path_copies
+        ),
+        (3584, 2048, 48, 5)
+    );
+    let io = memory.io_sizing();
+    assert_eq!((io.per_cpu, io.min, io.max), (4, 8, 64));
+    let input = memory.plan_input(10);
+    assert_eq!((input.limit, input.cpus), (2048 << 20, 10));
 }

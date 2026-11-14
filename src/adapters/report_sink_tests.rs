@@ -60,6 +60,7 @@ fn sample_copy_report() -> CopyReport {
         doc_only: false,
         errors: vec![],
         errors_truncated: false,
+        bytes_read: 0,
         duration_ms: 0,
     }
 }
@@ -70,7 +71,8 @@ fn sample_find_report() -> FindReport {
         groups: vec![crate::usecases::report::DuplicateGroupReport {
             size: 1024,
             paths: vec!["a.jpg".into(), "a_copy.jpg".into()],
-        }],
+        }]
+        .into(),
         bytes_read: 1024,
         duration_ms: 0,
     }
@@ -88,6 +90,21 @@ fn sink_writes_valid_copy_json() {
     assert_eq!(parsed["scanned"], 5);
     assert_eq!(parsed["copied"], 3);
     assert_eq!(parsed["dry_run"], false);
+}
+
+#[test]
+fn sink_writes_move_report_json() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("move.json");
+    let sink = JsonFileReportSink::new(path.to_str().unwrap());
+    let r = CopyReport {
+        remove: true,
+        ..sample_copy_report()
+    };
+    sink.write(&Report::Copy(&r)).unwrap();
+    let parsed: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    assert_eq!(parsed["remove"], true);
 }
 
 #[test]
@@ -189,18 +206,40 @@ fn sink_find_persist_fails_when_target_is_directory() {
 
 #[test]
 fn write_and_persist_propagates_write_err() {
-    let err = write_and_persist("ignored", b"{}", Box::new(WriteFails)).unwrap_err();
+    let err =
+        write_and_persist("ignored", &serde_json::json!({}), Box::new(WriteFails)).unwrap_err();
     assert!(err.to_string().contains("inject write fail"), "{err}");
 }
 
 #[test]
+fn write_and_persist_propagates_write_err_from_large_report() {
+    let large = serde_json::json!(vec!["x"; 70_000]);
+    let err = write_and_persist("ignored", &large, Box::new(WriteFails)).unwrap_err();
+    assert!(err.to_string().contains("inject write fail"), "{err}");
+}
+
+#[test]
+fn write_and_persist_streams_large_value_to_target() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("large.json");
+    let large = serde_json::json!(vec!["x"; 70_000]);
+    let tmp = tempfile::NamedTempFile::new_in(dir.path()).unwrap();
+    write_and_persist(path.to_str().unwrap(), &large, Box::new(tmp)).unwrap();
+    let parsed: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    assert_eq!(parsed, large);
+}
+
+#[test]
 fn write_and_persist_propagates_flush_err() {
-    let err = write_and_persist("ignored", b"{}", Box::new(FlushFails)).unwrap_err();
+    let err =
+        write_and_persist("ignored", &serde_json::json!({}), Box::new(FlushFails)).unwrap_err();
     assert!(err.to_string().contains("inject flush fail"), "{err}");
 }
 
 #[test]
 fn write_and_persist_propagates_persist_err() {
-    let err = write_and_persist("ignored", b"{}", Box::new(PersistFails)).unwrap_err();
+    let err =
+        write_and_persist("ignored", &serde_json::json!({}), Box::new(PersistFails)).unwrap_err();
     assert!(err.to_string().contains("inject persist fail"), "{err}");
 }

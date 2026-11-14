@@ -1,6 +1,8 @@
 use std::collections::BTreeMap;
 
-use serde_derive::Serialize;
+use serde_derive::{Deserialize, Serialize};
+
+use crate::usecases::spill::{Listed, SpillKey};
 
 use crate::usecases::report::ReportError;
 
@@ -15,7 +17,7 @@ pub struct VerifyReport {
     pub decision_failed: usize,
     /// 诊断 pattern 命中计数，key 见 `diagnose.rs`；空 = 尚未诊断。
     pub pattern_counts: BTreeMap<String, usize>,
-    pub entries: Vec<VerifyEntry>,
+    pub entries: Listed<VerifyEntry>,
     pub errors: Vec<ReportError>,
     pub errors_truncated: bool,
     pub dry_run: bool,
@@ -25,7 +27,7 @@ pub struct VerifyReport {
 
 /// 单个源文件的对账行。阶段逐步填充：骨架阶段只填决策相关字段，
 /// 桶对账/内容比对/诊断在后续阶段补齐（未填字段保持 default）。
-#[derive(Debug, Default, Serialize)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct VerifyEntry {
     pub source_path: String,
     /// 归档预测桶 `YYYY:MM`（由决策时间 + 配置时区推导）。
@@ -47,10 +49,16 @@ pub struct VerifyEntry {
     pub filename_bucket: Option<String>,
     /// 期望桶与预测桶不一致（含未注入 tsv 时的内部一致性判定）。
     pub mismatch: bool,
-    /// 内容比对裁定：`not_checked`/`exact_dup`/`pixel_same`/`rotated_same`/`absent`。
+    /// 内容比对裁定：`not_checked`/`exact_dup`/`pixel_same`/`rotated_same`/`name_only`/`too_large`/`absent`。
     pub duplicate_verdict: String,
     /// 命中的诊断 pattern 名。
     pub patterns: Vec<String>,
     /// 修补建议（exiftool 命令等），None = 无需修补。
     pub fix_suggestion: Option<String>,
+}
+
+impl SpillKey for VerifyEntry {
+    fn spill_key(&self) -> String {
+        self.source_path.clone()
+    }
 }

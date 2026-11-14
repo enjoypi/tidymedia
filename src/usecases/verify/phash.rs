@@ -1,13 +1,13 @@
 use std::sync::OnceLock;
 
-use image::RgbImage;
+use image::{GenericImageView, Rgb};
 
 const DCT_SIDE: usize = 32;
 const DCT_SIDE_U32: u32 = 32;
 const HASH_SIDE: usize = 8;
 
 #[must_use]
-pub(crate) fn phash(img: &RgbImage) -> u64 {
+pub(crate) fn phash<V: GenericImageView<Pixel = Rgb<u8>>>(img: &V) -> u64 {
     let small = super::content_diff_io::resize(img, DCT_SIDE_U32);
     let luma = super::content_diff_io::grayscale(small);
     let mut pixels = [[0.0_f32; DCT_SIDE]; DCT_SIDE];

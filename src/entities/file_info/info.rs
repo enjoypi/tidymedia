@@ -57,19 +57,22 @@ impl std::fmt::Debug for Info {
     }
 }
 
+fn path_of(loc: &Location) -> Utf8PathBuf {
+    match loc {
+        Location::Local(p) => p.clone(),
+        other @ Location::Smb { .. } => other.display().into(),
+    }
+}
+
 impl Info {
     pub fn open(loc: &Location, backend: Arc<dyn Backend>) -> io::Result<Self> {
         let meta = backend.metadata(loc)?;
         ensure_hashable(&meta, loc)?;
         let mut reader = backend.open_read(loc)?;
         let (bytes_read, first_hash, second_hash) = fast_hash_stream(reader.as_mut())?;
-        let full_path: Utf8PathBuf = match loc {
-            Location::Local(p) => p.clone(),
-            other @ Location::Smb { .. } => other.display().into(),
-        };
         Ok(Self {
             fast_hash: first_hash,
-            full_path,
+            full_path: path_of(loc),
             size: meta.size,
             location: loc.clone(),
             backend,
@@ -79,6 +82,11 @@ impl Info {
             lazy: Mutex::new(Lazy::new(bytes_read as u64, second_hash)),
             meta,
         })
+    }
+
+    #[must_use]
+    pub fn is_staged(&self) -> bool {
+        path_of(&self.location) != self.full_path
     }
 
     pub fn bytes_read(&self) -> u64 {
@@ -135,17 +143,30 @@ impl Info {
     }
 
     pub fn cloned_at(&self, new_loc: Location, new_backend: Arc<dyn Backend>) -> Self {
-        let new_full_path: Utf8PathBuf = match &new_loc {
-            Location::Local(p) => p.clone(),
-            other @ Location::Smb { .. } => other.display().into(),
+        let full_path = path_of(&new_loc);
+        self.relocated(full_path, new_loc, new_backend)
+    }
+
+    pub fn staged_at(&self, target: &Location) -> Self {
+        self.relocated(path_of(target), self.location.clone(), self.backend())
+    }
+
+    fn relocated(
+        &self,
+        full_path: Utf8PathBuf,
+        location: Location,
+        backend: Arc<dyn Backend>,
+    ) -> Self {
+        let lazy_snapshot = Lazy {
+            bytes_read: 0,
+            ..*self.lazy.lock()
         };
-        let lazy_snapshot = *self.lazy.lock();
         Self {
             fast_hash: self.fast_hash,
-            full_path: new_full_path,
+            full_path,
             size: self.size,
-            location: new_loc,
-            backend: new_backend,
+            location,
+            backend,
             exif: self.exif.clone(),
             extra_candidates: self.extra_candidates.clone(),
             category: self.category.clone(),

@@ -5,6 +5,7 @@ use nom_exif::MediaSource;
 
 use super::super::backend::MediaReader;
 use super::super::file_info::read_fill;
+use super::metered::{MeteredReader, parse_limits};
 
 pub(super) const SNIFF_BYTES: usize = 256;
 
@@ -31,14 +32,18 @@ pub(super) fn rewind(reader: &mut dyn MediaReader) -> io::Result<()> {
     reader.seek(io::SeekFrom::Start(0)).map(|_| ())
 }
 
+fn metered(reader: Box<dyn MediaReader>) -> MeteredReader {
+    MeteredReader::new(reader, parse_limits())
+}
+
 pub(super) fn parse_image_exif(reader: Box<dyn MediaReader>) -> Option<nom_exif::Exif> {
-    let source = MediaSource::seekable(reader).ok()?;
+    let source = MediaSource::seekable(metered(reader)).ok()?;
     let mut parser = MediaParser::new();
     parser.parse_exif(source).ok().map(Into::into)
 }
 
 pub(super) fn parse_video_track(reader: Box<dyn MediaReader>) -> Option<nom_exif::TrackInfo> {
-    let source = MediaSource::seekable(reader).ok()?;
+    let source = MediaSource::seekable(metered(reader)).ok()?;
     let mut parser = MediaParser::new();
     parser.parse_track(source).ok()
 }

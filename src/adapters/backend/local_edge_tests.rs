@@ -311,3 +311,14 @@ fn walk_entry_to_io_propagates_injected_path_conversion_error() {
     assert_eq!(err.kind(), io::ErrorKind::InvalidData);
     assert_eq!(err.to_string(), "injected");
 }
+
+#[test]
+fn read_to_string_rejects_invalid_utf8() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("bad.xmp");
+    fs::write(&path, [0xFF_u8, 0xFE, 0xFD]).unwrap();
+    let err = LocalBackend::new()
+        .read_to_string(&local(&path))
+        .unwrap_err();
+    assert_eq!(err.kind(), io::ErrorKind::InvalidData);
+}

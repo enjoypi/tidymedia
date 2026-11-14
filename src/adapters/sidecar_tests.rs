@@ -154,7 +154,14 @@ fn try_xmp_unparseable_returns_none() {
     std::fs::write(&xmp, b"not xmp content").unwrap();
     let mp = camino::Utf8PathBuf::from_path_buf(media).unwrap();
     let backend = LocalBackend::arc();
-    assert!(try_xmp(&Location::Local(mp), backend.as_ref()).is_none());
+    assert!(
+        try_xmp(
+            &Location::Local(mp),
+            backend.as_ref(),
+            &crate::usecases::memory::governor().work
+        )
+        .is_none()
+    );
 }
 
 /// json 文件存在但内容不符合 schema → `try_takeout` None
@@ -167,7 +174,14 @@ fn try_takeout_unparseable_returns_none() {
     std::fs::write(&json, b"{}").unwrap();
     let mp = camino::Utf8PathBuf::from_path_buf(media).unwrap();
     let backend = LocalBackend::arc();
-    assert!(try_takeout(&Location::Local(mp), backend.as_ref()).is_none());
+    assert!(
+        try_takeout(
+            &Location::Local(mp),
+            backend.as_ref(),
+            &crate::usecases::memory::governor().work
+        )
+        .is_none()
+    );
 }
 
 #[test]
@@ -227,4 +241,22 @@ fn discover_with_fake_backend_finds_xmp() {
     let cands = discover_with_backend(&media, &backend);
     assert_eq!(cands.len(), 1);
     assert_eq!(cands[0].source, Source::XmpSidecar);
+}
+
+#[test]
+fn sidecar_beyond_work_budget_is_skipped() {
+    use crate::adapters::backend::fake::FakeBackend;
+    use crate::entities::memory::Level;
+
+    let backend = FakeBackend::new("local");
+    let media = Location::Local(Utf8PathBuf::from("/m/a.jpg"));
+    let xml = r#"<rdf:Description photoshop:DateCreated="2024-05-01T14:30:00+08:00"/>"#;
+    backend.add_file(
+        Location::Local(Utf8PathBuf::from("/m/a.xmp")),
+        xml.as_bytes().to_vec(),
+    );
+    let tight = Budget::new(Level::Work, 16);
+    assert_eq!(discover_within(&media, &backend, &tight).len(), 0);
+    let roomy = Budget::new(Level::Work, 1 << 20);
+    assert_eq!(discover_within(&media, &backend, &roomy).len(), 1);
 }

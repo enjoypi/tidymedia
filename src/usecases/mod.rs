@@ -9,10 +9,15 @@ pub(super) use verify::verify;
 pub(crate) mod classify;
 pub(crate) mod config;
 pub(crate) mod detector;
+pub(crate) mod image_input;
+pub(crate) mod memory;
 pub(crate) mod ocr;
+pub(crate) mod retained;
+pub(crate) mod retained_plan;
+pub mod spill;
 
 mod archive_template;
-mod copy;
+pub(crate) mod copy;
 pub(crate) mod find;
 pub(crate) mod move_text_shot;
 pub(crate) mod report;

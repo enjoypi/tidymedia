@@ -117,7 +117,7 @@ fn verify_name_only_when_candidates_do_not_match_content() {
 }
 
 #[test]
-fn verify_name_only_when_max_bytes_guard_blocks_reads() {
+fn verify_too_large_when_max_bytes_guard_blocks_reads() {
     let _cfg = write_small_max_bytes_config();
     let mut big_a = minimal_jpeg(b"meta-a", b"SHARED-PIXELS");
     big_a.resize(1_200_000, 0);
@@ -138,9 +138,8 @@ fn verify_name_only_when_max_bytes_guard_blocks_reads() {
     let report_dir = tempdir().unwrap();
     let json = verify_json(src_dir, out.path().to_str().unwrap(), &report_dir);
     assert_eq!(json["compared"], 2);
-    // 源超 max_bytes → 读 guard 拦截 → name_only；候选超 max_bytes → 读 guard 拦截 → name_only
-    assert_eq!(json["entries"][0]["duplicate_verdict"], "name_only");
-    assert_eq!(json["entries"][1]["duplicate_verdict"], "name_only");
+    assert_eq!(json["entries"][0]["duplicate_verdict"], "too_large");
+    assert_eq!(json["entries"][1]["duplicate_verdict"], "too_large");
 }
 
 #[test]

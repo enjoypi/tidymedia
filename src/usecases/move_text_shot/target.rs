@@ -10,7 +10,7 @@ use tracing::debug;
 
 use super::delta::{SourceDelta, record_failure};
 use super::move_file::{do_move_or_dry_run, target_dir};
-use crate::entities::backend::Backend;
+use crate::entities::backend::{Backend, FileBytes};
 use crate::entities::uri::Location;
 use crate::usecases::config::config;
 
@@ -24,7 +24,7 @@ pub(super) fn move_one(
     source: &Location,
     output: &Location,
     output_backend: &Arc<dyn Backend>,
-    bytes: &[u8],
+    bytes: FileBytes,
     mkdir_cache: &Arc<dashmap::DashSet<Location>>,
     dry_run: bool,
     delta: &mut SourceDelta,
@@ -52,13 +52,15 @@ pub(super) fn move_one(
     // 幂等去重：base 候选（file_name 本体，无 _N 后缀）已存在时对比双侧 SHA-512。
     // 相同 → 视为「上次已归档」删源计 deduplicated；不同 → 走 unique_name _N 分派。
     let base_target = target_dir_loc.join_path(file_name);
-    match dedupe_or_pick_target(
+    let decision = dedupe_or_pick_target(
         &base_target,
         file_name,
         &target_dir_loc,
         output_backend,
-        bytes,
-    ) {
+        &bytes,
+    );
+    drop(bytes);
+    match decision {
         Ok(TargetDecision::Duplicate) => {
             handle_duplicate(src_backend, src_loc, &base_target, dry_run, delta);
         }
@@ -69,7 +71,6 @@ pub(super) fn move_one(
                 output_backend,
                 &target_dir_loc,
                 &loc,
-                bytes,
                 mkdir_cache,
                 dry_run,
                 delta,
@@ -139,9 +140,15 @@ pub(super) fn bytes_hash_equal(
 /// `read_to_end` + SHA-512 双侧比对一体化：`?` Err arm 走 helper 内部让 caller
 /// `bytes_hash_equal` 的调用站点无独立 `?` sub-region。
 fn drain_and_hash_equal(reader: &mut dyn io::Read, src_bytes: &[u8]) -> io::Result<bool> {
-    let mut target_bytes = Vec::new();
-    reader.read_to_end(&mut target_bytes)?;
-    Ok(Sha512::digest(&target_bytes) == Sha512::digest(src_bytes))
+    let mut hasher = Sha512::new();
+    let mut chunk = vec![0_u8; crate::entities::backend::STREAM_BUFFER_BYTES];
+    loop {
+        let n = reader.read(&mut chunk)?;
+        if n == 0 {
+            return Ok(hasher.finalize() == Sha512::digest(src_bytes));
+        }
+        hasher.update(&chunk[..n]);
+    }
 }
 
 /// 「target 已存在且同 hash」= 用户重跑同 source 情况；直接删源即等价「已移动」。

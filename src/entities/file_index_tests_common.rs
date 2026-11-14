@@ -7,11 +7,6 @@ use crate::entities::uri::Location;
 
 impl Index {
     #[must_use]
-    pub fn is_empty(&self) -> bool {
-        self.files.is_empty()
-    }
-
-    #[must_use]
     pub fn contains_key(&self, key: &Utf8Path) -> bool {
         self.files.contains_key(key)
     }

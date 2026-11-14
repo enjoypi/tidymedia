@@ -5,13 +5,17 @@ use camino::Utf8PathBuf;
 use dashmap::DashMap;
 use parking_lot::Mutex;
 
-use crate::entities::backend::{Backend, EntryKind};
-use crate::entities::file_index::{Index, target_key};
+use crate::entities::backend::{Backend, EntryKind, FileBytes};
+#[cfg(test)]
+use crate::entities::file_index::Admit;
+use crate::entities::file_index::{Admission, Index, target_key};
 use crate::entities::file_info::Info;
 use crate::usecases::copy::Source;
 
 use super::candidates::CandidateIndex;
 use super::content_features::CandidateFeatures;
+use crate::entities::memory::Budget;
+use crate::usecases::image_input::DecodeCtx;
 
 struct FeatureCell {
     value: Mutex<Option<Arc<CandidateFeatures>>>,
@@ -31,20 +35,38 @@ struct LazyBucket {
 }
 
 impl LazyBucket {
-    fn materialize(&self, backend: &Arc<dyn Backend>) -> &Index {
+    fn materialize(&self, backend: &Arc<dyn Backend>, keep: &Arc<dyn Admission>) -> &Index {
         self.index.get_or_init(|| {
-            let mut index = Index::new();
+            let mut index = Index::new().with_admission(Arc::clone(keep));
             index.open_locations_sequential(&self.locations, backend);
             index
         })
     }
 
-    fn materialize_parallel(&self, backend: &Arc<dyn Backend>) -> &Index {
+    fn materialize_parallel(
+        &self,
+        backend: &Arc<dyn Backend>,
+        keep: &Arc<dyn Admission>,
+    ) -> &Index {
         self.index.get_or_init(|| {
-            let mut index = Index::new();
+            let mut index = Index::new().with_admission(Arc::clone(keep));
             index.open_locations(&self.locations, backend);
             index
         })
+    }
+}
+
+#[cfg(test)]
+struct KeepAll;
+
+#[cfg(test)]
+impl Admission for KeepAll {
+    fn admit(&self, _entry: &crate::entities::backend::Entry) -> Admit {
+        Admit::Take
+    }
+
+    fn counts_shared_stats(&self) -> bool {
+        true
     }
 }
 
@@ -54,16 +76,24 @@ pub(crate) struct OutputLibrary {
     path_sizes: HashMap<Utf8PathBuf, u64>,
     cands: CandidateIndex,
     features: DashMap<Utf8PathBuf, Arc<FeatureCell>>,
+    decode: DecodeCtx<'static>,
+    hold: &'static Budget,
+    keep: Arc<dyn Admission>,
 }
 
 impl OutputLibrary {
+    #[cfg(test)]
     pub(crate) fn from_source(output: &Source) -> Self {
+        Self::scan(output, Arc::new(KeepAll)).0
+    }
+
+    pub(crate) fn scan(output: &Source, admission: Arc<dyn Admission>) -> (Self, bool) {
+        let mut scanner = Index::new().with_admission(Arc::clone(&admission));
         let (loc, backend) = output;
         let entries = if backend
             .metadata(loc)
             .is_ok_and(|m| m.kind == EntryKind::Dir)
         {
-            let mut scanner = Index::new();
             scanner.scan_entries(loc, backend, &[])
         } else {
             Vec::new()
@@ -87,20 +117,43 @@ impl OutputLibrary {
             })
             .collect();
         let cands = CandidateIndex::build_from_paths(path_sizes.keys());
-        Self {
+        let lib = Self {
             backend: Arc::clone(backend),
             buckets,
             path_sizes,
             cands,
             features: DashMap::new(),
-        }
+            decode: DecodeCtx::global(),
+            hold: &crate::usecases::memory::governor().hold,
+            keep: admission,
+        };
+        (lib, scanner.overflowed())
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_budgets(mut self, hold: &'static Budget, work: &'static Budget) -> Self {
+        self.hold = hold;
+        self.decode.work = work;
+        self
+    }
+
+    pub(super) fn decode(&self) -> DecodeCtx<'static> {
+        self.decode
+    }
+
+    pub(super) fn hold(&self) -> &'static Budget {
+        self.hold
+    }
+
+    pub(super) fn size_of(&self, path: &Utf8PathBuf) -> u64 {
+        self.path_sizes.get(path).copied().unwrap_or(0)
     }
 
     pub(crate) fn prepare_exact(&self, infos: &[Info]) {
         let sizes: HashSet<u64> = infos.iter().map(|info| info.size).collect();
         for (size, bucket) in &self.buckets {
             if sizes.contains(size) {
-                bucket.materialize_parallel(&self.backend);
+                bucket.materialize_parallel(&self.backend, &self.keep);
             }
         }
     }
@@ -143,10 +196,11 @@ impl OutputLibrary {
     fn compute_features(&self, path: &Utf8PathBuf, max_bytes: u64) -> Option<CandidateFeatures> {
         let bytes = self.read_candidate(path, max_bytes)?;
         let ext = path.extension().map_or_default(str::to_ascii_lowercase);
-        Some(CandidateFeatures::from_bytes(&bytes, &ext))
+        let features = CandidateFeatures::from_bytes(&bytes, &ext, self.decode);
+        bytes.unchanged().then_some(features)
     }
 
-    pub(super) fn read_candidate(&self, path: &Utf8PathBuf, max_bytes: u64) -> Option<Vec<u8>> {
+    pub(super) fn read_candidate(&self, path: &Utf8PathBuf, max_bytes: u64) -> Option<FileBytes> {
         let index = self.bucket_for_path(path)?;
         read_guarded_by_path(index, path, max_bytes)
     }
@@ -154,7 +208,7 @@ impl OutputLibrary {
     fn bucket_for_size(&self, size: u64) -> Option<&Index> {
         self.buckets
             .get(&size)
-            .map(|bucket| bucket.materialize(&self.backend))
+            .map(|bucket| bucket.materialize(&self.backend, &self.keep))
     }
 
     fn bucket_for_path(&self, path: &Utf8PathBuf) -> Option<&Index> {
@@ -188,7 +242,7 @@ pub(crate) fn read_guarded_by_path(
     out: &Index,
     path: &Utf8PathBuf,
     max_bytes: u64,
-) -> Option<Vec<u8>> {
+) -> Option<FileBytes> {
     let info = out.get(path)?;
     super::content_diff::read_guarded(&info, max_bytes)
 }

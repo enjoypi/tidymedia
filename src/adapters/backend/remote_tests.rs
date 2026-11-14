@@ -19,6 +19,11 @@ fn scheme_returns_dummy() {
 }
 
 #[test]
+fn remote_files_are_never_mapped() {
+    assert!(backend().map_whole(&loc()).unwrap().is_none());
+}
+
+#[test]
 fn debug_format_includes_scheme() {
     let s = format!("{:?}", backend());
     assert!(s.contains("dummy"));

@@ -14,7 +14,7 @@ use super::ops::{count_type_filtered, do_copy};
 use super::run::CopyOpts;
 use crate::entities::backend::{Backend, is_output_write_denied};
 use crate::entities::common;
-use crate::entities::file_index::{Index, VisitStats};
+use crate::entities::file_index::Index;
 use crate::entities::threadpool::install_io;
 use crate::entities::uri::Location;
 use crate::usecases::report::{ReportError, extend_errors_capped, feature_of, push_error_capped};
@@ -24,27 +24,12 @@ use crate::usecases::report::{ReportError, extend_errors_capped, feature_of, pus
 // 让 do_copy 的 output_index.exists → add 序列在每桶内保持原有 dedup 语义。
 pub(super) fn run_copy_loop(
     source: &Index,
-    output_loc: &Location,
-    output_backend: &Arc<dyn Backend>,
+    output_index: &Index,
+    index_authoritative: bool,
+    output: (&Location, &Arc<dyn Backend>),
     opts: &CopyOpts<'_>,
 ) -> (usize, usize, usize, Vec<ReportError>, bool) {
-    // root 不存在（dry-run 首次归档最常见；非 dry-run 已 mkdir_p 必存在）→ 整树
-    // 为空，跳过 walk。exists 的 Err 不吞成「不存在」：保守按存在处理走 walk，
-    // walk 失败会计 walker_errors 让 index_authoritative=false，后续逐文件
-    // exists 探测时错误自然传播。
-    let walk_output = !matches!(output_backend.exists(output_loc), Ok(false));
-    let mut output_index = Index::new();
-    if walk_output {
-        output_index.visit_location(output_loc, output_backend);
-    }
-    // output 扫描零 skip / 零 walker 错误 ⇒ 索引是 output 的完整快照（权威），
-    // generate_unique_name 可跳过逐文件 backend.exists 探测（远端每文件一次 RTT）。
-    // 有任何 skip（空文件 / 不可读 / walker 错误）⇒ 磁盘上存在索引外文件，保留探测。
-    let index_authoritative = output_index.stats() == VisitStats::default();
-    // freeze 成 shared &Index：Index 内 DashMap 让 add / exists / contains_target 均
-    // &self 语义，跨 par_iter 边界安全并发。
-    let output_index = output_index;
-
+    let (output_loc, output_backend) = output;
     // 提出宏外：tracing 字段表达式仅在事件被订阅时求值，留在宏内会成为
     // 测试中永不执行的 region，破坏 100% 覆盖率口径。
     let feature = feature_of(opts.remove);
@@ -93,7 +78,7 @@ pub(super) fn run_copy_loop(
                 process_group(
                     grp,
                     source,
-                    &output_index,
+                    output_index,
                     &mkdir_cache,
                     &abort,
                     index_authoritative,

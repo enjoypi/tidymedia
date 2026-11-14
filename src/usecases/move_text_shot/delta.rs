@@ -4,7 +4,9 @@ use std::io;
 
 use tracing::warn;
 
-use crate::usecases::report::{FEATURE_MOVE_TEXT_SHOT, ReportError, extend_errors_capped};
+use crate::usecases::report::{
+    FEATURE_MOVE_TEXT_SHOT, ReportError, extend_errors_capped, push_error_capped,
+};
 
 /// per-worker/per-source 累加器：Vec + 计数;主线程 reduce 到全局 report。
 /// 与 `copy/run.rs::CopyDelta` 同套路：并行 map + tree-reduce 归并。
@@ -20,6 +22,7 @@ pub(super) struct SourceDelta {
     pub(super) skipped_too_large: usize,
     pub(super) failed: usize,
     pub(super) errors: Vec<ReportError>,
+    pub(super) errors_truncated: bool,
 }
 
 pub(super) fn merge_delta(
@@ -39,7 +42,7 @@ pub(super) fn merge_delta(
         &mut report.errors,
         &mut report.errors_truncated,
         delta.errors,
-        /* src_truncated = */ false,
+        delta.errors_truncated,
     );
 }
 
@@ -53,7 +56,12 @@ pub(super) fn reduce_delta(mut a: SourceDelta, b: SourceDelta) -> SourceDelta {
     a.skipped_no_text += b.skipped_no_text;
     a.skipped_too_large += b.skipped_too_large;
     a.failed += b.failed;
-    a.errors.extend(b.errors);
+    extend_errors_capped(
+        &mut a.errors,
+        &mut a.errors_truncated,
+        b.errors,
+        b.errors_truncated,
+    );
     a
 }
 
@@ -64,7 +72,11 @@ pub(super) fn reduce_delta(mut a: SourceDelta, b: SourceDelta) -> SourceDelta {
 pub(super) fn record_failure(delta: &mut SourceDelta, path: String, e: &io::Error) {
     let msg = e.to_string();
     log_item_failed(&path, &msg);
-    delta.errors.push(ReportError { path, message: msg });
+    push_error_capped(
+        &mut delta.errors,
+        &mut delta.errors_truncated,
+        ReportError { path, message: msg },
+    );
     delta.failed += 1;
 }
 

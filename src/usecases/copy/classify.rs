@@ -41,6 +41,8 @@ pub(crate) fn make_classify_provider(
     })
 }
 
+pub(crate) const EXTRACT_WORK_BYTES: u64 = 8 << 20;
+
 fn classify_one(
     loc: &Location,
     backend: &Arc<dyn Backend>,
@@ -50,7 +52,13 @@ fn classify_one(
     score_min: f32,
 ) -> Option<String> {
     let mut reader = backend.open_read(loc).ok()?;
-    let text = extract_office_text(reader.as_mut(), mime, max_text_bytes);
+    let text = {
+        let _held = crate::usecases::memory::governor()
+            .work
+            .reserve(EXTRACT_WORK_BYTES)
+            .expect("internal: sanitize keeps work budget above extraction needs");
+        extract_office_text(reader.as_mut(), mime, max_text_bytes)
+    };
     if text.is_empty() {
         debug!(
             feature = FEATURE_COPY,

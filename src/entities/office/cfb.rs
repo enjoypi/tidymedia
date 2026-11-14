@@ -22,7 +22,8 @@ pub fn parse(reader: &mut dyn MediaReader, _mime: &str) -> (u64, u64) {
     let Some(stream) = cfb_io::open_stream(&mut comp, SUMMARY_INFORMATION_STREAM) else {
         return (0, 0);
     };
-    let Some(bytes) = cfb_io::read_stream(stream) else {
+    let capped = std::io::Read::take(stream, STREAM_TEXT_INPUT_CAP);
+    let Some(bytes) = cfb_io::read_stream(capped) else {
         return (0, 0);
     };
     extract_dates(&bytes)

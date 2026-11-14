@@ -20,7 +20,7 @@ fn find_duplicates_propagates_non_notfound_metadata_error() {
     );
     let backend: Arc<dyn Backend> = fake;
     let out_pair = (remote_dir, backend);
-    let err = find_duplicates(true, vec![local_data_dir()], Some(&out_pair), &mut Vec::new()).unwrap_err();
+    let err = find_duplicates(true, &[local_data_dir()], Some(&out_pair), &mut Vec::new()).unwrap_err();
     // 关键：错误不应被改写成 "not a directory"
     assert!(
         !err.to_string().contains("not a directory"),
@@ -90,7 +90,7 @@ fn find_duplicates_remote_output_uses_storage_key_prefix() {
     fake.add_dir(remote_dir.clone());
     let backend: Arc<dyn Backend> = fake;
     let out_pair = (remote_dir, backend);
-    find_duplicates(false, vec![local_data_dir()], Some(&out_pair), &mut Vec::new()).unwrap();
+    find_duplicates(false, &[local_data_dir()], Some(&out_pair), &mut Vec::new()).unwrap();
 }
 
 #[test]
@@ -232,7 +232,7 @@ fn render_script_propagates_write_failure_at_every_stage() {
 
     for budget in 0..9 {
         let mut sink = FailAfter { budget };
-        let err = render_script(&sample_two_groups(), None, &mut sink).unwrap_err();
+        let err = render_script(&listed(sample_two_groups()), None, &mut sink).unwrap_err();
         assert!(
             err.to_string().contains("injected stdout failure"),
             "budget {budget} must fail"
@@ -241,7 +241,7 @@ fn render_script_propagates_write_failure_at_every_stage() {
     for budget in 0..11 {
         let mut sink = FailAfter { budget };
         let err =
-            render_script(&sample_two_groups(), Some("/no_such_output_xyz"), &mut sink)
+            render_script(&listed(sample_two_groups()), Some("/no_such_output_xyz"), &mut sink)
                 .unwrap_err();
         assert!(
             err.to_string().contains("injected stdout failure"),
@@ -250,7 +250,7 @@ fn render_script_propagates_write_failure_at_every_stage() {
     }
     for budget in 0..5 {
         let mut sink = FailAfter { budget };
-        let err = render_script(&keyed, Some(&real_prefix), &mut sink).unwrap_err();
+        let err = render_script(&listed(keyed.clone()), Some(&real_prefix), &mut sink).unwrap_err();
         assert!(
             err.to_string().contains("injected stdout failure"),
             "budget {budget} must fail"
@@ -270,7 +270,7 @@ fn find_scanned_counts_indexed_empty_and_walker_errors() {
     );
     let report = find_duplicates(
         true,
-        vec![local_dir(dir.path()), missing],
+        &[local_dir(dir.path()), missing],
         None,
         &mut Vec::new(),
     )
@@ -294,7 +294,7 @@ fn find_duplicates_propagates_script_sink_failure() {
     let dir = tempdir().unwrap();
     std::fs::write(dir.path().join("a.bin"), b"dup").unwrap();
     std::fs::write(dir.path().join("b.bin"), b"dup").unwrap();
-    let err = find_duplicates(true, vec![local_dir(dir.path())], None, &mut FailSink)
+    let err = find_duplicates(true, &[local_dir(dir.path())], None, &mut FailSink)
         .unwrap_err();
     assert!(
         err.to_string().contains("injected script sink failure"),

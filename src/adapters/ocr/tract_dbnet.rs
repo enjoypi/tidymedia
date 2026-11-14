@@ -4,8 +4,9 @@ use camino::Utf8Path;
 use parking_lot::Mutex;
 use tract_onnx::prelude::*;
 
-use super::tract_dbnet_real::{as_f32_vec, decode_rgb, resize_rgb, rgb_chw_tensor};
+use super::tract_dbnet_real::{as_f32_vec, resize_rgb, rgb_chw_tensor};
 use crate::usecases::config::OcrConfig;
+use crate::usecases::image_input::{DecodeCtx, DecodeError, with_rgb};
 use crate::usecases::ocr::TextDetector;
 
 pub(crate) trait RawDetector: Send + Sync {
@@ -32,7 +33,7 @@ impl std::fmt::Debug for TractDbnetDetector {
 impl TextDetector for TractDbnetDetector {
     fn has_text(&self, _path: &Utf8Path, image_bytes: &[u8]) -> io::Result<bool> {
         self.ensure_raw()?;
-        let input = preprocess(image_bytes, self.cfg.resize_max_side)?;
+        let input = preprocess(image_bytes, self.cfg.resize_max_side, DecodeCtx::global())?;
         let output = {
             let guard = self.raw.lock();
             guard
@@ -62,14 +63,27 @@ pub fn build_detector(cfg: &OcrConfig) -> io::Result<Box<dyn TextDetector>> {
     }))
 }
 
-pub(crate) fn preprocess(bytes: &[u8], max_side: u32) -> io::Result<Tensor> {
+const ALIGN: u32 = 32;
+
+pub(crate) fn preprocess(bytes: &[u8], max_side: u32, ctx: DecodeCtx<'_>) -> io::Result<Tensor> {
+    with_rgb(bytes, ctx, max_side.saturating_add(ALIGN), |rgb| {
+        normalized_tensor(rgb, max_side)
+    })
+    .map_err(|e| {
+        let kind = match e {
+            DecodeError::TooLarge(_) => io::ErrorKind::FileTooLarge,
+            DecodeError::Invalid(_) => io::ErrorKind::InvalidData,
+        };
+        io::Error::new(kind, e.to_string())
+    })
+}
+
+fn normalized_tensor(rgb: &image::RgbImage, max_side: u32) -> Tensor {
     const MEAN: [f32; 3] = [0.485, 0.456, 0.406];
     const STD: [f32; 3] = [0.229, 0.224, 0.225];
 
-    let rgb = decode_rgb(bytes)
-        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, format!("decode image: {e}")))?;
     let (width, height) = target_size(rgb.width(), rgb.height(), max_side);
-    let rgb = resize_rgb(&rgb, width, height);
+    let rgb = resize_rgb(rgb, width, height);
     let h_usize = height as usize;
     let w_usize = width as usize;
     let mut chw = vec![0.0_f32; 3 * h_usize * w_usize];
@@ -82,7 +96,7 @@ pub(crate) fn preprocess(bytes: &[u8], max_side: u32) -> io::Result<Tensor> {
             chw[ch * plane + y * w_usize + x] = (v - MEAN[ch]) / STD[ch];
         }
     }
-    Ok(rgb_chw_tensor(chw, h_usize, w_usize))
+    rgb_chw_tensor(chw, h_usize, w_usize)
 }
 
 fn target_size(w: u32, h: u32, max_side: u32) -> (u32, u32) {
@@ -105,11 +119,11 @@ fn target_size(w: u32, h: u32, max_side: u32) -> (u32, u32) {
     let mut sh = (f64::from(h) * scale).round() as u32;
     sw = align32(sw);
     sh = align32(sh);
-    (sw.max(32), sh.max(32))
+    (sw.max(ALIGN), sh.max(ALIGN))
 }
 
 fn align32(v: u32) -> u32 {
-    v.div_ceil(32) * 32
+    v.div_ceil(ALIGN) * ALIGN
 }
 
 pub(crate) fn decide(output: &Tensor, binarize_threshold: f32, min_text_pixel_ratio: f32) -> bool {

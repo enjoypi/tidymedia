@@ -37,7 +37,7 @@ fn mismatch_rows_group_by_from_with_fallbacks() {
     let mut b = entry("/src/b.mov");
     b.mismatch = true;
     let report = VerifyReport {
-        entries: vec![a, b],
+        entries: vec![a, b].into(),
         ..Default::default()
     };
     let out = format_summary(&report);
@@ -60,7 +60,7 @@ fn differ_only_when_filename_bucket_differs() {
     let mut diff = entry("/src/diff.jpg");
     diff.filename_bucket = Some("2019:05".to_owned());
     let report = VerifyReport {
-        entries: vec![same, diff],
+        entries: vec![same, diff].into(),
         ..Default::default()
     };
     let out = format_summary(&report);
@@ -78,7 +78,7 @@ fn verdict_counts_sort_by_count_then_key() {
     let mut e3 = entry("/src/3.jpg");
     e3.duplicate_verdict = "exact_dup".to_owned();
     let report = VerifyReport {
-        entries: vec![e1, e2, e3, entry("/src/4.jpg")],
+        entries: vec![e1, e2, e3, entry("/src/4.jpg")].into(),
         ..Default::default()
     };
     let out = format_summary(&report);

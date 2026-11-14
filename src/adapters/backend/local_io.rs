@@ -2,7 +2,7 @@ use std::fs;
 use std::io::{self, BufReader, Read, Seek, SeekFrom, Write};
 use std::path::Path;
 
-use crate::entities::backend::{MediaReader, MediaWriter, STREAM_BUFFER_BYTES};
+use crate::entities::backend::{MediaReader, MediaWriter, read_buffer_bytes};
 
 #[derive(Debug)]
 pub(super) struct FileReader {
@@ -12,7 +12,7 @@ pub(super) struct FileReader {
 impl FileReader {
     pub(super) fn new(file: fs::File) -> Self {
         Self {
-            inner: BufReader::with_capacity(STREAM_BUFFER_BYTES, file),
+            inner: BufReader::with_capacity(read_buffer_bytes(), file),
         }
     }
 }

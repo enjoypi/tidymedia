@@ -21,6 +21,8 @@
 - 平台分支使用 `#[cfg(target_os = "...")]` 常量，避免 `cfg!()` 让当前平台产生不可达 instrument 分支。
 - office bin instance 由 `OFFICE_FIXTURES` 集中驱动；office 入口和复杂业务函数的全部业务分支由 lib 单元测试覆盖。
 - 超大常量守卫通过纯 helper 接受测试值，不在测试中构造巨型资源。
+- 泛型函数的 region 覆盖按单个实例计：必须有一个实例走遍全部分支，不能靠多个实例拼凑；测试用的泛型实例（如 `serde_json::Value`、测试闭包）要同时覆盖成功和失败路径。
+- 内存额度相关测试用 `usecases::memory::with_retained` 或小容量 `Budget` 注入，额度只作用于当前线程的扫描阶段。
 
 ## Fixture 与 Fake
 

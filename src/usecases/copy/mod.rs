@@ -1,12 +1,15 @@
 pub(super) mod classify;
 pub(super) mod copy_loop;
+pub(super) mod grouped;
 pub(super) mod index;
 pub(super) mod naming;
 pub(super) mod ops;
 pub(super) mod reporting;
 pub(super) mod run;
 
-pub(crate) use self::classify::{make_classify_provider, template_needs_category};
+pub(crate) use self::classify::{
+    EXTRACT_WORK_BYTES, make_classify_provider, template_needs_category,
+};
 pub(crate) use self::index::source_skip_extensions;
 pub(crate) use self::run::{Source, copy_with_sidecar, resolved_template};
 

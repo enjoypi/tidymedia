@@ -9,12 +9,12 @@ use tidymedia::{
 
 use super::{FakeBackendFactory, local};
 
-struct ThirdReadFails {
+struct FifthReadFails {
     inner: FakeBackend,
     reads: AtomicUsize,
 }
 
-impl ThirdReadFails {
+impl FifthReadFails {
     fn new() -> Self {
         Self {
             inner: FakeBackend::new("local"),
@@ -23,7 +23,7 @@ impl ThirdReadFails {
     }
 }
 
-impl Backend for ThirdReadFails {
+impl Backend for FifthReadFails {
     fn scheme(&self) -> &'static str {
         self.inner.scheme()
     }
@@ -44,7 +44,7 @@ impl Backend for ThirdReadFails {
     }
 
     fn open_read(&self, loc: &Location) -> io::Result<Box<dyn MediaReader>> {
-        if self.reads.fetch_add(1, Ordering::SeqCst) == 2 {
+        if self.reads.fetch_add(1, Ordering::SeqCst) == 4 {
             return Err(io::Error::new(
                 io::ErrorKind::PermissionDenied,
                 "injected secure read failure",
@@ -75,12 +75,16 @@ impl Backend for ThirdReadFails {
 }
 
 #[test]
-fn dry_run_reports_secure_read_failure_without_writing_or_removing() {
+fn dry_run_reports_on_demand_secure_read_failure_between_same_size_peers() {
     let root = local("/src");
-    let file = local("/src/photo.bin");
-    let backend = Arc::new(ThirdReadFails::new());
+    let backend = Arc::new(FifthReadFails::new());
     backend.inner.add_dir(root.clone());
-    backend.inner.add_file(file, b"payload".to_vec());
+    backend
+        .inner
+        .add_file(local("/src/a.bin"), b"payload".to_vec());
+    backend
+        .inner
+        .add_file(local("/src/b.bin"), b"payload".to_vec());
     let mut factory = FakeBackendFactory::new();
     factory.insert("local", backend.clone());
     let result = tidy_with(
@@ -100,11 +104,12 @@ fn dry_run_reports_secure_read_failure_without_writing_or_removing() {
         panic!("expected copy report");
     };
     assert_eq!(
-        report.failed,
-        1,
+        (report.copied, report.failed),
+        (1, 1),
         "{report:?} reads={}",
         backend.reads.load(Ordering::SeqCst)
     );
+    assert_eq!(backend.inner.exists(&local("/out")).ok(), Some(false));
     assert!(
         report.errors[0]
             .message

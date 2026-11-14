@@ -1,16 +1,15 @@
 use super::{TempPersist, write_and_persist};
 use crate::entities::common;
 
-pub(super) fn serialize<T: serde::Serialize>(report: &T) -> String {
-    serde_json::to_string_pretty(report).expect("internal error: serializing report must not fail")
-}
-
-pub(super) fn try_write(path: &str, bytes: &[u8]) -> common::Result<()> {
+pub(super) fn try_write<T: serde::Serialize + ?Sized>(
+    path: &str,
+    report: &T,
+) -> common::Result<()> {
     let parent = std::path::Path::new(path)
         .parent()
         .unwrap_or(std::path::Path::new("."));
     let tmp = tempfile::NamedTempFile::new_in(parent)?;
-    write_and_persist(path, bytes, Box::new(tmp))
+    write_and_persist(path, report, Box::new(tmp))
 }
 
 impl TempPersist for tempfile::NamedTempFile {

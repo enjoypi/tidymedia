@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::hash::Hash;
 use std::io;
 use std::sync::Arc;
@@ -10,7 +10,7 @@ use parking_lot::Mutex;
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use tracing::{debug, warn};
 
-use super::{DuplicateGroup, FEATURE_INDEX, Index};
+use super::{Admit, DuplicateGroup, FEATURE_INDEX, Index};
 use crate::entities::backend::{Backend, EntryKind};
 use crate::entities::common;
 use crate::entities::file_info::Info;
@@ -40,45 +40,48 @@ impl Index {
         Ok(None)
     }
 
-    pub fn calc_same<F, T>(
-        &self,
-        calc: F,
-    ) -> Vec<std::collections::HashMap<(u64, T), HashSet<Utf8PathBuf>>>
+    pub fn calc_same<F, T>(&self, calc: F) -> HashMap<(u64, T), HashSet<Utf8PathBuf>>
     where
         F: Fn(&Info) -> io::Result<T> + Send + Sync,
         T: Eq + Hash + Send,
     {
-        let bucket_paths: Vec<(u64, Vec<Utf8PathBuf>)> = self
-            .similar_files
-            .iter()
-            .filter_map(|kv| {
-                let paths: Vec<Utf8PathBuf> = kv.value().lock().iter().cloned().collect();
-                if paths.len() > 1 {
-                    Some((*kv.key(), paths))
-                } else {
-                    None
-                }
-            })
+        let mut by_size: HashMap<(u64, u64), Vec<Utf8PathBuf>> = HashMap::new();
+        for bucket in &self.similar_files {
+            let paths = bucket.value().lock();
+            if paths.len() < 2 {
+                continue;
+            }
+            for (path, size) in paths
+                .iter()
+                .filter_map(|p| self.files.get(p).map(|e| (p, e.value().size)))
+            {
+                by_size
+                    .entry((*bucket.key(), size))
+                    .or_default()
+                    .push(path.clone());
+            }
+        }
+        let peers: Vec<Utf8PathBuf> = by_size
+            .into_values()
+            .filter(|paths| paths.len() > 1)
+            .flatten()
             .collect();
-        bucket_paths
-            .par_iter()
-            .map(|(_, paths)| {
-                let mut same: std::collections::HashMap<(u64, T), HashSet<Utf8PathBuf>> =
-                    std::collections::HashMap::new();
-                for (path, entry) in paths
-                    .iter()
-                    .filter_map(|p| self.files.get(p).map(|e| (p, e)))
-                {
-                    let info = entry.value();
-                    if let Ok(key) = calc(info) {
-                        same.entry((info.size, key))
-                            .or_default()
-                            .insert(path.clone());
-                    }
-                }
-                same
-            })
-            .collect::<Vec<_>>()
+        let keyed: Vec<(Utf8PathBuf, u64, T)> = install_io(|| {
+            peers
+                .par_iter()
+                .filter_map(|path| {
+                    self.files.get(path).and_then(|entry| {
+                        let info = entry.value();
+                        calc(info).ok().map(|key| (path.clone(), info.size, key))
+                    })
+                })
+                .collect()
+        });
+        let mut same: HashMap<(u64, T), HashSet<Utf8PathBuf>> = HashMap::new();
+        for (path, size, key) in keyed {
+            same.entry((size, key)).or_default().insert(path);
+        }
+        same
     }
 
     pub fn search_same(&self) -> Vec<DuplicateGroup> {
@@ -91,23 +94,19 @@ impl Index {
         Self::filter_and_sort(&results)
     }
 
-    fn filter_and_sort<T>(
-        map: &[std::collections::HashMap<(u64, T), HashSet<Utf8PathBuf>>],
-    ) -> Vec<DuplicateGroup> {
+    fn filter_and_sort<T>(same: &HashMap<(u64, T), HashSet<Utf8PathBuf>>) -> Vec<DuplicateGroup> {
         let mut groups: Vec<DuplicateGroup> = Vec::new();
-        for same in map {
-            for ((size, _), paths) in same {
-                if paths.len() > 1 {
-                    let mut v: Vec<_> = paths.iter().cloned().collect();
-                    v.sort();
-                    groups.push(DuplicateGroup {
-                        size: *size,
-                        paths: v,
-                    });
-                }
+        for ((size, _), paths) in same {
+            if paths.len() > 1 {
+                let mut v: Vec<_> = paths.iter().cloned().collect();
+                v.sort();
+                groups.push(DuplicateGroup {
+                    size: *size,
+                    paths: v,
+                });
             }
         }
-        groups.sort_by(|a, b| b.size.cmp(&a.size).then_with(|| a.paths.cmp(&b.paths)));
+        sort_groups(&mut groups);
         groups
     }
 
@@ -188,10 +187,14 @@ impl Index {
     ) -> Vec<crate::entities::backend::Entry> {
         let mut entries = Vec::new();
         for entry_res in backend.walk(root) {
+            let shared = self
+                .admission
+                .as_ref()
+                .is_none_or(|a| a.counts_shared_stats());
             let entry = match entry_res {
                 Ok(e) => e,
                 Err(e) => {
-                    self.stats.walker_errors += 1;
+                    self.stats.walker_errors += u64::from(shared);
                     let root_str = root.display();
                     warn!(
                         feature = FEATURE_INDEX,
@@ -208,11 +211,11 @@ impl Index {
                 continue;
             }
             if has_extension_in(&entry.location, skip_ext) {
-                self.stats.skipped_by_ext += 1;
+                self.stats.skipped_by_ext += u64::from(shared);
                 continue;
             }
             if entry.size == 0 {
-                self.stats.skipped_empty += 1;
+                self.stats.skipped_empty += u64::from(shared);
                 debug!(
                     feature = FEATURE_INDEX,
                     operation = "walk",
@@ -222,7 +225,18 @@ impl Index {
                 );
                 continue;
             }
-            entries.push(entry);
+            match self
+                .admission
+                .as_ref()
+                .map_or(Admit::Take, |a| a.admit(&entry))
+            {
+                Admit::Take => entries.push(entry),
+                Admit::Skip => {}
+                Admit::Overflow => {
+                    self.overflowed = true;
+                    break;
+                }
+            }
         }
         entries
     }
@@ -230,7 +244,7 @@ impl Index {
     pub fn open_locations(&mut self, locs: &[Location], backend: &Arc<dyn Backend>) {
         let infos: Vec<_> = install_io(|| {
             locs.par_iter()
-                .map(|loc| Info::open(loc, Arc::clone(backend)))
+                .map(|loc| self.open_kept(loc, backend))
                 .collect()
         });
         self.add_open_results(locs, infos);
@@ -239,15 +253,22 @@ impl Index {
     pub fn open_locations_sequential(&mut self, locs: &[Location], backend: &Arc<dyn Backend>) {
         let infos: Vec<_> = locs
             .iter()
-            .map(|loc| Info::open(loc, Arc::clone(backend)))
+            .map(|loc| self.open_kept(loc, backend))
             .collect();
         self.add_open_results(locs, infos);
     }
 
-    fn add_open_results(&mut self, locs: &[Location], infos: Vec<io::Result<Info>>) {
+    fn open_kept(&self, loc: &Location, backend: &Arc<dyn Backend>) -> io::Result<Option<Info>> {
+        let info = Info::open(loc, Arc::clone(backend))?;
+        let keep = self.admission.as_ref().is_none_or(|a| a.keep_info(&info));
+        Ok(keep.then_some(info))
+    }
+
+    fn add_open_results(&mut self, locs: &[Location], infos: Vec<io::Result<Option<Info>>>) {
         for (loc, result) in locs.iter().zip(infos) {
             match result {
-                Ok(info) => self.add(info),
+                Ok(Some(info)) => self.add(info),
+                Ok(None) => {}
                 Err(e) => {
                     self.stats.skipped_unreadable += 1;
                     let loc_str = loc.display();
@@ -263,6 +284,10 @@ impl Index {
             }
         }
     }
+}
+
+fn sort_groups(groups: &mut [DuplicateGroup]) {
+    groups.sort_by(|a, b| b.size.cmp(&a.size).then_with(|| a.paths.cmp(&b.paths)));
 }
 
 fn has_extension_in(loc: &Location, list: &[String]) -> bool {

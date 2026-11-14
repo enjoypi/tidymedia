@@ -26,10 +26,6 @@ impl RawDetector for TractRawDetector {
     }
 }
 
-pub(crate) fn decode_rgb(bytes: &[u8]) -> Result<image::RgbImage, image::ImageError> {
-    Ok(image::load_from_memory(bytes)?.to_rgb8())
-}
-
 pub(crate) fn resize_rgb(img: &image::RgbImage, width: u32, height: u32) -> image::RgbImage {
     image::imageops::resize(img, width, height, image::imageops::FilterType::Triangle)
 }

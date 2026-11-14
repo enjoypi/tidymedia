@@ -3,7 +3,9 @@
 
 use std::time::Instant;
 
-use serde_derive::Serialize;
+use serde_derive::{Deserialize, Serialize};
+
+use crate::usecases::spill::{Listed, SpillKey};
 
 #[must_use]
 pub fn elapsed_ms(start: Instant) -> u64 {
@@ -82,6 +84,7 @@ pub struct CopyReport {
     /// `errors` Vec 是否因 [`ERRORS_SOFT_CAP`] 截断；`true` = 存在未记入 `errors`
     /// 的失败项，用户应看 `failed` 总数与结构化日志。
     pub errors_truncated: bool,
+    pub bytes_read: u64,
     /// use case 入口到 finalize 的 wall-clock 耗时（毫秒）。供 AI 分析吞吐 =
     /// `bytes_read / duration_ms`。溢出（>= 2^64 ms ≈ 5 亿年）走 `u64::MAX`。
     pub duration_ms: u64,
@@ -90,19 +93,38 @@ pub struct CopyReport {
 #[derive(Debug, Default, Serialize)]
 pub struct FindReport {
     pub scanned: usize,
-    pub groups: Vec<DuplicateGroupReport>,
+    pub groups: Listed<DuplicateGroupReport>,
     pub bytes_read: u64,
     /// use case 入口到构造 report 的 wall-clock 耗时（毫秒）。见 `CopyReport::duration_ms`。
     pub duration_ms: u64,
 }
 
 /// 单个重复组的报告项：组内文件 size（同组共享）+ 路径列表。
-#[derive(Debug, Default, Serialize)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct DuplicateGroupReport {
     /// 组内每个文件的字节数（同组所有文件 size 相同；重复判定靠 size + hash）。
     pub size: u64,
     /// 组内文件路径列表（保留组边界，不做 CSV 展平）。
     pub paths: Vec<String>,
+}
+
+impl SpillKey for DuplicateGroupReport {
+    fn spill_key(&self) -> String {
+        format!(
+            "{:020}\u{0}{}",
+            u64::MAX - self.size,
+            self.paths.join("\u{0}")
+        )
+    }
+}
+
+impl From<crate::entities::file_index::DuplicateGroup> for DuplicateGroupReport {
+    fn from(group: crate::entities::file_index::DuplicateGroup) -> Self {
+        Self {
+            size: group.size,
+            paths: group.paths.into_iter().map(|p| p.to_string()).collect(),
+        }
+    }
 }
 
 /// 报告中的单条错误记录。

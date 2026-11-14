@@ -1,95 +1,135 @@
-//! verify CLI stdout 人类可读汇总（内化 tidy-verify skill `analyze_verify.ts`）：
-//! summary 计数 / MISMATCH 明细（exiftool 期望桶 ≠ 预测桶）/ DIFFER 明细
-//! （文件名桶 ≠ 预测桶）/ `duplicate_verdict` 分布 / pattern 计数。`dispatch_verify`
-//! 打印，skill 不再需独立分析脚本。排序确定性：计数降序，同计数 key 升序。
-
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
+use std::io::{self, Write};
 
-use super::report::VerifyReport;
+use super::report::{VerifyEntry, VerifyReport};
 
-#[must_use]
-pub(crate) fn format_summary(report: &VerifyReport) -> String {
-    let mut out = String::new();
-    out.push_str("---summary---\n");
-    let _ = writeln!(out, "scanned={}", report.scanned);
-    let _ = writeln!(out, "compared={}", report.compared);
-    let _ = writeln!(out, "mismatched={}", report.mismatched);
-    let _ = writeln!(out, "decision_failed={}", report.decision_failed);
-    let with_name_time = report
-        .entries
-        .iter()
-        .filter(|e| e.filename_bucket.is_some())
-        .count();
-    let _ = writeln!(out, "with_name_time={with_name_time}");
+#[derive(Default)]
+struct Counts {
+    with_name_time: usize,
+    mismatches: usize,
+    differs: usize,
+    by_from: BTreeMap<String, usize>,
+    verdicts: BTreeMap<String, usize>,
+}
 
-    let mismatches: Vec<_> = report.entries.iter().filter(|e| e.mismatch).collect();
-    let _ = writeln!(out, "MISMATCH_count={}", mismatches.len());
-    if !mismatches.is_empty() {
-        out.push_str("---mismatch by from---\n");
-        let mut by_from: BTreeMap<&str, usize> = BTreeMap::new();
-        for e in &mismatches {
-            *by_from
-                .entry(e.exif_from.as_deref().unwrap_or("NONE"))
+impl Counts {
+    fn add(&mut self, e: &VerifyEntry) {
+        self.with_name_time += usize::from(e.filename_bucket.is_some());
+        self.differs += usize::from(differs_from_name(e));
+        *self
+            .verdicts
+            .entry(e.duplicate_verdict.clone())
+            .or_insert(0) += 1;
+        if e.mismatch {
+            self.mismatches += 1;
+            *self
+                .by_from
+                .entry(e.exif_from.clone().unwrap_or_else(|| "NONE".to_owned()))
                 .or_insert(0) += 1;
         }
-        for (from, n) in &by_from {
-            let _ = writeln!(out, "{n}\t{from}");
-        }
-        out.push_str("---MISMATCH details---\n");
-        for e in &mismatches {
-            let exp = e.exif_exp_bucket.as_deref().unwrap_or("NONE");
-            let from = e.exif_from.as_deref().unwrap_or("NONE");
-            let make = non_empty(e.exif_make.as_deref());
-            let model = non_empty(e.exif_model.as_deref());
-            let _ = writeln!(
-                out,
-                "MISMATCH\texp={exp}\ttgt={}\tfrom={from}\tmake={make}\tmodel={model}\t{}",
-                e.actual_bucket, e.source_path
-            );
-        }
     }
 
-    let differs: Vec<_> = report
+    fn head(&self, report: &VerifyReport) -> String {
+        let mut out = String::from("---summary---\n");
+        let _ = writeln!(out, "scanned={}", report.scanned);
+        let _ = writeln!(out, "compared={}", report.compared);
+        let _ = writeln!(out, "mismatched={}", report.mismatched);
+        let _ = writeln!(out, "decision_failed={}", report.decision_failed);
+        let _ = writeln!(out, "with_name_time={}", self.with_name_time);
+        let _ = writeln!(out, "MISMATCH_count={}", self.mismatches);
+        if self.mismatches > 0 {
+            out.push_str("---mismatch by from---\n");
+            for (from, n) in &self.by_from {
+                let _ = writeln!(out, "{n}\t{from}");
+            }
+            out.push_str("---MISMATCH details---\n");
+        }
+        out
+    }
+
+    fn middle(&self) -> String {
+        let mut out = format!("DIFFER_count={}\n", self.differs);
+        if self.differs > 0 {
+            out.push_str("---DIFFER details---\n");
+        }
+        out
+    }
+
+    fn tail(&self, report: &VerifyReport) -> String {
+        let mut out = String::from("---duplicate_verdict---\n");
+        for (verdict, n) in sorted_counts(self.verdicts.iter()) {
+            let _ = writeln!(out, "{n}\t{verdict}");
+        }
+        if !report.pattern_counts.is_empty() {
+            out.push_str("---patterns---\n");
+            for (pattern, n) in sorted_counts(report.pattern_counts.iter()) {
+                let _ = writeln!(out, "{n}\t{pattern}");
+            }
+        }
+        out
+    }
+}
+
+pub(crate) fn write_summary(report: &VerifyReport, out: &mut dyn Write) -> io::Result<()> {
+    let mut counts = Counts::default();
+    report
         .entries
-        .iter()
-        .filter(|e| {
-            e.filename_bucket
-                .as_ref()
-                .is_some_and(|n| *n != e.actual_bucket)
+        .for_each(&mut |e| {
+            counts.add(e);
+            Ok(())
         })
-        .collect();
-    let _ = writeln!(out, "DIFFER_count={}", differs.len());
-    if !differs.is_empty() {
-        out.push_str("---DIFFER details---\n");
-        for e in &differs {
-            let name = e.filename_bucket.as_deref().unwrap_or("NONE");
-            let _ = writeln!(
-                out,
-                "DIFFER\tname={name}\ttgt={}\t{}",
-                e.actual_bucket, e.source_path
-            );
-        }
-    }
+        .and_then(|()| out.write_all(counts.head(report).as_bytes()))
+        .and_then(|()| write_rows(report, out, &|e| e.mismatch.then(|| mismatch_row(e))))
+        .and_then(|()| out.write_all(counts.middle().as_bytes()))
+        .and_then(|()| {
+            write_rows(report, out, &|e| {
+                differs_from_name(e).then(|| differ_row(e))
+            })
+        })
+        .and_then(|()| out.write_all(counts.tail(report).as_bytes()))
+}
 
-    out.push_str("---duplicate_verdict---\n");
-    let mut verdict_counts: BTreeMap<&str, usize> = BTreeMap::new();
-    for e in &report.entries {
-        *verdict_counts
-            .entry(e.duplicate_verdict.as_str())
-            .or_insert(0) += 1;
-    }
-    for (verdict, n) in sorted_counts(verdict_counts.iter()) {
-        let _ = writeln!(out, "{n}\t{verdict}");
-    }
+#[cfg(test)]
+pub(crate) fn format_summary(report: &VerifyReport) -> String {
+    let mut out = Vec::new();
+    write_summary(report, &mut out).expect("internal: writing to Vec cannot fail");
+    String::from_utf8(out).expect("internal: summary is UTF-8")
+}
 
-    if !report.pattern_counts.is_empty() {
-        out.push_str("---patterns---\n");
-        for (pattern, n) in sorted_counts(report.pattern_counts.iter()) {
-            let _ = writeln!(out, "{n}\t{pattern}");
-        }
-    }
-    out
+fn write_rows(
+    report: &VerifyReport,
+    out: &mut dyn Write,
+    row: &dyn Fn(&VerifyEntry) -> Option<String>,
+) -> io::Result<()> {
+    report
+        .entries
+        .for_each(&mut |e| row(e).map_or(Ok(()), |line| out.write_all(line.as_bytes())))
+}
+
+fn differs_from_name(e: &VerifyEntry) -> bool {
+    e.filename_bucket
+        .as_ref()
+        .is_some_and(|n| *n != e.actual_bucket)
+}
+
+fn mismatch_row(e: &VerifyEntry) -> String {
+    let exp = e.exif_exp_bucket.as_deref().unwrap_or("NONE");
+    let from = e.exif_from.as_deref().unwrap_or("NONE");
+    let make = non_empty(e.exif_make.as_deref());
+    let model = non_empty(e.exif_model.as_deref());
+    format!(
+        "MISMATCH\texp={exp}\ttgt={}\tfrom={from}\tmake={make}\tmodel={model}\t{}\n",
+        e.actual_bucket, e.source_path
+    )
+}
+
+fn differ_row(e: &VerifyEntry) -> String {
+    let name = e.filename_bucket.as_deref().unwrap_or("NONE");
+    format!(
+        "DIFFER\tname={name}\ttgt={}\t{}\n",
+        e.actual_bucket, e.source_path
+    )
 }
 
 fn non_empty(v: Option<&str>) -> &str {

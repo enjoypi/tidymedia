@@ -177,7 +177,8 @@ fn verify_collects_conflicts_from_media_time_decision() {
         super::DEFAULT_PHASH_MAX,
         false,
         None,
-    );
+    )
+    .unwrap();
     assert_eq!(report.entries.len(), 1);
     let conflicts = &report.entries[0].conflicts;
     assert!(conflicts.iter().any(|c| c == "FilenameOver1Day"));
@@ -225,7 +226,8 @@ fn verify_skips_listed_extensions_from_source_scan() {
         super::DEFAULT_PHASH_MAX,
         false,
         None,
-    );
+    )
+    .unwrap();
     assert_eq!((report.scanned, report.compared), (2, 1));
 }
 
@@ -247,7 +249,8 @@ fn verify_includes_non_media_when_requested() {
         super::DEFAULT_PHASH_MAX,
         true,
         None,
-    );
+    )
+    .unwrap();
     assert_eq!((report.scanned, report.compared), (2, 2));
 }
 
@@ -269,6 +272,48 @@ fn verify_scanned_counts_empty_files_as_touched() {
         super::DEFAULT_PHASH_MAX,
         false,
         None,
-    );
+    )
+    .unwrap();
     assert_eq!((report.scanned, report.compared), (2, 1));
+}
+
+fn budget_verify(
+    capacity: u64,
+    output_files: usize,
+) -> crate::entities::common::Result<super::VerifyReport> {
+    let src = tempfile::tempdir().unwrap();
+    std::fs::copy("tests/data/sample-with-exif.jpg", src.path().join("a.jpg")).unwrap();
+    let out = tempfile::tempdir().unwrap();
+    for i in 0..output_files {
+        std::fs::write(out.path().join(format!("o{i}.jpg")), [1, 2, 3]).unwrap();
+    }
+    let be: std::sync::Arc<dyn crate::entities::backend::Backend> =
+        crate::adapters::backend::local::LocalBackend::arc();
+    let loc = |p: &std::path::Path| {
+        crate::entities::uri::Location::Local(camino::Utf8PathBuf::from(p.to_str().unwrap()))
+    };
+    crate::usecases::memory::with_retained(capacity, || {
+        super::verify(
+            &[(loc(src.path()), be.clone())],
+            &(loc(out.path()), be),
+            super::DEFAULT_PHASH_MAX,
+            false,
+            None,
+        )
+    })
+}
+
+#[test]
+fn verify_stops_when_one_source_exceeds_budget() {
+    let Err(crate::entities::common::Error::Io(err)) = budget_verify(100, 0) else {
+        panic!("expected budget error");
+    };
+    assert_eq!(err.kind(), std::io::ErrorKind::OutOfMemory);
+}
+
+#[test]
+fn verify_groups_when_output_library_exceeds_budget() {
+    let report = budget_verify(8_000, 10).unwrap();
+    assert!(report.entries.is_spilled());
+    assert_eq!(report.compared, 1);
 }
