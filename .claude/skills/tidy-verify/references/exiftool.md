@@ -2,7 +2,7 @@
 
 ## 抽取
 
-- 8 列 TSV 契约由 skill `config.yaml` 的 `exiftool_tsv_p` 单点定义，并与 `src/usecases/verify/exif_tsv.rs`、`src/adapters/cli_commands.rs` 保持同步。
+- 8 列 TSV 契约由 skill `config.yaml` 的 `exiftool_tsv_p` 单点定义，列序对齐 tidymedia 的 P0–P4；修改时与 `src/usecases/verify/exif_tsv.rs`、`src/adapters/cli_commands.rs` 三处同步。值中的 `\t` 由脚本替换为真实 tab。
 - 禁止添加 `-fast2`，否则可能跳过 QuickTime moov atom，漏读容器时间。
 - 并行抽取使用 argfile 和 `-charset filename=utf8`。Windows 中文路径的 ANSI/GBK 输出由 `scripts/lib/gbk.ts` 规范化，不得删除该兼容层。
 - 按目录文件数分组，TSV 先分组写入再合并。并发同时受配置上限和可用内存约束；残留进程通过 pid 文件在下轮清理。
