@@ -8,7 +8,7 @@
 - 推理 Output Port 放在对应 `usecases/<feature>/`，基础设施 Port 放在 `entities/backend/`；具体 impl 放 `adapters/`，选择 impl 的 factory 放 `frameworks/`。
 - `tidy()` 在部分失败时返回 Err 以提供非零退出码；`tidy_with()` 直接返回 `CommandResult`，不重复检查。
 - 生产目录使用 `foo/mod.rs` 声明与 re-export，子模块不得命名为 `core`。测试需要访问的内部项用 `#[cfg(test)]` 私有 re-export 或 `pub(super)`。
-- OS、模型 runtime 和第三方容器适配与业务分文件；`_io.rs`、`_real.rs` 仅是职责命名，不自动获得覆盖率排除。纯 bytes 解析、端口编排和业务错误分类不得迁入非业务文件。
+- OS、模型 runtime 和第三方容器适配与业务分文件；`_io.rs`、`_real.rs` 后缀不决定覆盖率排除。纯 bytes 解析、端口编排和业务错误分类不得迁入非业务文件。
 - 新模块先完成 `lib.rs` re-export 和 dispatch 装配再实现主体；仅在未消费模块的独立阶段允许 `#![allow(dead_code)]`，接入时删除。
 - `#[cfg(test)]` 标在方法或 import 上，不标在同时含生产代码的 `impl` 块上。
 
@@ -47,7 +47,7 @@
 - 优先级：P0 为原始拍摄或文档创建时间，P1 为数字化/容器写入时间，P2 为文件名启发式，P3 为 XMP sidecar/Google Takeout，P4 为文件系统时间。具体 Source 以 `entities/media_time/priority.rs` 为准。
 - 多数派推翻 P0 只接受 `Validity::Valid` 候选；下载时戳类文件名不得参与投票，新增此类 Source 必须加入 `is_majority_filename_vote` 黑名单。
 - ModifyDate 只作旁证：与 filename 票互证时否决多数派推翻并记录冲突，不成为独立候选。
-- naive EXIF 和文件名时间按配置时区解释；QuickTime/MKV 等 UTC 时间先转 UTC，再按配置时区确定归档桶。EXIF naive 的桶可直接看原字符串年月，UTC 容器时间不可套用此规则。
+- naive EXIF 和文件名时间按配置时区解释；QuickTime/MKV 等 UTC 时间先转 UTC，再按配置时区确定归档桶。
 - `epoch_to_candidate(0)` 表示未填；合法的文件系统 UNIX_EPOCH 由独立转换路径处理。外部 timestamp 必须经整数转换、受限时间构造和 checked arithmetic 防溢出。
 - PDF 带符号时区非法或越界时保留墙钟日期并按配置时区解释；无 tz、`Z` 和未知前缀保持 UTC，分钟与总偏移不得静默归一化。
 - 1904 时间按当天窗口过滤；未来时间和 1995 年前低置信度候选按现有 filter 规则处理。
@@ -62,7 +62,7 @@
 
 ## 复制、移动、报告与推理
 
-- 类型过滤必须先于重复删源；dry-run 不写归档媒体、不删源（显式报告文件除外），但要预填 hash 并把预计目标加入 output index，保持与真跑相同的命名决策。
+- 类型过滤必须先于重复删源；dry-run 要预填 hash 并把预计目标加入 output index，保持与真跑相同的命名决策。
 - 目标名通过 `Index::try_reserve_target` 原子占位，Windows 按路径组件小写折叠；`AlreadyExists` 时尝试下一候选名。
 - `generate_unique_name` 依次使用 output index、权威索引判定和 backend exists；修改 walk/VisitStats 语义时同步复核权威判定。
 - 目标已存在时按 size、双侧内容判等区分 Duplicate、Fresh、Exhausted；只有 Duplicate 才能删源并计入去重。
@@ -73,11 +73,11 @@
 - copy-doc/move-doc 仅在文档模式且模板含 `{category}` 时装配分类器；分类在 EXIF/MIME 解析后进行，并经 `Info.category` 传入模板。分类阈值以下使用 `uncategorized`，路径段必须 sanitize。
 - 含 `errors` 的 Report 使用统一软上限和截断标记，rayon merge 传播截断状态；`failed` 不受上限影响。
 - `scanned` 使用 `Index::touched_count` 统一按触达数累计，不能用成功项数量代替。耗时统一使用 `elapsed_ms`；新增字段同步所有对应 Report、fixture 和 JSON 断言，不写死 Report 数量。
-- `ReportSink` 使用 `enum Report<'a>` 和返回 `Result<()>` 的单一 `write(&Report<'_>)` 方法保持对象安全；新增变体不应强制所有 sink 增加专用方法。报告与 find stdout 写失败必须传播为非零退出，已完成的媒体操作不回滚。copy/move 的部分失败文案按实际操作分流并双向测试。
+- `ReportSink` 只有 `write(&Report<'_>) -> Result<()>` 一个方法，保持对象安全；新增 `Report` 变体不给 sink 加专用方法。报告与 find stdout 写失败必须传播为非零退出，已完成的媒体操作不回滚。copy/move 的部分失败文案按实际操作分流并双向测试。
 - 动态 H/W 的 OCR DBNet 使用 `into_typed().into_runnable()`；BERT symbolic 维先 `into_typed()`，绑定 batch=1、sequence=256，再优化。tokenizer 输出手动 pad/truncate 到 sequence。
 - tract runnable 已由 Arc 持有，不重复包装。
-- 老 QuickTime 使用现有 nom-exif patch，并只用 `BoxHeader::parse` 解析 header；M2TS/AVCHD 使用现有 video PID 与 H.264 EP strip 规则，不把 container body 一次性装入解析 buffer。
-- 推理 metadata 与输入按值透传。
+- 老 QuickTime 使用现有 nom-exif patch，并只用该 patch 内的 `BoxHeader::parse` 解析 header；M2TS/AVCHD 使用现有 video PID 与 H.264 EP strip 规则，不把 container body 一次性装入解析 buffer。
+- 推理 metadata 与输入按值透传；模型路径为空时立即返回 `InvalidInput`。
 - tract 输出 tensor 的 cow、view、slice 必须保持有效生命周期；多输出分别持有 binding。
 
 ## 同步检查点

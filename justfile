@@ -56,15 +56,15 @@ test *ARGS:
     cargo +nightly nextest run --locked --no-fail-fast {{ ARGS }}
 
 # === 覆盖率（llvm-cov）===
-# 唯一门禁实现见 tools/cov.sh；顺序 = lcov BRDA branch 100%
+# 唯一门禁实现见 tools/cov.ts；顺序 = lcov BRDA branch 100%
 # -> report region 100%（function/line 同门禁）-> DA 真值 plate + 生产文件完整性自检。
 [macos]
 cov:
-    bash tools/cov.sh
+    bun tools/cov.ts
 
 [windows]
 cov:
-    "{{ CMD }}" //c "call tools\msvc-env.cmd && bash tools/cov.sh"
+    "{{ CMD }}" //c "call tools\msvc-env.cmd && bun tools/cov.ts"
 
 # === fmt / lint ===
 fmt:

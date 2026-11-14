@@ -1,6 +1,6 @@
 # Pattern 判定与证据研判
 
-Step 3 对 MISMATCH、DIFFER 和 decision_failed 条目逐文件研判。`collect_evidence.ts` 自动收集前两类的时间、路径、文件名和相机信息；仅有 decision_failed 的条目按 SKILL 手工补齐。AI 只补充推荐与需要用户确认的冲突。
+Step 3 对 MISMATCH、DIFFER 和 decision_failed 条目逐文件研判。AI 只补充推荐与需要用户确认的冲突。
 
 ## verify 自动判定
 
@@ -22,7 +22,7 @@ Step 3 对 MISMATCH、DIFFER 和 decision_failed 条目逐文件研判。`collec
 | `FilenameWeakDate` | stem 只有合法日期 | 可作为日级证据，时分秒需用户确认默认值 |
 | `FilenameCoincidentalDigits` | 连续数字形似日期但不合法 | 不得当作日期 |
 
-“合法日期”必须是真实日历日期。当前脚本只做初步数字校验，AI 必须额外核对月份天数和闰年；例如 `20230231`、非闰年 2 月 29 日和小月 31 日都不得作为证据。
+“合法日期”必须是真实日历日期。脚本不校验日历合法性，AI 必须核对月份天数和闰年；例如 `20230231`、非闰年 2 月 29 日和小月 31 日都不得作为证据。
 
 ## 人工研判
 
@@ -36,6 +36,6 @@ Step 3 对 MISMATCH、DIFFER 和 decision_failed 条目逐文件研判。`collec
 
 推荐顺序：经证据确认可信的拍摄或容器时间 > FilenameStrong > FilenameWeakDate > PathDirectoryHint > 跳过。出厂默认值、机型冲突或其他反证优先否决看似合法的时间；证据相互矛盾时必须询问用户，不机械套用顺序。
 
-只有日期时默认建议 `12:00:00`；只有年月或年时，默认日期和时刻也必须由用户确认。`FilenameCoincidentalDigits` 永不能推出时间。
+只有年月或年时，默认日期和时刻都必须由用户确认。`FilenameCoincidentalDigits` 永不能推出时间。
 
-`TidymediaContainerMiss` 可向用户报告疑似解析缺口，并按已核实的容器时间提出写回建议；未核实前不得修改归档规则或把旧调查结论当作事实。
+`TidymediaContainerMiss` 可向用户报告疑似解析缺口，并按已核实的容器时间提出写回建议；未核实前不得修改归档规则。

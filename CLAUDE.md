@@ -1,28 +1,36 @@
 @~/.claude/CLAUDE.md
 
-@~/.claude/rust.md
-
 # tidymedia 开发上下文
 
 按拍摄或创建时间去重整理媒体与文档的 Windows/macOS CLI，支持本地与 SMB 来源，采用 Clean Architecture。
 
-## 全局原则
+## 全局优先原则
 
-1. 文档与沟通使用简体中文和全角标点，表达精简、无歧义、便于人工维护；文件名用英文。
-2. 给用户的选项带数字编号，第 1 项为推荐项或 All。
-3. 批量改动使用脚本或工具，所用脚本及新增通用自动化脚本使用 Bun + TypeScript；既有平台包装和模型准备脚本可保留原技术栈。批量替换后核对匹配数量和结果。
-4. 遵守 SOLID、DRY、YAGNI：职责单一、面向接口、逻辑只保留一份；优先复用仓内代码、stdlib、平台能力和已有依赖。
-5. 代码文件含测试不得超过 512 行，达到 400 行时预防性拆至不超过 300 行；函数不得超过 64 行。`CLAUDE.md` 必须少于 256 行。
-6. 不写注释或 docstring，删除已有注释。
-7. 存储与日志时间使用 UTC；面向人展示时标注时区并支持 `TZ`。
-8. 新配置使用 YAML。用户可调默认值和业务字符串从配置读取；算法、协议和固定 IO 边界常量可留在代码。配置必须有真实消费点。
-9. secret 只从环境变量加载，不设默认值，不写入 YAML 或日志。
-10. 输出 debug 级结构化日志，包含定位请求所需字段；逐文件事件用 `debug!`，用户汇总提示用一条 `warn!`。
-11. 测试先行，先写失败测试再实现；先满足 branch 100%，再满足 region 100%。测试与业务代码分文件。
-12. 不自行新建 git branch 或 worktree；未经用户明确要求不 commit、不 push，不 amend 或改写已有提交。同一主题的未提交改动合并为一个新 commit，不同主题分开；message 单行、少于 64 个 UTF-8 字符、无署名，格式为 `[TASK-ID ]type: 中文业务描述`，type 仅取 build/chore/ci/docs/feat/fix/perf/refactor/revert/style/test。TASK-ID 由用户提供或取最近 git log，没有则留空。
-13. 可复用规则写入对应作用域的 `CLAUDE.md` 并去重；一次性规则不保留。`TODO.md` 仅用于开放任务，完成即删除对应事项。
-14. Plan 使用 subagent 从至少三个角度推敲，包含批判角度。定稿后把计划移到项目目录，完成后删除。
-15. 新建文档须先征得用户同意。README 只写使用方法；`docs/` 只写非技术业务需求；AI 规则写入对应 `CLAUDE.md`；skill 保留其可执行结构。
+1. 文档与沟通精简无歧义、人工可维护
+2. 使用简体中文（全角标点），不用繁体中文、日文、韩文。文件名用英文
+3. 向用户提问尽量细，前因后果说清楚，一项一项问。选项带数字编号，第 1 项为推荐
+4. 脚本用 Bun + TypeScript，不用 Perl、Python、Bash
+5. SOLID：一个类/模块/函数只负责一项功能；针对接口编程；拆分胖接口；用 Interface/Trait 而非继承
+6. DRY：同一逻辑只保留一份，抽取为函数/模块
+7. YAGNI：只写当前需要的功能；依次优先复用仓内代码、stdlib、平台原生能力、已装依赖，都不行才写能跑通的最小实现
+8. 代码文件（含测试）不超过 512 行、函数不超过 64 行，超限即拆分
+9. 不写注释或 docstring，删除已有注释
+10. 存储与日志时间用数字时间戳+UTC，并且支持 TZ 环境变量
+11. 配置文件用 yaml；默认值、数值常量、业务字符串常量从配置读取
+12. secrets 通过 sops 管理，yaml 中不设默认值，写法 `db_password: "${DB_PASSWORD}"`
+13. 输出 debug 级结构化日志（session、feature、user、action、request、response 等）供 AI 分析，日志中禁止 secrets
+14. 测试先行：先写失败的测试再实现；覆盖率先保证 branch 100% 再保证 region 100%；Web 前端用 CDP+DOM 进行测试，禁止截图
+15. 测试与业务代码分文件
+16. 不自行新建 git branch 或 worktree
+17. git commit message 单行、少于 128 个 UTF-8 字符、不含 Co-Authored-By 等签名，格式 [TASK-ID ]type: 业务描述，type ∈ build/chore/ci/docs/feat/fix/perf/refactor/revert/style/test，TASK-ID 由用户提供或取自最近 git log，没有则留空
+18. 可复用的规则、原则、坑尽快写进对应领域的 CLAUDE.md（与既有规则去重合并，单个 CLAUDE.md 少于 256 行），不记入 TODO.md 或 MEMORY；一次性规则丢弃
+19. TODO.md 是任务清单，任务完成即删除
+20. Plan 定稿后把 ~/.claude/plans/<name>.md 移到当前项目目录，无需确认。Plan 完成后删除
+21. 新建文档（.md .rst .adoc .txt 等）先征得用户同意
+22. 后端提供的 API 必须是严格的 HTTP Method + RESTful，返回值必须严格遵守 RESTful 规范
+23. 前端必须使用后端生成的 OpenAPI 描述进行通信和强类型检查，禁止自行猜测
+24. 前端必须能独立部署于 CDN 上
+25. 能并发的尽量并发。必须考虑线程间同步方案是否最优
 
 ## 常用命令
 

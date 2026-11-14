@@ -23,4 +23,4 @@ QuickTime CreationDate/CreateDate 是 UTC 语义。带 `±HH:MM` 或 `Z` 后缀�
 - `timezone_offset_hours` 由 verify 从配置读取，脚本无需重复解析。
 - 归档目录使用 `YYYY/MM`，verify JSON 桶使用 `YYYY:MM`；只有对照路径和对账结果时才转换格式。
 - `actual_bucket` 来自 tidymedia 决策，`exif_exp_bucket` 来自注入 TSV；两者不一致即产生 mismatch。
-- `exif_from=FsMtime` 当前直接使用 exiftool 字符串的年月，只有操作系统时区与配置时区一致时才可与实际归档桶比较；不一致时先停止该对账，不得通过手工改月份掩盖问题。
+- `exif_from=FsMtime` 直接使用 exiftool 字符串的年月，只有操作系统时区与配置时区一致时才可与实际归档桶比较；不一致时按 SKILL 的时区前置检查停止，不得手工改月份掩盖问题。

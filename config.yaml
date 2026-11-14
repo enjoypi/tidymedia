@@ -1,5 +1,5 @@
-# 加载顺序：默认值 -> 当前文件 -> 环境变量覆盖
-# Secret 通过 ${VAR:-default} 语法从环境变量加载；本项目目前无 secret
+# 加载顺序：默认值 -> 当前文件；值中的 ${VAR:-default} 由环境变量覆盖
+# secret 不入 yaml：SMB 密码只从 SMB_PASSWORD 环境变量读取
 copy:
   # 输出目录按 年/月 分桶时使用的时区，单位：整小时（北京时间默认 +8）
   timezone_offset_hours: ${TIDYMEDIA_TIMEZONE_OFFSET_HOURS:-8}
@@ -21,11 +21,10 @@ verify:
 log:
   # 默认日志级别：trace/debug/info/warn/error；优先级 RUST_LOG > --log-level > 此处
   level: ${TIDYMEDIA_LOG_LEVEL:-info}
-# Backend Gateway 全局开关：仅放非凭据可调项；
-# SMB 密码经 SMB_PASSWORD env、Kerberos 走 KRB5CCNAME，均不入 yaml
+# Backend 可调项：仅放非凭据字段
 backend:
   smb:
-    # URI 未写 `user@` 时兜底用户名；真实 client 接入后由 SmbBackend 读取
+    # URI 未写 `user@` 时的兜底用户名
     default_user: ${SMB_USER:-}
     # NTLM 工作组；smb2 ClientConfig::domain 必填
     workgroup: ${SMB_WORKGROUP:-WORKGROUP}
@@ -55,7 +54,6 @@ backend:
     # 模型配套 tokenizer.json 本地路径
     tokenizer_path: ${TIDYMEDIA_CLASSIFY_TOKENIZER:-models/bge_small_zh_v15_tokenizer.json}
     # cosine 相似度下限；低于此值落 uncategorized
-    # spike 实测：命中类目 0.60~0.81、无关文本最高 0.36，默认 0.5 两侧留余量
     score_min: ${TIDYMEDIA_CLASSIFY_SCORE_MIN:-0.5}
     # 提取给分类器的正文文本字节上限（embedding 只吃前几百 token）
     max_text_bytes: ${TIDYMEDIA_CLASSIFY_MAX_TEXT_BYTES:-4096}

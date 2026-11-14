@@ -8,7 +8,7 @@ argument-hint: <source_dir> <output_dir>
 
 **原始参数字符串**：`$ARGUMENTS`
 
-自行解析 `source_dir` 与 `output_dir`，不要使用内置位置参数拆分器。仅使用双引号分组：成对首尾双引号去除，引号内空格属于同一参数，其他字符包括 Windows 反斜杠均原样保留。必须恰好得到两个非空参数；无法唯一解析时，提示 `/tidy-verify <source_dir> <output_dir>` 并停止。下文 `<SRC>`、`<OUT>` 为占位符。
+自行解析 `source_dir` 与 `output_dir`，不使用内置位置参数拆分器：只按成对双引号分组，引号内空格属于同一参数，其他字符（含 Windows 反斜杠）原样保留。必须恰好得到两个非空参数，否则提示 `/tidy-verify <source_dir> <output_dir>` 并停止。下文 `<SRC>`、`<OUT>` 为占位符。
 
 cwd 必须是 tidymedia 仓库根目录。
 
@@ -25,16 +25,16 @@ cwd 必须是 tidymedia 仓库根目录。
 bun .claude/skills/tidy-verify/scripts/run.ts "<SRC>" "<OUT>" "<WORK>"
 ```
 
-`run.ts` 依次执行：
+`run.ts` 同时进行两件事：
 
-- 并行调用 exiftool，按目录文件数和可用内存分组，使用 argfile 与 UTF-8 文件名输出；TSV 先分组写入再合并。残留进程按 pid 文件清理。
-- 调用 `tidymedia verify`，生成预测归档桶、时间决策、冲突、内容重复裁定、诊断和修复建议。
+- 启动 `tidymedia verify`，生成预测归档桶、时间决策、冲突、内容重复裁定、诊断和修复建议。
+- 并行调用 exiftool 抽取 TSV，完成后经 stdin 交给 verify 做交叉比对；抽取规则见 `references/exiftool.md`。
 
-stdout 输出汇总和耗时；产物按执行情况写入 `<WORK>`，包括 `verify.json`、`summary.txt`、`verify.err`，成功抽取时另有 `exif.tsv`。`mismatched > 0` 或 `decision_failed > 0` 会产生非零退出码，这是需要继续研判的对账结果，不是脚本崩溃。
+stdout 输出汇总和耗时；产物写入 `<WORK>`，包括 `verify.json`、`summary.txt`、`verify.err`，执行过抽取时另有 `exif.tsv`。`mismatched > 0` 或 `decision_failed > 0` 时退出码非零，这是需要继续研判的对账结果，不是脚本崩溃。
 
-exiftool 缺失时输出 `exiftool_missing=1`，省略 `--exif-tsv` 并继续 verify；此时没有第二实现交叉比对，内部判定仍有效。执行过抽取时必须确认 `exif_exit=0`；非零表示交叉比对不完整，立即停止后续写回和移动，不得把残缺 TSV 当作完整证据，即使脚本仍继续调用 verify。
+exiftool 缺失时输出 `exiftool_missing=1`，向 verify 传入空 TSV 并继续；此时没有第二实现交叉比对，内部判定仍有效。执行过抽取时必须确认 `exif_exit=0`；非零表示交叉比对不完整，立即停止后续写回和移动，不得把残缺 TSV 当作完整证据，即使脚本仍继续调用 verify。
 
-桶格式统一为 `YYYY:MM`，详见 `references/buckets.md`。不要另跑 move dry-run；verify 已提供重复裁定，而 dry-run 会对大文件重复判重。
+桶口径见 `references/buckets.md`。不要另跑 move dry-run；verify 已提供重复裁定，而 dry-run 会对大文件重复判重。
 
 ## Step 2：按汇总分流
 
@@ -61,7 +61,7 @@ bun .claude/skills/tidy-verify/scripts/collect_evidence.ts "<WORK>/verify.json" 
 <EXIFTOOL> -P -overwrite_original "-AllDates=YYYY:MM:DD HH:MM:SS" "-FileModifyDate=YYYY:MM:DD HH:MM:SS<OFFSET>" "<file>"
 ```
 
-`<OFFSET>` 是配置时区偏移，例如 UTC+8 写 `+08:00`。`-overwrite_original` 表示不留备份，只有用户选择该方式时才使用。视频必须同时核对并修正 QuickTime CreationDate 与 CreateDate，不能只写较低优先级字段；详见 `references/exiftool.md`。
+`<OFFSET>` 是配置时区偏移，例如 UTC+8 写 `+08:00`。`-overwrite_original` 表示不留备份，只有用户选择该方式时才使用。视频必须同时核对并修正 QuickTime CreationDate 与 CreateDate，不能只写较低优先级字段。写回细节见 `references/exiftool.md`。
 
 写回后返回 Step 1，复用同一 `<WORK>` 重新抽取并对账，确认异常收敛到 0 或仅剩用户接受的项。
 

@@ -54,7 +54,7 @@ function parseIsoNow(): string {
 function findBinary(projectRoot: string): string {
   const candidate = resolve(projectRoot, "target", "release", IS_WINDOWS ? "tidymedia.exe" : "tidymedia");
   if (existsSync(candidate)) return candidate;
-  console.error(`error: ${candidate} not found; build first with cargo build --release`);
+  console.error(`error: ${candidate} not found; build first with just build-release`);
   process.exit(1);
 }
 

@@ -55,11 +55,7 @@ fn linear_oracle(out: &Index, base: &str) -> BTreeSet<Utf8PathBuf> {
                 return true;
             }
             let (nstem, next) = split_stem_ext(&name_lower);
-            if next == ext {
-                stem_digit_variant(&nstem, &stem)
-            } else {
-                false
-            }
+            next == ext && stem_digit_variant(&nstem, &stem)
         })
         .map(|entry| entry.key().clone())
         .collect()
