@@ -78,6 +78,7 @@ pub(super) fn run(
     tsv: &HashMap<&str, &ExifRow>,
     report: &mut VerifyReport,
     ledger: &'static Ledger,
+    tsv_provided: bool,
 ) -> common::Result<()> {
     let capacity = ledger.capacity() - ledger.capacity() / NAME_MATCH_HEADROOM_DIVISOR;
     let names = EntryCost {
@@ -111,7 +112,7 @@ pub(super) fn run(
                 }),
             );
             let evaluated = evaluate_all(job, source, &out, tsv);
-            spill.push_run(&fold_evaluated(report, evaluated))
+            spill.push_run(&fold_evaluated(report, evaluated, tsv_provided))
         })
         .map_err(common::Error::Io)
         .map(|()| report.entries = Listed::spilled(spill))

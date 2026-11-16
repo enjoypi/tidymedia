@@ -36,6 +36,7 @@ impl Counts {
         let _ = writeln!(out, "compared={}", report.compared);
         let _ = writeln!(out, "mismatched={}", report.mismatched);
         let _ = writeln!(out, "decision_failed={}", report.decision_failed);
+        let _ = writeln!(out, "exif_row_missing={}", report.exif_row_missing);
         let _ = writeln!(out, "with_name_time={}", self.with_name_time);
         let _ = writeln!(out, "MISMATCH_count={}", self.mismatches);
         if self.mismatches > 0 {

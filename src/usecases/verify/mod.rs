@@ -10,11 +10,13 @@ use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use tracing::debug;
 use tracing::warn;
 
+use crate::entities::backend::Backend;
 use crate::entities::common;
 use crate::entities::file_index;
 use crate::entities::file_info::Info;
 use crate::entities::media_time::MediaTimeDecision;
 use crate::entities::memory::Ledger;
+use crate::entities::uri::Location;
 use crate::usecases::memory::{output_cost, retained, source_cost};
 use crate::usecases::report::elapsed_ms;
 use crate::usecases::retained::Charging;
@@ -96,9 +98,9 @@ pub(crate) fn verify(
         Some((source, out)) => {
             report.scanned = source.touched_count();
             let evaluated = evaluate_all(&job, source, &out, &tsv);
-            report.entries = fold_evaluated(&mut report, evaluated).into();
+            report.entries = fold_evaluated(&mut report, evaluated, exif_tsv.is_some()).into();
         }
-        None => grouped::run(&job, &tsv, &mut report, ledger)?,
+        None => grouped::run(&job, &tsv, &mut report, ledger, exif_tsv.is_some())?,
     }
     report.duration_ms = elapsed_ms(start);
     Ok(report)
@@ -166,13 +168,22 @@ fn scan_sources(
     let walk_start = Instant::now();
     let skip_ext = super::copy::source_skip_extensions(job.include_non_media, false);
     let mut index = file_index::Index::new().with_admission(admission);
+    let mut batches: Vec<(Arc<dyn Backend>, Vec<Location>)> = Vec::new();
     for (loc, backend) in job.sources {
-        index.visit_location_skipping(loc, backend, skip_ext);
+        batches.push((
+            Arc::clone(backend),
+            index.collect_locations_skipping(loc, backend, skip_ext),
+        ));
     }
     log_stage("source_walk", walk_start);
     if index.overflowed() {
         return index;
     }
+    let open_start = Instant::now();
+    for (backend, locs) in &batches {
+        index.open_locations(locs, backend);
+    }
+    log_stage("source_open", open_start);
     let exif_start = Instant::now();
     index.parse_exif(job.offset, job.include_non_media, false);
     log_stage("source_exif", exif_start);
@@ -219,7 +230,11 @@ fn log_stage(operation: &'static str, start: Instant) {
     );
 }
 
-fn fold_evaluated(report: &mut VerifyReport, mut evaluated: Vec<Evaluated>) -> Vec<VerifyEntry> {
+fn fold_evaluated(
+    report: &mut VerifyReport,
+    mut evaluated: Vec<Evaluated>,
+    tsv_provided: bool,
+) -> Vec<VerifyEntry> {
     let fold_start = Instant::now();
     evaluated.sort_by(|a, b| a.entry.source_path.cmp(&b.entry.source_path));
     let mut entries = Vec::with_capacity(evaluated.len());
@@ -230,6 +245,9 @@ fn fold_evaluated(report: &mut VerifyReport, mut evaluated: Vec<Evaluated>) -> V
         }
         if ev.entry.mismatch {
             report.mismatched += 1;
+        }
+        if tsv_provided && ev.entry.exif_from.is_none() {
+            report.exif_row_missing += 1;
         }
         for p in &ev.entry.patterns {
             *report.pattern_counts.entry(p.clone()).or_insert(0) += 1;

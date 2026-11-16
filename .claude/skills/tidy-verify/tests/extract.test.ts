@@ -128,6 +128,38 @@ test("extractExif 每组输出落盘再逐组合并，回报 pid、行数与最�
   }
 });
 
+test("listDirCounts 白名单只保留媒体扩展名且忽略大小写与空目录", async () => {
+  const root = mkdtempSync(`${tmpdir()}/tv-ext-`).replaceAll("\\", "/");
+  try {
+    await Bun.write(`${root}/top.JPG`, "x");
+    await Bun.write(`${root}/note.txt`, "x");
+    await Bun.write(`${root}/LICENSE`, "x");
+    await Bun.write(`${root}/中文 目录/a.mov`, "x");
+    await Bun.write(`${root}/中文 目录/b.mkv`, "x");
+    await Bun.write(`${root}/无媒体/c.txt`, "x");
+    const files = await listDirCounts(root, ["jpg", "mov"]);
+    const norm = [...files.entries()].map(([d, l]) => [d, [...l].sort()] as const).sort();
+    expect(norm).toEqual([
+      [root, [`${root}/top.JPG`]],
+      [`${root}/中文 目录`, [`${root}/中文 目录/a.mov`]],
+    ]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("listDirCounts 白名单为空时保留全部文件", async () => {
+  const root = mkdtempSync(`${tmpdir()}/tv-ext-all-`).replaceAll("\\", "/");
+  try {
+    await Bun.write(`${root}/top.jpg`, "x");
+    await Bun.write(`${root}/note.txt`, "x");
+    const files = await listDirCounts(root, []);
+    expect(files.get(root)?.length).toBe(2);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("extractExif 单巨目录拆分时 argfile 写文件清单且参数文件内容完整", async () => {
   const work = mkdtempSync(`${tmpdir()}/tv-split-`).replaceAll("\\", "/");
   const calls: FileRun[] = [];

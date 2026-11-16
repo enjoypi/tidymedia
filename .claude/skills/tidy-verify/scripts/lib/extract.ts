@@ -31,13 +31,24 @@ export function planGroups(files: Map<string, string[]>, concurrency: number): s
   return groups.map((g) => g.lines);
 }
 
-export async function listDirCounts(root: string): Promise<Map<string, string[]>> {
+function extOf(name: string): string {
+  const dot = name.lastIndexOf(".");
+  return dot <= 0 ? "" : name.slice(dot + 1).toLowerCase();
+}
+
+// allow 为空表示不过滤（保持旧行为：全量文件交给 exiftool）。
+export async function listDirCounts(root: string, allow: string[] = []): Promise<Map<string, string[]>> {
+  const keep = new Set(allow.map((e) => e.toLowerCase()));
   const base = root.replaceAll("\\", "/").replace(/\/+$/, "");
   const files = new Map<string, string[]>();
   const glob = new Bun.Glob("**/*");
   for await (const rel of glob.scan({ cwd: base, onlyFiles: true, dot: false })) {
     const norm = rel.replaceAll("\\", "/");
     const cut = norm.lastIndexOf("/");
+    const name = cut < 0 ? norm : norm.slice(cut + 1);
+    if (keep.size > 0 && !keep.has(extOf(name))) {
+      continue;
+    }
     const dir = cut < 0 ? base : `${base}/${norm.slice(0, cut)}`;
     const list = files.get(dir) ?? [];
     list.push(`${base}/${norm}`);

@@ -182,3 +182,70 @@ fn verify_parses_special_filename_date_buckets() {
         "2021:01"
     );
 }
+
+#[test]
+fn verify_exif_tsv_missing_row_counts_exif_row_missing() {
+    let src = tempdir().unwrap();
+    let src_dir = src.path().to_str().unwrap();
+    let jpg = PathBuf::from(src_dir).join("IMG_20240101_120000.jpg");
+    write(
+        &jpg,
+        b"\xFF\xD8\xFF\xE0\x00\x10JFIF\x00\x01\x02\x00\x00\x01\x00\x01\x00\x00",
+    )
+    .unwrap();
+    let out = tempdir().unwrap();
+    let report_dir = tempdir().unwrap();
+    let report_path = report_dir.path().join("verify.json");
+    let tsv_path = report_dir.path().join("exif.tsv");
+    // TSV has a row for a DIFFERENT file → the jpg has no row
+    write(
+        &tsv_path,
+        "/other/file.jpg\t2023:06:01 10:00:00\t-\t-\t-\t-\tMake\tModel\n",
+    )
+    .unwrap();
+    run_cli([
+        "tidymedia",
+        "verify",
+        "--output",
+        out.path().to_str().unwrap(),
+        src_dir,
+        "--exif-tsv",
+        tsv_path.to_str().unwrap(),
+        "--report",
+        report_path.to_str().unwrap(),
+    ])
+    .expect("verify should succeed even with missing TSV row");
+    let json: serde_json::Value =
+        serde_json::from_str(&read_to_string(&report_path).unwrap()).expect("report json valid");
+    assert_eq!(json["compared"], 1);
+    assert_eq!(json["exif_row_missing"], 1);
+}
+
+#[test]
+fn verify_no_exif_tsv_yields_zero_exif_row_missing() {
+    let src = tempdir().unwrap();
+    let src_dir = src.path().to_str().unwrap();
+    let jpg = PathBuf::from(src_dir).join("IMG_20240101_120000.jpg");
+    write(
+        &jpg,
+        b"\xFF\xD8\xFF\xE0\x00\x10JFIF\x00\x01\x02\x00\x00\x01\x00\x01\x00\x00",
+    )
+    .unwrap();
+    let out = tempdir().unwrap();
+    let report_dir = tempdir().unwrap();
+    let report_path = report_dir.path().join("verify.json");
+    run_cli([
+        "tidymedia",
+        "verify",
+        "--output",
+        out.path().to_str().unwrap(),
+        src_dir,
+        "--report",
+        report_path.to_str().unwrap(),
+    ])
+    .expect("verify should succeed");
+    let json: serde_json::Value =
+        serde_json::from_str(&read_to_string(&report_path).unwrap()).expect("report json valid");
+    assert_eq!(json["compared"], 1);
+    assert_eq!(json["exif_row_missing"], 0);
+}

@@ -164,6 +164,16 @@ impl Index {
             .insert(key);
     }
 
+    pub fn collect_locations_skipping(
+        &mut self,
+        root: &Location,
+        backend: &Arc<dyn Backend>,
+        skip_ext: &[String],
+    ) -> Vec<Location> {
+        let entries = self.scan_entries(root, backend, skip_ext);
+        entries.into_iter().map(|entry| entry.location).collect()
+    }
+
     pub fn visit_location(&mut self, root: &Location, backend: &Arc<dyn Backend>) {
         self.visit_location_skipping(root, backend, &[]);
     }
@@ -174,8 +184,7 @@ impl Index {
         backend: &Arc<dyn Backend>,
         skip_ext: &[String],
     ) {
-        let entries = self.scan_entries(root, backend, skip_ext);
-        let locs: Vec<Location> = entries.into_iter().map(|entry| entry.location).collect();
+        let locs = self.collect_locations_skipping(root, backend, skip_ext);
         self.open_locations(&locs, backend);
     }
 

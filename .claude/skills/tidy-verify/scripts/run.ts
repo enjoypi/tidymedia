@@ -22,7 +22,7 @@ async function extractStep(cfg: SkillConfig, src: string): Promise<string | null
     console.log(`stale_exiftool_killed=${stale.join(",")}`);
   }
   const t0 = performance.now();
-  const counts = await listDirCounts(src);
+  const counts = await listDirCounts(src, cfg.mediaExtensions);
   const concurrency = pickConcurrency(cfg.exiftoolConcurrency, freemem(), cfg.exiftoolMemMb * 1024 * 1024);
   const tsv = workPath(cfg, cfg.exifTsv);
   const r = await extractExif({

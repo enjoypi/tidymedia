@@ -15,6 +15,8 @@ pub struct VerifyReport {
     pub compared: usize,
     pub mismatched: usize,
     pub decision_failed: usize,
+    /// TSV 已提供但媒体文件无对应行的计数；TSV 未提供时恒为 0。
+    pub exif_row_missing: usize,
     /// 诊断 pattern 命中计数，key 见 `diagnose.rs`；空 = 尚未诊断。
     pub pattern_counts: BTreeMap<String, usize>,
     pub entries: Listed<VerifyEntry>,

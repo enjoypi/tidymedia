@@ -44,6 +44,11 @@ export interface SkillConfig {
   exiftoolConcurrency: number;
   exiftoolMemMb: number;
   exiftoolPids: string;
+  mediaExtensions: string[];
+}
+
+function splitList(value: string | undefined): string[] {
+  return (value ?? "").split(/\s+/).filter((s) => s !== "");
 }
 
 export async function loadConfig(
@@ -60,6 +65,7 @@ export async function loadConfig(
     exiftoolConcurrency: Number(raw.exiftool_concurrency ?? "8"),
     exiftoolMemMb: Number(raw.exiftool_mem_mb ?? "300"),
     exiftoolPids: raw.exiftool_pids ?? "exiftool-pids.txt",
+    mediaExtensions: splitList(raw.media_extensions),
   };
 }
 

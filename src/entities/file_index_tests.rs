@@ -386,3 +386,23 @@ fn touched_count_equals_indexed_plus_all_skip_categories() {
     index.stats.skipped_by_ext = 1;
     assert_eq!(index.touched_count(), 5);
 }
+
+#[test]
+fn collect_locations_skipping_defers_open_until_open_locations() {
+    use camino::Utf8PathBuf;
+
+    use super::super::uri::Location;
+    use crate::adapters::backend::local::LocalBackend;
+
+    let dir = tempdir().unwrap();
+    fs::write(dir.path().join("a.bin"), b"abc").unwrap();
+    fs::write(dir.path().join("skip.txt"), b"x").unwrap();
+    let backend = LocalBackend::arc();
+    let root = Location::Local(Utf8PathBuf::from(dir.path().to_str().unwrap()));
+    let mut index = Index::new();
+    let locs = index.collect_locations_skipping(&root, &backend, &["txt".to_owned()]);
+    assert_eq!(locs.len(), 1);
+    assert_eq!(index.len(), 0);
+    index.open_locations(&locs, &backend);
+    assert_eq!(index.len(), 1);
+}

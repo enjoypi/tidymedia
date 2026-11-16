@@ -3,8 +3,19 @@ tidymedia_bin: target/release/tidymedia
 exiftool_bin: bin/exiftool/exiftool
 exif_tsv: exif.tsv
 verify_report: verify.json
-exiftool_concurrency: 8
+exiftool_concurrency: 16
 exiftool_mem_mb: 300
+# exiftool 交叉核对的扩展名白名单（空格分隔，忽略大小写）；留空表示处理全部文件。
+# 口径 = tidymedia 的 is_media（image/* 与 video/*，不含 image/fpx）：先取 MIME 表内
+# 的 image/video 扩展名，再补相机原始与容器别名等真实常见写法，宁可多列不可漏列。
+# 表外的改名媒体不会有 TSV 行，由 verify 汇总的 exif_row_missing 暴露，按 Step 3 补测。
+media_extensions: >-
+  jpg jpe jpeg png apng gif webp avif bmp dib ico cur jp2 jpf jpx jxl jxr wxr ora
+  psd tif tiff heic heif hif djvu
+  dng cr2 cr3 crw nef nrw orf rw2 rwl pef ptx arw srf sr2 srx raf raw iiq 3fr fff
+  srw kdc dcs dc2 mrw x3f
+  mp4 m4v mov qt avi mkv webm flv wmv asf mpg mpeg mpe mts m2ts dv dif 3gp 3g2
+  3gpp vob ogv rm rmvb
 exiftool_pids: exiftool-pids.txt
 exiftool_tsv_p: >-
   $Directory/$FileName\t$DateTimeOriginal\t$QuickTime:CreationDate\t$QuickTime:CreateDate\t$CreateDate\t$FileModifyDate\t$Make\t$Model
