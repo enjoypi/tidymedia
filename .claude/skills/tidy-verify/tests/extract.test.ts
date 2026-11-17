@@ -1,181 +1,275 @@
 /// <reference path="../scripts/lib/bun.d.ts" />
 
 import { expect, test } from "bun:test";
-import { appendFileSync, mkdtempSync, rmSync } from "node:fs";
+import { closeSync, mkdtempSync, openSync, rmSync, writeSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { extractExif, listDirCounts, mergeIncremental, mergeParts, parseManifest, planGroups, planIncremental, spawnRunner, spawnToFiles } from "../scripts/lib/extract.ts";
+import {
+  Chunker,
+  boundedQueue,
+  extractExif,
+  filterManifest,
+  manifestLine,
+  mergeIncremental,
+  mergeParts,
+  parseManifest,
+  pickRows,
+  sameStamp,
+  spawnRunner,
+  spawnToFiles,
+  walkMedia,
+} from "../scripts/lib/extract.ts";
 import type { FileRun, FileStamp } from "../scripts/lib/extract.ts";
 
-function filesOf(entries: [string, number][]): Map<string, string[]> {
-  return new Map(
-    entries.map(([dir, n]) => [
-      dir,
-      Array.from({ length: n }, (_, i) => `${dir}/f${String(i).padStart(2, "0")}.jpg`),
-    ]),
-  );
+function pathsOf(list: string[]): AsyncGenerator<string> {
+  return (async function* () {
+    for (const p of list) {
+      yield p;
+    }
+  })();
 }
 
-function allFiles(files: Map<string, string[]>): string[] {
-  return [...files.values()].flat().sort();
+function collect(run: FileRun): Promise<string[]> {
+  return Bun.file(run.cmd[run.cmd.length - 1]).text().then((t) => t.trim().split("\n").filter((l) => l !== ""));
 }
 
-test("planGroups 按文件数均衡分组且只产文件行", () => {
-  const files = filesOf([["a", 7], ["b", 6], ["c", 5], ["d", 4]]);
-  const groups = planGroups(files, 2);
-  expect(groups.length).toBe(2);
-  expect(groups.map((g) => g.length).sort((x, y) => x - y)).toEqual([11, 11]);
-  expect(groups.flat().sort()).toEqual(allFiles(files));
-  expect(groups.flat().some((line) => line === "a" || line === "b")).toBe(false);
-});
+const writer = async (r: FileRun): Promise<number> => {
+  const lines = await collect(r);
+  await Bun.write(r.out, lines.map((l) => `${l}\t-\n`).join(""));
+  await Bun.write(r.err, "");
+  return 0;
+};
 
-test("planGroups 单巨目录拆成文件行且负载按文件数均衡", () => {
-  const big = Array.from({ length: 20 }, (_, i) => `/s/big/f${String(i).padStart(2, "0")}.jpg`);
-  const groups = planGroups(new Map([["/s/big", big]]), 4);
-  expect(groups.length).toBe(4);
-  expect(groups.map((g) => g.length).sort((x, y) => x - y)).toEqual([5, 5, 5, 5]);
-  const lines = groups.flat();
-  expect([...lines].sort()).toEqual([...big].sort());
-  expect(lines.every((l) => l !== "/s/big")).toBe(true);
-});
-
-test("planGroups 小目录也展开为文件行", () => {
-  const files = filesOf([["/s/a", 9], ["/s/b", 2], ["/s/c", 2]]);
-  const groups = planGroups(files, 3);
-  expect(groups.length).toBe(3);
-  const lines = groups.flat();
-  for (const dir of ["/s/a", "/s/b", "/s/c"]) {
-    expect(lines).not.toContain(dir);
-  }
-  expect([...lines].sort()).toEqual(allFiles(files));
-  expect(groups.map((g) => g.length).sort((x, y) => x - y)).toEqual([4, 4, 5]);
-});
-
-test("planGroups 组数不超过文件总数且不产空组", () => {
-  const groups = planGroups(filesOf([["a", 3], ["b", 1]]), 8);
-  expect(groups.length).toBeLessThanOrEqual(4);
-  expect(groups.every((g) => g.length > 0)).toBe(true);
-  expect(groups.flat().sort()).toEqual(allFiles(filesOf([["a", 3], ["b", 1]])));
-});
-
-test("planGroups 无文件返回空", () => {
-  expect(planGroups(new Map(), 4)).toEqual([]);
-});
-
-test("planGroups 并发数小于 1 按 1 处理", () => {
-  expect(planGroups(filesOf([["a", 1], ["b", 1]]), 0)).toEqual([["a/f00.jpg", "b/f00.jpg"]]);
-});
-
-test("listDirCounts 返回每个目录的文件清单并跳过隐藏目录", async () => {
-  const root = mkdtempSync(`${tmpdir()}/tv-list-`).replaceAll("\\", "/");
+test("walkMedia 流式产出白名单媒体并按扩展名忽略大小写", async () => {
+  const root = mkdtempSync(`${tmpdir()}/tv-walk-`).replaceAll("\\", "/");
   try {
-    await Bun.write(`${root}/top.jpg`, "x");
-    await Bun.write(`${root}/中文 目录/a.jpg`, "x");
-    await Bun.write(`${root}/中文 目录/b.jpg`, "x");
-    await Bun.write(`${root}/中文 目录/子/c.mov`, "x");
+    await Bun.write(`${root}/top.JPG`, "x");
+    await Bun.write(`${root}/note.txt`, "x");
+    await Bun.write(`${root}/LICENSE`, "x");
+    await Bun.write(`${root}/中文 目录/a.mov`, "xy");
+    await Bun.write(`${root}/中文 目录/b.mkv`, "x");
     await Bun.write(`${root}/.hidden/d.jpg`, "x");
-    const files = await listDirCounts(root);
-    const norm = [...files.entries()].map(([d, l]) => [d, [...l].sort()] as const).sort();
-    expect(norm).toEqual([
-      [root, [`${root}/top.jpg`]],
-      [`${root}/中文 目录`, [`${root}/中文 目录/a.jpg`, `${root}/中文 目录/b.jpg`].sort()],
-      [`${root}/中文 目录/子`, [`${root}/中文 目录/子/c.mov`]],
+    const got: [string, number][] = [];
+    for await (const item of walkMedia(root, ["jpg", "mov"])) {
+      got.push([item.path, item.stamp.size]);
+    }
+    got.sort();
+    expect(got).toEqual([
+      [`${root}/top.JPG`, 1],
+      [`${root}/中文 目录/a.mov`, 2],
     ]);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
 });
 
-test("extractExif 每组输出落盘再逐组合并，回报 pid、行数与最大退出码", async () => {
+test("walkMedia 白名单为空表示全部文件，stat 失败的文件跳过", async () => {
+  const root = mkdtempSync(`${tmpdir()}/tv-walk-all-`).replaceAll("\\", "/");
+  try {
+    await Bun.write(`${root}/top.jpg`, "x");
+    await Bun.write(`${root}/note.txt`, "x");
+    const all: string[] = [];
+    for await (const item of walkMedia(root, [])) {
+      all.push(item.path);
+    }
+    expect(all.length).toBe(2);
+    const none: string[] = [];
+    for await (const item of walkMedia(root, [], () => null)) {
+      none.push(item.path);
+    }
+    expect(none).toEqual([]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("Chunker 攒满 size 才吐 chunk，fast 与完整扫描分开打包", () => {
+  const c = new Chunker(2, ["jpg"]);
+  expect(c.push("/d/a.jpg")).toBeNull();
+  const first = c.push("/d/b.jpg");
+  expect(first).toEqual({ seq: 0, fast: true, paths: ["/d/a.jpg", "/d/b.jpg"] });
+  const mov = c.push("/d/v.mov");
+  expect(mov).toBeNull();
+  expect(c.push("/d/w.mp4")).toEqual({ seq: 1, fast: false, paths: ["/d/v.mov", "/d/w.mp4"] });
+  expect(c.push("/d/last.jpg")).toBeNull();
+  expect(c.finish()).toEqual([{ seq: 2, fast: true, paths: ["/d/last.jpg"] }]);
+  expect(c.finish()).toEqual([]);
+  expect([c.chunks, c.fastFiles]).toEqual([3, 3]);
+});
+
+test("Chunker size 小于 1 按 1 处理", () => {
+  const c = new Chunker(0, []);
+  expect(c.push("/d/a")).toEqual({ seq: 0, fast: false, paths: ["/d/a"] });
+});
+
+test("boundedQueue 满缓冲时挂起生产者，取出后恢复", async () => {
+  const q = boundedQueue<number>(1);
+  await q.push(0);
+  let released = false;
+  const slow = q.push(1).then(() => {
+    released = true;
+  });
+  await Bun.sleep(5);
+  expect(released).toBe(false);
+  expect(await q.take()).toBe(0);
+  await slow;
+  expect(released).toBe(true);
+  expect(await q.take()).toBe(1);
+});
+
+test("boundedQueue seal 唤醒等待中的生产者与消费者", async () => {
+  const q = boundedQueue<number>(1);
+  await q.push(0);
+  const pending = q.push(1);
+  q.seal();
+  await pending;
+  expect(await q.take()).toBe(0);
+  expect(await q.take()).toBeNull();
+  expect(await q.take()).toBeNull();
+});
+
+test("extractExif 按 chunk 落盘再按序号合并，回报行数与最大退出码", async () => {
   const work = mkdtempSync(`${tmpdir()}/tv-ex-`).replaceAll("\\", "/");
   const calls: FileRun[] = [];
-  const pids: number[] = [];
   const run = async (r: FileRun): Promise<number> => {
     const index = calls.push(r);
-    r.onSpawn(100 + index);
-    const dirs = (await Bun.file(r.cmd[r.cmd.length - 1]).text()).trim().split("\n");
-    await Bun.write(r.out, dirs.map((d) => `${d}\t-\r\n`).join(""));
-    await Bun.write(r.err, `e${dirs.length}`);
+    const lines = await collect(r);
+    await Bun.write(r.out, lines.map((l) => `${l}\t-\r\n`).join(""));
+    await Bun.write(r.err, `e${lines.length}`);
     return index === 1 ? 1 : 0;
   };
   try {
-    const files = filesOf([["D:/s/a", 5], ["D:/s/b", 3], ["D:/s/c", 2]]);
+    const paths = ["D:/s/a/f0.jpg", "D:/s/a/f1.jpg", "D:/s/b/f0.jpg", "D:/s/b/f1.jpg", "D:/s/c/f0.jpg"];
     const r = await extractExif({
-      bin: "exiftool", fmt: "F", counts: files, work, concurrency: 2, run,
-      tsv: `${work}/exif.tsv`, err: `${work}/exif.tsv.err`, onSpawn: (pid) => pids.push(pid),
+      bin: "exiftool", fmt: "F", paths: pathsOf(paths), work, lanes: 2, chunkFiles: 2,
+      fastExtensions: [], run, tsv: `${work}/exif.tsv`, err: `${work}/exif.tsv.err`,
+      onSpawn: () => {},
     });
-    expect(calls.length).toBe(2);
-    expect(calls[0].cmd.slice(0, 7)).toEqual(["exiftool", "-charset", "filename=utf8", "-q", "-T", "-p", "F"]);
+    expect(calls.length).toBe(3);
+    expect(calls[0].cmd.slice(0, 6)).toEqual(["exiftool", "-charset", "filename=utf8", "-q", "-T", "-p"]);
     expect(calls[0].cmd[7]).toBe("-@");
-    expect(calls[0].out).toBe(`${work}/exif-0.tsv`);
-    expect(pids.sort()).toEqual([101, 102]);
-    expect(r).toEqual({ rows: 10, exit: 1, groups: 2, fast: 0 });
+    expect(r).toEqual({ exit: 1, chunks: 3, fast: 0 });
     const tsv = await Bun.file(`${work}/exif.tsv`).text();
-    expect(tsv.split("\n").filter((l) => l !== "").sort()).toEqual(allFiles(files).map((p) => `${p}\t-`).sort());
-    const err = await Bun.file(`${work}/exif.tsv.err`).text();
-    expect(err).toBe("e5\ne5\n");
+    expect(tsv.split("\n").filter((l) => l !== "").sort()).toEqual(paths.map((p) => `${p}\t-`).sort());
+    expect(await Bun.file(`${work}/exif.tsv.err`).text()).toBe("e2\ne2\ne1\n");
   } finally {
     rmSync(work, { recursive: true, force: true });
   }
 });
 
-test("listDirCounts 白名单只保留媒体扩展名且忽略大小写与空目录", async () => {
-  const root = mkdtempSync(`${tmpdir()}/tv-ext-`).replaceAll("\\", "/");
-  try {
-    await Bun.write(`${root}/top.JPG`, "x");
-    await Bun.write(`${root}/note.txt`, "x");
-    await Bun.write(`${root}/LICENSE`, "x");
-    await Bun.write(`${root}/中文 目录/a.mov`, "x");
-    await Bun.write(`${root}/中文 目录/b.mkv`, "x");
-    await Bun.write(`${root}/无媒体/c.txt`, "x");
-    const files = await listDirCounts(root, ["jpg", "mov"]);
-    const norm = [...files.entries()].map(([d, l]) => [d, [...l].sort()] as const).sort();
-    expect(norm).toEqual([
-      [root, [`${root}/top.JPG`]],
-      [`${root}/中文 目录`, [`${root}/中文 目录/a.mov`]],
-    ]);
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test("listDirCounts 白名单为空时保留全部文件", async () => {
-  const root = mkdtempSync(`${tmpdir()}/tv-ext-all-`).replaceAll("\\", "/");
-  try {
-    await Bun.write(`${root}/top.jpg`, "x");
-    await Bun.write(`${root}/note.txt`, "x");
-    const files = await listDirCounts(root, []);
-    expect(files.get(root)?.length).toBe(2);
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test("extractExif 单巨目录拆分时 argfile 写文件清单且参数文件内容完整", async () => {
-  const work = mkdtempSync(`${tmpdir()}/tv-split-`).replaceAll("\\", "/");
-  const calls: FileRun[] = [];
+test("extractExif 同时存活的 exiftool 不超过 lane 数", async () => {
+  const work = mkdtempSync(`${tmpdir()}/tv-lane-`).replaceAll("\\", "/");
+  let active = 0;
+  let peak = 0;
   const run = async (r: FileRun): Promise<number> => {
-    calls.push(r);
-    r.onSpawn(200 + calls.length);
-    const lines = (await Bun.file(r.cmd[r.cmd.length - 1]).text()).trim().split("\n");
-    await Bun.write(r.out, lines.map((l) => `${l}\t-\r\n`).join(""));
+    active += 1;
+    peak = Math.max(peak, active);
+    await Bun.sleep(2);
+    await Bun.write(r.out, "");
     await Bun.write(r.err, "");
+    active -= 1;
     return 0;
   };
   try {
-    const big = Array.from({ length: 12 }, (_, i) => `D:/s/中文 目录/img ${i}.jpg`);
+    const paths = Array.from({ length: 40 }, (_, i) => `/d/f${String(i).padStart(2, "0")}.jpg`);
     const r = await extractExif({
-      bin: "exiftool", fmt: "F", counts: new Map([["D:/s/中文 目录", big]]), work,
-      concurrency: 3, run, tsv: `${work}/exif.tsv`, err: `${work}/exif.tsv.err`, onSpawn: () => {},
+      bin: "x", fmt: "F", paths: pathsOf(paths), work, lanes: 3, chunkFiles: 2,
+      fastExtensions: [], run, tsv: `${work}/t`, err: `${work}/e`, onSpawn: () => {},
     });
-    expect(r).toEqual({ rows: 12, exit: 0, groups: 3, fast: 0 });
-    const argLines: string[] = [];
-    for (const c of calls) {
-      argLines.push(...(await Bun.file(c.cmd[c.cmd.length - 1]).text()).trim().split("\n"));
-    }
-    expect(calls.length).toBe(3);
-    expect([...argLines].sort()).toEqual([...big].sort());
-    const tsv = await Bun.file(`${work}/exif.tsv`).text();
-    expect(tsv.split("\n").filter((l) => l !== "").length).toBe(12);
+    expect(peak).toBe(3);
+    expect(r).toEqual({ exit: 0, chunks: 20, fast: 0 });
+  } finally {
+    rmSync(work, { recursive: true, force: true });
+  }
+});
+
+test("extractExif 无文件时不调用 exiftool 且产空 tsv", async () => {
+  const work = mkdtempSync(`${tmpdir()}/tv-empty-`).replaceAll("\\", "/");
+  let called = false;
+  const run = async (): Promise<number> => {
+    called = true;
+    return 0;
+  };
+  try {
+    const r = await extractExif({
+      bin: "x", fmt: "F", paths: pathsOf([]), work, lanes: 4, chunkFiles: 8,
+      fastExtensions: [], run, tsv: `${work}/t`, err: `${work}/e`, onSpawn: () => {},
+    });
+    expect(called).toBe(false);
+    expect(r).toEqual({ exit: 0, chunks: 0, fast: 0 });
+    expect(await Bun.file(`${work}/t`).text()).toBe("");
+  } finally {
+    rmSync(work, { recursive: true, force: true });
+  }
+});
+
+test("extractExif 分片先清空，子进程就地覆盖更短输出时不留残行", async () => {
+  const work = mkdtempSync(`${tmpdir()}/tv-trunc-`).replaceAll("\\", "/");
+  const staleRow = "OLD\taaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\r\n";
+  await Bun.write(`${work}/exif-c0.tsv`, staleRow);
+  await Bun.write(`${work}/exif-c0.err`, "OLDERR\r\n");
+  // 复现子进程 stdout 的 r+ 语义：从偏移 0 覆盖，不截断文件
+  const run = async (r: FileRun): Promise<number> => {
+    const fd = openSync(r.out, "r+");
+    writeSync(fd, Buffer.from("/d/a.jpg\t-\n"));
+    closeSync(fd);
+    const ef = openSync(r.err, "r+");
+    writeSync(ef, Buffer.from("e1\n"));
+    closeSync(ef);
+    return 0;
+  };
+  try {
+    const r = await extractExif({
+      bin: "x", fmt: "F", paths: pathsOf(["/d/a.jpg"]), work, lanes: 1, chunkFiles: 4,
+      fastExtensions: [], run, tsv: `${work}/exif.tsv`, err: `${work}/exif.tsv.err`,
+      onSpawn: () => {},
+    });
+    expect(r).toEqual({ exit: 0, chunks: 1, fast: 0 });
+    expect(await Bun.file(`${work}/exif.tsv`).text()).toBe("/d/a.jpg\t-\n");
+    expect(await Bun.file(`${work}/exif.tsv.err`).text()).toBe("e1\n");
+  } finally {
+    rmSync(work, { recursive: true, force: true });
+  }
+});
+
+test("extractExif 只合并本轮序号内的分片，忽略上轮残留", async () => {
+  const work = mkdtempSync(`${tmpdir()}/tv-stale-`).replaceAll("\\", "/");
+  await Bun.write(`${work}/exif-c9.tsv`, "OLD\t-\n");
+  await Bun.write(`${work}/exif-c9.err`, "olderr\n");
+  try {
+    const r = await extractExif({
+      bin: "x", fmt: "F", paths: pathsOf(["/d/a.jpg"]), work, lanes: 1, chunkFiles: 4,
+      fastExtensions: [], run: writer, tsv: `${work}/exif.tsv`, err: `${work}/exif.tsv.err`,
+      onSpawn: () => {},
+    });
+    expect(r).toEqual({ exit: 0, chunks: 1, fast: 0 });
+    expect(await Bun.file(`${work}/exif.tsv`).text()).toBe("/d/a.jpg\t-\n");
+    expect(await Bun.file(`${work}/exif.tsv.err`).text()).toBe("");
+  } finally {
+    rmSync(work, { recursive: true, force: true });
+  }
+});
+
+test("extractExif 按扩展名把文件分进带与不带 -fast 的 chunk", async () => {
+  const work = mkdtempSync(`${tmpdir()}/tv-fast-`).replaceAll("\\", "/");
+  const calls: FileRun[] = [];
+  const run = async (r: FileRun): Promise<number> => {
+    calls.push(r);
+    return writer(r);
+  };
+  try {
+    const paths = ["/s/d/a.jpg", "/s/d/v.mov", "/s/d/b.heic", "/s/d/w.mp4", "/s/d/c.jpg"];
+    const r = await extractExif({
+      bin: "exiftool", fmt: "F", paths: pathsOf(paths), work, lanes: 2, chunkFiles: 2,
+      fastExtensions: ["jpg", "heic"], run, tsv: `${work}/exif.tsv`, err: `${work}/exif.tsv.err`,
+      onSpawn: () => {},
+    });
+    expect(r).toEqual({ exit: 0, chunks: 3, fast: 3 });
+    const fast = calls.filter((c) => c.cmd.includes("-fast"));
+    const full = calls.filter((c) => !c.cmd.includes("-fast"));
+    expect((await Promise.all(fast.map(collect))).flat().sort()).toEqual([
+      "/s/d/a.jpg", "/s/d/b.heic", "/s/d/c.jpg",
+    ]);
+    expect((await Promise.all(full.map(collect))).flat().sort()).toEqual(["/s/d/v.mov", "/s/d/w.mp4"]);
   } finally {
     rmSync(work, { recursive: true, force: true });
   }
@@ -217,127 +311,45 @@ test("spawnToFiles 输出直写文件并回报 pid 与退出码", async () => {
   }
 });
 
-test("extractExif 无目录时不调用 exiftool 且产空 tsv", async () => {
-  const work = mkdtempSync(`${tmpdir()}/tv-empty-`).replaceAll("\\", "/");
-  let called = false;
-  const run = async (): Promise<number> => {
-    called = true;
-    return 0;
-  };
-  try {
-    const r = await extractExif({
-      bin: "x", fmt: "F", counts: new Map(), work, concurrency: 4, run,
-      tsv: `${work}/t`, err: `${work}/e`, onSpawn: () => {},
-    });
-    expect(called).toBe(false);
-    expect(r).toEqual({ rows: 0, exit: 0, groups: 0, fast: 0 });
-    expect(await Bun.file(`${work}/t`).text()).toBe("");
-  } finally {
-    rmSync(work, { recursive: true, force: true });
-  }
-});
-
-test("extractExif 按扩展名把文件拆到 fast 与 full 组", async () => {
-  const work = mkdtempSync(`${tmpdir()}/tv-fast-`).replaceAll("\\", "/");
-  const calls: FileRun[] = [];
-  const run = async (r: FileRun): Promise<number> => {
-    calls.push(r);
-    const lines = (await Bun.file(r.cmd[r.cmd.length - 1]).text()).trim().split("\n").filter((l) => l !== "");
-    await Bun.write(r.out, lines.map((l) => `${l}\t-\n`).join(""));
-    await Bun.write(r.err, "");
-    return 0;
-  };
-  const argLines = async (c: FileRun): Promise<string[]> =>
-    (await Bun.file(c.cmd[c.cmd.length - 1]).text()).trim().split("\n").filter((l) => l !== "");
-  try {
-    const counts = new Map([
-      ["/s/d", ["/s/d/a.jpg", "/s/d/b.jpg", "/s/d/c.heic", "/s/d/v.mov", "/s/d/w.mp4"]],
-    ]);
-    const r = await extractExif({
-      bin: "exiftool", fmt: "F", counts, work, concurrency: 3, run,
-      fastExtensions: ["jpg", "heic"],
-      tsv: `${work}/exif.tsv`, err: `${work}/exif.tsv.err`, onSpawn: () => {},
-    });
-    expect(r).toEqual({ rows: 5, exit: 0, groups: 3, fast: 3 });
-    const fastCalls = calls.filter((c) => c.cmd.includes("-fast"));
-    const fullCalls = calls.filter((c) => !c.cmd.includes("-fast"));
-    expect(fastCalls.length).toBeGreaterThan(0);
-    expect(fullCalls.length).toBeGreaterThan(0);
-    expect((await Promise.all(fastCalls.map(argLines))).flat().sort()).toEqual([
-      "/s/d/a.jpg", "/s/d/b.jpg", "/s/d/c.heic",
-    ]);
-    expect((await Promise.all(fullCalls.map(argLines))).flat().sort()).toEqual([
-      "/s/d/v.mov", "/s/d/w.mp4",
-    ]);
-  } finally {
-    rmSync(work, { recursive: true, force: true });
-  }
-});
-
-test("extractExif 无 fast 文件时不加 -fast", async () => {
-  const work = mkdtempSync(`${tmpdir()}/tv-nofast-`).replaceAll("\\", "/");
-  const calls: FileRun[] = [];
-  const run = async (r: FileRun): Promise<number> => {
-    calls.push(r);
-    await Bun.write(r.out, "");
-    await Bun.write(r.err, "");
-    return 0;
-  };
-  try {
-    const r = await extractExif({
-      bin: "exiftool", fmt: "F", counts: new Map([["/s/d", ["/s/d/v.mov", "/s/d/w.mp4"]]]),
-      work, concurrency: 2, run, fastExtensions: ["jpg"],
-      tsv: `${work}/exif.tsv`, err: `${work}/exif.tsv.err`, onSpawn: () => {},
-    });
-    expect(r).toEqual({ rows: 0, exit: 0, groups: 2, fast: 0 });
-    expect(calls.every((c) => !c.cmd.includes("-fast"))).toBe(true);
-  } finally {
-    rmSync(work, { recursive: true, force: true });
-  }
-});
-
-test("extractExif 清空分片，避免复用 work 目录时追加旧行", async () => {
-  const work = mkdtempSync(`${tmpdir()}/tv-stale-`).replaceAll("\\", "/");
-  await Bun.write(`${work}/exif-0.tsv`, "OLD\t-\n");
-  await Bun.write(`${work}/exif-0.err`, "olderr\n");
-  const run = async (r: FileRun): Promise<number> => {
-    appendFileSync(r.out, "NEW\t-\n");
-    appendFileSync(r.err, "");
-    return 0;
-  };
-  try {
-    const r = await extractExif({
-      bin: "x", fmt: "F", counts: new Map([["/d", ["/d/a.jpg"]]]), work, concurrency: 1, run,
-      tsv: `${work}/exif.tsv`, err: `${work}/exif.tsv.err`, onSpawn: () => {},
-    });
-    expect(r.rows).toBe(1);
-    expect(await Bun.file(`${work}/exif.tsv`).text()).toBe("NEW\t-\n");
-    expect(await Bun.file(`${work}/exif.tsv.err`).text()).toBe("");
-  } finally {
-    rmSync(work, { recursive: true, force: true });
-  }
-});
-
 function stamp(size: number): FileStamp {
   return { size, mtimeMs: 10, ctimeMs: 10 };
 }
 
-test("planIncremental 只重抽新增或文件属性变化的文件", () => {
-  const previous = { "/a": stamp(1), "/b": stamp(2) };
-  const current = new Map([
-    ["/a", stamp(1)],
-    ["/b", { size: 3, mtimeMs: 10, ctimeMs: 10 }],
-    ["/c", stamp(4)],
-  ]);
-  expect(planIncremental(current, previous)).toEqual({ retry: ["/b", "/c"], stale: [] });
+test("manifestLine 与 parseManifest 往返同一份属性清单", () => {
+  const text = `${manifestLine("/d/中文 目录/a.jpg", stamp(7))}${manifestLine("/d/b.mov", { size: 0, mtimeMs: 1, ctimeMs: 2 })}`;
+  expect(parseManifest(text)).toEqual(
+    new Map<string, FileStamp>([["/d/中文 目录/a.jpg", stamp(7)], ["/d/b.mov", { size: 0, mtimeMs: 1, ctimeMs: 2 }]]),
+  );
 });
 
-test("planIncremental 标记已消失的旧文件", () => {
-  const current = new Map([["/a", stamp(1)]]);
-  expect(planIncremental(current, { "/a": stamp(1), "/b": stamp(2) })).toEqual({
-    retry: [],
-    stale: ["/b"],
-  });
+test("parseManifest 丢弃列数不足或属性非数字的坏行", () => {
+  expect(parseManifest("/a\t1\t2\t3\nbroken\n/x\ty\tz\tw\n/b\t4\t5\t6\n")).toEqual(
+    new Map<string, FileStamp>([["/a", { size: 1, mtimeMs: 2, ctimeMs: 3 }], ["/b", { size: 4, mtimeMs: 5, ctimeMs: 6 }]]),
+  );
+});
+
+test("sameStamp 只在 size 与两个时间戳全等时判未变", () => {
+  expect(sameStamp(stamp(1), stamp(1))).toBe(true);
+  expect(sameStamp(stamp(1), { size: 1, mtimeMs: 11, ctimeMs: 10 })).toBe(false);
+});
+
+test("filterManifest 剔除重抽却无产出的文件，保留复用与成功行", () => {
+  const lines = [
+    manifestLine("/d/keep.jpg", stamp(1)),
+    manifestLine("/d/ok.jpg", stamp(2)),
+    manifestLine("/d/bad.mov", stamp(0)),
+  ];
+  const fresh = "/d/ok.jpg\t2024:01:01\n";
+  expect(filterManifest(lines, new Set(["/d/ok.jpg", "/d/bad.mov"]), fresh)).toBe(
+    `${lines[0]}${lines[1]}`,
+  );
+  expect(filterManifest(lines, new Set(), fresh)).toBe(lines.join(""));
+});
+
+test("pickRows 丢弃路径列不在本轮清单内的野行", () => {
+  const fed = new Set(["/d/a.jpg"]);
+  expect(pickRows("/d/a.jpg\t2024:01\r\n\r\n-\t-\t-\r\n", fed)).toBe("/d/a.jpg\t2024:01\n");
+  expect(pickRows("", fed)).toBe("");
 });
 
 test("mergeIncremental 保留未变行、替换重抽行并丢弃消失行", () => {
@@ -348,13 +360,4 @@ test("mergeIncremental 保留未变行、替换重抽行并丢弃消失行", () 
 
 test("mergeIncremental 处理 CRLF 与空行", () => {
   expect(mergeIncremental("/a\t1\r\n\r\n", "/b\t2\r\n", new Set(), new Set())).toBe("/a\t1\n/b\t2\n");
-});
-
-test("parseManifest 只接受合法的路径到属性映射", () => {
-  expect(parseManifest('{"/a":{"size":1,"mtimeMs":2,"ctimeMs":3}}')).toEqual({
-    "/a": { size: 1, mtimeMs: 2, ctimeMs: 3 },
-  });
-  expect(parseManifest("{oops")).toBeNull();
-  expect(parseManifest("[]")).toBeNull();
-  expect(parseManifest('{"/a":{"size":"x"}}')).toBeNull();
 });

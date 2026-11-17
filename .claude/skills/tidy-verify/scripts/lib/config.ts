@@ -39,10 +39,12 @@ export interface SkillConfig {
   tidymediaBin: string;
   exiftoolBin: string;
   exifTsv: string;
+  exifManifest: string;
   verifyReport: string;
   exiftoolTsvP: string;
   exiftoolConcurrency: number;
   exiftoolMemMb: number;
+  exiftoolChunkFiles: number;
   taskMemoryLimitMb: number;
   taskMemoryReserveMb: number;
   fastExtensions: string[];
@@ -64,10 +66,12 @@ export async function loadConfig(
     tidymediaBin: raw.tidymedia_bin ?? "target/release/tidymedia",
     exiftoolBin: raw.exiftool_bin ?? "bin/exiftool/exiftool",
     exifTsv: raw.exif_tsv ?? "exif.tsv",
+    exifManifest: raw.exif_manifest ?? "exif.manifest.tsv",
     verifyReport: raw.verify_report ?? "verify.json",
     exiftoolTsvP: (raw.exiftool_tsv_p ?? "").replaceAll("\\t", "\t"),
     exiftoolConcurrency: Number(raw.exiftool_concurrency ?? "16"),
     exiftoolMemMb: Number(raw.exiftool_mem_mb ?? "128"),
+    exiftoolChunkFiles: Number(raw.exiftool_chunk_files ?? "512"),
     taskMemoryLimitMb: Number(raw.task_memory_limit_mb ?? "2048"),
     taskMemoryReserveMb: Number(raw.task_memory_reserve_mb ?? "512"),
     fastExtensions: splitList(raw.exiftool_fast_extensions ?? "jpg jpeg png heic heif"),

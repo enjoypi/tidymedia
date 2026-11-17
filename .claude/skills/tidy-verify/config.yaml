@@ -2,11 +2,15 @@ work_dir: /tmp/tm
 tidymedia_bin: target/release/tidymedia
 exiftool_bin: bin/exiftool/exiftool
 exif_tsv: exif.tsv
+# 同一 work_dir 复核增量清单：每行 路径\tsize\tmtime_ms\tctime_ms
+exif_manifest: exif.manifest.tsv
 verify_report: verify.json
 # exiftool 并发上限；实际并发 = min(此值, CPU+2, (整任务预算-预留)/单进程预算)
 exiftool_concurrency: 16
-# 单个 exiftool 进程的内存预算（实测 44–90MB，取 128 留余量）
+# 单个 exiftool 进程的内存预算（512 文件/chunk 实测峰值 114MB，取 128 留余量）
 exiftool_mem_mb: 128
+# 每个一次性 exiftool 进程处理的文件数；实测启动 0.28s，512 个约 4s 工作量
+exiftool_chunk_files: 512
 # 整个 tidy-verify 任务（含 bun、tidymedia 与全部 exiftool）的内存上限与预留
 task_memory_limit_mb: 2048
 task_memory_reserve_mb: 512

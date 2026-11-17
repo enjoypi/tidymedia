@@ -1,76 +1,71 @@
 /// <reference path="./lib/bun.d.ts" />
 
-import { mkdirSync, statSync, writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { freemem } from "node:os";
 import { dirname } from "node:path";
 import { exiftoolBin, loadConfig, tidymediaBin, workPath } from "./lib/config.ts";
 import type { SkillConfig } from "./lib/config.ts";
 import {
   extractExif,
-  listDirCounts,
+  filterManifest,
+  manifestLine,
   mergeIncremental,
   parseManifest,
-  planIncremental,
+  pickRows,
+  sameStamp,
   spawnToFiles,
+  walkMedia,
 } from "./lib/extract.ts";
-import type { FileStamp, Manifest } from "./lib/extract.ts";
+import type { Manifest } from "./lib/extract.ts";
 import { cpuCount, isImageRunning, killTree, pickConcurrency, reapStale, recordPid } from "./lib/procs.ts";
 import { startVerify, verifyCommand, verifyExitCode } from "./lib/verify.ts";
 import type { RunningVerify } from "./lib/verify.ts";
 
 const MB = 1024 * 1024;
 
-function stampsOf(counts: Map<string, string[]>): Map<string, FileStamp> {
-  const stamps = new Map<string, FileStamp>();
-  for (const list of counts.values()) {
-    for (const path of list) {
-      try {
-        const s = statSync(path);
-        stamps.set(path, { size: s.size, mtimeMs: s.mtimeMs, ctimeMs: s.ctimeMs });
-      } catch {
-        continue;
+interface Feed {
+  paths: AsyncGenerator<string>;
+  manifest: string[];
+  retried: string[];
+  counters: { reused: number };
+}
+
+// 边遍历边判定：size/mtime/ctime 未变的文件不进抽取队列，直接复用上一轮 TSV 行。
+function makeFeed(src: string, cfg: SkillConfig, prev: Manifest): Feed {
+  const manifest: string[] = [];
+  const retried: string[] = [];
+  const counters = { reused: 0 };
+  async function* paths(): AsyncGenerator<string> {
+    for await (const item of walkMedia(src, cfg.mediaExtensions)) {
+      manifest.push(manifestLine(item.path, item.stamp));
+      const old = prev.get(item.path);
+      if (old !== undefined) {
+        prev.delete(item.path);
+        if (sameStamp(old, item.stamp)) {
+          counters.reused += 1;
+          continue;
+        }
       }
+      retried.push(item.path);
+      yield item.path;
     }
   }
-  return stamps;
+  return { paths: paths(), manifest, retried, counters };
 }
 
-function filterCounts(counts: Map<string, string[]>, keep: Set<string>): Map<string, string[]> {
-  const out = new Map<string, string[]>();
-  for (const [dir, list] of counts) {
-    const kept = list.filter((path) => keep.has(path));
-    if (kept.length > 0) {
-      out.set(dir, kept);
-    }
-  }
-  return out;
-}
-
-async function readPrevious(manifestPath: string, tsvPath: string): Promise<Manifest | null> {
-  if (!(await Bun.file(manifestPath).exists()) || !(await Bun.file(tsvPath).exists())) {
-    return null;
-  }
-  return parseManifest(await Bun.file(manifestPath).text());
-}
-
-async function writeManifest(
+async function loadPrevious(
+  cfg: SkillConfig,
+  src: string,
+  tsv: string,
   manifestPath: string,
-  stamps: Map<string, FileStamp>,
-  previous: Manifest | null,
-  retried: Set<string>,
-  exit: number,
-): Promise<void> {
-  if (exit !== 0) {
-    if (previous !== null) {
-      await Bun.file(manifestPath).delete();
-    }
-    return;
+): Promise<{ prev: Manifest; had: boolean }> {
+  if (!cfg.incremental || src.toLowerCase().startsWith("smb://")) {
+    return { prev: new Map(), had: false };
   }
-  const next: Manifest = {};
-  for (const [path, stamp] of stamps) {
-    next[path] = previous !== null && !retried.has(path) ? (previous[path] ?? stamp) : stamp;
+  if (!(await Bun.file(manifestPath).exists()) || !(await Bun.file(tsv).exists())) {
+    return { prev: new Map(), had: false };
   }
-  await Bun.write(manifestPath, JSON.stringify(next));
+  return { prev: parseManifest(await Bun.file(manifestPath).text()), had: true };
 }
 
 async function extractStep(cfg: SkillConfig, src: string): Promise<string | null> {
@@ -84,10 +79,10 @@ async function extractStep(cfg: SkillConfig, src: string): Promise<string | null
   if (stale.length > 0) {
     console.log(`stale_exiftool_killed=${stale.join(",")}`);
   }
-  const t0 = performance.now();
-  const counts = await listDirCounts(src, cfg.mediaExtensions);
+  const started = performance.now();
+  const lap = newLap(started);
   const cpu = cpuCount();
-  const concurrency = pickConcurrency(
+  const lanes = pickConcurrency(
     cfg.exiftoolConcurrency,
     cpu,
     cfg.taskMemoryLimitMb * MB,
@@ -96,33 +91,41 @@ async function extractStep(cfg: SkillConfig, src: string): Promise<string | null
   );
   const tsv = workPath(cfg, cfg.exifTsv);
   const freshTsv = workPath(cfg, "exif-fresh.tsv");
-  const manifestPath = workPath(cfg, "exif.manifest.json");
-  const previous = cfg.incremental && !src.toLowerCase().startsWith("smb://")
-    ? await readPrevious(manifestPath, tsv)
-    : null;
-  const stamps = stampsOf(counts);
-  const plan = previous === null
-    ? { retry: [...stamps.keys()].sort(), stale: [] as string[] }
-    : planIncremental(stamps, previous);
-  const retried = new Set(plan.retry);
+  const manifestPath = workPath(cfg, cfg.exifManifest);
+  const { prev, had } = await loadPrevious(cfg, src, tsv, manifestPath);
+  const feed = makeFeed(src, cfg, prev);
   const r = await extractExif({
-    bin, fmt: cfg.exiftoolTsvP, counts: filterCounts(counts, retried), work: cfg.workDir,
-    concurrency, run: spawnToFiles, tsv: freshTsv, err: `${freshTsv}.err`,
-    onSpawn: (pid) => recordPid(pids, pid), fastExtensions: cfg.fastExtensions,
+    bin, fmt: cfg.exiftoolTsvP, paths: feed.paths, work: cfg.workDir, lanes,
+    chunkFiles: cfg.exiftoolChunkFiles, fastExtensions: cfg.fastExtensions,
+    run: spawnToFiles, tsv: freshTsv, err: `${freshTsv}.err`,
+    onSpawn: (pid) => recordPid(pids, pid),
   });
-  const fresh = await Bun.file(freshTsv).text();
-  const merged = previous === null
-    ? fresh
-    : mergeIncremental(await Bun.file(tsv).text(), fresh, retried, new Set(plan.stale));
+  lap("exiftool");
+  const retried = new Set(feed.retried);
+  const fresh = pickRows(await Bun.file(freshTsv).text(), retried);
+  const merged = had
+    ? mergeIncremental(await Bun.file(tsv).text(), fresh, retried, new Set(prev.keys()))
+    : fresh;
   await Bun.write(tsv, merged);
-  await writeManifest(manifestPath, stamps, previous, retried, r.exit);
-  writeFileSync(pids, "");
   const rows = merged === "" ? 0 : merged.split("\n").filter((line) => line !== "").length;
-  const reused = previous === null ? 0 : stamps.size - plan.retry.length;
+  await Bun.write(manifestPath, filterManifest(feed.manifest, retried, fresh));
+  writeFileSync(pids, "");
+  lap("merge");
   console.log(
-    `exif_rows=${rows} exif_groups=${r.groups} exif_exit=${r.exit} exif_fast=${r.fast} exif_reused=${reused} exif_concurrency=${concurrency} freemem_mb=${Math.round(freemem() / MB)} cpu=${cpu} extract_ms=${Math.round(performance.now() - t0)}`,
+    `exif_rows=${rows} exif_chunks=${r.chunks} exif_exit=${r.exit} exif_fast=${r.fast} exif_reused=${feed.counters.reused} exif_lanes=${lanes} exif_retry=${feed.retried.length} freemem_mb=${Math.round(freemem() / MB)} cpu=${cpu} bun_rss_mb=${Math.round(process.memoryUsage.rss() / MB)} extract_ms=${Math.round(performance.now() - started)} laps=${lap.value()}`,
   );
   return tsv;
+}
+
+function newLap(started: number): ((name: string) => void) & { value(): string } {
+  const laps: string[] = [];
+  let last = started;
+  const fn = (name: string) => {
+    const now = performance.now();
+    laps.push(`${name}:${Math.round(now - last)}`);
+    last = now;
+  };
+  return Object.assign(fn, { value: () => laps.join(",") });
 }
 
 async function finishVerifyStep(
@@ -163,6 +166,9 @@ async function main(args: string[]): Promise<number> {
   const started = performance.now();
   const running = startVerify(verifyCommand(bin, src, out, "-", workPath(cfg, cfg.verifyReport)));
   const tsv = await extractStep(cfg, src);
+  // 抽取阶段的清单/TSV 缓冲此刻已不可达，但 JSC 不会主动把堆还给操作系统；
+  // verify 稍后在同一 2G 任务预算内冲峰值，这里强制回收一次。
+  Bun.gc(true);
   const code = await finishVerifyStep(cfg, running, started, tsv);
   console.log(`total_ms=${Math.round(performance.now() - total)}`);
   return code;

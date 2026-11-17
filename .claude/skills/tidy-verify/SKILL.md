@@ -30,11 +30,11 @@ bun .claude/skills/tidy-verify/scripts/run.ts "<SRC>" "<OUT>" "<WORK>"
 - 启动 `tidymedia verify`，生成预测归档桶、时间决策、冲突、内容重复裁定、诊断和修复建议。
 - 并行调用 exiftool 抽取 TSV，完成后经 stdin 交给 verify 做交叉比对；抽取规则见 `references/exiftool.md`。
 
-stdout 输出汇总和耗时；产物写入 `<WORK>`，包括 `verify.json`、`summary.txt`、`verify.err`，执行过抽取时另有 `exif.tsv`。`mismatched > 0` 或 `decision_failed > 0` 时退出码非零，这是需要继续研判的对账结果，不是脚本崩溃。
+stdout 输出汇总和耗时；产物写入 `<WORK>`，包括 `verify.json`、`summary.txt`、`verify.err`，执行过抽取时另有 `exif.tsv` 与增量清单 `exif.manifest.tsv`。`mismatched > 0` 或 `decision_failed > 0` 时退出码非零，这是需要继续研判的对账结果，不是脚本崩溃。
 
-抽取相关字段：`exif_rows` 为合并后行数，`exif_groups` 为本次启动的组数，`exif_exit` 为最大退出码，`exif_fast` 为使用 `-fast` 的文件数，`exif_reused` 为复用行数，`exif_concurrency` 为实际并发。并发按整任务 2G 预算与 CPU 计算；`-fast` 只用于 `config.yaml` 的 `exiftool_fast_extensions`（图片），视频与 RAW 始终完整扫描。
+抽取相关字段：`exif_rows` 为合并后行数，`exif_chunks` 为本次启动的 exiftool 进程数，`exif_exit` 为最大退出码，`exif_fast` 为使用 `-fast` 的文件数，`exif_reused` 为复用行数，`exif_retry` 为重抽文件数，`exif_lanes` 为并发 lane 数，`bun_rss_mb`/`freemem_mb` 为内存观测，`extract_ms` 与 `laps` 为阶段耗时。lane 数按整任务 2G 预算与 CPU 计算；目录遍历边产出文件边按 `exiftool_chunk_files` 打包成 chunk，由 lane 抢占，先完成的 lane 自动接活，无静态分组的尾部空转。`-fast` 只用于 `config.yaml` 的 `exiftool_fast_extensions`（图片），视频与 RAW 始终完整扫描。
 
-同一 `<WORK>` 再次执行 Step 1 时，读取 `exif.manifest.json`，只重抽 size/mtime/ctime 变化的文件并合并旧行。manifest 缺失、损坏或上次抽取非零退出时下次全量重抽；`smb://` 源不做增量复用。
+同一 `<WORK>` 再次执行 Step 1 时，读取 `exif.manifest.tsv`（每行 `路径\tsize\tmtime_ms\tctime_ms`），只重抽 size/mtime/ctime 变化、新增，以及上轮未产出 TSV 行的文件，其余直接复用旧行；`smb://` 源不做增量复用。个别文件报错（如空文件）不影响其余文件的复用，但整轮 `exif_exit` 仍非零并按下文停下来核查。
 
 exiftool 缺失时输出 `exiftool_missing=1`，向 verify 传入空 TSV 并继续；此时没有第二实现交叉比对，内部判定仍有效。执行过抽取时必须确认 `exif_exit=0`；非零表示交叉比对不完整，立即停止后续写回和移动，不得把残缺 TSV 当作完整证据，即使脚本仍继续调用 verify。
 

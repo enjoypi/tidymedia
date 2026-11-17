@@ -45,6 +45,7 @@ declare namespace Bun {
   function spawn(cmd: string[], opts?: BunSpawnOptions): BunSubprocess;
   function spawnSync(cmd: string[], opts?: BunSpawnOptions): BunSyncSubprocess;
   function which(name: string): string | null;
+  function gc(full?: boolean): boolean;
   class Glob {
     constructor(pattern: string);
     scan(opts?: BunGlobScanOptions): AsyncIterable<string>;

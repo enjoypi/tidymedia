@@ -11,10 +11,12 @@ const cfg: SkillConfig = {
   tidymediaBin: "target/release/tidymedia",
   exiftoolBin: "bin/exiftool/exiftool",
   exifTsv: "exif.tsv",
+  exifManifest: "exif.manifest.tsv",
   verifyReport: "verify.json",
   exiftoolTsvP: "a\tb",
   exiftoolConcurrency: 16,
   exiftoolMemMb: 128,
+  exiftoolChunkFiles: 512,
   taskMemoryLimitMb: 2048,
   taskMemoryReserveMb: 512,
   fastExtensions: ["jpg", "jpeg", "png", "heic", "heif"],
@@ -28,6 +30,8 @@ test("loadConfig 读取 skill config.yaml 全部字段", async () => {
   expect(c.exifTsv).toBe("exif.tsv");
   expect(c.exiftoolConcurrency).toBe(16);
   expect(c.exiftoolMemMb).toBe(128);
+  expect(c.exifManifest).toBe("exif.manifest.tsv");
+  expect(c.exiftoolChunkFiles).toBe(512);
   expect(c.taskMemoryLimitMb).toBe(2048);
   expect(c.taskMemoryReserveMb).toBe(512);
   expect(c.fastExtensions).toEqual(["jpg", "jpeg", "png", "heic", "heif"]);
@@ -64,6 +68,8 @@ test("loadConfig 缺新字段时使用整任务预算默认值", async () => {
     writeFileSync(p, "exiftool_concurrency: 4\n");
     const c = await loadConfig(p.replaceAll("\\", "/"));
     expect(c.exiftoolMemMb).toBe(128);
+    expect(c.exifManifest).toBe("exif.manifest.tsv");
+    expect(c.exiftoolChunkFiles).toBe(512);
     expect(c.taskMemoryLimitMb).toBe(2048);
     expect(c.taskMemoryReserveMb).toBe(512);
     expect(c.fastExtensions).toEqual(["jpg", "jpeg", "png", "heic", "heif"]);

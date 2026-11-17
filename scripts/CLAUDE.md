@@ -4,6 +4,8 @@
 
 - 脚本语言见根 `CLAUDE.md`。独立脚本用 `bun <script>` 执行，测试放 `tests/scripts`，用 `bun test tests/scripts` 运行。
 - 批量文本修改后核对预期数量和实际结果。含 Windows 反斜杠的内容使用 Edit/Write，避免 shell heredoc 或内联表达式吞掉转义。
+- `Bun.file(path)` 作为子进程 stdout/stderr 是就地覆盖且不截断：复用同一输出文件前必须先写空，否则上一轮较长的尾部会残成野行。
+- JSC 不主动把堆还给操作系统。脚本内先缓冲大清单、后续另有进程在同一内存预算内冲峰值时，交接点显式 `Bun.gc(true)`。
 - `find` 生成的删除脚本必须转义反斜杠、引号和控制字符；保护项保留注释和明确 SURVIVOR 标记，不能生成会误删最后副本的默认操作。
 
 ## 模型准备
