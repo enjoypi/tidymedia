@@ -4,6 +4,7 @@
 
 - 日常命令使用根 `CLAUDE.md` 的 just 入口。
 - 覆盖率门禁为 Windows 与 macOS 双平台各自 `just cov`，branch、region、function、line 均为 100%；先消除 branch miss，再处理 region。
+- 跑测器固定为 nextest，其「每测试独立进程」是测试套件的成立前提：`set_env_var`/`remove_env_var` 的 SAFETY 注释、`usecases::config` 的 `once` + `Box::leak` 进程级单例都依赖它。不得为提速把 cov 跑测切成 `cargo test`（实测 lib 174〜220 个失败，详见 `tools/CLAUDE.md`）。
 - 覆盖率排除只认 `tools/cov.ts` 的逐文件精确清单，维护规则见 `tools/CLAUDE.md`；禁止按目录或 `tract_*`、`_real`、`_io` 等后缀排除，禁止 `coverage(off)` 及其 `cfg_attr` 形式。
 - 判断存量 miss 归属时，用相同 filter 对照未修改基线；平台固有缺口不得通过降低门禁掩盖。
 - 单元测试外置为 `#[cfg(test)] #[path = "X_yyy_tests.rs"] mod yyy_tests;`。多份测试共享 helper 放 `<mod>_tests_common.rs`，在主模块顶层挂载，不嵌套 `mod tests {}` 后误用相对 `#[path]`。
@@ -13,7 +14,7 @@
 ## 覆盖率处理
 
 - tracing fixture 通过 ctor 安装全局 subscriber，只开启 `tidymedia*` target，让宏字段在覆盖运行中真实求值。新增集成测试根必须挂载。
-- 定位 miss：子行 region 用复用 profdata 的 `llvm-cov report --text`；branch 查 BRDA 未执行记录；function 用 lcov FNDA，跨 instance 全零才视为真 miss。多实例缺口不是排除理由。
+- 定位 miss：子行 region 用复用 profdata 的 `llvm-cov report --text`；branch 查 BRDA 未执行记录；function 用 lcov FNDA，跨 instance 全零才视为真 miss。多实例缺口不是排除理由。profraw 由门禁用后即删，事后凭据只剩 `target/llvm-cov-target/*.profdata` 与 `target/coverage.lcov`。
 - 定长转换、整数上限等结构不可达的 `?` 改为无 Err 分支的 map、unwrap_or 或索引 helper；能由 helper 直接返回最终 Result 时，不在 caller 留下不可达 `?`。
 - 拆分联合 assert，并先计算 panic 文案中的表达式，避免失败路径产生未覆盖子表达式。
 - 难触发的 Err arm 优先使用 fn pointer 或 `#[cfg(test)]` shim 注入，不为覆盖率改变生产语义。
@@ -27,7 +28,7 @@
 ## Fixture 与 Fake
 
 - `tests/data/` 的 fixture 由 `bun tests/fixtures/gen.ts` 生成（需要 exiftool 与 ffmpeg），产物入库，测试运行期不依赖这两个工具；doc/xls/ppt 由 `gen_cfb_fixtures` 测试生成。
-- `tests/data/` 的时间测试必须用 `filetime::set_file_mtime` 固定；共享 PNG helper 使用 `FIXED_MEDIA_MTIME`，不得依赖 checkout 后的 mtime。
+- `tests/data/` 的时间测试必须用 `std::fs::FileTimes` + `File::set_times` 固定 mtime（lib 侧走 `entities::test_common::set_mtime`，集成侧走各 root 的 `set_mtime` helper），不得依赖 checkout 后的 mtime；共享 PNG helper 使用 `FIXED_MEDIA_MTIME`。钉时间需以写权限打开文件，负 Unix 秒表示 1970 年前。
 - MP4 需要“无创建时间”语义时使用 MKV fixture；未显式写 creation_time 的 MP4 可能得到 1904 时间。
 - FakeBackend 默认 mtime 为 UNIX_EPOCH，会走 P4 并在默认时区落入 `1970/01`；测试需要其他桶时显式设置时间。
 - DCT pHash 使用至少 256×256 的随机噪声 JPEG；亮度变化断言 Hamming 在既定阈值内。纯色图和 gradient 不能替代随机噪声 fixture。
