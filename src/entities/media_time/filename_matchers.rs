@@ -21,22 +21,18 @@ fn plausible_filename_year(year: i32) -> bool {
     (MIN_FILENAME_YEAR..=Utc::now().year() + 1).contains(&year)
 }
 
-fn digit_span(bytes: &[u8], start: usize, end: usize) -> (usize, usize) {
-    let mut begin = start;
-    while begin > 0 && bytes[begin - 1].is_ascii_digit() {
-        begin -= 1;
-    }
+fn digits_end(bytes: &[u8], end: usize) -> usize {
     let mut finish = end;
     while finish < bytes.len() && bytes[finish].is_ascii_digit() {
         finish += 1;
     }
-    (begin, finish)
+    finish
 }
 
 fn is_millis_timestamp(stem: &str, start: usize, end: usize) -> bool {
-    let (begin, finish) = digit_span(stem.as_bytes(), start, end);
-    finish - begin == 13
-        && millis_str_to_candidate(&stem[begin..finish], Source::FilenameUnixMillis)
+    let finish = digits_end(stem.as_bytes(), end);
+    finish - start == 13
+        && millis_str_to_candidate(&stem[start..finish], Source::FilenameUnixMillis)
             .is_some_and(|c| plausible_filename_year(c.utc.year()))
 }
 
