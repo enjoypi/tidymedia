@@ -14,6 +14,7 @@ use crate::usecases::copy::Source;
 
 use super::candidates::CandidateIndex;
 use super::content_features::CandidateFeatures;
+use super::manifest::ScanCache;
 use crate::entities::memory::Budget;
 use crate::usecases::image_input::DecodeCtx;
 
@@ -84,17 +85,21 @@ pub(crate) struct OutputLibrary {
 impl OutputLibrary {
     #[cfg(test)]
     pub(crate) fn from_source(output: &Source) -> Self {
-        Self::scan(output, Arc::new(KeepAll)).0
+        Self::scan(output, Arc::new(KeepAll), &ScanCache::off()).0
     }
 
-    pub(crate) fn scan(output: &Source, admission: Arc<dyn Admission>) -> (Self, bool) {
+    pub(crate) fn scan(
+        output: &Source,
+        admission: Arc<dyn Admission>,
+        cache: &ScanCache,
+    ) -> (Self, bool) {
         let mut scanner = Index::new().with_admission(Arc::clone(&admission));
         let (loc, backend) = output;
         let entries = if backend
             .metadata(loc)
             .is_ok_and(|m| m.kind == EntryKind::Dir)
         {
-            let mut stream = backend.walk(loc);
+            let mut stream = cache.entries(loc, backend);
             scanner.scan_entries_from(loc, &mut stream, &[])
         } else {
             Vec::new()

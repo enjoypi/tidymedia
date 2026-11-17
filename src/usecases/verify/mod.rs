@@ -40,6 +40,7 @@ mod evaluate;
 pub(crate) mod exif_tsv;
 pub(crate) mod filename_hint;
 mod grouped;
+mod manifest;
 pub(crate) mod output_library;
 pub(crate) mod phash;
 pub(crate) mod report;
@@ -110,12 +111,14 @@ fn single_pass(
     job: &VerifyJob<'_>,
     ledger: &'static Ledger,
 ) -> Option<(file_index::Index, OutputLibrary)> {
+    let cache = manifest::ScanCache::off();
     let source = scan_sources(
         job,
         Arc::new(Charging {
             ledger,
             cost: source_cost(),
         }),
+        &cache,
     );
     if source.overflowed() {
         return None;
@@ -127,6 +130,7 @@ fn single_pass(
             ledger,
             cost: output_cost(),
         }),
+        &cache,
     );
     log_stage("output_walk", output_start);
     (!overflowed).then_some((source, out))
@@ -164,15 +168,17 @@ fn evaluate_all(
 fn scan_sources(
     job: &VerifyJob<'_>,
     admission: Arc<dyn file_index::Admission>,
+    cache: &manifest::ScanCache,
 ) -> file_index::Index {
     let walk_start = Instant::now();
     let skip_ext = super::copy::source_skip_extensions(job.include_non_media, false);
     let mut index = file_index::Index::new().with_admission(admission);
     let mut batches: Vec<(Arc<dyn Backend>, Vec<Location>)> = Vec::new();
     for (loc, backend) in job.sources {
+        let mut stream = cache.entries(loc, backend);
         batches.push((
             Arc::clone(backend),
-            index.collect_locations_skipping(loc, backend, skip_ext),
+            index.collect_locations_from(loc, &mut stream, skip_ext),
         ));
     }
     log_stage("source_walk", walk_start);

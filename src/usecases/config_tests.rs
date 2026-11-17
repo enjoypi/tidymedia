@@ -37,6 +37,7 @@ fn config_defaults_match_historical_constants() {
     assert_eq!(c.backend.ocr.max_image_bytes, 50 * 1024 * 1024);
     assert_eq!(c.verify.max_image_bytes, 50 * 1024 * 1024);
     assert_eq!(c.verify.max_tsv_bytes, 64 * 1024 * 1024);
+    assert_eq!(c.verify.manifest_min_entries, 10_000);
     assert_eq!(c.backend.classify.embed_model_path, "");
     assert_eq!(c.backend.classify.tokenizer_path, "");
     assert!(c.backend.classify.categories.is_empty());

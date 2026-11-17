@@ -166,16 +166,6 @@ impl Index {
             .insert(key);
     }
 
-    pub fn collect_locations_skipping(
-        &mut self,
-        root: &Location,
-        backend: &Arc<dyn Backend>,
-        skip_ext: &[String],
-    ) -> Vec<Location> {
-        let mut stream = backend.walk(root);
-        self.collect_locations_from(root, &mut stream, skip_ext)
-    }
-
     pub fn collect_locations_from(
         &mut self,
         root: &Location,

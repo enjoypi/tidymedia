@@ -88,6 +88,7 @@
 - 单个请求超过额度返回 `TooLarge`，按“跳过并报告”处理：verify 记 `too_large`，move-text-shot 记 `skipped_too_large`；不得静默降级，也不得独占执行。
 - verify 不保留全分辨率旋转副本：pHash 与 512 归一化图在 `RotatedView` 上计算，与实体旋转逐字节等价；修改时保持 `rotated_view_tests` 与旧实现对照测试通过。
 - 新增会放大内存的配置项必须在 `config_sanitize_memory.rs` 加上限。
+- verify 分组模式的重复遍历经 `verify::manifest` 落盘清单回放：录制点是 `plan_groups` 首趟 tally（唯一完整枚举），`single_pass` 与 copy/find 不录制。清单只存过滤前的 `path+size`，常驻内存与 `spill` 的 64KiB 缓冲同口径不计入账本；条目数低于 `verify.manifest_min_entries` 或写盘失败即回退真实遍历。运行期间目录被并发修改时，重放按清单尝试打开、失败计入 `skipped_unreadable`（不再表现为漏计）。
 - 常驻结构经 `Index::with_admission` 记账：常规先用 `Charging` 单轮扫描，溢出后 copy/find/verify 用 `retained_plan::plan_groups` 分组（大小桶 → 精确大小 → 文件头指纹 → 路径分块），来源用 `plan.filter`，输出库用 `plan.output_filter`。分组模式下输出索引非权威；仅 dry-run 经 `sharing_names` 跨组保留目标名，并结转分块键的预演条目。新增按文件数增长的结构须计入记账成本。
 - 随文件数增长的报告列表用 `spill::Listed`：分组时每组排序写入临时文件，输出时按 `SpillKey` 归并；遍历只用 `for_each`，不要依赖 `len`/索引。
 - 分组循环与汇总写出用 `try_for_each`/`and_then` 链传播错误，避免在泛型或批量代码里留下测试打不到的 `?` 分支。

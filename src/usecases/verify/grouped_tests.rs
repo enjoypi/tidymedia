@@ -8,6 +8,7 @@ use crate::adapters::backend::local::LocalBackend;
 use crate::entities::backend::Backend;
 use crate::entities::uri::Location;
 use crate::usecases::memory::with_retained;
+use crate::usecases::verify::manifest::with_manifest_min_entries;
 use crate::usecases::verify::summary::format_summary;
 use crate::usecases::verify::{DEFAULT_PHASH_MAX, VerifyReport, verify};
 
@@ -134,4 +135,48 @@ fn grouped_verify_tolerates_missing_output_library() {
     let grouped = run(16_000, src.path(), &missing);
     assert!(grouped.entries.is_spilled());
     assert_eq!(json(&grouped), json(&single));
+}
+
+#[test]
+fn cached_grouping_matches_single_pass_report_and_summary() {
+    let src = tempdir().unwrap();
+    let out = tempdir().unwrap();
+    seed(src.path(), out.path());
+    let single = run(1 << 30, src.path(), out.path());
+    let cached = with_manifest_min_entries(1, || run(16_000, src.path(), out.path()));
+    assert!(cached.entries.is_spilled());
+    assert_eq!(cached.scanned, single.scanned);
+    assert_eq!(cached.compared, single.compared);
+    assert_eq!(json(&cached), json(&single));
+    assert_eq!(format_summary(&cached), format_summary(&single));
+}
+
+#[test]
+fn cached_identical_flood_matches_single_pass() {
+    let src = tempdir().unwrap();
+    let out = tempdir().unwrap();
+    for i in 0..6 {
+        fs::copy(
+            "tests/data/sample-with-exif.jpg",
+            src.path().join(format!("{i}.jpg")),
+        )
+        .unwrap();
+    }
+    fs::copy("tests/data/sample-with-exif.jpg", out.path().join("0.jpg")).unwrap();
+    let single = run(1 << 30, src.path(), out.path());
+    let cached = with_manifest_min_entries(1, || run(12_000, src.path(), out.path()));
+    assert!(cached.entries.is_spilled());
+    assert_eq!(json(&cached), json(&single));
+}
+
+#[test]
+fn cached_grouping_tolerates_missing_output_library() {
+    let src = tempdir().unwrap();
+    let out = tempdir().unwrap();
+    seed(src.path(), out.path());
+    let missing = out.path().join("missing");
+    let single = run(1 << 30, src.path(), &missing);
+    let cached = with_manifest_min_entries(1, || run(16_000, src.path(), &missing));
+    assert!(cached.entries.is_spilled());
+    assert_eq!(json(&cached), json(&single));
 }

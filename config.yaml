@@ -20,6 +20,8 @@ verify:
   max_image_bytes: ${TIDYMEDIA_VERIFY_MAX_BYTES:-52428800}
   # --exif-tsv 读入上限，超过则告警并关闭交叉核对；最大 256 MiB
   max_tsv_bytes: ${TIDYMEDIA_VERIFY_MAX_TSV_BYTES:-67108864}
+  # 分组模式下目录清单落盘复用的最小条目数；0 为无条件启用，极大值为关闭
+  manifest_min_entries: ${TIDYMEDIA_VERIFY_MANIFEST_MIN_ENTRIES:-10000}
 # 进程私有内存上限账本：固定开销之外的余额用于索引等常驻结构，不可行时回退默认
 memory:
   limit_bytes: ${TIDYMEDIA_MEMORY_LIMIT_BYTES:-2147483648}

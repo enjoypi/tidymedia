@@ -29,6 +29,7 @@ export const COV_NONBUSINESS = [
   "src/frameworks/detector.rs",
   "src/usecases/image_input_io.rs",
   "src/usecases/verify/content_diff_io.rs",
+  "src/usecases/verify/manifest_io.rs",
   "src/usecases/verify/verify_io.rs",
 ];
 

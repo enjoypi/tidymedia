@@ -6,6 +6,7 @@ use tracing::info;
 use super::candidates::variant_key;
 use super::content_diff::basename;
 use super::exif_tsv::ExifRow;
+use super::manifest::ScanCache;
 use super::output_library::OutputLibrary;
 use super::report::VerifyReport;
 use super::{VerifyJob, evaluate_all, fold_evaluated, scan_sources};
@@ -55,20 +56,23 @@ impl Admission for OutputFilter {
 fn walk(
     job: &VerifyJob<'_>,
     make: &dyn Fn(EntryCost) -> Arc<dyn Admission>,
+    cache: &ScanCache,
 ) -> crate::entities::file_index::VisitStats {
     let mut sources = Index::new().with_admission(make(source_cost()));
     let skip_ext = crate::usecases::copy::source_skip_extensions(job.include_non_media, false);
     for (loc, backend) in job.sources {
-        sources.visit_location_skipping(loc, backend, skip_ext);
+        let mut stream = cache.entries(loc, backend);
+        sources.visit_location_from(loc, backend, &mut stream, skip_ext);
     }
     let (loc, backend) = job.output;
     if backend
         .metadata(loc)
         .is_ok_and(|m| m.kind == EntryKind::Dir)
     {
+        let mut stream = cache.entries(loc, backend);
         Index::new()
             .with_admission(make(output_cost()))
-            .visit_location(loc, backend);
+            .visit_location_from(loc, backend, &mut stream, &[]);
     }
     sources.stats()
 }
@@ -85,7 +89,9 @@ pub(super) fn run(
         base: 0,
         path_copies: 0,
     };
-    let planned = plan_groups(capacity, names, &|make| walk(job, make)).map_err(memory_error)?;
+    let cache = ScanCache::on();
+    let planned =
+        plan_groups(capacity, names, &|make| walk(job, make, &cache)).map_err(memory_error)?;
     info!(
         feature = FEATURE_VERIFY,
         operation = "plan_groups",
@@ -97,7 +103,7 @@ pub(super) fn run(
     let mut spill = Spill::default();
     (0..planned.plan.groups)
         .try_for_each(|group| {
-            let source = scan_sources(job, planned.plan.filter(group));
+            let source = scan_sources(job, planned.plan.filter(group), &cache);
             report.scanned += source.len()
                 + usize::try_from(source.stats().skipped_unreadable).unwrap_or(usize::MAX);
             let names = source
@@ -110,6 +116,7 @@ pub(super) fn run(
                     group: planned.plan.output_filter(group),
                     names,
                 }),
+                &cache,
             );
             let evaluated = evaluate_all(job, source, &out, tsv);
             spill.push_run(&fold_evaluated(report, evaluated, tsv_provided))

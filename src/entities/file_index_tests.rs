@@ -388,7 +388,7 @@ fn touched_count_equals_indexed_plus_all_skip_categories() {
 }
 
 #[test]
-fn collect_locations_skipping_defers_open_until_open_locations() {
+fn collect_locations_from_defers_open_until_open_locations() {
     use camino::Utf8PathBuf;
 
     use super::super::uri::Location;
@@ -400,7 +400,8 @@ fn collect_locations_skipping_defers_open_until_open_locations() {
     let backend = LocalBackend::arc();
     let root = Location::Local(Utf8PathBuf::from(dir.path().to_str().unwrap()));
     let mut index = Index::new();
-    let locs = index.collect_locations_skipping(&root, &backend, &["txt".to_owned()]);
+    let mut stream = backend.walk(&root);
+    let locs = index.collect_locations_from(&root, &mut stream, &["txt".to_owned()]);
     assert_eq!(locs.len(), 1);
     assert_eq!(index.len(), 0);
     index.open_locations(&locs, &backend);

@@ -35,6 +35,7 @@ impl Default for CopyConfig {
 pub struct VerifyConfig {
     pub max_image_bytes: u64,
     pub max_tsv_bytes: u64,
+    pub manifest_min_entries: u64,
 }
 
 impl Default for VerifyConfig {
@@ -42,6 +43,7 @@ impl Default for VerifyConfig {
         Self {
             max_image_bytes: 50 * 1024 * 1024,
             max_tsv_bytes: 64 * 1024 * 1024,
+            manifest_min_entries: 10_000,
         }
     }
 }
