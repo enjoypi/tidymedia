@@ -4,6 +4,7 @@ use std::path::Path;
 use camino::Utf8PathBuf;
 use tempfile::tempdir;
 
+use super::escape_py_string;
 use super::find_duplicates;
 use crate::adapters::backend::local::LocalBackend;
 use crate::entities::uri::Location;
@@ -35,7 +36,10 @@ fn run(capacity: u64, secure: bool) -> (FindReport, String) {
     let root = dir.path().to_str().unwrap().to_owned();
     (
         report,
-        String::from_utf8(script).unwrap().replace(&root, ""),
+        String::from_utf8(script)
+            .unwrap()
+            .replace(&escape_py_string(&root), "")
+            .replace(&root, ""),
     )
 }
 
