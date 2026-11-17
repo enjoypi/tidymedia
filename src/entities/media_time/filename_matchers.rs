@@ -1,9 +1,11 @@
 // 文件名匹配器集合：各 `try_*` 按前缀/形状解析出 P2 候选。
 // 与 `parse_filename`（入口编排）分离，纯函数可独立单测。
 
+use chrono::Datelike;
 use chrono::FixedOffset;
 use chrono::NaiveDate;
 use chrono::NaiveDateTime;
+use chrono::Utc;
 
 use super::{
     AT_DOTTED_LEN, CAMERA_PREFIX, MACOS_SCREENSHOT_PREFIX, MMEXPORT_PREFIX, PHONE_PREFIX,
@@ -12,6 +14,31 @@ use super::{
 };
 use crate::entities::media_time::candidate::Candidate;
 use crate::entities::media_time::priority::Source;
+
+const MIN_FILENAME_YEAR: i32 = 1990;
+
+fn plausible_filename_year(year: i32) -> bool {
+    (MIN_FILENAME_YEAR..=Utc::now().year() + 1).contains(&year)
+}
+
+fn digit_span(bytes: &[u8], start: usize, end: usize) -> (usize, usize) {
+    let mut begin = start;
+    while begin > 0 && bytes[begin - 1].is_ascii_digit() {
+        begin -= 1;
+    }
+    let mut finish = end;
+    while finish < bytes.len() && bytes[finish].is_ascii_digit() {
+        finish += 1;
+    }
+    (begin, finish)
+}
+
+fn is_millis_timestamp(stem: &str, start: usize, end: usize) -> bool {
+    let (begin, finish) = digit_span(stem.as_bytes(), start, end);
+    finish - begin == 13
+        && millis_str_to_candidate(&stem[begin..finish], Source::FilenameUnixMillis)
+            .is_some_and(|c| plausible_filename_year(c.utc.year()))
+}
 
 /// 宽松 `YYYYMMDD`：stem 开头或紧跟 `-` / `_` / 空格 之后的 8 位合法日期。
 /// 仅日期粒度（时间 00:00:00），比 [`try_bare_yyyymmdd`] 宽松（后者要求严格
@@ -33,10 +60,16 @@ pub(super) fn try_loose_yyyymmdd(stem: &str, default_offset: FixedOffset) -> Opt
         if !window.iter().all(u8::is_ascii_digit) {
             continue;
         }
+        if is_millis_timestamp(stem, start, end) {
+            continue;
+        }
         // 全 ASCII 数字 → str 切片落在 char 边界
         let Ok(date) = NaiveDate::parse_from_str(&stem[start..end], "%Y%m%d") else {
             continue;
         };
+        if !plausible_filename_year(date.year()) {
+            continue;
+        }
         let naive = date
             .and_hms_opt(0, 0, 0)
             .expect("internal: 00:00:00 is always a valid time-of-day");

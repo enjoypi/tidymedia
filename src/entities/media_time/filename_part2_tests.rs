@@ -139,6 +139,8 @@ fn whatsapp_east8_offset_applied() {
 // 「DSC_/PXL_ 严格模板坏掉但 stem 含合法 8 位日期」原来返 None，现兜底命中为日期 candidate
 #[case::dsc_bad_template("DSC_202405011_143000.jpg", epoch("2024-05-01T00:00:00Z"))]
 #[case::pxl_bad_time("PXL_20230615_993045123.jpg", epoch("2023-06-15T00:00:00Z"))]
+// 13 位数字串但毫秒换算落在合理年份之外 → 仍按 8 位日期匹配
+#[case::digits_not_millis("photo_2024050112345.jpg", epoch("2024-05-01T00:00:00Z"))]
 fn loose_yyyymmdd_parsed(#[case] name: &str, #[case] expected_ts: i64) {
     let c = parse_filename(name, utc_offset()).unwrap();
     assert_eq!(c.source, Source::FilenameBareYyyymmdd);
@@ -161,6 +163,12 @@ fn loose_yyyymmdd_parsed(#[case] name: &str, #[case] expected_ts: i64) {
 #[case::non_digit_after_anchor("ab-2006abcd.jpg")]
 // 无前缀且首字符非数字
 #[case::no_anchor("hello.jpg")]
+// 13 位毫秒时间戳（微信 wx_camera_）的前 8 位不是日期
+#[case::wx_camera_millis("wx_camera_1775012894527.jpg")]
+// 早于 1990 的伪日期
+#[case::before_1990("photo_19891231.jpg")]
+// 超过当前年份 +1 的伪日期
+#[case::far_future("photo_20990101.jpg")]
 fn loose_yyyymmdd_rejects(#[case] name: &str) {
     assert!(parse_filename(name, utc_offset()).is_none());
 }
