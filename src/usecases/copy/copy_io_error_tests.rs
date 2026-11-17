@@ -9,19 +9,37 @@ use super::tests_common::*;
 use super::*;
 use crate::adapters::backend::fake::FakeBackend;
 use crate::entities::backend::{
-    Backend, Entry, MediaReader, MediaWriter, Metadata, is_output_write_denied,
+    Backend, Entry, MediaReader, MediaWriter, Metadata, is_output_write_denied, is_partial_move,
+    partial_move_error,
 };
 use crate::entities::test_common as tc;
 use crate::entities::uri::Location;
 
 struct RenameDeniedBackend {
     inner: FakeBackend,
+    faults: std::sync::Mutex<Option<std::collections::VecDeque<io::Error>>>,
 }
 
 impl RenameDeniedBackend {
     fn new() -> Self {
         Self {
             inner: FakeBackend::new("local"),
+            faults: std::sync::Mutex::new(None),
+        }
+    }
+
+    fn failing_then_delegating(errors: Vec<io::Error>) -> Self {
+        Self {
+            inner: FakeBackend::new("local"),
+            faults: std::sync::Mutex::new(Some(errors.into())),
+        }
+    }
+
+    fn next_fault(&self) -> Option<io::Error> {
+        let mut guard = self.faults.lock().expect("rename fault queue");
+        match guard.as_mut() {
+            Some(queue) => queue.pop_front(),
+            None => Some(io::Error::from(io::ErrorKind::PermissionDenied)),
         }
     }
 }
@@ -74,8 +92,11 @@ impl Backend for RenameDeniedBackend {
         true
     }
 
-    fn rename(&self, _from: &Location, _to: &Location, _mkparents: bool) -> io::Result<()> {
-        Err(io::Error::from(io::ErrorKind::PermissionDenied))
+    fn rename(&self, from: &Location, to: &Location, mkparents: bool) -> io::Result<()> {
+        match self.next_fault() {
+            Some(err) => Err(err),
+            None => self.inner.rename(from, to, mkparents),
+        }
     }
 }
 
@@ -375,4 +396,72 @@ fn copy_rename_source_permission_failure_counts_per_file_without_abort() {
         "source rename failure must not abort remaining items: {:?}",
         report.errors
     );
+}
+
+#[test]
+fn do_copy_retries_native_rename_after_target_appears() {
+    let be = Arc::new(RenameDeniedBackend::failing_then_delegating(vec![
+        io::Error::from(io::ErrorKind::AlreadyExists),
+    ]));
+    let src = Location::Local(Utf8PathBuf::from("/src/photo.png"));
+    be.inner.add_file(src.clone(), b"payload".to_vec());
+    let out = Location::Local(Utf8PathBuf::from("/out"));
+    be.inner.add_dir(out.clone());
+    let backend: Arc<dyn Backend> = be.clone();
+    let mut info = Info::open(&src, Arc::clone(&backend)).unwrap();
+    info.set_exif(crate::entities::exif::Exif::with_mime("image/png"));
+    let idx = crate::entities::file_index::Index::new();
+    let moved = do_copy(
+        &info,
+        &out,
+        &backend,
+        &idx,
+        &CopyOpts {
+            dry_run: false,
+            remove: true,
+            include_non_media: false,
+            doc_only: false,
+            template: DEFAULT_TMPL,
+        },
+    )
+    .unwrap();
+    assert!(moved, "重命名竞态后应重试成功");
+    assert_eq!(idx.len(), 1);
+    assert!(be.inner.read_bytes(&src).is_none(), "成功后源文件不应还在");
+}
+
+#[test]
+fn do_copy_indexes_target_when_native_rename_half_moves() {
+    let be = Arc::new(RenameDeniedBackend::failing_then_delegating(vec![
+        partial_move_error(
+            io::ErrorKind::Other,
+            "copied but cannot remove source".to_owned(),
+        ),
+    ]));
+    let src = Location::Local(Utf8PathBuf::from("/src/photo.png"));
+    be.inner.add_file(src.clone(), b"payload".to_vec());
+    let out = Location::Local(Utf8PathBuf::from("/out"));
+    be.inner.add_dir(out.clone());
+    let backend: Arc<dyn Backend> = be.clone();
+    let mut info = Info::open(&src, Arc::clone(&backend)).unwrap();
+    info.set_exif(crate::entities::exif::Exif::with_mime("image/png"));
+    let idx = crate::entities::file_index::Index::new();
+    let err = do_copy(
+        &info,
+        &out,
+        &backend,
+        &idx,
+        &CopyOpts {
+            dry_run: false,
+            remove: true,
+            include_non_media: false,
+            doc_only: false,
+            template: DEFAULT_TMPL,
+        },
+    )
+    .unwrap_err();
+    let crate::entities::common::Error::Io(io_err) = err;
+    assert!(is_partial_move(&io_err), "半态必须原样上抛: {io_err}");
+    assert_eq!(idx.len(), 1, "半态必须记入目标，避免重跑再复制致源丢失");
+    assert!(be.inner.read_bytes(&src).is_some(), "半态不得删源");
 }
