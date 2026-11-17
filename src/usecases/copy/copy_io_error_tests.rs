@@ -465,3 +465,27 @@ fn do_copy_indexes_target_when_native_rename_half_moves() {
     assert_eq!(idx.len(), 1, "半态必须记入目标，避免重跑再复制致源丢失");
     assert!(be.inner.read_bytes(&src).is_some(), "半态不得删源");
 }
+
+#[test]
+fn do_copy_propagates_exists_error_from_target_probe() {
+    use crate::adapters::backend::fake::{FakeBackend, Op};
+    use std::io::ErrorKind;
+
+    let be = Arc::new(FakeBackend::new("local"));
+    let src = Location::Local(Utf8PathBuf::from("/src/photo.png"));
+    let target = Location::Local(Utf8PathBuf::from("/out/1970/01/photo.png"));
+    be.add_file(src.clone(), b"payload".to_vec());
+    let backend: Arc<dyn Backend> = be.clone();
+    let mut info = Info::open(&src, Arc::clone(&backend)).unwrap();
+    info.set_exif(crate::entities::exif::Exif::with_mime("image/png"));
+    be.inject_error(target, Op::Exists, ErrorKind::PermissionDenied);
+
+    let idx = crate::entities::file_index::Index::new();
+    let out = Location::Local(Utf8PathBuf::from("/out"));
+    let err = do_copy(&info, &out, &backend, &idx, &default_opts(DEFAULT_TMPL)).unwrap_err();
+
+    let crate::entities::common::Error::Io(io_err) = err;
+    assert_eq!(io_err.kind(), ErrorKind::PermissionDenied);
+    assert_eq!(idx.len(), 0, "探测失败不得预占目标");
+    assert!(be.read_bytes(&src).is_some(), "探测失败不得动源");
+}
