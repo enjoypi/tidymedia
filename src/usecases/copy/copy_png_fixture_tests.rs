@@ -10,7 +10,7 @@ pub(super) fn write_unique_png(dir: &Path, name: &str, unique: u64) -> PathBuf {
     bytes.resize(256, 0);
     let p = dir.join(name);
     fs::write(&p, &bytes).unwrap();
-    let ts = filetime::FileTime::from_unix_time(crate::entities::test_common::FIXED_MEDIA_MTIME, 0);
-    filetime::set_file_mtime(&p, ts).unwrap();
+    crate::entities::test_common::set_mtime(&p, crate::entities::test_common::FIXED_MEDIA_MTIME)
+        .unwrap();
     p
 }

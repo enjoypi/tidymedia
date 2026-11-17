@@ -16,8 +16,7 @@ use super::{DATA_DIR, FakeBackendFactory, local, smb_loc};
 
 // 注入 mtime = 2024-01-01 00:00:00 UTC → +8 时区落 2024/01 桶。
 fn fix_mtime(path: &std::path::Path) {
-    let mtime = filetime::FileTime::from_unix_time(1_704_067_200, 0);
-    filetime::set_file_mtime(path, mtime).expect("set mtime");
+    super::set_mtime(path, 1_704_067_200);
 }
 
 // 跨 backend move：目标 OpenWrite Err → stream_copy 失败，src 必须保留。

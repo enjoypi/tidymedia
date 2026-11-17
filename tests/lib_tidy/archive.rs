@@ -197,8 +197,7 @@ fn tidy_with_copy_local_source_to_smb_output() {
     let src_file = src_dir.path().join("photo.bin");
     std::fs::write(&src_file, b"LOCAL-PHOTO-BYTES").unwrap();
     // 固定 mtime 让归档桶稳定（2024-01-01 UTC → 默认时区 2024/01）。
-    let mtime = filetime::FileTime::from_unix_time(1_704_067_200, 0);
-    filetime::set_file_mtime(&src_file, mtime).unwrap();
+    super::set_mtime(&src_file, 1_704_067_200);
 
     let smb_root = smb_loc("Inbox");
     let fake_smb = Arc::new(FakeBackend::new("smb"));

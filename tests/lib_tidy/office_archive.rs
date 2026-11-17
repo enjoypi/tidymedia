@@ -65,8 +65,7 @@ fn copy_archives_txt_falls_back_to_mtime_or_filename() {
     let txt_path = src.path().join("notes.txt");
     std::fs::write(&txt_path, b"hello world\n").unwrap();
     // mtime 设固定值让归档桶可预测：2020-06-15 → 桶 2020/06
-    let target_mtime = filetime::FileTime::from_unix_time(1_592_179_200, 0);
-    filetime::set_file_mtime(&txt_path, target_mtime).unwrap();
+    super::set_mtime(&txt_path, 1_592_179_200);
 
     tidy(Commands::Copy {
         dry_run: false,

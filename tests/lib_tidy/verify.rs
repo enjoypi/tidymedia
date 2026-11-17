@@ -139,8 +139,7 @@ fn verify_marks_unresolved_decision_and_exits_non_zero() {
         b"\xFF\xD8\xFF\xE0\x00\x10JFIF\x00\x01\x02\x00\x00\x01\x00\x01\x00\x00",
     )
     .unwrap();
-    let pre_epoch = filetime::FileTime::from_unix_time(-2_082_844_800, 0);
-    filetime::set_file_mtime(&jpg, pre_epoch).expect("set pre-epoch mtime");
+    super::set_mtime(&jpg, -2_082_844_800);
     let out = tempdir().unwrap();
     let report_dir = tempdir().unwrap();
     let report_path = report_dir.path().join("verify.json");

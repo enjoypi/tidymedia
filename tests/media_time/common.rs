@@ -29,7 +29,12 @@ pub fn ts(secs: i64) -> DateTime<Utc> {
         .expect("epoch second is valid")
 }
 
-pub fn set_mtime(path: &Path, secs: i64) {
-    let ts = filetime::FileTime::from_unix_time(secs, 0);
-    filetime::set_file_mtime(path, ts).expect("can set mtime on test fixture");
+pub fn set_mtime(path: &Path, secs: u64) {
+    let when = std::time::UNIX_EPOCH + std::time::Duration::from_secs(secs);
+    std::fs::OpenOptions::new()
+        .write(true)
+        .open(path)
+        .expect("open test fixture for mtime")
+        .set_times(std::fs::FileTimes::new().set_modified(when))
+        .expect("can set mtime on test fixture");
 }

@@ -8,14 +8,23 @@ fn copy_png_to_errors_when_target_dir_missing() {
     assert_eq!(err.kind(), std::io::ErrorKind::NotFound);
 }
 
-// 拷贝完成后立即删 dst，再让 set_file_mtime 失败，覆盖 L43 ? Err。
-// 通过两步走：先成功 copy_png_to，再单独调用 set_file_mtime 验证它会失败。
+// 拷贝完成后立即删 dst，再让 set_mtime 失败，覆盖 L43 ? Err。
+// 通过两步走：先成功 copy_png_to，再单独调用 set_mtime 验证它会失败。
 // 这里直接构造：把 dst 立即转成一个不存在的同名文件路径。
 #[test]
 fn set_file_mtime_on_missing_path_fails() {
     let dir = tempfile::tempdir().unwrap();
     let missing = dir.path().join("never-created.png");
-    let ts = filetime::FileTime::from_unix_time(FIXED_MEDIA_MTIME, 0);
-    let err = filetime::set_file_mtime(&missing, ts).unwrap_err();
+    let err = set_mtime(&missing, FIXED_MEDIA_MTIME).unwrap_err();
     assert_eq!(err.kind(), std::io::ErrorKind::NotFound);
+}
+
+#[test]
+fn set_mtime_accepts_pre_epoch_timestamps() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("pre1970.bin");
+    std::fs::write(&path, b"hello").unwrap();
+    set_mtime(&path, -1_500_000_001).expect("pre-epoch mtime must be settable");
+    let want = std::time::UNIX_EPOCH - std::time::Duration::from_secs(1_500_000_001);
+    assert_eq!(path.metadata().unwrap().modified().unwrap(), want);
 }

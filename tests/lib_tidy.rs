@@ -10,6 +10,21 @@ fn local(p: &str) -> Location {
     Location::Local(Utf8PathBuf::from(p))
 }
 
+fn set_mtime(path: &std::path::Path, secs: i64) {
+    let span = std::time::Duration::from_secs(secs.unsigned_abs());
+    let when = if secs < 0 {
+        std::time::UNIX_EPOCH - span
+    } else {
+        std::time::UNIX_EPOCH + span
+    };
+    std::fs::OpenOptions::new()
+        .write(true)
+        .open(path)
+        .expect("open fixture for mtime")
+        .set_times(std::fs::FileTimes::new().set_modified(when))
+        .expect("set fixture mtime");
+}
+
 /// 集成测试用的 BackendFactory：local scheme 给真实 LocalBackend，其他 scheme
 /// 从注入 map 取 Arc<dyn Backend>（通常是 FakeBackend）；未注入 scheme 返 Unsupported。
 struct FakeBackendFactory {

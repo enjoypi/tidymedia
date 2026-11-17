@@ -33,9 +33,11 @@ mod test_parallel {
     fn dup_png(src: &Path, dst_dir: &Path, name: &str) -> std::path::PathBuf {
         let p = dst_dir.join(name);
         fs::copy(src, &p).unwrap();
-        let ts =
-            filetime::FileTime::from_unix_time(crate::entities::test_common::FIXED_MEDIA_MTIME, 0);
-        filetime::set_file_mtime(&p, ts).unwrap();
+        crate::entities::test_common::set_mtime(
+            &p,
+            crate::entities::test_common::FIXED_MEDIA_MTIME,
+        )
+        .unwrap();
         p
     }
 

@@ -163,8 +163,8 @@ fn verify_collects_conflicts_from_media_time_decision() {
     let src = tempfile::tempdir().unwrap();
     let dst = src.path().join("IMG_20100101_120000.jpg");
     std::fs::copy("tests/data/sample-with-exif.jpg", &dst).unwrap();
-    let ts = filetime::FileTime::from_unix_time(crate::entities::test_common::FIXED_MEDIA_MTIME, 0);
-    filetime::set_file_mtime(&dst, ts).unwrap();
+    crate::entities::test_common::set_mtime(&dst, crate::entities::test_common::FIXED_MEDIA_MTIME)
+        .unwrap();
     let out = tempfile::tempdir().unwrap();
     let be: std::sync::Arc<dyn crate::entities::backend::Backend> =
         crate::adapters::backend::local::LocalBackend::arc();

@@ -31,11 +31,7 @@ fn write_same_bucket_pair(dir: &Path) {
         data.push(tail);
         let p = dir.join(name);
         fs::write(&p, data).unwrap();
-        filetime::set_file_mtime(
-            &p,
-            filetime::FileTime::from_unix_time(tc::FIXED_MEDIA_MTIME, 0),
-        )
-        .unwrap();
+        tc::set_mtime(&p, tc::FIXED_MEDIA_MTIME).unwrap();
     }
 }
 

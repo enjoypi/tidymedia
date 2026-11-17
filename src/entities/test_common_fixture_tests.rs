@@ -83,19 +83,34 @@ pub const DATA_M2TS_CANON: &str = "tests/data/sample-canon-avchd.m2ts";
 /// 2024-01-01 12:00:00 UTC，用于固定 PNG 复制目标的 mtime
 pub const FIXED_MEDIA_MTIME: i64 = 1_704_110_400;
 
-// 测试 fixture helper：fs::copy + set_file_mtime 钉 FIXED_MEDIA_MTIME，保证时间相关测试可重复。
+// 测试 fixture helper：fs::copy + set_mtime 钉 FIXED_MEDIA_MTIME，保证时间相关测试可重复。
 pub fn copy_png_to(
     target_dir: &std::path::Path,
     name: &str,
 ) -> std::io::Result<std::path::PathBuf> {
     let dst = target_dir.join(name);
     std::fs::copy(DATA_DNS_BENCHMARK, &dst)?;
-    let ts = filetime::FileTime::from_unix_time(FIXED_MEDIA_MTIME, 0);
     // utimes 失败极罕见（owner 总能 utimes）；测试 helper 直接 expect 让覆盖率工具
     // 不再要求构造无法稳定触发的 fail 场景。
-    filetime::set_file_mtime(&dst, ts)
-        .expect("test helper: set_file_mtime on freshly copied file must succeed");
+    set_mtime(&dst, FIXED_MEDIA_MTIME)
+        .expect("test helper: set_mtime on freshly copied file must succeed");
     Ok(dst)
+}
+
+pub fn set_mtime(path: &std::path::Path, secs: i64) -> std::io::Result<()> {
+    std::fs::OpenOptions::new()
+        .write(true)
+        .open(path)?
+        .set_times(std::fs::FileTimes::new().set_modified(unix_time(secs)))
+}
+
+fn unix_time(secs: i64) -> std::time::SystemTime {
+    let span = std::time::Duration::from_secs(secs.unsigned_abs());
+    if secs < 0 {
+        std::time::UNIX_EPOCH - span
+    } else {
+        std::time::UNIX_EPOCH + span
+    }
 }
 
 #[derive(Debug)]

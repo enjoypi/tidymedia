@@ -125,8 +125,7 @@ fn move_local_fastpath_dst_mtime_matches_src() {
     let out_dir = tempdir().unwrap();
     let src_file = copy_fixture(src_dir.path(), "sample-with-offset.jpg");
 
-    let pinned = filetime::FileTime::from_unix_time(PINNED_SECS.cast_signed(), 0);
-    filetime::set_file_mtime(&src_file, pinned).expect("set src mtime");
+    super::set_mtime(&src_file, PINNED_SECS.cast_signed());
 
     let factory = FakeBackendFactory::new();
     tidy_with(

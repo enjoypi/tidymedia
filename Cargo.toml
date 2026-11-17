@@ -52,7 +52,6 @@ windows-sys = { version = "0.61", features = ["Win32_Storage_FileSystem"] }
 assert_cmd = "2"
 chrono = "0.4"
 ctor = "1.0.13"
-filetime = "0.2"
 hex = "0.4"
 image = { version = "0.25", default-features = false, features = ["default-formats"] }
 predicates = "3"

@@ -129,8 +129,7 @@ fn create_time_emits_warn_when_mtime_much_earlier_than_p0() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("conflict.bin");
     fs::write(&path, b"conflict-test-content").unwrap();
-    let ft = filetime::FileTime::from_unix_time(MTIME_EARLY, 0);
-    filetime::set_file_mtime(&path, ft).unwrap();
+    crate::entities::test_common::set_mtime(&path, MTIME_EARLY).unwrap();
 
     let mut info = super::Info::from(path.to_str().unwrap()).unwrap();
     info.set_exif(
@@ -197,8 +196,7 @@ fn create_time_no_warn_when_mtime_close_to_p0() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("noconflict.bin");
     fs::write(&path, b"no-conflict-content").unwrap();
-    let ft = filetime::FileTime::from_unix_time(MTIME_SECS, 0);
-    filetime::set_file_mtime(&path, ft).unwrap();
+    crate::entities::test_common::set_mtime(&path, MTIME_SECS).unwrap();
 
     let mut info = super::Info::from(path.to_str().unwrap()).unwrap();
     info.set_exif(

@@ -18,11 +18,7 @@ fn put(dir: &Path, name: &str, data: &[u8]) {
     let path = dir.join(name);
     fs::create_dir_all(path.parent().unwrap()).unwrap();
     fs::write(&path, data).unwrap();
-    filetime::set_file_mtime(
-        &path,
-        filetime::FileTime::from_unix_time(tc::FIXED_MEDIA_MTIME, 0),
-    )
-    .unwrap();
+    tc::set_mtime(&path, tc::FIXED_MEDIA_MTIME).unwrap();
 }
 
 fn seed(src: &Path, out: &Path) {

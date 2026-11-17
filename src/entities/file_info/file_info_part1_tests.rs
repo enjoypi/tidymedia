@@ -210,8 +210,7 @@ fn create_time_uses_modify_when_smaller_than_create() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("ct.bin");
     fs::write(&path, b"hello").unwrap();
-    let early = filetime::FileTime::from_unix_time(631_152_000, 0);
-    filetime::set_file_mtime(&path, early).unwrap();
+    crate::entities::test_common::set_mtime(&path, 631_152_000).unwrap();
     let info = Info::from(path.to_str().unwrap()).unwrap();
     let t = info.create_time(TEST_VALID_THRESHOLD_SECS, utc0());
     let secs = t.duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();

@@ -76,9 +76,9 @@ fn walk_finds_files_under_root() {
             Location::Smb { .. } => String::new(),
         })
         .collect();
-    assert!(names.contains(&"a.bin".to_string()));
-    assert!(names.contains(&"sub".to_string()));
-    assert!(names.contains(&"b.bin".to_string()));
+    assert!(names.iter().any(|n| n == "a.bin"));
+    assert!(names.iter().any(|n| n == "sub"));
+    assert!(names.iter().any(|n| n == "b.bin"));
 }
 
 #[test]

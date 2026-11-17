@@ -77,8 +77,7 @@ fn tidy_with_move_local_to_fake_smb_removes_src() {
     let src_file = src_dir.path().join("photo.bin");
     std::fs::write(&src_file, b"hello smb").unwrap();
     // 固定 mtime 让 create_time 桶稳定（2024-01-01 UTC）。
-    let mtime = filetime::FileTime::from_unix_time(1_704_067_200, 0);
-    filetime::set_file_mtime(&src_file, mtime).unwrap();
+    super::set_mtime(&src_file, 1_704_067_200);
 
     let smb_root = smb_loc("dst");
     let fake_smb = Arc::new(FakeBackend::new("smb"));
@@ -119,8 +118,7 @@ fn tidy_move_with_duplicate_removes_src_when_not_dry_run() {
     let payload = vec![0x77u8; 4096];
     let src_file = src_dir.path().join("photo2.bin");
     std::fs::write(&src_file, &payload).unwrap();
-    let mtime = filetime::FileTime::from_unix_time(1_704_067_200, 0);
-    filetime::set_file_mtime(&src_file, mtime).unwrap();
+    super::set_mtime(&src_file, 1_704_067_200);
     std::fs::write(out_dir.path().join("dup2.bin"), &payload).unwrap();
 
     tidy(Commands::Move {
@@ -150,8 +148,7 @@ fn tidy_move_dry_run_with_duplicate_skips_actual_remove() {
     let src_file = src_dir.path().join("photo.bin");
     std::fs::write(&src_file, &payload).unwrap();
     // 固定 mtime 让 create_time 桶稳定，与 lib_tidy 其他用例一致。
-    let mtime = filetime::FileTime::from_unix_time(1_704_067_200, 0);
-    filetime::set_file_mtime(&src_file, mtime).unwrap();
+    super::set_mtime(&src_file, 1_704_067_200);
     // 把同样内容放到 output 任意位置，让 output_index 扫描时挂上同 hash 文件。
     std::fs::write(out_dir.path().join("dup.bin"), &payload).unwrap();
 

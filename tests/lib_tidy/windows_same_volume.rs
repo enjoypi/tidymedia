@@ -5,7 +5,7 @@
 //! 都**不要管理员权限**，用户本地 Windows 机直接
 //! `cargo nextest run --release windows_same_volume` 可跑。
 //!
-//! 验证手段：用 `filetime::set_file_mtime` 把 src 钉到固定时间戳，move 后断言
+//! 验证手段：用 `set_mtime` 把 src 钉到固定时间戳，move 后断言
 //! dst mtime 不变 —— `stream_copy` 路径会让 dst mtime = now，rename 路径会保留 src 原
 //! mtime，是 fast-path 命中的强证据。
 //!
@@ -31,8 +31,7 @@ fn copy_fixture(dst: &Path) {
 }
 
 fn pin_mtime(path: &Path) {
-    let pinned = filetime::FileTime::from_unix_time(PINNED_SECS.cast_signed(), 0);
-    filetime::set_file_mtime(path, pinned).expect("set mtime");
+    super::set_mtime(path, PINNED_SECS.cast_signed());
 }
 
 fn read_secs(path: &Path) -> u64 {
