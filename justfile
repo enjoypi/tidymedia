@@ -1,12 +1,16 @@
 # tidymedia justfile - build / nextest / llvm-cov 统一入口
 #
-# 日常 build/test/lint/cov 使用 nightly + dev；Windows 的编译型命令经 tools/msvc-env.cmd 导入 MSVC 环境。
-# 普通 target/ 与 coverage 的 target/llvm-cov-target/ 保持隔离，各自增量复用。
+# rust-toolchain.toml 把 dev 工具链固定为 rolling nightly；fmt/check/lint/build/test/cov 显式 +nightly，
+# build-release 显式 +stable，发布产物与覆盖率插桩互不影响。
+# Windows 的编译型命令经 tools/msvc-env.cmd 导入 MSVC 环境。
+# 普通 target/ 与 coverage 的 target/llvm-cov-target/ 保持隔离，各自增量复用；
+# build/check/lint/test 共用同一 RUSTFLAGS，第三方依赖产物完全共享。
 #
 # 用法：
 #   just build            日常 debug 构建（nightly + dev）
-#   just build-release    发布/性能/真跑构建（release opt=3）
+#   just build-release    发布/性能/真跑构建（stable + release opt=3）
 #   just OPT=0 build-release  快速 release 编译验证
+#   just check            全目标类型检查（复用依赖产物）
 #   just test             nextest 全量（default features）
 #   just test xavc        nextest 按名字子串过滤
 #   just cov              覆盖率门禁（Windows/macOS 双平台权威）
@@ -38,11 +42,21 @@ build:
 
 [windows]
 build-release:
-    "{{ CMD }}" //c "call tools\msvc-env.cmd && set \"CARGO_PROFILE_RELEASE_OPT_LEVEL={{ OPT }}\" && cargo build --release --locked"
+    "{{ CMD }}" //c "call tools\msvc-env.cmd && set \"CARGO_PROFILE_RELEASE_OPT_LEVEL={{ OPT }}\" && cargo +stable build --release --locked"
 
 [unix]
 build-release:
-    CARGO_PROFILE_RELEASE_OPT_LEVEL={{ OPT }} cargo build --release --locked
+    CARGO_PROFILE_RELEASE_OPT_LEVEL={{ OPT }} cargo +stable build --release --locked
+
+# === 类型检查 ===
+# 与 lint/build/test 共用 RUSTFLAGS 与 dev profile，第三方依赖产物完全共享。
+[windows]
+check:
+    "{{ CMD }}" //c "call tools\msvc-env.cmd && cargo +nightly check --all-targets --locked"
+
+[unix]
+check:
+    cargo +nightly check --all-targets --locked
 
 # === 测试（nextest）===
 # just test            全量（lib + 集成，default features）
@@ -80,4 +94,4 @@ lint:
 
 # === 清理 ===
 clean:
-    cargo clean
+    cargo +nightly clean --locked

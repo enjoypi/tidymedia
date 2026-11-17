@@ -84,7 +84,7 @@ function main(): void {
   writeFileSync(data("photo-takeout.json"), TAKEOUT);
   for (const script of BUN_GENERATORS) run(["bun", resolve(SCRIPT_DIR, script)]);
   console.log(
-    "NOTE: regenerate doc/xls/ppt via: cargo test --release --test gen_cfb_fixtures && cp target/cfb-fixtures/sample-* tests/data/",
+    "NOTE: regenerate doc/xls/ppt via: just test gen_cfb_fixtures && cp target/cfb-fixtures/sample-* tests/data/",
   );
   console.log(`Generated ${readdirSync(DATA_DIR).length} files in ${DATA_DIR}`);
 }
