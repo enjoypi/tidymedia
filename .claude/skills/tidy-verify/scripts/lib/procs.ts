@@ -1,6 +1,15 @@
 /// <reference path="./bun.d.ts" />
 
 import { appendFileSync, existsSync, writeFileSync } from "node:fs";
+import { availableParallelism, cpus } from "node:os";
+
+export function cpuCount(): number {
+  try {
+    return availableParallelism();
+  } catch {
+    return Math.max(cpus().length, 1);
+  }
+}
 
 export function pickConcurrency(
   max: number,

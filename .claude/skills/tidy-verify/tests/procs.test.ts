@@ -3,9 +3,13 @@
 import { expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { isImageRunning, killTree, pickConcurrency, reapStale, recordPid, runPool } from "../scripts/lib/procs.ts";
+import { cpuCount, isImageRunning, killTree, pickConcurrency, reapStale, recordPid, runPool } from "../scripts/lib/procs.ts";
 
 const MB = 1024 * 1024;
+
+test("cpuCount 返回正整数", () => {
+  expect(cpuCount()).toBeGreaterThan(0);
+});
 
 test("pickConcurrency 同时受配置、CPU 与整任务预算约束", () => {
   expect(pickConcurrency(16, 10, 2048 * MB, 512 * MB, 128 * MB)).toBe(12);

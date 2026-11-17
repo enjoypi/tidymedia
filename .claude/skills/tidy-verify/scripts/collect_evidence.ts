@@ -3,14 +3,13 @@
 // Usage: bun collect_evidence.ts <verify.json> <src_root> [out.md]
 /// <reference path="./lib/bun.d.ts" />
 
-import { freemem } from "node:os";
 import { exiftoolBin, loadConfig, workPath } from "./lib/config.ts";
 import {
   collectCards,
   selectReviewEntries,
   type EvidenceEntry,
 } from "./lib/evidence.ts";
-import { pickConcurrency, spawnRunner } from "./lib/procs.ts";
+import { cpuCount, pickConcurrency, spawnRunner } from "./lib/procs.ts";
 
 async function main(args: string[]): Promise<number> {
   const [jsonPath, srcRoot, outArg] = args;
@@ -34,7 +33,13 @@ async function main(args: string[]): Promise<number> {
     return 0;
   }
 
-  const limit = pickConcurrency(cfg.exiftoolConcurrency, freemem(), cfg.exiftoolMemMb * 1024 * 1024);
+  const limit = pickConcurrency(
+    cfg.exiftoolConcurrency,
+    cpuCount(),
+    cfg.taskMemoryLimitMb * 1024 * 1024,
+    cfg.taskMemoryReserveMb * 1024 * 1024,
+    cfg.exiftoolMemMb * 1024 * 1024,
+  );
   const { cards, failures, warnings } = await collectCards(review, srcRoot, limit, (cmd) => spawnRunner([bin, ...cmd]));
   for (const w of warnings) {
     console.error(`exiftool 警告 path=${w.path} stderr=${w.err}`);

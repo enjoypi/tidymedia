@@ -1,7 +1,7 @@
 /// <reference path="./lib/bun.d.ts" />
 
 import { mkdirSync, statSync, writeFileSync } from "node:fs";
-import { availableParallelism, cpus, freemem } from "node:os";
+import { freemem } from "node:os";
 import { dirname } from "node:path";
 import { exiftoolBin, loadConfig, tidymediaBin, workPath } from "./lib/config.ts";
 import type { SkillConfig } from "./lib/config.ts";
@@ -14,19 +14,11 @@ import {
   spawnToFiles,
 } from "./lib/extract.ts";
 import type { FileStamp, Manifest } from "./lib/extract.ts";
-import { isImageRunning, killTree, pickConcurrency, reapStale, recordPid } from "./lib/procs.ts";
+import { cpuCount, isImageRunning, killTree, pickConcurrency, reapStale, recordPid } from "./lib/procs.ts";
 import { startVerify, verifyCommand, verifyExitCode } from "./lib/verify.ts";
 import type { RunningVerify } from "./lib/verify.ts";
 
 const MB = 1024 * 1024;
-
-function cpuCount(): number {
-  try {
-    return availableParallelism();
-  } catch {
-    return Math.max(cpus().length, 1);
-  }
-}
 
 function stampsOf(counts: Map<string, string[]>): Map<string, FileStamp> {
   const stamps = new Map<string, FileStamp>();
