@@ -11,11 +11,13 @@ use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use tracing::{debug, warn};
 
 use super::{Admit, DuplicateGroup, FEATURE_INDEX, Index};
-use crate::entities::backend::{Backend, EntryKind};
+use crate::entities::backend::{Backend, Entry as BackendEntry, EntryKind};
 use crate::entities::common;
 use crate::entities::file_info::Info;
 use crate::entities::threadpool::install_io;
 use crate::entities::uri::Location;
+
+pub type EntrySource<'a> = &'a mut dyn Iterator<Item = io::Result<BackendEntry>>;
 
 impl Index {
     pub fn exists(&self, src_file: &Info, secure: bool) -> io::Result<Option<Utf8PathBuf>> {
@@ -170,8 +172,20 @@ impl Index {
         backend: &Arc<dyn Backend>,
         skip_ext: &[String],
     ) -> Vec<Location> {
-        let entries = self.scan_entries(root, backend, skip_ext);
-        entries.into_iter().map(|entry| entry.location).collect()
+        let mut stream = backend.walk(root);
+        self.collect_locations_from(root, &mut stream, skip_ext)
+    }
+
+    pub fn collect_locations_from(
+        &mut self,
+        root: &Location,
+        source: EntrySource<'_>,
+        skip_ext: &[String],
+    ) -> Vec<Location> {
+        self.scan_entries_from(root, source, skip_ext)
+            .into_iter()
+            .map(|entry| entry.location)
+            .collect()
     }
 
     pub fn visit_location(&mut self, root: &Location, backend: &Arc<dyn Backend>) {
@@ -184,56 +198,36 @@ impl Index {
         backend: &Arc<dyn Backend>,
         skip_ext: &[String],
     ) {
-        let locs = self.collect_locations_skipping(root, backend, skip_ext);
-        self.open_locations(&locs, backend);
+        let mut stream = backend.walk(root);
+        self.visit_location_from(root, backend, &mut stream, skip_ext);
     }
 
-    pub fn scan_entries(
+    pub fn visit_location_from(
         &mut self,
         root: &Location,
         backend: &Arc<dyn Backend>,
+        source: EntrySource<'_>,
         skip_ext: &[String],
-    ) -> Vec<crate::entities::backend::Entry> {
+    ) {
+        let locs = self.collect_locations_from(root, source, skip_ext);
+        self.open_locations(&locs, backend);
+    }
+
+    pub fn scan_entries_from(
+        &mut self,
+        root: &Location,
+        source: EntrySource<'_>,
+        skip_ext: &[String],
+    ) -> Vec<BackendEntry> {
+        let shared = self
+            .admission
+            .as_ref()
+            .is_none_or(|a| a.counts_shared_stats());
         let mut entries = Vec::new();
-        for entry_res in backend.walk(root) {
-            let shared = self
-                .admission
-                .as_ref()
-                .is_none_or(|a| a.counts_shared_stats());
-            let entry = match entry_res {
-                Ok(e) => e,
-                Err(e) => {
-                    self.stats.walker_errors += u64::from(shared);
-                    let root_str = root.display();
-                    warn!(
-                        feature = FEATURE_INDEX,
-                        operation = "walk",
-                        result = "walker_error",
-                        root = %root_str,
-                        error = %e,
-                        "walker reported an error entry",
-                    );
-                    continue;
-                }
+        for entry_res in source {
+            let Some(entry) = self.accept_entry(root, entry_res, skip_ext, shared) else {
+                continue;
             };
-            if entry.kind != EntryKind::File {
-                continue;
-            }
-            if has_extension_in(&entry.location, skip_ext) {
-                self.stats.skipped_by_ext += u64::from(shared);
-                continue;
-            }
-            if entry.size == 0 {
-                self.stats.skipped_empty += u64::from(shared);
-                debug!(
-                    feature = FEATURE_INDEX,
-                    operation = "walk",
-                    result = "skipped_empty",
-                    location = %entry.location.display(),
-                    "empty file skipped",
-                );
-                continue;
-            }
             match self
                 .admission
                 .as_ref()
@@ -248,6 +242,50 @@ impl Index {
             }
         }
         entries
+    }
+
+    fn accept_entry(
+        &mut self,
+        root: &Location,
+        entry_res: io::Result<BackendEntry>,
+        skip_ext: &[String],
+        shared: bool,
+    ) -> Option<BackendEntry> {
+        let entry = match entry_res {
+            Ok(entry) => entry,
+            Err(e) => {
+                self.stats.walker_errors += u64::from(shared);
+                let root_str = root.display();
+                warn!(
+                    feature = FEATURE_INDEX,
+                    operation = "walk",
+                    result = "walker_error",
+                    root = %root_str,
+                    error = %e,
+                    "walker reported an error entry",
+                );
+                return None;
+            }
+        };
+        if entry.kind != EntryKind::File {
+            return None;
+        }
+        if has_extension_in(&entry.location, skip_ext) {
+            self.stats.skipped_by_ext += u64::from(shared);
+            return None;
+        }
+        if entry.size == 0 {
+            self.stats.skipped_empty += u64::from(shared);
+            debug!(
+                feature = FEATURE_INDEX,
+                operation = "walk",
+                result = "skipped_empty",
+                location = %entry.location.display(),
+                "empty file skipped",
+            );
+            return None;
+        }
+        Some(entry)
     }
 
     pub fn open_locations(&mut self, locs: &[Location], backend: &Arc<dyn Backend>) {

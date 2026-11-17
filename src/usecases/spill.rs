@@ -11,7 +11,7 @@ use serde::ser::{Error as _, SerializeSeq};
 use serde::{Serialize, Serializer};
 use tempfile::TempPath;
 
-const SPILL_BUFFER_BYTES: usize = 64 << 10;
+pub(crate) const SPILL_BUFFER_BYTES: usize = 64 << 10;
 
 pub trait SpillKey {
     fn spill_key(&self) -> String;
@@ -137,7 +137,7 @@ thread_local! {
     static SPILL_DIR: std::cell::RefCell<Option<PathBuf>> = const { std::cell::RefCell::new(None) };
 }
 
-fn spill_dir() -> PathBuf {
+pub(crate) fn spill_dir() -> PathBuf {
     #[cfg(test)]
     if let Some(dir) = SPILL_DIR.with_borrow(Clone::clone) {
         return dir;

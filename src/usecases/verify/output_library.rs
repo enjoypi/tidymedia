@@ -94,7 +94,8 @@ impl OutputLibrary {
             .metadata(loc)
             .is_ok_and(|m| m.kind == EntryKind::Dir)
         {
-            scanner.scan_entries(loc, backend, &[])
+            let mut stream = backend.walk(loc);
+            scanner.scan_entries_from(loc, &mut stream, &[])
         } else {
             Vec::new()
         };
