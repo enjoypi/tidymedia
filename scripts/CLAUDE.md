@@ -30,6 +30,7 @@ bun scripts/perf-dataset.ts <clone|photos|stress> --to <目录>
 - `perf-compare` 仅在两组分布不重叠时判改进或回归，其余判噪声；stdout 或报告计数不一致时非零退出。实测秒数只留在产物中，不写入测试、文档或阈值。
 - `perf-dataset` 生成不入库数据集：`clone` 克隆真实目录（`--mutate-tail` 让同名文件内容不同），`photos` 以 `tests/data` 为种子生成大量小文件，`stress` 生成大像素图片及输出库同名副本。
 - 修改参数或产物字段时同步脚本测试和本文件。
+- 默认值已按 D3 扫描确定：`memory.read_buffer_bytes` 64 KiB、I/O 线程 CPU×4。复核 16/64/256/1024 KiB 与 4/8/16/40/64 线程时 stdout 与报告计数一致，热缓存耗时差异在噪声带内（S2 上 4 线程仅调度波动，指令数相同），不改默认；冷缓存与 SMB 大文件需另测。
 
 ## 指标与分析
 
