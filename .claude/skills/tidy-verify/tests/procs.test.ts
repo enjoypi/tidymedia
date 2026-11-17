@@ -7,13 +7,16 @@ import { isImageRunning, killTree, pickConcurrency, reapStale, recordPid, runPoo
 
 const MB = 1024 * 1024;
 
-test("pickConcurrency 按空闲内存折算并以配置为上限", () => {
-  expect(pickConcurrency(8, 16000 * MB, 300 * MB)).toBe(8);
-  expect(pickConcurrency(8, 1300 * MB, 300 * MB)).toBe(4);
+test("pickConcurrency 同时受配置、CPU 与整任务预算约束", () => {
+  expect(pickConcurrency(16, 10, 2048 * MB, 512 * MB, 128 * MB)).toBe(12);
+  expect(pickConcurrency(16, 32, 2048 * MB, 512 * MB, 128 * MB)).toBe(12);
+  expect(pickConcurrency(4, 32, 2048 * MB, 512 * MB, 128 * MB)).toBe(4);
+  expect(pickConcurrency(16, 2, 2048 * MB, 512 * MB, 128 * MB)).toBe(4);
 });
 
-test("pickConcurrency 内存不足一个进程时仍保底 1", () => {
-  expect(pickConcurrency(8, 100 * MB, 300 * MB)).toBe(1);
+test("pickConcurrency 预算不足一个进程时仍保底 1", () => {
+  expect(pickConcurrency(16, 10, 600 * MB, 512 * MB, 128 * MB)).toBe(1);
+  expect(pickConcurrency(16, 10, 1024 * MB, 512 * MB, 0)).toBe(1);
 });
 
 function withDir(fn: (dir: string) => Promise<void>): Promise<void> {

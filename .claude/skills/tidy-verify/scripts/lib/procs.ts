@@ -2,8 +2,19 @@
 
 import { appendFileSync, existsSync, writeFileSync } from "node:fs";
 
-export function pickConcurrency(max: number, freeBytes: number, perProcBytes: number): number {
-  return Math.max(1, Math.min(max, Math.floor(freeBytes / perProcBytes)));
+export function pickConcurrency(
+  max: number,
+  cpu: number,
+  taskLimitBytes: number,
+  reserveBytes: number,
+  perProcBytes: number,
+): number {
+  if (perProcBytes <= 0) {
+    return 1;
+  }
+  const byBudget = Math.floor((taskLimitBytes - reserveBytes) / perProcBytes);
+  const byCpu = Math.max(cpu, 1) + 2;
+  return Math.max(1, Math.min(max, byCpu, byBudget));
 }
 
 export function recordPid(file: string, pid: number): void {

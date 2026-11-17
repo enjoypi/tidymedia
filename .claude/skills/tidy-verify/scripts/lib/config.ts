@@ -43,6 +43,10 @@ export interface SkillConfig {
   exiftoolTsvP: string;
   exiftoolConcurrency: number;
   exiftoolMemMb: number;
+  taskMemoryLimitMb: number;
+  taskMemoryReserveMb: number;
+  fastExtensions: string[];
+  incremental: boolean;
   exiftoolPids: string;
   mediaExtensions: string[];
 }
@@ -62,8 +66,12 @@ export async function loadConfig(
     exifTsv: raw.exif_tsv ?? "exif.tsv",
     verifyReport: raw.verify_report ?? "verify.json",
     exiftoolTsvP: (raw.exiftool_tsv_p ?? "").replaceAll("\\t", "\t"),
-    exiftoolConcurrency: Number(raw.exiftool_concurrency ?? "8"),
-    exiftoolMemMb: Number(raw.exiftool_mem_mb ?? "300"),
+    exiftoolConcurrency: Number(raw.exiftool_concurrency ?? "16"),
+    exiftoolMemMb: Number(raw.exiftool_mem_mb ?? "128"),
+    taskMemoryLimitMb: Number(raw.task_memory_limit_mb ?? "2048"),
+    taskMemoryReserveMb: Number(raw.task_memory_reserve_mb ?? "512"),
+    fastExtensions: splitList(raw.exiftool_fast_extensions ?? "jpg jpeg png heic heif"),
+    incremental: (raw.exiftool_incremental ?? "true") !== "false",
     exiftoolPids: raw.exiftool_pids ?? "exiftool-pids.txt",
     mediaExtensions: splitList(raw.media_extensions),
   };

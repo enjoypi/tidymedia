@@ -3,8 +3,17 @@ tidymedia_bin: target/release/tidymedia
 exiftool_bin: bin/exiftool/exiftool
 exif_tsv: exif.tsv
 verify_report: verify.json
+# exiftool 并发上限；实际并发 = min(此值, CPU+2, (整任务预算-预留)/单进程预算)
 exiftool_concurrency: 16
-exiftool_mem_mb: 300
+# 单个 exiftool 进程的内存预算（实测 44–90MB，取 128 留余量）
+exiftool_mem_mb: 128
+# 整个 tidy-verify 任务（含 bun、tidymedia 与全部 exiftool）的内存上限与预留
+task_memory_limit_mb: 2048
+task_memory_reserve_mb: 512
+# 允许加 -fast（只扫文件头）的扩展名；视频与 RAW 的元数据可能在尾部，不得加入
+exiftool_fast_extensions: jpg jpeg png heic heif
+# 同一 work_dir 内复核时只重抽 size/mtime/ctime 变化的文件
+exiftool_incremental: true
 # exiftool 交叉核对的扩展名白名单（空格分隔，忽略大小写）；留空表示处理全部文件。
 # 口径 = tidymedia 的 is_media（image/* 与 video/*，不含 image/fpx）：先取 MIME 表内
 # 的 image/video 扩展名，再补相机原始与容器别名等真实常见写法，宁可多列不可漏列。
@@ -15,7 +24,7 @@ media_extensions: >-
   dng cr2 cr3 crw nef nrw orf rw2 rwl pef ptx arw srf sr2 srx raf raw iiq 3fr fff
   srw kdc dcs dc2 mrw x3f
   mp4 m4v mov qt avi mkv webm flv wmv asf mpg mpeg mpe mts m2ts dv dif 3gp 3g2
-  3gpp vob ogv rm rmvb
+  3gpp vob ogv rm rmvb lrf
 exiftool_pids: exiftool-pids.txt
 exiftool_tsv_p: >-
   $Directory/$FileName\t$DateTimeOriginal\t$QuickTime:CreationDate\t$QuickTime:CreateDate\t$CreateDate\t$FileModifyDate\t$Make\t$Model

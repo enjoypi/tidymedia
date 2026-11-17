@@ -6,6 +6,7 @@ interface BunFile {
   text(): Promise<string>;
   arrayBuffer(): Promise<ArrayBuffer>;
   exists(): Promise<boolean>;
+  delete(): Promise<void>;
 }
 
 interface BunFileSink {
@@ -57,6 +58,7 @@ declare module "node:fs" {
   export function writeFileSync(path: string, data: string): void;
   export function existsSync(path: string): boolean;
   export function rmSync(path: string, opts?: { recursive?: boolean; force?: boolean }): void;
+  export function statSync(path: string): { size: number; mtimeMs: number; ctimeMs: number; isFile(): boolean };
 }
 
 declare module "node:path" {
@@ -66,6 +68,8 @@ declare module "node:path" {
 declare module "node:os" {
   export function tmpdir(): string;
   export function freemem(): number;
+  export function availableParallelism(): number;
+  export function cpus(): unknown[];
 }
 
 declare namespace process {

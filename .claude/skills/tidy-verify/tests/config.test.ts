@@ -14,7 +14,11 @@ const cfg: SkillConfig = {
   verifyReport: "verify.json",
   exiftoolTsvP: "a\tb",
   exiftoolConcurrency: 16,
-  exiftoolMemMb: 300,
+  exiftoolMemMb: 128,
+  taskMemoryLimitMb: 2048,
+  taskMemoryReserveMb: 512,
+  fastExtensions: ["jpg", "jpeg", "png", "heic", "heif"],
+  incremental: true,
   exiftoolPids: "exiftool-pids.txt",
   mediaExtensions: ["jpg"],
 };
@@ -23,12 +27,17 @@ test("loadConfig 读取 skill config.yaml 全部字段", async () => {
   const c = await loadConfig("config.yaml");
   expect(c.exifTsv).toBe("exif.tsv");
   expect(c.exiftoolConcurrency).toBe(16);
-  expect(c.exiftoolMemMb).toBe(300);
+  expect(c.exiftoolMemMb).toBe(128);
+  expect(c.taskMemoryLimitMb).toBe(2048);
+  expect(c.taskMemoryReserveMb).toBe(512);
+  expect(c.fastExtensions).toEqual(["jpg", "jpeg", "png", "heic", "heif"]);
+  expect(c.incremental).toBe(true);
   expect(c.exiftoolPids).toBe("exiftool-pids.txt");
   expect(c.exiftoolTsvP.split("\t").length).toBe(8);
   expect(c.mediaExtensions.length).toBeGreaterThan(0);
   expect(c.mediaExtensions).toContain("jpg");
   expect(c.mediaExtensions).toContain("mp4");
+  expect(c.mediaExtensions).toContain("lrf");
   expect(c.mediaExtensions).not.toContain("txt");
   expect(c.mediaExtensions).not.toContain("fpx");
   expect(c.mediaExtensions).toEqual([...new Set(c.mediaExtensions)]);
@@ -43,6 +52,35 @@ test("loadConfig 缺 media_extensions 时白名单为空", async () => {
     const p = `${dir}/config.yaml`;
     writeFileSync(p, "exiftool_concurrency: 4\n");
     expect((await loadConfig(p.replaceAll("\\", "/"))).mediaExtensions).toEqual([]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("loadConfig 缺新字段时使用整任务预算默认值", async () => {
+  const dir = mkdtempSync(`${tmpdir()}/tv-cfg-def-`);
+  try {
+    const p = `${dir}/config.yaml`;
+    writeFileSync(p, "exiftool_concurrency: 4\n");
+    const c = await loadConfig(p.replaceAll("\\", "/"));
+    expect(c.exiftoolMemMb).toBe(128);
+    expect(c.taskMemoryLimitMb).toBe(2048);
+    expect(c.taskMemoryReserveMb).toBe(512);
+    expect(c.fastExtensions).toEqual(["jpg", "jpeg", "png", "heic", "heif"]);
+    expect(c.incremental).toBe(true);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("loadConfig 读取 incremental 关闭与空 fast 白名单", async () => {
+  const dir = mkdtempSync(`${tmpdir()}/tv-cfg-inc-`);
+  try {
+    const p = `${dir}/config.yaml`;
+    writeFileSync(p, "exiftool_incremental: false\nexiftool_fast_extensions: ''\n");
+    const c = await loadConfig(p.replaceAll("\\", "/"));
+    expect(c.incremental).toBe(false);
+    expect(c.fastExtensions).toEqual([]);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

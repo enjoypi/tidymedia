@@ -32,6 +32,10 @@ bun .claude/skills/tidy-verify/scripts/run.ts "<SRC>" "<OUT>" "<WORK>"
 
 stdout 输出汇总和耗时；产物写入 `<WORK>`，包括 `verify.json`、`summary.txt`、`verify.err`，执行过抽取时另有 `exif.tsv`。`mismatched > 0` 或 `decision_failed > 0` 时退出码非零，这是需要继续研判的对账结果，不是脚本崩溃。
 
+抽取相关字段：`exif_rows` 为合并后行数，`exif_groups` 为本次启动的组数，`exif_exit` 为最大退出码，`exif_fast` 为使用 `-fast` 的文件数，`exif_reused` 为复用行数，`exif_concurrency` 为实际并发。并发按整任务 2G 预算与 CPU 计算；`-fast` 只用于 `config.yaml` 的 `exiftool_fast_extensions`（图片），视频与 RAW 始终完整扫描。
+
+同一 `<WORK>` 再次执行 Step 1 时，读取 `exif.manifest.json`，只重抽 size/mtime/ctime 变化的文件并合并旧行。manifest 缺失、损坏或上次抽取非零退出时下次全量重抽；`smb://` 源不做增量复用。
+
 exiftool 缺失时输出 `exiftool_missing=1`，向 verify 传入空 TSV 并继续；此时没有第二实现交叉比对，内部判定仍有效。执行过抽取时必须确认 `exif_exit=0`；非零表示交叉比对不完整，立即停止后续写回和移动，不得把残缺 TSV 当作完整证据，即使脚本仍继续调用 verify。
 
 桶口径见 `references/buckets.md`。不要另跑 move dry-run；verify 已提供重复裁定，而 dry-run 会对大文件重复判重。
