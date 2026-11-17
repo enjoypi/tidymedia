@@ -4,6 +4,9 @@ import {
   COV_TEST_SUPPORT,
   checkExcludes,
   checkIgnoreMatches,
+  cleanArgs,
+  belowFull,
+  gateReportArgs,
   hasCode,
   hasCoverageOff,
   ignoreRegex,
@@ -100,9 +103,42 @@ test("hasCoverageOff 识别各种空白写法", () => {
   expect(hasCoverageOff("#[coverage(on)]")).toBe(false);
 });
 
+test("belowFull 用 lcov 汇总点名未达标指标，全满则归因 regions", () => {
+  const full = ["FNF:4", "FNH:4", "LF:10", "LH:10", "BRF:6", "BRH:6"].join("\n");
+  expect(belowFull(full)).toEqual(["regions"]);
+  expect(belowFull(["FNF:4", "FNH:3", "LF:10", "LH:10", "BRF:6", "BRH:6"].join("\n"))).toEqual([
+    "functions 3/4",
+  ]);
+  expect(belowFull(["FNF:4", "FNH:4", "LF:10", "LH:9", "BRF:6", "BRH:5"].join("\n"))).toEqual([
+    "lines 9/10",
+    "branches 5/6",
+  ]);
+  expect(belowFull("SF:src/a.rs\nend_of_record\n")).toEqual(["regions"]);
+});
+
 test("reportArgs 仅在非零忽略模式下传 ignore 正则", () => {
   expect(reportArgs("X", false)).toEqual(["--ignore-filename-regex=X"]);
   expect(reportArgs("X", true)).toEqual([]);
+});
+
+test("cleanArgs 带 --locked 防止工具改写 Cargo.lock", () => {
+  expect(cleanArgs()).toEqual(["+nightly", "llvm-cov", "--locked", "clean", "--profraw-only"]);
+});
+
+test("gateReportArgs 单次调用同时出 lcov 与四项阈值", () => {
+  const args = gateReportArgs("X", false);
+  expect(args.slice(0, 4)).toEqual(["+nightly", "llvm-cov", "report", "--locked"]);
+  expect(args).toContain("--ignore-filename-regex=X");
+  expect(args).toContain("--lcov");
+  expect(args.indexOf("--output-path")).toBeGreaterThan(0);
+  expect(args[args.indexOf("--output-path") + 1]).toBe("target/coverage.lcov");
+  expect(args[args.indexOf("--fail-under-file-lines") + 1]).toBe("99.999");
+  expect(args[args.indexOf("--fail-under-functions") + 1]).toBe("100");
+  expect(args[args.indexOf("--fail-under-lines") + 1]).toBe("100");
+  expect(args[args.indexOf("--fail-under-regions") + 1]).toBe("100");
+  expect(args).not.toContain("--summary-only");
+  expect(gateReportArgs("X", true)).not.toContain("--ignore-filename-regex=X");
+  expect(gateReportArgs("X", false, "other.lcov")).toContain("other.lcov");
 });
 
 test("nextestArgs 仅 Windows 加 --no-rustc-wrapper", () => {

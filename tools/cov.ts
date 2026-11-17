@@ -49,6 +49,12 @@ export const COV_TEST_SUPPORT = [
 ];
 
 const LCOV_OUT = "target/coverage.lcov";
+const THRESHOLDS = [
+  "--fail-under-file-lines", "99.999",
+  "--fail-under-functions", "100",
+  "--fail-under-lines", "100",
+  "--fail-under-regions", "100",
+];
 const CODE_RE = /^(impl |pub impl |fn |pub fn |pub\(crate\) fn )/m;
 const COVERAGE_OFF_RE = /coverage\s*\(\s*off\s*\)/;
 
@@ -87,6 +93,27 @@ export function zeroHits(lcov: string, kind: "BRDA" | "DA"): string[] {
   return hits;
 }
 
+export function belowFull(lcov: string): string[] {
+  const names: Record<string, string> = {
+    FNF: "functions", LF: "lines", BRF: "branches",
+    FNH: "functions", LH: "lines", BRH: "branches",
+  };
+  const found: Record<string, number> = { functions: 0, lines: 0, branches: 0 };
+  const hit: Record<string, number> = { functions: 0, lines: 0, branches: 0 };
+  for (const line of lcov.split(/\r?\n/)) {
+    const cut = line.indexOf(":");
+    const name = cut < 0 ? undefined : names[line.slice(0, cut)];
+    if (!name) continue;
+    const value = Number(line.slice(cut + 1)) || 0;
+    if (line.startsWith("FNF") || line.startsWith("LF") || line.startsWith("BRF")) found[name] += value;
+    else hit[name] += value;
+  }
+  const below = Object.keys(found)
+    .filter((kind) => hit[kind] < found[kind])
+    .map((kind) => `${kind} ${hit[kind]}/${found[kind]}`);
+  return below.length > 0 ? below : ["regions"];
+}
+
 export function lcovSources(lcov: string, root: string): Set<string> {
   const prefix = `${root}/`;
   const sources = new Set<string>();
@@ -114,6 +141,19 @@ export function reportArgs(regex: string, zeroIgnore: boolean): string[] {
   return zeroIgnore ? [] : [`--ignore-filename-regex=${regex}`];
 }
 
+export function cleanArgs(): string[] {
+  return ["+nightly", "llvm-cov", "--locked", "clean", "--profraw-only"];
+}
+
+export function gateReportArgs(regex: string, zeroIgnore: boolean, lcovOut = LCOV_OUT): string[] {
+  return [
+    "+nightly", "llvm-cov", "report", "--locked",
+    ...reportArgs(regex, zeroIgnore),
+    "--lcov", "--output-path", lcovOut,
+    ...THRESHOLDS,
+  ];
+}
+
 export function nextestArgs(windows: boolean): string[] {
   return [
     "+nightly", "llvm-cov", ...(windows ? ["--no-rustc-wrapper"] : []), "nextest",
@@ -128,9 +168,14 @@ function fail(message: string, details: string[] = []): never {
   process.exit(1);
 }
 
-function cargo(args: string[]): void {
+function runCargo(args: string[]): number {
   const done = Bun.spawnSync(["cargo", ...args], { stdio: ["inherit", "inherit", "inherit"] });
-  if (done.exitCode !== 0) process.exit(done.exitCode ?? 1);
+  return done.exitCode ?? 1;
+}
+
+function cargo(args: string[]): void {
+  const rc = runCargo(args);
+  if (rc !== 0) process.exit(rc);
 }
 
 function sourceFiles(): string[] {
@@ -150,23 +195,19 @@ function main(): void {
   if (problem) fail(problem);
   if (!checkIgnoreMatches(regex, production, excludes)) fail("exclusion regex does not match exact file list");
 
-  cargo(["+nightly", "llvm-cov", "clean", "--profraw-only"]);
+  cargo(cleanArgs());
 
   const off = files.filter((p) => hasCoverageOff(readFileSync(p, "latin1")));
   if (off.length > 0) fail("coverage(off) is forbidden", off);
 
   cargo(nextestArgs(process.platform === "win32"));
-  const report = ["+nightly", "llvm-cov", "report", ...reportArgs(regex, zeroIgnore)];
-  cargo([...report, "--lcov", "--output-path", LCOV_OUT]);
+  const gateRc = runCargo(gateReportArgs(regex, zeroIgnore));
+  cargo(cleanArgs());
+
   const lcov = readFileSync(LCOV_OUT, "utf8");
 
   const branchMiss = zeroHits(lcov, "BRDA");
   if (branchMiss.length > 0) fail("branch BRDA ,0 entries above", branchMiss);
-
-  cargo([
-    ...report, "--summary-only", "--fail-under-file-lines", "99.999",
-    "--fail-under-functions", "100", "--fail-under-lines", "100", "--fail-under-regions", "100",
-  ]);
 
   const lineMiss = zeroHits(lcov, "DA");
   if (lineMiss.length > 0) fail("line DA ,0 entries above", lineMiss);
@@ -175,6 +216,8 @@ function main(): void {
   const gated = zeroIgnore ? production : production.filter((p) => !ignored.test(p));
   const missing = missingSources(gated, lcovSources(lcov, root)).filter((p) => hasCode(readFileSync(p, "utf8")));
   if (missing.length > 0) fail("production source not in lcov:", missing);
+
+  if (gateRc !== 0) fail(`llvm-cov thresholds below 100%: ${belowFull(lcov).join(", ")}`);
 
   console.log("COV_PASS");
 }
